@@ -104,4 +104,4 @@ before anything is pushed:
 
 ## Adding Another Repo Later
 
-Add an entry to `docs/repo-catalog.yaml` (id, path, remote, role, default_branch, status, docs_dir) and create a matching `docs/repos/<repo-id>/` folder. Re-run `bun run workspace:setup` — it clones only what's missing and skips repos that already exist locally.
+Add an entry to `docs/repo-catalog.yaml` (id, path, remote, role, default_branch, status, docs_dir) and create a matching `docs/repos/<repo-id>/` folder. Re-run `bun run workspace:setup` — it clones only what's missing and skips repos that already exist locally.# WMS-FE
