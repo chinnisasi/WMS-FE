@@ -51,7 +51,7 @@ export function Sidebar() {
   );
 }
 
-function ThemeToggle() {
+export function ThemeToggle() {
   return (
     <button
       type="button"

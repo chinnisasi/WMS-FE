@@ -11,7 +11,8 @@ export interface HealthResponse {
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
-  const res = await fetch(`${API_BASE_URL}/health`);
+  // Hard 5s ceiling so the banner reports "unreachable" instead of hanging.
+  const res = await fetch(`${API_BASE_URL}/health`, { signal: AbortSignal.timeout(5000) });
   if (!res.ok) {
     throw new Error(`health check failed: ${res.status}`);
   }

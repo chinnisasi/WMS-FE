@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { NAV_ITEMS } from '@/lib/navigation';
@@ -40,6 +40,26 @@ function PaletteOverlay({
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
+  const previouslyFocused = useRef<Element | null>(null);
+
+  // Esc must close the palette even when focus is on the window/body rather
+  // than inside the overlay, and focus returns to the trigger on the way out.
+  useEffect(() => {
+    previouslyFocused.current = document.activeElement;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (previouslyFocused.current instanceof HTMLElement) {
+        previouslyFocused.current.focus();
+      }
+    };
+  }, [onClose]);
 
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -65,11 +85,12 @@ function PaletteOverlay({
       aria-modal="true"
       aria-label="Command palette"
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[12vh]"
+      onClick={(e) => {
+        // Backdrop click (the overlay itself, not its children) closes.
+        if (e.target === e.currentTarget) onClose();
+      }}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          onClose();
-        } else if (e.key === 'ArrowDown') {
+        if (e.key === 'ArrowDown') {
           e.preventDefault();
           setSelected((s) => Math.min(s + 1, items.length - 1));
         } else if (e.key === 'ArrowUp') {

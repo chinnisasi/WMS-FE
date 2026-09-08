@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 /**
  * Data-table primitive — the spine every list surface drops into (stubbed in
  * Story 1.1): dense ~40px rows, sticky header, tabular numerals on numeric
@@ -29,6 +31,13 @@ export function DataTable<T extends { id: string }>({
   onCursor,
   emptyMessage = 'No rows yet.',
 }: DataTableProps<T>) {
+  // Tracks the cursor that produced the current page; null = first page, so
+  // Prev is disabled until a Next has actually happened.
+  const [activeCursor, setActiveCursor] = useState<string | null>(null);
+  const go = (cursor: string | null) => {
+    setActiveCursor(cursor);
+    onCursor?.(cursor);
+  };
   return (
     <div className="overflow-x-auto rounded-md border border-(--border)">
       <table className="w-full border-collapse text-sm">
@@ -70,8 +79,8 @@ export function DataTable<T extends { id: string }>({
       <div className="flex h-10 items-center justify-end gap-2 border-t border-(--border) px-3 text-xs">
         <button
           type="button"
-          disabled={!onCursor}
-          onClick={() => onCursor?.(null)}
+          disabled={activeCursor === null || !onCursor}
+          onClick={() => go(null)}
           className="rounded-sm border border-(--border) px-2 py-1 disabled:opacity-40"
         >
           Prev
@@ -79,7 +88,7 @@ export function DataTable<T extends { id: string }>({
         <button
           type="button"
           disabled={!nextCursor || !onCursor}
-          onClick={() => onCursor?.(nextCursor)}
+          onClick={() => nextCursor && go(nextCursor)}
           className="rounded-sm border border-(--border) px-2 py-1 disabled:opacity-40"
         >
           Next

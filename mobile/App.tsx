@@ -3,7 +3,7 @@ import { ActivityIndicator, SafeAreaView, ScrollView, StyleSheet, Text, View } f
 import { StatusBar } from 'expo-status-bar';
 
 import { fetchHealth, type HealthResponse } from './src/api';
-import { scanStates, useAppTheme, type } from './src/theme';
+import { scanStates, useAppTheme, type, type ScanState } from './src/theme';
 
 /**
  * Health screen — the Story 1.1 mobile boot check. The scan-banner block
@@ -29,9 +29,18 @@ export default function App(): React.JSX.Element {
     };
   }, []);
 
-  // Scan-accepted is the one loud element on the screen (DESIGN.md) — green
-  // fill + glyph + word, dark-variant foreground pair, never color-only.
-  const banner = { ...scanStates.accepted, color: theme.accent, foreground: theme.accentForeground };
+  // Banner state derives from the health result, never hardcoded: pending →
+  // queued (↻), healthy → accepted (✓, the one loud element on the screen —
+  // DESIGN.md), unreachable → rejected (✕). Each pairs fill + glyph + word,
+  // never color-only.
+  const bannerState: ScanState = health ? 'accepted' : error ? 'rejected' : 'queued';
+  const bannerFill =
+    bannerState === 'accepted'
+      ? { color: theme.accent, foreground: theme.accentForeground }
+      : bannerState === 'rejected'
+        ? { color: theme.destructive, foreground: theme.destructiveForeground }
+        : { color: theme.warning, foreground: theme.warningForeground };
+  const banner = { ...scanStates[bannerState], ...bannerFill };
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: theme.background }]}>

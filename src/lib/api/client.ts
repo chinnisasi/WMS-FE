@@ -1,5 +1,6 @@
 import { client } from './generated/client.gen';
 import { healthControllerHealth } from './generated/sdk.gen';
+import type { HealthResponse } from './generated/types.gen';
 
 /**
  * Configures the generated client once. The base URL points at wms-be's
@@ -14,17 +15,10 @@ client.setConfig({
 
 export { client };
 
-export interface ApiHealth {
-  status: string;
-  service: string;
-  time: string;
-}
-
-export async function fetchApiHealth(): Promise<ApiHealth> {
+export async function fetchApiHealth(): Promise<HealthResponse> {
   const { data, error } = await healthControllerHealth();
-  if (error) {
+  if (error || !data) {
     throw new Error(`api health check failed: ${JSON.stringify(error)}`);
   }
-  // The generated HealthResponse type is structurally ApiHealth.
-  return data as ApiHealth;
+  return data;
 }

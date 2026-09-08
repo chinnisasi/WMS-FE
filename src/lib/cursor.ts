@@ -8,14 +8,33 @@ export interface CursorPayload {
   readonly id: string;
 }
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+/** UTF-8-safe base64 (btoa is latin-1 only; cursor payloads are not). */
+function encodeBase64Url(json: string): string {
+  const bytes = textEncoder.encode(json);
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+
+function decodeBase64Url(cursor: string): string {
+  const b64 = cursor.replaceAll('-', '+').replaceAll('_', '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+  return textDecoder.decode(bytes);
+}
+
 export function encodeCursor(payload: CursorPayload): string {
-  return btoa(JSON.stringify(payload)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  return encodeBase64Url(JSON.stringify(payload));
 }
 
 export function decodeCursor(cursor: string): CursorPayload {
-  const b64 = cursor.replaceAll('-', '+').replaceAll('_', '/');
-  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-  const json = atob(padded);
+  const json = decodeBase64Url(cursor);
   const parsed: unknown = JSON.parse(json);
   if (
     typeof parsed !== 'object' ||
@@ -38,6 +57,9 @@ export function buildPage<T extends { createdAt: string; id: string }>(
   rows: readonly T[],
   limit: number,
 ): Page<T> {
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error(`Page limit must be a positive integer, got ${limit}`);
+  }
   const hasMore = rows.length > limit;
   const items = hasMore ? rows.slice(0, limit) : rows;
   const last = items.at(-1);

@@ -9,6 +9,7 @@
   "engines": {
     "bun": ">=1.2"
   },
+  "packageManager": "bun@1.2.20",
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",
