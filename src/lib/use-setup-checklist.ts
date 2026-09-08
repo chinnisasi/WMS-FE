@@ -5,14 +5,16 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { fetchApiSetupChecklist } from '@/lib/api/client';
 import type { SetupChecklistResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { CATALOG_CHANGED_EVENT } from '@/lib/catalog';
 import { WAREHOUSES_CHANGED_EVENT } from '@/lib/warehouses';
 import { ZONES_CHANGED_EVENT } from '@/lib/zones';
 
 /**
- * The setup checklist (Story 1.3), computed on read by the backend — this
- * hook refetches whenever anything it aggregates changes: a warehouse is
- * created (WAREHOUSES_CHANGED_EVENT) or zone/bin master data mutates
- * (ZONES_CHANGED_EVENT), plus session identity changes. Stale cross-tenant
+ * The setup checklist (Story 1.3, catalog step wired in 1.4), computed on
+ * read by the backend — this hook refetches whenever anything it aggregates
+ * changes: a warehouse is created (WAREHOUSES_CHANGED_EVENT), zone/bin
+ * master data mutates (ZONES_CHANGED_EVENT), or catalog data mutates
+ * (CATALOG_CHANGED_EVENT), plus session identity changes. Stale cross-tenant
  * pages are filtered at render time (result.tenantId), matching the
  * useTenantWarehouses convention of never calling setState in an effect.
  */
@@ -30,9 +32,11 @@ export function useSetupChecklist(): (SetupChecklistResponse & { tenantId: strin
     const onChange = () => setRevision((r) => r + 1);
     window.addEventListener(WAREHOUSES_CHANGED_EVENT, onChange);
     window.addEventListener(ZONES_CHANGED_EVENT, onChange);
+    window.addEventListener(CATALOG_CHANGED_EVENT, onChange);
     return () => {
       window.removeEventListener(WAREHOUSES_CHANGED_EVENT, onChange);
       window.removeEventListener(ZONES_CHANGED_EVENT, onChange);
+      window.removeEventListener(CATALOG_CHANGED_EVENT, onChange);
     };
   }, []);
 
