@@ -28,7 +28,9 @@
   --destructive-foreground: #ffffff;
   --border: #e4e4e7;
   --input: #e4e4e7;
-  --ring: #a1a1aa;
+  /* Focus indicator: Primary Blue per DESIGN.md (zinc-400 default fails
+     WCAG 2.2 AA 1.4.11 non-text contrast on white at ≈2.5:1; blue is ≈8:1). */
+  --ring: #1e4e8c;
 
   /* brand delta (light) */
   --primary: #1e4e8c;

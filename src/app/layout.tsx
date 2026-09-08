@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { GeistSans } from 'geist/font/sans';
 
 import { AppShell } from '@/components/shell/app-shell';
+import { THEME_STORAGE_KEY } from '@/lib/theme';
 
 import './globals.css';
 
@@ -14,11 +15,13 @@ export const metadata: Metadata = {
 };
 
 // Applies the theme before first paint so there is no flash: an explicit
-// choice (localStorage) wins; otherwise the OS preference is respected.
+// choice (localStorage) wins; otherwise the OS preference is respected. The
+// key is interpolated from src/lib/theme.ts so the write side (ThemeToggle)
+// and this read side cannot drift apart.
 const themeInit = `
 (function () {
   try {
-    var stored = localStorage.getItem('wms-theme');
+    var stored = localStorage.getItem('${THEME_STORAGE_KEY}');
     var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
     if (dark) document.documentElement.classList.add('dark');
   } catch (e) {}

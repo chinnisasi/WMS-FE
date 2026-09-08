@@ -31,9 +31,48 @@ describe('design-token layer vs DESIGN.md', () => {
   });
 
   test('globals.css mirrors the brand hues for both themes', () => {
-    for (const hex of Object.values(BRAND)) {
-      expect(CSS).toContain(hex);
+    // Positional: each variable must carry the right value inside the right
+    // block — a light/dark swap elsewhere in the file must fail here.
+    // '.dark' also matches the @custom-variant line — anchor on the block.
+    const rootBlock = CSS.slice(CSS.indexOf(':root'), CSS.indexOf('.dark {'));
+    const darkBlock = CSS.slice(CSS.indexOf('.dark {'), CSS.indexOf('@theme'));
+    const lightVars: Record<string, string> = {
+      '--primary': BRAND.primary,
+      '--primary-foreground': BRAND.primaryForeground,
+      '--accent': BRAND.accent,
+      '--accent-foreground': BRAND.accentForeground,
+      '--warning': BRAND.warning,
+      '--warning-foreground': BRAND.warningForeground,
+    };
+    const darkVars: Record<string, string> = {
+      '--primary': BRAND.primaryDark,
+      '--primary-foreground': BRAND.primaryForegroundDark,
+      '--accent': BRAND.accentDark,
+      '--accent-foreground': BRAND.accentForegroundDark,
+      '--warning': BRAND.warningDark,
+      '--warning-foreground': BRAND.warningForegroundDark,
+    };
+    for (const [v, hex] of Object.entries(lightVars)) {
+      expect(rootBlock).toContain(`${v}: ${hex}`);
     }
+    for (const [v, hex] of Object.entries(darkVars)) {
+      expect(darkBlock).toContain(`${v}: ${hex}`);
+    }
+  });
+
+  test('no hue exists outside the token set (no second brand hue, no gradients)', () => {
+    const allowed = new Set([
+      ...Object.values(BRAND),
+      // shadcn-inherited zinc surface scale + destructive + focus ring (primary)
+      '#ffffff', '#18181b', '#f4f4f5', '#71717a', '#a1a1aa', '#dc2626', '#e4e4e7',
+      '#09090b', '#fafafa', '#27272a', '#d4d4d8', '#ef4444',
+      // zinc foregrounds used inside dark pairs
+      ...Object.values(BRAND).map((h) => h.toLowerCase()),
+    ]);
+    const hexes = CSS.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+    const unknown = hexes.filter((h) => !allowed.has(h.toLowerCase()));
+    expect(unknown).toEqual([]);
+    expect(CSS).not.toMatch(/gradient\(/);
   });
 
   test('radius scale is 4/6/8px', () => {

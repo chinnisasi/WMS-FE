@@ -8,3 +8,7 @@ coverage/
 .DS_Store
 next-env.d.ts
 tsconfig.tsbuildinfo
+# foreign lockfiles — bun only
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

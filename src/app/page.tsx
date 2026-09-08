@@ -14,7 +14,8 @@ const SURFACE_COLUMNS = [
 export default async function OverviewPage() {
   let health: string;
   try {
-    const h = await fetchApiHealth();
+    // A hung backend must not hold the render — 3s ceiling, then "unreachable".
+    const h = await fetchApiHealth({ signal: AbortSignal.timeout(3000) });
     health = `${h.status} · ${h.service}`;
   } catch {
     health = 'unreachable';
@@ -37,7 +38,7 @@ export default async function OverviewPage() {
       </div>
 
       <DataTable
-        columns={[...SURFACE_COLUMNS]}
+        columns={SURFACE_COLUMNS}
         rows={[]}
         emptyMessage="List surfaces render via cursor-paginated endpoints in later stories."
       />

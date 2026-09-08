@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 import { NAV_ITEMS } from '@/lib/navigation';
+import { writeStoredTheme } from '@/lib/theme';
 
 /**
  * Sidebar IA skeleton — all 12 surfaces, non-functional routes.
@@ -21,7 +22,9 @@ export function Sidebar() {
       </div>
       <nav aria-label="Primary" className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         {NAV_ITEMS.map((item) => {
-          const active = pathname === item.href;
+          // Nested child routes (e.g. /inventory/xyz) keep the surface
+          // highlighted; the Overview root matches exactly.
+          const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
           return (
             <Link
               key={item.id}
@@ -58,11 +61,7 @@ export function ThemeToggle() {
       className="mx-2 mb-3 rounded-md border border-(--border) px-2 py-1 text-xs text-(--muted-foreground) hover:bg-(--muted) lg:px-3"
       onClick={() => {
         const dark = document.documentElement.classList.toggle('dark');
-        try {
-          localStorage.setItem('wms-theme', dark ? 'dark' : 'light');
-        } catch {
-          // private mode — theme simply won't persist
-        }
+        writeStoredTheme(dark ? 'dark' : 'light');
       }}
     >
       <span className="hidden lg:inline">Toggle theme</span>

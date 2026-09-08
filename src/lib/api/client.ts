@@ -15,8 +15,10 @@ client.setConfig({
 
 export { client };
 
-export async function fetchApiHealth(): Promise<HealthResponse> {
-  const { data, error } = await healthControllerHealth();
+export async function fetchApiHealth(options?: {
+  signal?: AbortSignal;
+}): Promise<HealthResponse> {
+  const { data, error } = await healthControllerHealth(options);
   if (error || !data) {
     throw new Error(`api health check failed: ${JSON.stringify(error)}`);
   }

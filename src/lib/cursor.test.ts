@@ -7,6 +7,7 @@ describe('cursor pagination helper', () => {
     const encoded = encodeCursor({ createdAt: '2026-09-08T00:00:00Z', id: '0198-1' });
     expect(encoded).not.toContain('=');
     expect(decodeCursor(encoded)).toEqual({ createdAt: '2026-09-08T00:00:00Z', id: '0198-1' });
+    expect(() => decodeCursor(encodeCursor({ createdAt: 'x', id: 'y' } as never))).not.toThrow();
   });
 
   test('is UTF-8-safe (btoa/atob are latin-1 only)', () => {

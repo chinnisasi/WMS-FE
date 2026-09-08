@@ -41,9 +41,11 @@ function PaletteOverlay({
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
   const previouslyFocused = useRef<Element | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
 
-  // Esc must close the palette even when focus is on the window/body rather
-  // than inside the overlay, and focus returns to the trigger on the way out.
+  // All palette keys are handled at window level: focus can leave the overlay
+  // (a click on the panel padding, a stray tab) without deadening the
+  // keyboard, and focus returns to the trigger on the way out.
   useEffect(() => {
     previouslyFocused.current = document.activeElement;
     const onKey = (e: KeyboardEvent) => {
@@ -79,6 +81,31 @@ function PaletteOverlay({
     item.run();
   };
 
+  // Arrows/Enter at window level; an empty result list is a no-op (never
+  // drives the selection to -1).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (items.length) setSelected((s) => Math.min(s + 1, items.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (items.length) setSelected((s) => Math.max(s - 1, 0));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        commit(selected);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, selected, onClose]);
+
+  // Keep the selected item visible inside the capped-height list.
+  useEffect(() => {
+    listRef.current?.children[selected]?.scrollIntoView({ block: 'nearest' });
+  }, [selected, items]);
+
   return (
     <div
       role="dialog"
@@ -88,18 +115,6 @@ function PaletteOverlay({
       onClick={(e) => {
         // Backdrop click (the overlay itself, not its children) closes.
         if (e.target === e.currentTarget) onClose();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          setSelected((s) => Math.min(s + 1, items.length - 1));
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          setSelected((s) => Math.max(s - 1, 0));
-        } else if (e.key === 'Enter') {
-          e.preventDefault();
-          commit(selected);
-        }
       }}
     >
       <div className="w-full max-w-md rounded-lg border border-(--border) bg-(--popover) shadow-xl">
@@ -113,7 +128,7 @@ function PaletteOverlay({
           placeholder="Search surfaces and actions…"
           className="w-full rounded-t-lg border-b border-(--border) bg-transparent px-4 py-3 text-sm outline-none"
         />
-        <ul className="max-h-72 overflow-y-auto p-1">
+        <ul ref={listRef} className="max-h-72 overflow-y-auto p-1">
           {items.length === 0 ? (
             <li className="px-3 py-2 text-sm text-(--muted-foreground)">No matches</li>
           ) : (

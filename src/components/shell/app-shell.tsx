@@ -30,13 +30,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // The header menu is a layer too: Esc and an outside click close it, not
+  // just navigation — but only while it is the topmost layer (the palette
+  // owns Esc whenever it is open).
+  useEffect(() => {
+    const onPointer = (e: PointerEvent) => {
+      if (menuRef.current?.open && !menuRef.current.contains(e.target as Node)) {
+        menuRef.current.open = false;
+      }
+    };
+    document.addEventListener('pointerdown', onPointer);
+    return () => document.removeEventListener('pointerdown', onPointer);
+  }, []);
+
+  useEffect(() => {
+    if (paletteOpen) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && menuRef.current) {
+        menuRef.current.open = false;
+      }
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [paletteOpen]);
+
   return (
     <div className="flex min-h-screen">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 items-center gap-2 border-b border-(--border) px-4 lg:px-6">
           {/* <768px only: the nav is otherwise hidden, so it must stay reachable */}
-          <details ref={menuRef} className="md:hidden">
+          <details ref={menuRef} className="relative md:hidden">
             <summary className="cursor-pointer list-none rounded-md border border-(--border) px-2 py-1 text-sm">
               Menu
             </summary>
