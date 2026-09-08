@@ -11,20 +11,29 @@ export const WAREHOUSES_CHANGED_EVENT = 'wms-warehouses-changed';
 /** Fired on `window` when the picked warehouse changes (also on pick itself). */
 export const ACTIVE_WAREHOUSE_CHANGED_EVENT = 'wms-active-warehouse-changed';
 
+/**
+ * Key prefix for the per-tenant picked warehouse — the suffix is the tenant
+ * id, so a re-sign-in as another tenant can never read the previous
+ * tenant's pick (review loop 1).
+ */
 export const ACTIVE_WAREHOUSE_STORAGE_KEY = 'wms-active-warehouse';
 
-export function readActiveWarehouseId(): string | null {
+function activeWarehouseKey(tenantId: string): string {
+  return `${ACTIVE_WAREHOUSE_STORAGE_KEY}:${tenantId}`;
+}
+
+export function readActiveWarehouseId(tenantId: string): string | null {
   try {
-    const id = localStorage.getItem(ACTIVE_WAREHOUSE_STORAGE_KEY);
+    const id = localStorage.getItem(activeWarehouseKey(tenantId));
     return typeof id === 'string' && id.length > 0 ? id : null;
   } catch {
     return null;
   }
 }
 
-export function writeActiveWarehouseId(id: string): void {
+export function writeActiveWarehouseId(tenantId: string, id: string): void {
   try {
-    localStorage.setItem(ACTIVE_WAREHOUSE_STORAGE_KEY, id);
+    localStorage.setItem(activeWarehouseKey(tenantId), id);
   } catch {
     // private mode — selection just won't persist
   }
@@ -38,7 +47,7 @@ export function writeActiveWarehouseId(id: string): void {
  */
 export function subscribeActiveWarehouse(onChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
-    if (event.key === ACTIVE_WAREHOUSE_STORAGE_KEY) onChange();
+    if (event.key === null || event.key.startsWith(ACTIVE_WAREHOUSE_STORAGE_KEY)) onChange();
   };
   window.addEventListener('storage', onStorage);
   window.addEventListener(ACTIVE_WAREHOUSE_CHANGED_EVENT, onChange);

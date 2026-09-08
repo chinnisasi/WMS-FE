@@ -21,6 +21,13 @@ export interface StoredSession {
   expiresAt: number;
 }
 
+/**
+ * Pure snapshot read: never mutates storage or dispatches events. This is
+ * the `getSnapshot` of `useSyncExternalStore` subscriptions — a side effect
+ * here (clearing + dispatching on expiry) runs during render. An expired
+ * session simply reads as signed-out; the stored row is cleaned up by the
+ * next `writeSession`/`clearSession` or ignored forever (harmless).
+ */
 export function readSession(): StoredSession | null {
   try {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -37,7 +44,6 @@ export function readSession(): StoredSession | null {
     }
     const session = parsed as StoredSession;
     if (session.expiresAt <= Date.now()) {
-      clearSession();
       return null;
     }
     return session;

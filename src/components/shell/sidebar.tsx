@@ -6,6 +6,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiListWarehouses } from '@/lib/api/client';
 import type { WarehouseListResponse, WarehouseResponse } from '@/lib/api/generated';
+import { SignOutButton } from '@/components/auth/sign-out';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { NAV_ITEMS } from '@/lib/navigation';
 import { writeStoredTheme } from '@/lib/theme';
@@ -36,25 +37,27 @@ function WarehouseGlyph() {
 /**
  * Warehouse switcher (mockup `.wh` block): code+name, "Warehouse N of M",
  * chevron disclosure listing the tenant's warehouses. Fed from the generated
- * client against the signed-in tenant; session presence and the picked
- * warehouse come from useSyncExternalStore subscriptions, so the server
- * render (unknown session → nothing) never mismatches. The picked warehouse
- * persists in localStorage; there is no server-side active warehouse yet
- * (Epic 2).
+ * client against the signed-in tenant; the session *identity* (tenant id) and
+ * the picked warehouse come from useSyncExternalStore subscriptions, so the
+ * server render (unknown session → nothing) never mismatches and a re-sign-in
+ * as another tenant refetches. The picked warehouse persists in localStorage
+ * scoped per tenant; there is no server-side active warehouse yet (Epic 2).
  */
 export function WarehouseSwitcher() {
-  // `null` = unknown (server render) → render nothing.
-  const sessioned = useSyncExternalStore(
+  // `null` = unknown (server render) or signed out → render nothing.
+  const tenantId = useSyncExternalStore(
     subscribeSession,
-    () => readSession() !== null,
-    () => null as boolean | null,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
   );
   const activeId = useSyncExternalStore(
     subscribeActiveWarehouse,
-    readActiveWarehouseId,
+    () => (tenantId === null ? null : readActiveWarehouseId(tenantId)),
     () => null,
   );
-  const [page, setPage] = useState<WarehouseListResponse | null>(null);
+  const [page, setPage] = useState<{ tenantId: string; list: WarehouseListResponse } | null>(
+    null,
+  );
   const [open, setOpen] = useState(false);
   // Bumped by the warehouses-changed event so the fetch effect re-runs
   // (setState in a subscription callback, never synchronously in an effect).
@@ -66,28 +69,36 @@ export function WarehouseSwitcher() {
     return () => window.removeEventListener(WAREHOUSES_CHANGED_EVENT, onChange);
   }, []);
 
-  const fetching = sessioned !== false;
   useEffect(() => {
-    if (!fetching) return;
+    if (tenantId === null) return;
     let cancelled = false;
-    const session = readSession();
-    if (session === null) return;
-    fetchApiListWarehouses(session.tenant.id)
-      .then((list) => {
-        if (!cancelled) setPage(list);
-      })
-      // Switcher chrome stays quiet on failure — surfaces report API errors.
-      .catch(() => {
-        if (!cancelled) setPage(null);
-      });
+    // Follow the keyset cursor chain so the switcher and its "N of M" count
+    // cover every warehouse, not just the first page (review loop 1).
+    (async () => {
+      try {
+        let list: WarehouseListResponse | null = null;
+        let cursor: string | undefined;
+        for (let hops = 0; hops < 20; hops++) {
+          const page = await fetchApiListWarehouses(tenantId, cursor === undefined ? undefined : { cursor });
+          list = list === null ? page : { ...page, items: [...list.items, ...page.items] };
+          if (!page.nextCursor) break;
+          cursor = page.nextCursor;
+        }
+        // A failed fetch leaves the previous tenant's page in state — the
+        // tenantId check below (not a setState-in-effect) keeps it hidden.
+        if (!cancelled && list !== null) setPage({ tenantId, list });
+      } catch {
+        // Switcher chrome stays quiet on failure — surfaces report API errors.
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [fetching, revision]);
+  }, [tenantId, revision]);
 
-  if (sessioned === null || !sessioned || page === null) return null;
+  if (tenantId === null || page === null || page.tenantId !== tenantId) return null;
 
-  const items: readonly WarehouseResponse[] = page.items;
+  const items: readonly WarehouseResponse[] = page.list.items;
   if (items.length === 0) {
     return (
       <div className="hidden border-b border-(--border) px-3 py-2 lg:block lg:px-4">
@@ -106,7 +117,7 @@ export function WarehouseSwitcher() {
   if (active === undefined) return null;
 
   function pick(id: string) {
-    writeActiveWarehouseId(id);
+    writeActiveWarehouseId(tenantId!, id);
     setOpen(false);
   }
 
@@ -204,7 +215,10 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <ThemeToggle />
+      <div className="mx-2 mb-3 flex items-center gap-2 lg:mx-3">
+        <SignOutButton className="rounded-md border border-(--border) px-2 py-1 text-xs text-(--muted-foreground) hover:bg-(--muted)" />
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }

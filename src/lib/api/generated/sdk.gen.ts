@@ -45,12 +45,17 @@ export const tenancyControllerSignIn = <ThrowOnError extends boolean = false>(op
 /**
  * Lists warehouses (keyset cursor pagination)
  */
-export const tenancyControllerListWarehouses = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerListWarehousesData, ThrowOnError>): RequestResult<TenancyControllerListWarehousesResponses, TenancyControllerListWarehousesErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerListWarehousesResponses, TenancyControllerListWarehousesErrors, ThrowOnError>({ url: '/tenants/{tenantId}/warehouses', ...options });
+export const tenancyControllerListWarehouses = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerListWarehousesData, ThrowOnError>): RequestResult<TenancyControllerListWarehousesResponses, TenancyControllerListWarehousesErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerListWarehousesResponses, TenancyControllerListWarehousesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses',
+    ...options
+});
 
 /**
  * Creates a warehouse (code unique per tenant)
  */
 export const tenancyControllerCreateWarehouse = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerCreateWarehouseData, ThrowOnError>): RequestResult<TenancyControllerCreateWarehouseResponses, TenancyControllerCreateWarehouseErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerCreateWarehouseResponses, TenancyControllerCreateWarehouseErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
     url: '/tenants/{tenantId}/warehouses',
     ...options,
     headers: {

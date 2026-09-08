@@ -5,6 +5,7 @@ import Link from 'next/link';
 
 import { NAV_ITEMS } from '@/lib/navigation';
 
+import { SignOutButton } from '@/components/auth/sign-out';
 import { CommandPalette } from './command-palette';
 import { Sidebar, ThemeToggle } from './sidebar';
 
@@ -67,6 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <nav className="absolute left-0 top-12 z-40 w-56 border border-(--border) bg-(--background) py-2 shadow-lg">
               <MobileNavLinks onNavigate={() => menuRef.current && (menuRef.current.open = false)} />
               <div className="border-t border-(--border) px-2 pt-2">
+                <SignOutButton className="mb-2 block px-2 py-1 text-left text-sm hover:bg-(--muted)" />
                 <ThemeToggle />
               </div>
             </nav>
