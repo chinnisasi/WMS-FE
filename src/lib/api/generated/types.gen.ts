@@ -467,7 +467,7 @@ export type TenancyControllerCreateWarehouseErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied)
+     * Session belongs to another tenant (permission-denied), or the caller lacks warehouse.create (role-denied)
      */
     403: ProblemDetailsDto;
     /**
@@ -563,7 +563,7 @@ export type TenancyControllerCreateZoneErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied)
+     * Session belongs to another tenant (permission-denied), or the caller lacks zone.create (role-denied)
      */
     403: ProblemDetailsDto;
     /**
@@ -665,7 +665,7 @@ export type TenancyControllerCreateBinErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied)
+     * Session belongs to another tenant (permission-denied), or the caller lacks bin.create (role-denied)
      */
     403: ProblemDetailsDto;
     /**
@@ -720,7 +720,7 @@ export type TenancyControllerGenerateBinGridErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied)
+     * Session belongs to another tenant (permission-denied), or the caller lacks bin.create (role-denied)
      */
     403: ProblemDetailsDto;
     /**
@@ -775,7 +775,7 @@ export type TenancyControllerSetBinBlockedErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied)
+     * Session belongs to another tenant (permission-denied), or the caller lacks bin.block (role-denied)
      */
     403: ProblemDetailsDto;
     /**
@@ -1072,7 +1072,7 @@ export type CatalogControllerImportCatalogErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied)
+     * Session belongs to another tenant (permission-denied), or the caller lacks catalog.import (role-denied)
      */
     403: ProblemDetailsDto;
     /**
@@ -1170,7 +1170,7 @@ export type CatalogControllerEditSkuErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied)
+     * Session belongs to another tenant (permission-denied), or the caller lacks sku.edit (role-denied)
      */
     403: ProblemDetailsDto;
     /**
