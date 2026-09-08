@@ -14,6 +14,63 @@ export type ProblemDetailsDto = {
     errors?: Array<string>;
 };
 
+export type RegisterTenantDto = {
+    name: string;
+    ownerEmail: string;
+    password: string;
+};
+
+export type TenantResponse = {
+    id: string;
+    name: string;
+};
+
+export type OwnerUserResponse = {
+    id: string;
+    email: string;
+};
+
+export type TenantRegistrationResponse = {
+    tenant: TenantResponse;
+    owner: OwnerUserResponse;
+};
+
+export type SignInDto = {
+    email: string;
+    password: string;
+};
+
+export type SignInResponse = {
+    /**
+     * HS256 session token (15 min), claims: sub + tenant_id
+     */
+    accessToken: string;
+    tokenType: string;
+    expiresInSeconds: number;
+    tenant: TenantResponse;
+};
+
+export type CreateWarehouseDto = {
+    code: string;
+    name: string;
+};
+
+export type WarehouseResponse = {
+    id: string;
+    tenantId: string;
+    code: string;
+    name: string;
+    createdAt: string;
+};
+
+export type WarehouseListResponse = {
+    items: Array<WarehouseResponse>;
+    /**
+     * Opaque keyset cursor
+     */
+    nextCursor: string | null;
+};
+
 export type HealthResponse = {
     status: string;
     service: string;
@@ -26,6 +83,152 @@ export type EchoResponse = {
     };
     time: string;
 };
+
+export type TenancyControllerRegisterData = {
+    body: RegisterTenantDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path?: never;
+    query?: never;
+    url: '/tenants';
+};
+
+export type TenancyControllerRegisterErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Owner email already registered (duplicate-email)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerRegisterError = TenancyControllerRegisterErrors[keyof TenancyControllerRegisterErrors];
+
+export type TenancyControllerRegisterResponses = {
+    201: TenantRegistrationResponse;
+};
+
+export type TenancyControllerRegisterResponse = TenancyControllerRegisterResponses[keyof TenancyControllerRegisterResponses];
+
+export type TenancyControllerSignInData = {
+    body: SignInDto;
+    path?: never;
+    query?: never;
+    url: '/tenants/sign-in';
+};
+
+export type TenancyControllerSignInErrors = {
+    /**
+     * Invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Unknown email or wrong password (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+};
+
+export type TenancyControllerSignInError = TenancyControllerSignInErrors[keyof TenancyControllerSignInErrors];
+
+export type TenancyControllerSignInResponses = {
+    200: SignInResponse;
+};
+
+export type TenancyControllerSignInResponse = TenancyControllerSignInResponses[keyof TenancyControllerSignInResponses];
+
+export type TenancyControllerListWarehousesData = {
+    body?: never;
+    path: {
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses';
+};
+
+export type TenancyControllerListWarehousesErrors = {
+    /**
+     * Malformed cursor
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type TenancyControllerListWarehousesError = TenancyControllerListWarehousesErrors[keyof TenancyControllerListWarehousesErrors];
+
+export type TenancyControllerListWarehousesResponses = {
+    200: WarehouseListResponse;
+};
+
+export type TenancyControllerListWarehousesResponse = TenancyControllerListWarehousesResponses[keyof TenancyControllerListWarehousesResponses];
+
+export type TenancyControllerCreateWarehouseData = {
+    body: CreateWarehouseDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses';
+};
+
+export type TenancyControllerCreateWarehouseErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse code already exists (duplicate-warehouse-code names the code)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerCreateWarehouseError = TenancyControllerCreateWarehouseErrors[keyof TenancyControllerCreateWarehouseErrors];
+
+export type TenancyControllerCreateWarehouseResponses = {
+    201: WarehouseResponse;
+};
+
+export type TenancyControllerCreateWarehouseResponse = TenancyControllerCreateWarehouseResponses[keyof TenancyControllerCreateWarehouseResponses];
 
 export type HealthControllerHealthData = {
     body?: never;

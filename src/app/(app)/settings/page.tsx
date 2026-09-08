@@ -1,3 +1,4 @@
+import { WarehouseCreateForm, WarehouseList } from '@/components/settings/warehouse-create-form';
 import { SurfacePlaceholder } from '@/components/shell/surface-placeholder';
 
 export const metadata = { title: 'Settings' };
@@ -9,6 +10,8 @@ export default function SettingsPage() {
         title="Settings"
         description="Includes device enrollment and the setup checklist (which aggregates completion state across onboarding stories)."
       />
+      <WarehouseCreateForm />
+      <WarehouseList />
       <div className="flex flex-col gap-2 text-sm">
         <div className="rounded-md border border-(--border) p-3">
           <div className="font-medium">Device enrollment</div>

@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { GeistSans } from 'geist/font/sans';
 
-import { AppShell } from '@/components/shell/app-shell';
 import { THEME_STORAGE_KEY } from '@/lib/theme';
 
 import './globals.css';
@@ -28,15 +27,18 @@ const themeInit = `
 })();
 `;
 
+/**
+ * Root layout: document chrome only. The app shell (sidebar + header) lives
+ * in the `(app)` route group so the auth surfaces (`/login`, `/register`)
+ * render without it — signup must not render the app sidebar.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning className={GeistSans.variable}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>
-      <body className="font-sans antialiased">
-        <AppShell>{children}</AppShell>
-      </body>
+      <body className="font-sans antialiased">{children}</body>
     </html>
   );
 }

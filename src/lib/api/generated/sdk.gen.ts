@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses } from './types.gen';
+import type { EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -17,6 +17,47 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
      */
     meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
+
+/**
+ * Registers a tenant with its Owner user
+ */
+export const tenancyControllerRegister = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerRegisterData, ThrowOnError>): RequestResult<TenancyControllerRegisterResponses, TenancyControllerRegisterErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerRegisterResponses, TenancyControllerRegisterErrors, ThrowOnError>({
+    url: '/tenants',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Verifies the password and issues a short-lived session token
+ */
+export const tenancyControllerSignIn = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerSignInData, ThrowOnError>): RequestResult<TenancyControllerSignInResponses, TenancyControllerSignInErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerSignInResponses, TenancyControllerSignInErrors, ThrowOnError>({
+    url: '/tenants/sign-in',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Lists warehouses (keyset cursor pagination)
+ */
+export const tenancyControllerListWarehouses = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerListWarehousesData, ThrowOnError>): RequestResult<TenancyControllerListWarehousesResponses, TenancyControllerListWarehousesErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerListWarehousesResponses, TenancyControllerListWarehousesErrors, ThrowOnError>({ url: '/tenants/{tenantId}/warehouses', ...options });
+
+/**
+ * Creates a warehouse (code unique per tenant)
+ */
+export const tenancyControllerCreateWarehouse = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerCreateWarehouseData, ThrowOnError>): RequestResult<TenancyControllerCreateWarehouseResponses, TenancyControllerCreateWarehouseErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerCreateWarehouseResponses, TenancyControllerCreateWarehouseErrors, ThrowOnError>({
+    url: '/tenants/{tenantId}/warehouses',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Liveness check
