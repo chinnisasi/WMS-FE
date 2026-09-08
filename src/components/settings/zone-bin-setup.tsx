@@ -149,12 +149,20 @@ function ZonesBinsSetupSessioned() {
         <div className="text-(--muted-foreground)">Loading zones…</div>
       ) : (
         <>
-          {/* key={warehouseId} remounts the forms on a warehouse switch so
-              their internal zone/code state can never post against the
-              previous warehouse's zones (404). */}
-          {canCreateZone && <ZoneCreateForm key={warehouseId} warehouseId={warehouseId} />}
+          {/* Distinct key prefixes (both siblings remount on a warehouse
+              switch so their internal zone/code state can never post against
+              the previous warehouse's zones (404)) — identical keys would
+              collide in the parent fragment. */}
+          {canCreateZone && (
+            <ZoneCreateForm key={`zone-${warehouseId}`} warehouseId={warehouseId} />
+          )}
           {canCreateBin && (
-            <BinFormsRow key={warehouseId} tenantId={tenantId} warehouseId={warehouseId} zones={zones} />
+            <BinFormsRow
+              key={`bin-${warehouseId}`}
+              tenantId={tenantId}
+              warehouseId={warehouseId}
+              zones={zones}
+            />
           )}
           <ZoneBinsTable
             tenantId={tenantId}
