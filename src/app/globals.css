@@ -1,0 +1,125 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design-token layer — authoritative source: DESIGN.md (ux-WMS-Meta-2026-09-08).
+ * Web inherits shadcn/ui defaults wholesale and adds only the brand delta:
+ * primary #1E4E8C, accent/scan-accepted green #16794C, warning amber #B45309 —
+ * each with its dark-mode foreground pair. White on dark fills fails AA and is
+ * forbidden. No second brand hue, no gradients, no decorative color coding.
+ *
+ * Radius scale: 4px inputs/table cells, 6px buttons/cards/banners, 8px dialogs.
+ */
+
+:root {
+  /* shadcn-inherited surface tokens (zinc defaults) */
+  --background: #ffffff;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #a1a1aa;
+
+  /* brand delta (light) */
+  --primary: #1e4e8c;
+  --primary-foreground: #ffffff;
+  --accent: #16794c;
+  --accent-foreground: #ffffff;
+  --warning: #b45309;
+  --warning-foreground: #ffffff;
+
+  /* radius scale */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+.dark {
+  /* shadcn-inherited surface tokens (zinc dark) */
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #09090b;
+  --card-foreground: #fafafa;
+  --popover: #09090b;
+  --popover-foreground: #fafafa;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+  --border: #27272a;
+  --input: #27272a;
+  --ring: #d4d4d8;
+
+  /* brand delta (dark pairs from DESIGN.md — never white on dark fills) */
+  --primary: #7fa7db;
+  --primary-foreground: #0a1a2a;
+  --accent: #4cc38a;
+  --accent-foreground: #07210f;
+  --warning: #f0a860;
+  --warning-foreground: #1f1002;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* kpi — 28px semibold tabular numerals for every KPI tile value (DESIGN.md) */
+.kpi {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* data — tabular numerals everywhere numbers align in columns */
+.data {
+  font-variant-numeric: tabular-nums;
+}
+
+/* focus ring AA-visible on both themes */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
