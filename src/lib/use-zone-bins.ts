@@ -30,8 +30,18 @@ export function useZoneBins(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
-  // The cursor the viewer asked for; null = first page.
-  const [requested, setRequested] = useState<string | null>(null);
+  // The cursor the viewer asked for, scoped to the (warehouse, zone) it was
+  // asked for — a cursor left over from another zone/warehouse is treated as
+  // a first-page request, never replayed against the wrong scope.
+  const [requested, setRequested] = useState<{
+    warehouseId: string;
+    zoneId: string;
+    cursor: string | null;
+  } | null>(null);
+  const activeCursor =
+    requested !== null && requested.warehouseId === warehouseId && requested.zoneId === zoneId
+      ? requested.cursor
+      : null;
   const [revision, setRevision] = useState(0);
   const [page, setPage] = useState<{
     tenantId: string;
@@ -56,10 +66,10 @@ export function useZoneBins(
           tenantId,
           warehouseId,
           zoneId,
-          requested === null ? undefined : { cursor: requested },
+          activeCursor === null ? undefined : { cursor: activeCursor },
         );
         if (!cancelled) {
-          setPage({ tenantId, warehouseId, zoneId, requested, page: result });
+          setPage({ tenantId, warehouseId, zoneId, requested: activeCursor, page: result });
         }
       } catch {
         // Quiet chrome on failure — the render-time key check hides stale data.
@@ -68,9 +78,15 @@ export function useZoneBins(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, zoneId, requested, revision]);
+  }, [tenantId, warehouseId, zoneId, activeCursor, revision]);
 
-  const onCursor = useCallback((cursor: string | null) => setRequested(cursor), []);
+  const onCursor = useCallback(
+    (cursor: string | null) => {
+      if (warehouseId === null || zoneId === null) return;
+      setRequested({ warehouseId, zoneId, cursor });
+    },
+    [warehouseId, zoneId],
+  );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
   if (
@@ -81,7 +97,7 @@ export function useZoneBins(
     page.tenantId !== tenantId ||
     page.warehouseId !== warehouseId ||
     page.zoneId !== zoneId ||
-    page.requested !== requested
+    page.requested !== activeCursor
   ) {
     return null;
   }
