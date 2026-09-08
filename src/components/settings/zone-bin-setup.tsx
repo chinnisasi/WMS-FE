@@ -80,7 +80,12 @@ function ZonesBinsSetupSessioned() {
       : (warehouses[0]?.id ?? null);
   const zones = useWarehouseZones(warehouseId);
   const [zoneId, setZoneId] = useState<string | null>(null);
-  const selectedZoneId = zoneId ?? zones?.[0]?.id ?? null;
+  // The picked zone only counts while it belongs to the warehouse being
+  // configured — a stale pick from a previous warehouse falls back to the
+  // first zone of the new one (the sidebar switcher can change warehouses
+  // without this component resetting state).
+  const selectedZoneId =
+    zoneId !== null && zones?.some((z) => z.id === zoneId) ? zoneId : (zones?.[0]?.id ?? null);
   const bins = useZoneBins(warehouseId, selectedZoneId);
 
   if (tenantId === null) return null;
@@ -134,8 +139,11 @@ function ZonesBinsSetupSessioned() {
         <div className="text-(--muted-foreground)">Loading zones…</div>
       ) : (
         <>
-          <ZoneCreateForm warehouseId={warehouseId} />
-          <BinFormsRow tenantId={tenantId} warehouseId={warehouseId} zones={zones} />
+          {/* key={warehouseId} remounts the forms on a warehouse switch so
+              their internal zone/code state can never post against the
+              previous warehouse's zones (404). */}
+          <ZoneCreateForm key={warehouseId} warehouseId={warehouseId} />
+          <BinFormsRow key={warehouseId} tenantId={tenantId} warehouseId={warehouseId} zones={zones} />
           <ZoneBinsTable
             tenantId={tenantId}
             warehouseId={warehouseId}
@@ -623,7 +631,11 @@ function rejectionReason(error: unknown, attemptedCode?: string): string {
       case 'duplicate-zone-code':
         return `Zone code ${attemptedCode ?? ''} is already used in this warehouse — pick another.`;
       case 'duplicate-bin-code':
-        return `Bin code ${attemptedCode ?? ''} is already used in this warehouse — pick another.`;
+        // The grid form has no attempted code — the API names the first
+        // conflicting code in the problem detail; the manual form does.
+        return attemptedCode !== undefined
+          ? `Bin code ${attemptedCode} is already used in this warehouse — pick another.`
+          : (error.detail ?? 'A generated bin code is already used in this warehouse — narrow the grid or pick different codes.');
       case 'grid-too-large':
         return error.detail ?? 'Narrow the aisle range, bays, or levels — 500 bins per run.';
       case 'not-found':

@@ -362,7 +362,7 @@ export type TenancyControllerListZonesData = {
 
 export type TenancyControllerListZonesErrors = {
     /**
-     * Malformed cursor
+     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -463,7 +463,7 @@ export type TenancyControllerListBinsData = {
 
 export type TenancyControllerListBinsErrors = {
     /**
-     * Malformed cursor
+     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -565,7 +565,7 @@ export type TenancyControllerGenerateBinGridData = {
 
 export type TenancyControllerGenerateBinGridErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or invalid body
+     * Missing or malformed Idempotency-Key, invalid body, or a descending aisle range (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
