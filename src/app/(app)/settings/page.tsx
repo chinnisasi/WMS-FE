@@ -1,4 +1,6 @@
 import { WarehouseCreateForm, WarehouseList } from '@/components/settings/warehouse-create-form';
+import { SetupChecklistCard } from '@/components/settings/setup-checklist-card';
+import { ZonesBinsSetup } from '@/components/settings/zone-bin-setup';
 import { SurfacePlaceholder } from '@/components/shell/surface-placeholder';
 
 export const metadata = { title: 'Settings' };
@@ -8,18 +10,16 @@ export default function SettingsPage() {
     <section className="flex flex-col gap-6">
       <SurfacePlaceholder
         title="Settings"
-        description="Includes device enrollment and the setup checklist (which aggregates completion state across onboarding stories)."
+        description="Includes device enrollment, the warehouse floor setup, and the setup checklist (which aggregates completion state across onboarding stories)."
       />
+      <SetupChecklistCard />
       <WarehouseCreateForm />
+      <ZonesBinsSetup />
       <WarehouseList />
       <div className="flex flex-col gap-2 text-sm">
         <div className="rounded-md border border-(--border) p-3">
           <div className="font-medium">Device enrollment</div>
           <div className="text-(--muted-foreground)">Scanner pairing lands in a later epic.</div>
-        </div>
-        <div className="rounded-md border border-(--border) p-3">
-          <div className="font-medium">Setup checklist</div>
-          <div className="text-(--muted-foreground)">Steps check off as tenants/bins/catalog/users complete (stories 1.2–1.5).</div>
         </div>
       </div>
     </section>

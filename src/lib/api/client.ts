@@ -1,21 +1,38 @@
 import { client } from './generated/client.gen';
 import {
   healthControllerHealth,
+  tenancyControllerCreateBin,
   tenancyControllerCreateWarehouse,
+  tenancyControllerCreateZone,
+  tenancyControllerGenerateBinGrid,
+  tenancyControllerListBins,
   tenancyControllerListWarehouses,
+  tenancyControllerListZones,
   tenancyControllerRegister,
+  tenancyControllerSetBinBlocked,
+  tenancyControllerSetupChecklist,
   tenancyControllerSignIn,
 } from './generated/sdk.gen';
 import { ensureSessionHint, readSession, clearSession } from '../auth';
 import type {
+  BinGridResponse,
+  BinListResponse,
+  BinResponse,
+  CreateBinDto,
   CreateWarehouseDto,
+  CreateZoneDto,
+  GenerateBinsDto,
   HealthResponse,
+  PatchBinDto,
   RegisterTenantDto,
+  SetupChecklistResponse,
   SignInDto,
   SignInResponse,
   TenantRegistrationResponse,
   WarehouseListResponse,
   WarehouseResponse,
+  ZoneListResponse,
+  ZoneResponse,
 } from './generated/types.gen';
 
 /**
@@ -141,6 +158,124 @@ export async function fetchApiListWarehouses(
   const { data, error } = await tenancyControllerListWarehouses({
     path: { tenantId },
     query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiCreateZone(
+  tenantId: string,
+  warehouseId: string,
+  body: CreateZoneDto,
+  idempotencyKey: string,
+): Promise<ZoneResponse> {
+  const { data, error } = await tenancyControllerCreateZone({
+    path: { tenantId, warehouseId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiListZones(
+  tenantId: string,
+  warehouseId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<ZoneListResponse> {
+  const { data, error } = await tenancyControllerListZones({
+    path: { tenantId, warehouseId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiCreateBin(
+  tenantId: string,
+  warehouseId: string,
+  zoneId: string,
+  body: CreateBinDto,
+  idempotencyKey: string,
+): Promise<BinResponse> {
+  const { data, error } = await tenancyControllerCreateBin({
+    path: { tenantId, warehouseId, zoneId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiGenerateBinGrid(
+  tenantId: string,
+  warehouseId: string,
+  zoneId: string,
+  body: GenerateBinsDto,
+  idempotencyKey: string,
+): Promise<BinGridResponse> {
+  const { data, error } = await tenancyControllerGenerateBinGrid({
+    path: { tenantId, warehouseId, zoneId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiListBins(
+  tenantId: string,
+  warehouseId: string,
+  zoneId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<BinListResponse> {
+  const { data, error } = await tenancyControllerListBins({
+    path: { tenantId, warehouseId, zoneId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiSetBinBlocked(
+  tenantId: string,
+  warehouseId: string,
+  binId: string,
+  body: PatchBinDto,
+  idempotencyKey: string,
+): Promise<BinResponse> {
+  const { data, error } = await tenancyControllerSetBinBlocked({
+    path: { tenantId, warehouseId, binId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiSetupChecklist(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<SetupChecklistResponse> {
+  const { data, error } = await tenancyControllerSetupChecklist({
+    path: { tenantId },
     signal: options?.signal,
   });
   if (error || !data) {

@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses } from './types.gen';
+import type { EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, TenancyControllerCreateBinData, TenancyControllerCreateBinErrors, TenancyControllerCreateBinResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerCreateZoneData, TenancyControllerCreateZoneErrors, TenancyControllerCreateZoneResponses, TenancyControllerGenerateBinGridData, TenancyControllerGenerateBinGridErrors, TenancyControllerGenerateBinGridResponses, TenancyControllerListBinsData, TenancyControllerListBinsErrors, TenancyControllerListBinsResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerListZonesData, TenancyControllerListZonesErrors, TenancyControllerListZonesResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerSetBinBlockedData, TenancyControllerSetBinBlockedErrors, TenancyControllerSetBinBlockedResponses, TenancyControllerSetupChecklistData, TenancyControllerSetupChecklistErrors, TenancyControllerSetupChecklistResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -62,6 +62,85 @@ export const tenancyControllerCreateWarehouse = <ThrowOnError extends boolean = 
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Lists the zones of one warehouse (keyset cursor pagination)
+ */
+export const tenancyControllerListZones = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerListZonesData, ThrowOnError>): RequestResult<TenancyControllerListZonesResponses, TenancyControllerListZonesErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerListZonesResponses, TenancyControllerListZonesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones',
+    ...options
+});
+
+/**
+ * Creates a zone in a warehouse (code unique per warehouse)
+ */
+export const tenancyControllerCreateZone = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerCreateZoneData, ThrowOnError>): RequestResult<TenancyControllerCreateZoneResponses, TenancyControllerCreateZoneErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerCreateZoneResponses, TenancyControllerCreateZoneErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Lists the bins of one zone (keyset cursor pagination)
+ */
+export const tenancyControllerListBins = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerListBinsData, ThrowOnError>): RequestResult<TenancyControllerListBinsResponses, TenancyControllerListBinsErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerListBinsResponses, TenancyControllerListBinsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones/{zoneId}/bins',
+    ...options
+});
+
+/**
+ * Creates a bin in a zone (code unique per warehouse; immediately usable)
+ */
+export const tenancyControllerCreateBin = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerCreateBinData, ThrowOnError>): RequestResult<TenancyControllerCreateBinResponses, TenancyControllerCreateBinErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerCreateBinResponses, TenancyControllerCreateBinErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones/{zoneId}/bins',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Mass-creates bins in one zone from an aisle/bay/level grid (≤ 500, one transaction)
+ */
+export const tenancyControllerGenerateBinGrid = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerGenerateBinGridData, ThrowOnError>): RequestResult<TenancyControllerGenerateBinGridResponses, TenancyControllerGenerateBinGridErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerGenerateBinGridResponses, TenancyControllerGenerateBinGridErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones/{zoneId}/bins/grid',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Blocks or unblocks a bin (the only bin edit in this story)
+ */
+export const tenancyControllerSetBinBlocked = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerSetBinBlockedData, ThrowOnError>): RequestResult<TenancyControllerSetBinBlockedResponses, TenancyControllerSetBinBlockedErrors, ThrowOnError> => (options.client ?? client).patch<TenancyControllerSetBinBlockedResponses, TenancyControllerSetBinBlockedErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Computed onboarding checklist (warehouse, bins, catalog, users — catalog/users pending)
+ */
+export const tenancyControllerSetupChecklist = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerSetupChecklistData, ThrowOnError>): RequestResult<TenancyControllerSetupChecklistResponses, TenancyControllerSetupChecklistErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerSetupChecklistResponses, TenancyControllerSetupChecklistErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/setup-checklist',
+    ...options
 });
 
 /**
