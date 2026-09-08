@@ -2,7 +2,7 @@
   "name": "wms-fe",
   "version": "0.1.0",
   "private": true,
-  "description": "WMS web dashboard \u2014 Next.js 16 App Router shell with the shared design-token layer",
+  "description": "WMS web dashboard — Next.js 16 App Router shell with the shared design-token layer",
   "workspaces": [
     "mobile"
   ],
@@ -11,7 +11,7 @@
   },
   "packageManager": "bun@1.2.20",
   "scripts": {
-    "preinstall": "node -e \"if (!/^bun\\//.test(process.env.npm_config_user_agent || '')) { console.error('This repo uses bun only \u2014 run bun install (never npm/yarn/pnpm).'); process.exit(1); }\"",
+    "preinstall": "node -e \"if (!/^bun\\//.test(process.env.npm_config_user_agent || '')) { console.error('This repo uses bun only — run bun install (never npm/yarn/pnpm).'); process.exit(1); }\"",
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
@@ -31,6 +31,7 @@
     "@eslint/js": "9.30.0",
     "@hey-api/openapi-ts": "0.99.0",
     "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "26.5.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
     "bun-types": "1.4.2",
