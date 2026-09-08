@@ -814,6 +814,10 @@ export type CatalogControllerImportCatalogErrors = {
      */
     403: ProblemDetailsDto;
     /**
+     * Concurrent import with the same Idempotency-Key (conflict), or the SKU/barcode this file introduces was committed by a concurrent import and a row-level check raced it (duplicate-sku-code / duplicate-barcode) — regenerate the key or retry
+     */
+    409: ProblemDetailsDto;
+    /**
      * Not a .csv/.xlsx file (unsupported-file-type)
      */
     415: ProblemDetailsDto;

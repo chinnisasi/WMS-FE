@@ -20,6 +20,9 @@ const labelClass = 'text-sm font-medium';
 /** Client-side pre-check mirrors the backend caps (spec 1.4). */
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
+/** The on-screen table shows a bounded window; the CSV report carries all rows. */
+const MAX_RENDERED_ERRORS = 100;
+
 /**
  * Catalog import wizard (story 1.4), a Settings sub-card. One pass: pick a
  * CSV/XLSX file, optionally run it as a fix round, submit — the backend
@@ -117,7 +120,7 @@ function ImportCatalogCardSessioned() {
         </label>
         <button
           type="submit"
-          disabled={pending || file === null}
+          disabled={pending || file === null || file.size > MAX_FILE_BYTES}
           className="self-end rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
         >
           {pending ? 'Importing…' : 'Import'}
@@ -178,12 +181,18 @@ function ImportResult({ result }: { result: CatalogImportResponse }) {
                 </tr>
               </thead>
               <tbody>
-                {result.errors.map((error) => (
+                {result.errors.slice(0, MAX_RENDERED_ERRORS).map((error) => (
                   <ErrorRow key={`${error.rowNumber}-${error.skuCode ?? ''}`} error={error} />
                 ))}
               </tbody>
             </table>
           </div>
+          {result.errors.length > MAX_RENDERED_ERRORS && (
+            <div className="text-xs text-(--muted-foreground)">
+              Showing the first {MAX_RENDERED_ERRORS} of {result.errors.length} errors — the
+              downloadable report carries the full list.
+            </div>
+          )}
           <button
             type="button"
             onClick={() => downloadErrorReport(result)}
@@ -219,17 +228,26 @@ function downloadErrorReport(result: CatalogImportResponse): void {
       csvField(error.detail),
     ].join(','),
   );
-  const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
+  // UTF-8 BOM so Excel opens the report as UTF-8 instead of mojibake.
+  const blob = new Blob([`\uFEFF${[header, ...lines].join('\n')}`], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = `import-${result.importId}-errors.csv`;
+  // Firefox needs the anchor in the document before click(); Safari can
+  // reclaim the object URL before the click lands, so revoke on a timer
+  // instead of inline.
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
 function csvField(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`;
+  // Spreadsheet applications execute a leading =, +, - or @ as a formula —
+  // neutralize it so row detail can never become an injection vector.
+  const guarded = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${guarded.replaceAll('"', '""')}"`;
 }
 
 /**
