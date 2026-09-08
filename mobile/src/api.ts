@@ -2,7 +2,9 @@
  * Thin API access for the health screen. The base URL comes from Expo's
  * env mechanism (EXPO_PUBLIC_* vars are inlined into the bundle).
  */
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
+// `||` (not `??`) so a set-but-empty env var falls back to the default
+// instead of producing a relative-URL fetch on device.
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:3000/api/v1';
 
 export interface HealthResponse {
   status: string;

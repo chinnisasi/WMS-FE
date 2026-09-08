@@ -7,7 +7,8 @@ import type { HealthResponse } from './generated/types.gen';
  * `/api/v1` shell; every typed function lives in ./generated (AD-8 — no
  * hand-written API types anywhere in wms-fe).
  */
-const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/v1';
+// `||` (not `??`) so a set-but-empty env var still falls back to the default.
+const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000/api/v1';
 
 client.setConfig({
   baseUrl,

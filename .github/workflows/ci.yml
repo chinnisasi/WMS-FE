@@ -44,3 +44,35 @@ jobs:
 
       - name: Typecheck Expo app
         run: cd mobile && bun run typecheck
+
+  # Mirrors the meta-repo workspace layout so the documented pipeline path
+  # (`../../backend/wms-be/openapi/openapi.json`) resolves exactly as it does
+  # locally, then fails if the committed client doesn't match the spec.
+  generated-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: workspace/core/frontend/wms-fe
+
+      - name: Check out wms-be (spec source for the generated client)
+        uses: actions/checkout@v4
+        with:
+          repository: chinnisasi/WMS-BE
+          path: workspace/core/backend/wms-be
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.20
+
+      - name: Install dependencies (workspaces incl. mobile)
+        run: bun install --frozen-lockfile
+        working-directory: workspace/core/frontend/wms-fe
+
+      - name: Regenerate client
+        run: bun run api:generate
+        working-directory: workspace/core/frontend/wms-fe
+
+      - name: Generated-client drift guard (client matches committed spec)
+        run: git diff --exit-code src/lib/api/generated
+        working-directory: workspace/core/frontend/wms-fe

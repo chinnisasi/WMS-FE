@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { EchoControllerEchoData, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthResponses } from './types.gen';
+import type { EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -21,9 +21,16 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 /**
  * Liveness check
  */
-export const healthControllerHealth = <ThrowOnError extends boolean = false>(options?: Options<HealthControllerHealthData, ThrowOnError>): RequestResult<HealthControllerHealthResponses, unknown, ThrowOnError> => (options?.client ?? client).get<HealthControllerHealthResponses, unknown, ThrowOnError>({ url: '/health', ...options });
+export const healthControllerHealth = <ThrowOnError extends boolean = false>(options?: Options<HealthControllerHealthData, ThrowOnError>): RequestResult<HealthControllerHealthResponses, HealthControllerHealthErrors, ThrowOnError> => (options?.client ?? client).get<HealthControllerHealthResponses, HealthControllerHealthErrors, ThrowOnError>({ url: '/health', ...options });
 
 /**
- * Echoes the request payload back with a timestamp
+ * Echoes the request JSON object back with a timestamp
  */
-export const echoControllerEcho = <ThrowOnError extends boolean = false>(options?: Options<EchoControllerEchoData, ThrowOnError>): RequestResult<EchoControllerEchoResponses, unknown, ThrowOnError> => (options?.client ?? client).post<EchoControllerEchoResponses, unknown, ThrowOnError>({ url: '/echo', ...options });
+export const echoControllerEcho = <ThrowOnError extends boolean = false>(options: Options<EchoControllerEchoData, ThrowOnError>): RequestResult<EchoControllerEchoResponses, EchoControllerEchoErrors, ThrowOnError> => (options.client ?? client).post<EchoControllerEchoResponses, EchoControllerEchoErrors, ThrowOnError>({
+    url: '/echo',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});

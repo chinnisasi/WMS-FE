@@ -4,6 +4,16 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}/api/v1` | (string & {});
 };
 
+export type ProblemDetailsDto = {
+    type: string;
+    title: string;
+    status: number;
+    code: string;
+    detail?: string;
+    instance?: string;
+    errors?: Array<string>;
+};
+
 export type HealthResponse = {
     status: string;
     service: string;
@@ -24,6 +34,19 @@ export type HealthControllerHealthData = {
     url: '/health';
 };
 
+export type HealthControllerHealthErrors = {
+    /**
+     * Route not found
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Internal error
+     */
+    500: ProblemDetailsDto;
+};
+
+export type HealthControllerHealthError = HealthControllerHealthErrors[keyof HealthControllerHealthErrors];
+
 export type HealthControllerHealthResponses = {
     200: HealthResponse;
 };
@@ -31,11 +54,30 @@ export type HealthControllerHealthResponses = {
 export type HealthControllerHealthResponse = HealthControllerHealthResponses[keyof HealthControllerHealthResponses];
 
 export type EchoControllerEchoData = {
-    body?: never;
+    body: {
+        [key: string]: unknown;
+    };
     path?: never;
     query?: never;
     url: '/echo';
 };
+
+export type EchoControllerEchoErrors = {
+    /**
+     * Body is not a JSON object
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Route not found
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Internal error
+     */
+    500: ProblemDetailsDto;
+};
+
+export type EchoControllerEchoError = EchoControllerEchoErrors[keyof EchoControllerEchoErrors];
 
 export type EchoControllerEchoResponses = {
     200: EchoResponse;

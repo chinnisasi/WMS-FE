@@ -15,3 +15,8 @@ bunx expo start   # Expo Go / simulator
 ```
 
 Point it at the local api with `EXPO_PUBLIC_API_BASE_URL` (defaults to `http://localhost:3000/api/v1`).
+
+> The `localhost` default only works in the **iOS simulator** (same host as wms-be).
+> In Expo Go on a physical device, `localhost` is the phone itself — set
+> `EXPO_PUBLIC_API_BASE_URL` to your machine's LAN IP. On the Android emulator
+> use `http://10.0.2.2:3000/api/v1`.
