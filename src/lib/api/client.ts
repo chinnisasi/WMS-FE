@@ -1,5 +1,8 @@
 import { client } from './generated/client.gen';
 import {
+  catalogControllerEditSku,
+  catalogControllerImportCatalog,
+  catalogControllerListSkus,
   healthControllerHealth,
   tenancyControllerCreateBin,
   tenancyControllerCreateWarehouse,
@@ -18,16 +21,20 @@ import type {
   BinGridResponse,
   BinListResponse,
   BinResponse,
+  CatalogImportResponse,
   CreateBinDto,
   CreateWarehouseDto,
   CreateZoneDto,
   GenerateBinsDto,
   HealthResponse,
   PatchBinDto,
+  PatchSkuDto,
   RegisterTenantDto,
   SetupChecklistResponse,
   SignInDto,
   SignInResponse,
+  SkuListResponse,
+  SkuResponse,
   TenantRegistrationResponse,
   WarehouseListResponse,
   WarehouseResponse,
@@ -261,6 +268,64 @@ export async function fetchApiSetBinBlocked(
 ): Promise<BinResponse> {
   const { data, error } = await tenancyControllerSetBinBlocked({
     path: { tenantId, warehouseId, binId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Catalog import (story 1.4) — synchronous multipart; valid rows commit in
+ * one transaction, bad rows come back row-level (a 201 can carry failures).
+ * `mode` is undefined for the default `initial` run; `fix` targets only the
+ * latest run's failed SKU codes.
+ */
+export async function fetchApiImportCatalog(
+  tenantId: string,
+  file: File,
+  mode: 'initial' | 'fix' | undefined,
+  idempotencyKey: string,
+): Promise<CatalogImportResponse> {
+  const { data, error } = await catalogControllerImportCatalog({
+    body: { file, ...(mode === undefined ? {} : { mode }) },
+    headers: { 'Idempotency-Key': idempotencyKey },
+    path: { tenantId },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiListSkus(
+  tenantId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<SkuListResponse> {
+  const { data, error } = await catalogControllerListSkus({
+    path: { tenantId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * SKU edit — everything but the SKU code is editable; the code is immutable.
+ */
+export async function fetchApiEditSku(
+  tenantId: string,
+  skuId: string,
+  body: PatchSkuDto,
+  idempotencyKey: string,
+): Promise<SkuResponse> {
+  const { data, error } = await catalogControllerEditSku({
+    path: { tenantId, skuId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
   });

@@ -176,6 +176,99 @@ export type SetupChecklistResponse = {
     steps: Array<SetupChecklistStepResponse>;
 };
 
+export type CatalogImportErrorResponse = {
+    /**
+     * 1-based data-row index (header excluded)
+     */
+    rowNumber: number;
+    /**
+     * Absent when the row failed shape validation before a code could be read
+     */
+    skuCode: string | null;
+    /**
+     * validation-failed | duplicate-sku-code | duplicate-barcode
+     */
+    code: string;
+    detail: string;
+};
+
+export type CatalogImportResponse = {
+    importId: string;
+    mode: 'initial' | 'fix';
+    /**
+     * Rows committed in this run's single transaction
+     */
+    committedRows: number;
+    /**
+     * Rows rejected with a row-level error
+     */
+    failedRows: number;
+    /**
+     * Rows skipped by fix mode (not in the latest run's failed set)
+     */
+    skippedRows: number;
+    errors: Array<CatalogImportErrorResponse>;
+};
+
+export type SkuUomConversionResponse = {
+    uom: string;
+    /**
+     * Positive integer, relative to the SKU's base UoM
+     */
+    factor: number;
+};
+
+export type SkuResponse = {
+    id: string;
+    tenantId: string;
+    code: string;
+    name: string;
+    uom: string;
+    /**
+     * GST in basis points (1800 = 18%)
+     */
+    gstRateBps: number;
+    hsn: string | null;
+    batchTracked: boolean;
+    serialTracked: boolean;
+    reorderPoint: number;
+    reorderQty: number;
+    /**
+     * Generated server-side (uuidv7) unless provided
+     */
+    barcode: string;
+    uomConversions: Array<SkuUomConversionResponse>;
+    createdAt: string;
+};
+
+export type SkuListResponse = {
+    items: Array<SkuResponse>;
+    /**
+     * Opaque keyset cursor
+     */
+    nextCursor: string | null;
+};
+
+export type PatchSkuDto = {
+    name?: string;
+    /**
+     * GST in basis points (1800 = 18%)
+     */
+    gstRate?: number;
+    hsn?: string | null;
+    batchTracked?: boolean;
+    serialTracked?: boolean;
+    /**
+     * Base-UoM units
+     */
+    reorderPoint?: number;
+    /**
+     * Base-UoM units
+     */
+    reorderQty?: number;
+    barcode?: string;
+};
+
 export type HealthResponse = {
     status: string;
     service: string;
@@ -679,6 +772,166 @@ export type TenancyControllerSetupChecklistResponses = {
 };
 
 export type TenancyControllerSetupChecklistResponse = TenancyControllerSetupChecklistResponses[keyof TenancyControllerSetupChecklistResponses];
+
+export type CatalogControllerImportCatalogData = {
+    body: {
+        /**
+         * CSV or XLSX with the documented header (sku_code,name,uom,gst_rate required)
+         */
+        file: Blob | File;
+        /**
+         * `initial` (default) or `fix` — fix processes only the latest run's failed SKU codes
+         */
+        mode?: 'initial' | 'fix';
+    };
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/imports';
+};
+
+export type CatalogControllerImportCatalogErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a file that cannot be parsed (file-unreadable)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Concurrent import with the same Idempotency-Key (conflict), or the SKU/barcode this file introduces was committed by a concurrent import and a row-level check raced it (duplicate-sku-code / duplicate-barcode) — regenerate the key or retry
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a .csv/.xlsx file (unsupported-file-type)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * More than 10,000 rows or 5 MB (import-too-large), or idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerImportCatalogError = CatalogControllerImportCatalogErrors[keyof CatalogControllerImportCatalogErrors];
+
+export type CatalogControllerImportCatalogResponses = {
+    /**
+     * Partial commit: counts + row-level errors (a 201 can carry failures)
+     */
+    201: CatalogImportResponse;
+};
+
+export type CatalogControllerImportCatalogResponse = CatalogControllerImportCatalogResponses[keyof CatalogControllerImportCatalogResponses];
+
+export type CatalogControllerListSkusData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/catalog/skus';
+};
+
+export type CatalogControllerListSkusErrors = {
+    /**
+     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type CatalogControllerListSkusError = CatalogControllerListSkusErrors[keyof CatalogControllerListSkusErrors];
+
+export type CatalogControllerListSkusResponses = {
+    200: SkuListResponse;
+};
+
+export type CatalogControllerListSkusResponse = CatalogControllerListSkusResponses[keyof CatalogControllerListSkusResponses];
+
+export type CatalogControllerEditSkuData = {
+    body: PatchSkuDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        skuId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/skus/{skuId}';
+};
+
+export type CatalogControllerEditSkuErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid/empty body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * SKU does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Barcode already belongs to another SKU (duplicate-barcode names it)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerEditSkuError = CatalogControllerEditSkuErrors[keyof CatalogControllerEditSkuErrors];
+
+export type CatalogControllerEditSkuResponses = {
+    200: SkuResponse;
+};
+
+export type CatalogControllerEditSkuResponse = CatalogControllerEditSkuResponses[keyof CatalogControllerEditSkuResponses];
 
 export type HealthControllerHealthData = {
     body?: never;
