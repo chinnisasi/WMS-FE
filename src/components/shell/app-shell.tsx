@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 
-import { NAV_ITEMS } from '@/lib/navigation';
+import { refreshSessionUser } from '@/lib/api/client';
+import { readSession, subscribeSession } from '@/lib/auth';
+import { visibleNavItems } from '@/lib/navigation';
 
 import { SignOutButton } from '@/components/auth/sign-out';
 import { CommandPalette } from './command-palette';
@@ -18,6 +20,15 @@ import { WarehouseSwitcher } from './warehouse-switcher';
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement>(null);
+
+  // Bootstrap the signed-in user (story 1.5): the stored role is as of the
+  // last sign-in; a /me refetch on mount surfaces role changes made after
+  // this session token was minted — without a re-login. Best-effort: a
+  // failed refresh keeps the stored role (only cosmetic gating is affected;
+  // the backend stays the authority).
+  useEffect(() => {
+    void refreshSessionUser();
+  }, []);
 
   // ⌘K opens the command palette from anywhere; Esc closes the topmost
   // layer; Enter commits (see CommandPalette).
@@ -100,11 +111,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 function MobileNavLinks({ onNavigate }: { onNavigate: () => void }) {
-  // Same shared IA list the ≥768px sidebar renders. Client-side Link keeps
-  // the SPA navigation; the menu folds itself away on the way through.
+  // Same role-filtered IA list the ≥768px sidebar renders (story 1.5).
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  // Client-side Link keeps the SPA navigation; the menu folds itself away on
+  // the way through.
   return (
     <>
-      {NAV_ITEMS.map((item) => (
+      {visibleNavItems(role).map((item) => (
         <Link
           key={item.id}
           href={item.href}

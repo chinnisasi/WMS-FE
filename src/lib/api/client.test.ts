@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   ApiProblem,
   fetchApiCreateWarehouse,
+  fetchApiInviteUser,
   fetchApiListWarehouses,
   fetchApiRegisterTenant,
+  refreshSessionUser,
 } from './client';
 import { SESSION_STORAGE_KEY, writeSession, clearSession } from '../auth';
 import type { StoredSession } from '../auth';
@@ -55,6 +57,13 @@ afterEach(() => {
 const SESSION: StoredSession = {
   token: 'header.payload.signature',
   tenant: { id: '0198f7a2-1b3c-7d4e-8f90-112233445566', name: 'Priya Spices' },
+  // Story 1.5: the session carries the signed-in user (role → surface gating).
+  user: {
+    id: '0198f7a2-1b3c-7d4e-8f90-aabbccddeeff',
+    email: 'priya@example.com',
+    role: 'operator',
+    status: 'active',
+  },
   expiresAt: Date.now() + 60_000,
 };
 
@@ -127,6 +136,68 @@ describe('bearer interceptor', () => {
     );
     expect(lastRequest).toBeDefined();
     expect(lastRequest!.headers.get('Idempotency-Key')).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+    clearSession();
+  });
+
+  test('the invite wrapper forwards its Idempotency-Key and posts the invite body (story 1.5)', async () => {
+    writeSession(SESSION);
+    stubFetch(201, {
+      user: {
+        id: '0198f7a2-1b3c-7d4e-8f90-998877665544',
+        email: 'arjun@example.com',
+        role: 'operator',
+        status: 'invited',
+      },
+      inviteToken: 'raw-token',
+      inviteExpiresAt: '2026-09-15T00:00:00.000Z',
+    });
+    const invited = await fetchApiInviteUser(
+      SESSION.tenant.id,
+      { email: 'arjun@example.com', role: 'operator' },
+      '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    );
+    expect(invited.inviteToken).toBe('raw-token');
+    expect(invited.inviteExpiresAt).toBe('2026-09-15T00:00:00.000Z');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
+    expect(lastRequest!.headers.get('Authorization')).toBe(`Bearer ${SESSION.token}`);
+    const body = (await lastRequest!.json()) as Record<string, unknown>;
+    expect(body).toEqual({ email: 'arjun@example.com', role: 'operator' });
+    clearSession();
+  });
+});
+
+describe('refreshSessionUser (story 1.5 /me bootstrap)', () => {
+  test('a changed role is refetched from /me and written back into the session', async () => {
+    writeSession(SESSION);
+    stubFetch(200, {
+      user: { ...SESSION.user, role: 'accountant' },
+    });
+    await refreshSessionUser();
+    const stored = JSON.parse(store.get(SESSION_STORAGE_KEY)!) as { user: { role: string } };
+    expect(stored.user.role).toBe('accountant');
+    clearSession();
+  });
+
+  test('an unchanged /me response does not rewrite the stored row', async () => {
+    writeSession(SESSION);
+    const before = store.get(SESSION_STORAGE_KEY);
+    stubFetch(200, {
+      user: { ...SESSION.user },
+    });
+    await refreshSessionUser();
+    expect(store.get(SESSION_STORAGE_KEY)).toBe(before);
+    clearSession();
+  });
+
+  test('a failed refresh keeps the stored session (best-effort bootstrap)', async () => {
+    writeSession(SESSION);
+    // 500, not 401 — a 401 would trigger the interceptor's clearSession, a
+    // different (authoritative) path than the refresh's own catch-silent.
+    stubFetch(500, { message: 'boom' });
+    // Must not throw — the refresh is cosmetic; the backend still gates
+    // every command, so a stale stored role is only a hiding hint.
+    await refreshSessionUser();
+    expect(store.has(SESSION_STORAGE_KEY)).toBe(true);
     clearSession();
   });
 });

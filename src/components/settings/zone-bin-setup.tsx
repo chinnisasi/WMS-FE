@@ -13,6 +13,7 @@ import {
 import type { BinResponse, ZoneResponse } from '@/lib/api/generated';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { useWarehouseZones } from '@/lib/use-warehouse-zones';
@@ -103,6 +104,15 @@ function ZonesBinsSetupSessioned() {
 
   const warehouse = warehouses.find((w) => w.id === warehouseId);
 
+  // Story 1.5 gating: the zone→bins table is a read (open to every member);
+  // the create forms and the block toggle render only for roles holding the
+  // matching capability — hide surfaces, never "blocked" screens. The
+  // backend per-command role read remains the authority.
+  const role = readSession()?.user.role;
+  const canCreateZone = roleHasCapability(role, 'zone.create');
+  const canCreateBin = roleHasCapability(role, 'bin.create');
+  const canBlockBin = roleHasCapability(role, 'bin.block');
+
   return (
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -142,8 +152,10 @@ function ZonesBinsSetupSessioned() {
           {/* key={warehouseId} remounts the forms on a warehouse switch so
               their internal zone/code state can never post against the
               previous warehouse's zones (404). */}
-          <ZoneCreateForm key={warehouseId} warehouseId={warehouseId} />
-          <BinFormsRow key={warehouseId} tenantId={tenantId} warehouseId={warehouseId} zones={zones} />
+          {canCreateZone && <ZoneCreateForm key={warehouseId} warehouseId={warehouseId} />}
+          {canCreateBin && (
+            <BinFormsRow key={warehouseId} tenantId={tenantId} warehouseId={warehouseId} zones={zones} />
+          )}
           <ZoneBinsTable
             tenantId={tenantId}
             warehouseId={warehouseId}
@@ -151,6 +163,7 @@ function ZonesBinsSetupSessioned() {
             selectedZoneId={selectedZoneId}
             onSelectZone={setZoneId}
             bins={bins}
+            canBlockBin={canBlockBin}
           />
         </>
       )}
@@ -534,6 +547,7 @@ function ZoneBinsTable({
   selectedZoneId,
   onSelectZone,
   bins,
+  canBlockBin,
 }: {
   tenantId: string;
   warehouseId: string;
@@ -541,6 +555,8 @@ function ZoneBinsTable({
   selectedZoneId: string | null;
   onSelectZone: (zoneId: string | null) => void;
   bins: ReturnType<typeof useZoneBins>;
+  /** Story 1.5: the block toggle renders only for `bin.block` roles. */
+  canBlockBin: boolean;
 }) {
   const [busyBinId, setBusyBinId] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
@@ -589,20 +605,24 @@ function ZoneBinsTable({
           </span>
         ),
     },
-    {
-      key: 'actions',
-      header: '',
-      render: (bin) => (
-        <button
-          type="button"
-          disabled={busyBinId === bin.id}
-          onClick={() => toggleBlocked(bin)}
-          className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
-        >
-          {busyBinId === bin.id ? '…' : bin.blocked ? 'Unblock' : 'Block'}
-        </button>
-      ),
-    },
+    ...(canBlockBin
+      ? [
+          {
+            key: 'actions',
+            header: '',
+            render: (bin: BinResponse) => (
+              <button
+                type="button"
+                disabled={busyBinId === bin.id}
+                onClick={() => toggleBlocked(bin)}
+                className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
+              >
+                {busyBinId === bin.id ? '…' : bin.blocked ? 'Unblock' : 'Block'}
+              </button>
+            ),
+          } satisfies DataTableColumn<BinResponse>,
+        ]
+      : []),
   ];
 
   return (

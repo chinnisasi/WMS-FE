@@ -71,6 +71,14 @@ function installShims(): void {
 const SESSION: StoredSession = {
   token: 'header.payload.signature',
   tenant: { id: '0198f7a2-1b3c-7d4e-8f90-112233445566', name: 'Priya Spices' },
+  // Story 1.5: every stored session carries the signed-in user — the role
+  // feeds the surface gating (hide surfaces, never "blocked" screens).
+  user: {
+    id: '0198f7a2-1b3c-7d4e-8f90-aabbccddeeff',
+    email: 'priya@example.com',
+    role: 'owner',
+    status: 'active',
+  },
   expiresAt: Date.now() + 60_000,
 };
 
@@ -116,6 +124,29 @@ describe('readSession (pure snapshot read)', () => {
 
   test('wrong shape (missing token) → null', () => {
     store.set(SESSION_STORAGE_KEY, JSON.stringify({ expiresAt: Date.now() + 1 }));
+    expect(readSession()).toBeNull();
+  });
+
+  test('pre-1.5 session row without a user → null (fail closed)', () => {
+    // Story 1.5 made `user` required: a row written by the previous build
+    // has no role for the surface gating to read, so it reads as signed-out
+    // and the next sign-in rewrites it in the new shape.
+    store.set(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({
+        token: SESSION.token,
+        tenant: SESSION.tenant,
+        expiresAt: SESSION.expiresAt,
+      }),
+    );
+    expect(readSession()).toBeNull();
+  });
+
+  test('session row with an incomplete user → null', () => {
+    store.set(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({ ...SESSION, user: { id: 'x', email: 'x@example.com' } }),
+    );
     expect(readSession()).toBeNull();
   });
 });

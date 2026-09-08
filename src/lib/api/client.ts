@@ -15,9 +15,16 @@ import {
   tenancyControllerSetBinBlocked,
   tenancyControllerSetupChecklist,
   tenancyControllerSignIn,
+  usersControllerAcceptInvite,
+  usersControllerInviteUser,
+  usersControllerListUsers,
+  usersControllerMe,
+  usersControllerSetUserRole,
 } from './generated/sdk.gen';
-import { ensureSessionHint, readSession, clearSession } from '../auth';
+import { ensureSessionHint, readSession, clearSession, writeSession } from '../auth';
 import type {
+  AcceptInviteDto,
+  AcceptInviteResponse,
   BinGridResponse,
   BinListResponse,
   BinResponse,
@@ -27,15 +34,21 @@ import type {
   CreateZoneDto,
   GenerateBinsDto,
   HealthResponse,
+  InviteUserDto,
+  InviteUserResponse,
+  MeResponse,
   PatchBinDto,
   PatchSkuDto,
   RegisterTenantDto,
+  SetUserRoleDto,
   SetupChecklistResponse,
   SignInDto,
   SignInResponse,
   SkuListResponse,
   SkuResponse,
   TenantRegistrationResponse,
+  UserListResponse,
+  UserResponse,
   WarehouseListResponse,
   WarehouseResponse,
   ZoneListResponse,
@@ -347,4 +360,112 @@ export async function fetchApiSetupChecklist(
     throw unwrapError(error, 400);
   }
   return data;
+}
+
+/**
+ * Invite a user (story 1.5, Owner capability `users.invite`) — the response
+ * carries the one-time invite token for the owner to share out-of-band.
+ */
+export async function fetchApiInviteUser(
+  tenantId: string,
+  body: InviteUserDto,
+  idempotencyKey: string,
+): Promise<InviteUserResponse> {
+  const { data, error } = await usersControllerInviteUser({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** The tenant's users — a read, open to any tenant member. */
+export async function fetchApiListUsers(
+  tenantId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<UserListResponse> {
+  const { data, error } = await usersControllerListUsers({
+    path: { tenantId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Change a user's role (Owner capability `users.role_change`). */
+export async function fetchApiSetUserRole(
+  tenantId: string,
+  userId: string,
+  body: SetUserRoleDto,
+  idempotencyKey: string,
+): Promise<UserResponse> {
+  const { data, error } = await usersControllerSetUserRole({
+    path: { tenantId, userId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Accept a one-time invite (unauthenticated) — sets the invitee's password. */
+export async function fetchApiAcceptInvite(
+  tenantId: string,
+  body: AcceptInviteDto,
+  idempotencyKey: string,
+): Promise<AcceptInviteResponse> {
+  const { data, error } = await usersControllerAcceptInvite({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** The signed-in user's own row — the /me bootstrap refresher reads this. */
+export async function fetchApiMe(tenantId: string): Promise<MeResponse> {
+  const { data, error } = await usersControllerMe({
+    path: { tenantId },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Bootstrap `/me` refetch (story 1.5): the stored session's role was read at
+ * sign-in, but roles change without re-login (the backend re-reads the DB per
+ * command) — on app mount this re-fetches the caller's own row and rewrites
+ * the stored session when it moved, so surface gating tracks reality.
+ */
+export async function refreshSessionUser(): Promise<void> {
+  const session = readSession();
+  if (session === null) return;
+  try {
+    const { user } = await fetchApiMe(session.tenant.id);
+    const current = readSession();
+    if (
+      current !== null &&
+      (current.user.id !== user.id ||
+        current.user.role !== user.role ||
+        current.user.status !== user.status)
+    ) {
+      writeSession({ ...current, user });
+    }
+  } catch {
+    // A failed refresh leaves the stored role in place — the backend still
+    // gates every command; hiding is cosmetic, not authoritative.
+  }
 }

@@ -5,6 +5,7 @@ import { useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiCreateWarehouse } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { notifyWarehousesChanged } from '@/lib/warehouses';
@@ -49,6 +50,13 @@ export function WarehouseCreateForm() {
         </div>
       </div>
     );
+  }
+  // Story 1.5 gating: roles without `warehouse.create` don't see the form —
+  // the Settings page renders the warehouse list itself, so this returns
+  // null (hide surfaces, never "blocked" screens). The backend per-command
+  // role read remains the authority; this only hides surfaces it would deny.
+  if (!roleHasCapability(readSession()?.user.role, 'warehouse.create')) {
+    return null;
   }
 
   async function onSubmit(event: React.FormEvent) {

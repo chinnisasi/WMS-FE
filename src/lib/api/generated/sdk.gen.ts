@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { CatalogControllerEditSkuData, CatalogControllerEditSkuErrors, CatalogControllerEditSkuResponses, CatalogControllerImportCatalogData, CatalogControllerImportCatalogErrors, CatalogControllerImportCatalogResponses, CatalogControllerListSkusData, CatalogControllerListSkusErrors, CatalogControllerListSkusResponses, EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, TenancyControllerCreateBinData, TenancyControllerCreateBinErrors, TenancyControllerCreateBinResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerCreateZoneData, TenancyControllerCreateZoneErrors, TenancyControllerCreateZoneResponses, TenancyControllerGenerateBinGridData, TenancyControllerGenerateBinGridErrors, TenancyControllerGenerateBinGridResponses, TenancyControllerListBinsData, TenancyControllerListBinsErrors, TenancyControllerListBinsResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerListZonesData, TenancyControllerListZonesErrors, TenancyControllerListZonesResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerSetBinBlockedData, TenancyControllerSetBinBlockedErrors, TenancyControllerSetBinBlockedResponses, TenancyControllerSetupChecklistData, TenancyControllerSetupChecklistErrors, TenancyControllerSetupChecklistResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses } from './types.gen';
+import type { CatalogControllerEditSkuData, CatalogControllerEditSkuErrors, CatalogControllerEditSkuResponses, CatalogControllerImportCatalogData, CatalogControllerImportCatalogErrors, CatalogControllerImportCatalogResponses, CatalogControllerListSkusData, CatalogControllerListSkusErrors, CatalogControllerListSkusResponses, EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, TenancyControllerCreateBinData, TenancyControllerCreateBinErrors, TenancyControllerCreateBinResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerCreateZoneData, TenancyControllerCreateZoneErrors, TenancyControllerCreateZoneResponses, TenancyControllerGenerateBinGridData, TenancyControllerGenerateBinGridErrors, TenancyControllerGenerateBinGridResponses, TenancyControllerListBinsData, TenancyControllerListBinsErrors, TenancyControllerListBinsResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerListZonesData, TenancyControllerListZonesErrors, TenancyControllerListZonesResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerSetBinBlockedData, TenancyControllerSetBinBlockedErrors, TenancyControllerSetBinBlockedResponses, TenancyControllerSetupChecklistData, TenancyControllerSetupChecklistErrors, TenancyControllerSetupChecklistResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses, UsersControllerAcceptInviteData, UsersControllerAcceptInviteErrors, UsersControllerAcceptInviteResponses, UsersControllerInviteUserData, UsersControllerInviteUserErrors, UsersControllerInviteUserResponses, UsersControllerListUsersData, UsersControllerListUsersErrors, UsersControllerListUsersResponses, UsersControllerMeData, UsersControllerMeErrors, UsersControllerMeResponses, UsersControllerSetUserRoleData, UsersControllerSetUserRoleErrors, UsersControllerSetUserRoleResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -140,6 +140,62 @@ export const tenancyControllerSetBinBlocked = <ThrowOnError extends boolean = fa
 export const tenancyControllerSetupChecklist = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerSetupChecklistData, ThrowOnError>): RequestResult<TenancyControllerSetupChecklistResponses, TenancyControllerSetupChecklistErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerSetupChecklistResponses, TenancyControllerSetupChecklistErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/tenants/{tenantId}/setup-checklist',
+    ...options
+});
+
+/**
+ * Lists the tenant’s users (keyset cursor pagination — open to any member)
+ */
+export const usersControllerListUsers = <ThrowOnError extends boolean = false>(options: Options<UsersControllerListUsersData, ThrowOnError>): RequestResult<UsersControllerListUsersResponses, UsersControllerListUsersErrors, ThrowOnError> => (options.client ?? client).get<UsersControllerListUsersResponses, UsersControllerListUsersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/users',
+    ...options
+});
+
+/**
+ * Invites a user (Owner only) — returns the one-time invite token
+ */
+export const usersControllerInviteUser = <ThrowOnError extends boolean = false>(options: Options<UsersControllerInviteUserData, ThrowOnError>): RequestResult<UsersControllerInviteUserResponses, UsersControllerInviteUserErrors, ThrowOnError> => (options.client ?? client).post<UsersControllerInviteUserResponses, UsersControllerInviteUserErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/users',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Changes a user’s role (Owner capability users.role_change; effective on the user’s next command)
+ */
+export const usersControllerSetUserRole = <ThrowOnError extends boolean = false>(options: Options<UsersControllerSetUserRoleData, ThrowOnError>): RequestResult<UsersControllerSetUserRoleResponses, UsersControllerSetUserRoleErrors, ThrowOnError> => (options.client ?? client).patch<UsersControllerSetUserRoleResponses, UsersControllerSetUserRoleErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/users/{userId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Accepts a one-time invite (unauthenticated): sets the account password and activates the user
+ */
+export const usersControllerAcceptInvite = <ThrowOnError extends boolean = false>(options: Options<UsersControllerAcceptInviteData, ThrowOnError>): RequestResult<UsersControllerAcceptInviteResponses, UsersControllerAcceptInviteErrors, ThrowOnError> => (options.client ?? client).post<UsersControllerAcceptInviteResponses, UsersControllerAcceptInviteErrors, ThrowOnError>({
+    url: '/tenants/{tenantId}/accept-invite',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The signed-in user’s own row (id, email, role, status)
+ */
+export const usersControllerMe = <ThrowOnError extends boolean = false>(options: Options<UsersControllerMeData, ThrowOnError>): RequestResult<UsersControllerMeResponses, UsersControllerMeErrors, ThrowOnError> => (options.client ?? client).get<UsersControllerMeResponses, UsersControllerMeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/me',
     ...options
 });
 
