@@ -2,19 +2,31 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useSyncExternalStore } from 'react';
 
 import { SignOutButton } from '@/components/auth/sign-out';
 import { WarehouseSwitcher } from '@/components/shell/warehouse-switcher';
-import { NAV_ITEMS } from '@/lib/navigation';
+import { readSession, subscribeSession } from '@/lib/auth';
+import { visibleNavItems } from '@/lib/navigation';
 import { writeStoredTheme } from '@/lib/theme';
 
 /**
- * Sidebar IA skeleton — all 12 surfaces, non-functional routes.
+ * Sidebar IA skeleton — all 12 surfaces, non-functional routes. The list is
+ * filtered by the session role (story 1.5): a surface that declares
+ * capabilities the role lacks is hidden — hide surfaces, never "blocked"
+ * screens (no epic-1 nav surface declares any yet).
  * Responsive contract: ≥1024px full labels · 768–1023px icon (monogram)
  * only · <768px hidden entirely (header menu takes over).
  */
 export function Sidebar() {
   const pathname = usePathname();
+  // The role is a primitive snapshot — stable across getSnapshot calls.
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  const navItems = visibleNavItems(role);
 
   return (
     <aside className="sticky top-0 hidden h-screen w-14 shrink-0 flex-col border-r border-(--border) md:flex lg:w-60">
@@ -24,7 +36,7 @@ export function Sidebar() {
       </div>
       <WarehouseSwitcher className="hidden lg:block" />
       <nav aria-label="Primary" className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           // Nested child routes (e.g. /inventory/xyz) keep the surface
           // highlighted; the Overview root matches exactly.
           const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);

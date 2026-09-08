@@ -40,6 +40,14 @@ export type SignInDto = {
     password: string;
 };
 
+export type UserResponse = {
+    id: string;
+    email: string;
+    role: 'owner' | 'ops_manager' | 'operator' | 'accountant';
+    status: 'invited' | 'active';
+    createdAt: string;
+};
+
 export type SignInResponse = {
     /**
      * HS256 session token (15 min), claims: sub + tenant_id
@@ -48,6 +56,7 @@ export type SignInResponse = {
     tokenType: string;
     expiresInSeconds: number;
     tenant: TenantResponse;
+    user: UserResponse;
 };
 
 export type CreateWarehouseDto = {
@@ -174,6 +183,51 @@ export type SetupChecklistStepResponse = {
 
 export type SetupChecklistResponse = {
     steps: Array<SetupChecklistStepResponse>;
+};
+
+export type InviteUserDto = {
+    email: string;
+    role: 'owner' | 'ops_manager' | 'operator' | 'accountant';
+};
+
+export type InviteUserResponse = {
+    user: UserResponse;
+    /**
+     * The one-time invite token — share the accept link out-of-band
+     */
+    inviteToken: string;
+    /**
+     * One-time link expiry (7 days)
+     */
+    inviteExpiresAt: string;
+};
+
+export type UserListResponse = {
+    items: Array<UserResponse>;
+    /**
+     * Opaque keyset cursor
+     */
+    nextCursor: string | null;
+};
+
+export type SetUserRoleDto = {
+    role: 'owner' | 'ops_manager' | 'operator' | 'accountant';
+};
+
+export type AcceptInviteDto = {
+    /**
+     * The one-time invite token from the invite response
+     */
+    token: string;
+    password: string;
+};
+
+export type AcceptInviteResponse = {
+    user: UserResponse;
+};
+
+export type MeResponse = {
+    user: UserResponse;
 };
 
 export type CatalogImportErrorResponse = {
@@ -772,6 +826,202 @@ export type TenancyControllerSetupChecklistResponses = {
 };
 
 export type TenancyControllerSetupChecklistResponse = TenancyControllerSetupChecklistResponses[keyof TenancyControllerSetupChecklistResponses];
+
+export type UsersControllerListUsersData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/users';
+};
+
+export type UsersControllerListUsersErrors = {
+    /**
+     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type UsersControllerListUsersError = UsersControllerListUsersErrors[keyof UsersControllerListUsersErrors];
+
+export type UsersControllerListUsersResponses = {
+    200: UserListResponse;
+};
+
+export type UsersControllerListUsersResponse = UsersControllerListUsersResponses[keyof UsersControllerListUsersResponses];
+
+export type UsersControllerInviteUserData = {
+    body: InviteUserDto;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/users';
+};
+
+export type UsersControllerInviteUserErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks users.invite (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Email already has an account in any tenant (email-exists), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type UsersControllerInviteUserError = UsersControllerInviteUserErrors[keyof UsersControllerInviteUserErrors];
+
+export type UsersControllerInviteUserResponses = {
+    201: InviteUserResponse;
+};
+
+export type UsersControllerInviteUserResponse = UsersControllerInviteUserResponses[keyof UsersControllerInviteUserResponses];
+
+export type UsersControllerSetUserRoleData = {
+    body: SetUserRoleDto;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/users/{userId}';
+};
+
+export type UsersControllerSetUserRoleErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks users.role_change (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * User does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The target is the tenant’s last Owner (last-owner), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type UsersControllerSetUserRoleError = UsersControllerSetUserRoleErrors[keyof UsersControllerSetUserRoleErrors];
+
+export type UsersControllerSetUserRoleResponses = {
+    200: UserResponse;
+};
+
+export type UsersControllerSetUserRoleResponse = UsersControllerSetUserRoleResponses[keyof UsersControllerSetUserRoleResponses];
+
+export type UsersControllerAcceptInviteData = {
+    body: AcceptInviteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * The inviting tenant (embedded in the invite link)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/accept-invite';
+};
+
+export type UsersControllerAcceptInviteErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, invalid body, or an unknown/used/expired token (invite-invalid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type UsersControllerAcceptInviteError = UsersControllerAcceptInviteErrors[keyof UsersControllerAcceptInviteErrors];
+
+export type UsersControllerAcceptInviteResponses = {
+    200: AcceptInviteResponse;
+};
+
+export type UsersControllerAcceptInviteResponse = UsersControllerAcceptInviteResponses[keyof UsersControllerAcceptInviteResponses];
+
+export type UsersControllerMeData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/me';
+};
+
+export type UsersControllerMeErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type UsersControllerMeError = UsersControllerMeErrors[keyof UsersControllerMeErrors];
+
+export type UsersControllerMeResponses = {
+    200: MeResponse;
+};
+
+export type UsersControllerMeResponse = UsersControllerMeResponses[keyof UsersControllerMeResponses];
 
 export type CatalogControllerImportCatalogData = {
     body: {

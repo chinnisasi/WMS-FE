@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { ApiProblem, fetchApiRegisterTenant, fetchApiSignIn } from '@/lib/api/client';
+import { ApiProblem, fetchApiAcceptInvite, fetchApiRegisterTenant, fetchApiSignIn } from '@/lib/api/client';
 import { writeSession } from '@/lib/auth';
 import { ulid } from '@/lib/ulid';
 
@@ -98,7 +98,9 @@ export function RegisterForm() {
 
 /**
  * Sign-in: verifies the password and stores the short-lived session the
- * warehouse endpoints require.
+ * warehouse endpoints require. The response's `user {id, email, role}`
+ * rides along (story 1.5) — it feeds the sidebar/settings surface gating
+ * until the /me bootstrap refresh on the next mount.
  */
 export function LoginForm({ initialEmail = '' }: { initialEmail?: string }) {
   const router = useRouter();
@@ -116,6 +118,7 @@ export function LoginForm({ initialEmail = '' }: { initialEmail?: string }) {
       writeSession({
         token: signIn.accessToken,
         tenant: signIn.tenant,
+        user: signIn.user,
         expiresAt: Date.now() + signIn.expiresInSeconds * 1000,
       });
       router.push('/settings');
@@ -162,6 +165,94 @@ export function LoginForm({ initialEmail = '' }: { initialEmail?: string }) {
   );
 }
 
+/**
+ * Accept-invite (story 1.5): the one-time token arrives as the invite link's
+ * query parameter; the invitee sets their own password. No session is minted
+ * here — success routes to /login with the now-active email prefilled.
+ */
+export function AcceptInviteForm({ initialToken = '' }: { initialToken?: string }) {
+  const router = useRouter();
+  const [token, setToken] = useState(initialToken);
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [pending, setPending] = useState(false);
+  const [rejection, setRejection] = useState<string | null>(null);
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (password !== confirm) {
+      setRejection('The two passwords do not match.');
+      return;
+    }
+    // The inviting tenant id rides the invite link too.
+    const tenantId = new URLSearchParams(window.location.search).get('tenant') ?? '';
+    if (tenantId === '') {
+      setRejection('This invite link is incomplete — ask the owner for a fresh invitation.');
+      return;
+    }
+    setPending(true);
+    setRejection(null);
+    try {
+      const accepted = await fetchApiAcceptInvite(tenantId, { token, password }, ulid());
+      router.push(`/login?email=${encodeURIComponent(accepted.user.email)}`);
+    } catch (error) {
+      setRejection(rejectionReason(error));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <label className="flex flex-col gap-1">
+        <span className={labelClass}>Invite token</span>
+        <input
+          className={`${inputClass} font-mono text-xs`}
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          required
+          maxLength={512}
+          autoComplete="off"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className={labelClass}>Password</span>
+        <input
+          className={inputClass}
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          minLength={8}
+          maxLength={200}
+          autoComplete="new-password"
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className={labelClass}>Confirm password</span>
+        <input
+          className={inputClass}
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          required
+          minLength={8}
+          maxLength={200}
+          autoComplete="new-password"
+        />
+      </label>
+      {rejection !== null && <FeedbackBanner tone="rejected" word="Not accepted" reason={rejection} />}
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
+      >
+        {pending ? 'Accepting…' : 'Accept invite'}
+      </button>
+    </form>
+  );
+}
+
 /** Clients branch on the machine-readable problem `code`, never on prose. */
 function rejectionReason(error: unknown): string {
   if (error instanceof ApiProblem) {
@@ -170,6 +261,10 @@ function rejectionReason(error: unknown): string {
         return 'An account for this email already exists.';
       case 'unauthenticated':
         return 'Unknown email or wrong password.';
+      case 'invite-pending':
+        return 'This invitation has not been accepted yet — use the link from your invitation.';
+      case 'invite-invalid':
+        return 'This invite link is not valid — ask the owner for a fresh invitation.';
       case 'idempotency-key-reuse':
         return 'This submission was already processed; check your tenant list.';
       case 'validation-failed':

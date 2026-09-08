@@ -9,6 +9,7 @@ import {
 import type { CatalogImportErrorResponse, CatalogImportResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
+import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -47,6 +48,13 @@ export function ImportCatalogCard() {
         <div className="text-(--muted-foreground)">Sign in to import your catalog.</div>
       </div>
     );
+  }
+  // Story 1.5 gating: the import is a pure mutation (no read surface to keep
+  // visible), so roles without `catalog.import` see nothing — hide surfaces,
+  // never "blocked" screens. The backend per-command role read stays the
+  // authority.
+  if (!roleHasCapability(readSession()?.user.role, 'catalog.import')) {
+    return null;
   }
   return <ImportCatalogCardSessioned />;
 }

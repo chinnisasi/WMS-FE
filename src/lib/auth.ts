@@ -7,9 +7,21 @@
  * The token is the backend's 15-minute HS256 session (no refresh in Story
  * 1.2) — an expired session reads as signed-out, honestly.
  */
-import type { TenantResponse } from '@/lib/api/generated';
+import type { TenantResponse, UserResponse } from '@/lib/api/generated';
 
 export const SESSION_STORAGE_KEY = 'wms-session';
+
+/**
+ * The signed-in user, as of the last sign-in or /me bootstrap refresh
+ * (story 1.5). The role here only *hides* surfaces the backend would deny —
+ * the per-command DB read on wms-be stays the authority.
+ */
+export interface SessionUser {
+  id: string;
+  email: string;
+  role: UserResponse['role'];
+  status: UserResponse['status'];
+}
 
 /**
  * Cookie mirror of session *presence* for the server-side proxy gate
@@ -26,6 +38,7 @@ export const SESSION_CHANGED_EVENT = 'wms-session-changed';
 export interface StoredSession {
   token: string;
   tenant: TenantResponse;
+  user: SessionUser;
   /** Unix ms — token expiry, from the sign-in response TTL. */
   expiresAt: number;
 }
@@ -47,7 +60,12 @@ export function readSession(): StoredSession | null {
       parsed === null ||
       typeof (parsed as StoredSession).token !== 'string' ||
       typeof (parsed as StoredSession).expiresAt !== 'number' ||
-      typeof (parsed as StoredSession).tenant?.id !== 'string'
+      typeof (parsed as StoredSession).tenant?.id !== 'string' ||
+      // Fail closed on a session without a user (pre-1.5 rows): surface
+      // gating would have no role to read, so the row reads as signed-out
+      // and the next sign-in rewrites it in the new shape.
+      typeof (parsed as StoredSession).user?.id !== 'string' ||
+      typeof (parsed as StoredSession).user.role !== 'string'
     ) {
       return null;
     }

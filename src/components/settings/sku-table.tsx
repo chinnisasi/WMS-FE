@@ -9,6 +9,7 @@ import {
 import type { SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
+import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkus } from '@/lib/use-catalog';
 
@@ -55,6 +56,10 @@ function SkuTableCardSessioned() {
   const skus = useSkus();
   const [editing, setEditing] = useState<SkuResponse | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  // Story 1.5 gating: the table is a read (open to every member); the Edit
+  // actions column renders only for roles holding `sku.edit`. The backend
+  // per-command role read remains the authority.
+  const canEditSku = roleHasCapability(readSession()?.user.role, 'sku.edit');
 
   const columns: readonly DataTableColumn<SkuResponse>[] = [
     { key: 'code', header: 'SKU code', render: (sku) => <span className="font-mono text-xs">{sku.code}</span> },
@@ -78,22 +83,26 @@ function SkuTableCardSessioned() {
           .join(' + ') || '—',
     },
     { key: 'barcode', header: 'Barcode', render: (sku) => <span className="font-mono text-xs">{sku.barcode}</span> },
-    {
-      key: 'actions',
-      header: '',
-      render: (sku) => (
-        <button
-          type="button"
-          onClick={() => {
-            setEditing(sku);
-            setOutcome(null);
-          }}
-          className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
-        >
-          Edit
-        </button>
-      ),
-    },
+    ...(canEditSku
+      ? [
+          {
+            key: 'actions',
+            header: '',
+            render: (sku: SkuResponse) => (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(sku);
+                  setOutcome(null);
+                }}
+                className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+              >
+                Edit
+              </button>
+            ),
+          } satisfies DataTableColumn<SkuResponse>,
+        ]
+      : []),
   ];
 
   return (
