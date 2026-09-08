@@ -149,7 +149,7 @@ describe('bearer interceptor', () => {
         status: 'invited',
       },
       inviteToken: 'raw-token',
-      expiresAt: '2026-09-15T00:00:00.000Z',
+      inviteExpiresAt: '2026-09-15T00:00:00.000Z',
     });
     const invited = await fetchApiInviteUser(
       SESSION.tenant.id,
@@ -157,6 +157,7 @@ describe('bearer interceptor', () => {
       '01ARZ3NDEKTSV4RRFFQ69G5FAV',
     );
     expect(invited.inviteToken).toBe('raw-token');
+    expect(invited.inviteExpiresAt).toBe('2026-09-15T00:00:00.000Z');
     expect(lastRequest!.headers.get('Idempotency-Key')).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV');
     expect(lastRequest!.headers.get('Authorization')).toBe(`Bearer ${SESSION.token}`);
     const body = (await lastRequest!.json()) as Record<string, unknown>;

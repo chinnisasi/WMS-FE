@@ -57,9 +57,16 @@ function SkuTableCardSessioned() {
   const [editing, setEditing] = useState<SkuResponse | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
   // Story 1.5 gating: the table is a read (open to every member); the Edit
-  // actions column renders only for roles holding `sku.edit`. The backend
-  // per-command role read remains the authority.
-  const canEditSku = roleHasCapability(readSession()?.user.role, 'sku.edit');
+  // actions column renders only for roles holding `sku.edit`. The role is
+  // subscribed (not a bare readSession() at render) so a /me bootstrap role
+  // rewrite re-renders the column. The backend per-command role read
+  // remains the authority.
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  const canEditSku = roleHasCapability(role, 'sku.edit');
 
   const columns: readonly DataTableColumn<SkuResponse>[] = [
     { key: 'code', header: 'SKU code', render: (sku) => <span className="font-mono text-xs">{sku.code}</span> },

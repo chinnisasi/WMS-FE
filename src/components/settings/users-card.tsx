@@ -111,6 +111,10 @@ function UsersCardSessioned() {
           onInvited={(link) => {
             setInviteLink(link);
             setOutcome(null);
+            // The invited user is a new row — refresh the table now instead
+            // of waiting for an unrelated refetch.
+            users?.reload();
+            notifyUsersChanged();
           }}
         />
       )}

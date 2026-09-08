@@ -52,10 +52,11 @@ export function WarehouseCreateForm() {
     );
   }
   // Story 1.5 gating: roles without `warehouse.create` don't see the form —
-  // the warehouse list below stays (reads are open). The backend per-command
+  // the Settings page renders the warehouse list itself, so this returns
+  // null (hide surfaces, never "blocked" screens). The backend per-command
   // role read remains the authority; this only hides surfaces it would deny.
   if (!roleHasCapability(readSession()?.user.role, 'warehouse.create')) {
-    return <WarehouseList />;
+    return null;
   }
 
   async function onSubmit(event: React.FormEvent) {

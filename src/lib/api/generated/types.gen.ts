@@ -870,6 +870,12 @@ export type UsersControllerListUsersResponse = UsersControllerListUsersResponses
 
 export type UsersControllerInviteUserData = {
     body: InviteUserDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
     path: {
         /**
          * Owning tenant (must match the session)
@@ -913,6 +919,12 @@ export type UsersControllerInviteUserResponse = UsersControllerInviteUserRespons
 
 export type UsersControllerSetUserRoleData = {
     body: SetUserRoleDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
     path: {
         /**
          * Owning tenant (must match the session)
