@@ -5,8 +5,10 @@ import Link from 'next/link';
 
 import { NAV_ITEMS } from '@/lib/navigation';
 
+import { SignOutButton } from '@/components/auth/sign-out';
 import { CommandPalette } from './command-palette';
 import { Sidebar, ThemeToggle } from './sidebar';
+import { WarehouseSwitcher } from './warehouse-switcher';
 
 /**
  * Web shell: fixed left sidebar + content. Responsive contract:
@@ -66,7 +68,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </summary>
             <nav className="absolute left-0 top-12 z-40 w-56 border border-(--border) bg-(--background) py-2 shadow-lg">
               <MobileNavLinks onNavigate={() => menuRef.current && (menuRef.current.open = false)} />
+              {/* Mobile gets the switcher too (review loop 2) — the sidebar's
+                  ≥lg mount is invisible below 768px, so this is the only
+                  warehouse display/picker on small viewports. */}
               <div className="border-t border-(--border) px-2 pt-2">
+                <WarehouseSwitcher
+                  className="border-b-0 px-0 py-1"
+                  onPicked={() => menuRef.current && (menuRef.current.open = false)}
+                />
+              </div>
+              <div className="border-t border-(--border) px-2 pt-2">
+                <SignOutButton className="mb-2 block px-2 py-1 text-left text-sm hover:bg-(--muted)" />
                 <ThemeToggle />
               </div>
             </nav>

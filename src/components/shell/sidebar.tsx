@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { SignOutButton } from '@/components/auth/sign-out';
+import { WarehouseSwitcher } from '@/components/shell/warehouse-switcher';
 import { NAV_ITEMS } from '@/lib/navigation';
 import { writeStoredTheme } from '@/lib/theme';
 
@@ -20,6 +22,7 @@ export function Sidebar() {
         <span className="hidden text-sm font-semibold lg:inline">WMS</span>
         <span className="text-sm font-semibold lg:hidden">W</span>
       </div>
+      <WarehouseSwitcher className="hidden lg:block" />
       <nav aria-label="Primary" className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         {NAV_ITEMS.map((item) => {
           // Nested child routes (e.g. /inventory/xyz) keep the surface
@@ -49,7 +52,10 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <ThemeToggle />
+      <div className="mx-2 mb-3 flex items-center gap-2 lg:mx-3">
+        <SignOutButton className="rounded-md border border-(--border) px-2 py-1 text-xs text-(--muted-foreground) hover:bg-(--muted)" />
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }
