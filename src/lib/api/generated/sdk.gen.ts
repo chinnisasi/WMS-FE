@@ -135,7 +135,7 @@ export const tenancyControllerSetBinBlocked = <ThrowOnError extends boolean = fa
 });
 
 /**
- * Computed onboarding checklist (warehouse, bins, catalog, users — catalog/users pending)
+ * Computed onboarding checklist (warehouse, bins, catalog, users — all four wired)
  */
 export const tenancyControllerSetupChecklist = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerSetupChecklistData, ThrowOnError>): RequestResult<TenancyControllerSetupChecklistResponses, TenancyControllerSetupChecklistErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerSetupChecklistResponses, TenancyControllerSetupChecklistErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
