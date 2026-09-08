@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 
-import { ApiProblem, fetchApiCreateWarehouse, fetchApiListWarehouses } from '@/lib/api/client';
+import { ApiProblem, fetchApiCreateWarehouse } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { ulid } from '@/lib/ulid';
-import { notifyWarehousesChanged, WAREHOUSES_CHANGED_EVENT } from '@/lib/warehouses';
+import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
+import { notifyWarehousesChanged } from '@/lib/warehouses';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 
@@ -141,39 +142,11 @@ function rejectionReason(error: unknown, attemptedCode: string): string {
 
 /** Existing warehouses, read-only for this story; refreshes on changes. */
 export function WarehouseList() {
-  const sessioned = useSyncExternalStore(
-    subscribeSession,
-    () => readSession() !== null,
-    () => false,
-  );
-  const [items, setItems] = useState<readonly { id: string; code: string; name: string }[] | null>(null);
-  // Bumped by the warehouses-changed event so the fetch effect re-runs.
-  const [revision, setRevision] = useState(0);
+  // Shared with the switcher: session-identity-scoped, full cursor chain,
+  // stale cross-tenant pages filtered by the hook (review loop 2 parity).
+  const { items } = useTenantWarehouses() ?? { items: [] };
 
-  useEffect(() => {
-    const onChange = () => setRevision((r) => r + 1);
-    window.addEventListener(WAREHOUSES_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(WAREHOUSES_CHANGED_EVENT, onChange);
-  }, []);
-
-  useEffect(() => {
-    if (!sessioned) return;
-    let cancelled = false;
-    const session = readSession();
-    if (session === null) return;
-    fetchApiListWarehouses(session.tenant.id)
-      .then((page) => {
-        if (!cancelled) setItems(page.items);
-      })
-      .catch(() => {
-        if (!cancelled) setItems(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessioned, revision]);
-
-  if (!sessioned || items === null || items.length === 0) return null;
+  if (items.length === 0) return null;
   return (
     <div className="flex flex-col gap-2 text-sm">
       {items.map((warehouse) => (

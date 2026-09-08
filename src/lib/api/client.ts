@@ -6,7 +6,7 @@ import {
   tenancyControllerRegister,
   tenancyControllerSignIn,
 } from './generated/sdk.gen';
-import { readSession } from '../auth';
+import { ensureSessionHint, readSession, clearSession } from '../auth';
 import type {
   CreateWarehouseDto,
   HealthResponse,
@@ -39,8 +39,24 @@ client.interceptors.request.use((request) => {
   const session = readSession();
   if (session !== null) {
     request.headers.set('Authorization', `Bearer ${session.token}`);
+    // Bootstrap: the proxy gate may have rendered this page on an expired
+    // hint cookie even though localStorage holds a fresh token — re-assert
+    // the mirror so the next hard navigation doesn't bounce to /login.
+    ensureSessionHint();
   }
   return request;
+});
+
+/**
+ * The backend's 401 is authoritative: the token was rejected (expired,
+ * revoked, tampered). Drop the stale session immediately so the UI flips to
+ * signed-out — the proxy gate then also sees the cleared hint cookie.
+ */
+client.interceptors.response.use((response) => {
+  if (response.status === 401) {
+    clearSession();
+  }
+  return response;
 });
 
 export { client };

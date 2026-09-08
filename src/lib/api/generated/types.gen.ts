@@ -149,6 +149,9 @@ export type TenancyControllerSignInResponse = TenancyControllerSignInResponses[k
 export type TenancyControllerListWarehousesData = {
     body?: never;
     path: {
+        /**
+         * Owning tenant (must match the session)
+         */
         tenantId: string;
     };
     query?: {
@@ -193,6 +196,9 @@ export type TenancyControllerCreateWarehouseData = {
         'Idempotency-Key': string;
     };
     path: {
+        /**
+         * Owning tenant (must match the session)
+         */
         tenantId: string;
     };
     query?: never;
