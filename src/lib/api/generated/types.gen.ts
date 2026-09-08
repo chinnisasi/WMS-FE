@@ -71,6 +71,111 @@ export type WarehouseListResponse = {
     nextCursor: string | null;
 };
 
+export type CreateZoneDto = {
+    code: string;
+    name: string;
+};
+
+export type ZoneResponse = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    code: string;
+    name: string;
+    createdAt: string;
+};
+
+export type ZoneListResponse = {
+    items: Array<ZoneResponse>;
+    /**
+     * Opaque keyset cursor
+     */
+    nextCursor: string | null;
+};
+
+export type CreateBinDto = {
+    code: string;
+    /**
+     * Positive integer, base-UoM units
+     */
+    capacity: number;
+    type: 'shelf' | 'pallet' | 'floor' | 'staging';
+};
+
+export type BinResponse = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    zoneId: string;
+    code: string;
+    /**
+     * Base-UoM units
+     */
+    capacity: number;
+    type: 'shelf' | 'pallet' | 'floor' | 'staging';
+    blocked: boolean;
+    createdAt: string;
+};
+
+export type GenerateBinsDto = {
+    /**
+     * First aisle letter (A–Z, ascending range)
+     */
+    aisleFrom: string;
+    /**
+     * Last aisle letter (A–Z, inclusive)
+     */
+    aisleTo: string;
+    baysPerAisle: number;
+    levelsPerBay: number;
+    /**
+     * Capacity per bin, base-UoM units
+     */
+    capacity: number;
+    type: 'shelf' | 'pallet' | 'floor' | 'staging';
+};
+
+export type BinGridResponse = {
+    warehouseId: string;
+    zoneId: string;
+    /**
+     * Bins created by this run (≤ 500)
+     */
+    generatedCount: number;
+    firstCode: string;
+    lastCode: string;
+};
+
+export type BinListResponse = {
+    items: Array<BinResponse>;
+    /**
+     * Opaque keyset cursor
+     */
+    nextCursor: string | null;
+};
+
+export type PatchBinDto = {
+    /**
+     * true blocks the bin (broken); false unblocks
+     */
+    blocked: boolean;
+};
+
+export type SetupChecklistStepResponse = {
+    key: 'warehouse' | 'bins' | 'catalog' | 'users';
+    label: string;
+    done: boolean;
+    detail: string;
+    /**
+     * Deep link for the Continue affordance
+     */
+    href: string;
+};
+
+export type SetupChecklistResponse = {
+    steps: Array<SetupChecklistStepResponse>;
+};
+
 export type HealthResponse = {
     status: string;
     service: string;
@@ -235,6 +340,345 @@ export type TenancyControllerCreateWarehouseResponses = {
 };
 
 export type TenancyControllerCreateWarehouseResponse = TenancyControllerCreateWarehouseResponses[keyof TenancyControllerCreateWarehouseResponses];
+
+export type TenancyControllerListZonesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones';
+};
+
+export type TenancyControllerListZonesErrors = {
+    /**
+     * Malformed cursor
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type TenancyControllerListZonesError = TenancyControllerListZonesErrors[keyof TenancyControllerListZonesErrors];
+
+export type TenancyControllerListZonesResponses = {
+    200: ZoneListResponse;
+};
+
+export type TenancyControllerListZonesResponse = TenancyControllerListZonesResponses[keyof TenancyControllerListZonesResponses];
+
+export type TenancyControllerCreateZoneData = {
+    body: CreateZoneDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones';
+};
+
+export type TenancyControllerCreateZoneErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Zone code already exists in this warehouse (duplicate-zone-code names the code)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerCreateZoneError = TenancyControllerCreateZoneErrors[keyof TenancyControllerCreateZoneErrors];
+
+export type TenancyControllerCreateZoneResponses = {
+    201: ZoneResponse;
+};
+
+export type TenancyControllerCreateZoneResponse = TenancyControllerCreateZoneResponses[keyof TenancyControllerCreateZoneResponses];
+
+export type TenancyControllerListBinsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        zoneId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones/{zoneId}/bins';
+};
+
+export type TenancyControllerListBinsErrors = {
+    /**
+     * Malformed cursor
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse or zone does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type TenancyControllerListBinsError = TenancyControllerListBinsErrors[keyof TenancyControllerListBinsErrors];
+
+export type TenancyControllerListBinsResponses = {
+    200: BinListResponse;
+};
+
+export type TenancyControllerListBinsResponse = TenancyControllerListBinsResponses[keyof TenancyControllerListBinsResponses];
+
+export type TenancyControllerCreateBinData = {
+    body: CreateBinDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        zoneId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones/{zoneId}/bins';
+};
+
+export type TenancyControllerCreateBinErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse or zone does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Bin code already exists in this warehouse (duplicate-bin-code names the code)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerCreateBinError = TenancyControllerCreateBinErrors[keyof TenancyControllerCreateBinErrors];
+
+export type TenancyControllerCreateBinResponses = {
+    201: BinResponse;
+};
+
+export type TenancyControllerCreateBinResponse = TenancyControllerCreateBinResponses[keyof TenancyControllerCreateBinResponses];
+
+export type TenancyControllerGenerateBinGridData = {
+    body: GenerateBinsDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        zoneId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones/{zoneId}/bins/grid';
+};
+
+export type TenancyControllerGenerateBinGridErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse or zone does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A generated code collides (duplicate-bin-code names the first conflicting code; nothing committed)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Grid exceeds 500 bins (grid-too-large), or idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerGenerateBinGridError = TenancyControllerGenerateBinGridErrors[keyof TenancyControllerGenerateBinGridErrors];
+
+export type TenancyControllerGenerateBinGridResponses = {
+    201: BinGridResponse;
+};
+
+export type TenancyControllerGenerateBinGridResponse = TenancyControllerGenerateBinGridResponses[keyof TenancyControllerGenerateBinGridResponses];
+
+export type TenancyControllerSetBinBlockedData = {
+    body: PatchBinDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        binId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}';
+};
+
+export type TenancyControllerSetBinBlockedErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Bin does not exist in this warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerSetBinBlockedError = TenancyControllerSetBinBlockedErrors[keyof TenancyControllerSetBinBlockedErrors];
+
+export type TenancyControllerSetBinBlockedResponses = {
+    200: BinResponse;
+};
+
+export type TenancyControllerSetBinBlockedResponse = TenancyControllerSetBinBlockedResponses[keyof TenancyControllerSetBinBlockedResponses];
+
+export type TenancyControllerSetupChecklistData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/setup-checklist';
+};
+
+export type TenancyControllerSetupChecklistErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type TenancyControllerSetupChecklistError = TenancyControllerSetupChecklistErrors[keyof TenancyControllerSetupChecklistErrors];
+
+export type TenancyControllerSetupChecklistResponses = {
+    200: SetupChecklistResponse;
+};
+
+export type TenancyControllerSetupChecklistResponse = TenancyControllerSetupChecklistResponses[keyof TenancyControllerSetupChecklistResponses];
 
 export type HealthControllerHealthData = {
     body?: never;
