@@ -23,13 +23,15 @@ export const CAPABILITIES = [
   'users.role_change',
   // Story 3.2 — floor-device lifecycle (mint enrollment codes, revoke).
   'device.manage',
+  // Story 3.3 — over-receipt approve/reject (the Conflicts & Reviews queue).
+  'review.decide',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
   owner: CAPABILITIES,
-  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage'],
+  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage', 'review.decide'],
   operator: [],
   accountant: [],
 };

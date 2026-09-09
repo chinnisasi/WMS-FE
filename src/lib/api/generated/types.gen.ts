@@ -342,7 +342,7 @@ export type MintEnrollmentCodeDto = {
 
 export type MintEnrollmentCodeResponse = {
     /**
-     * The one-time enrollment code (raw — shown once)
+     * The one-time enrollment code (raw — shown once; 43-char base64url)
      */
     code: string;
     /**
@@ -353,7 +353,7 @@ export type MintEnrollmentCodeResponse = {
 
 export type EnrollDeviceDto = {
     /**
-     * The one-time enrollment code minted in web Settings
+     * The one-time enrollment code minted in web Settings (43-char base64url — sha256-hashed server-side)
      */
     code: string;
     /**
@@ -552,17 +552,29 @@ export type LedgerReferenceDocDto = {
      */
     kind: string;
     /**
-     * Machine reason for the correction (e.g. stock-count)
+     * Machine reason for the correction (e.g. stock-count) — manual-adjustment arm only
      */
-    reasonCode: string;
+    reasonCode?: string;
     /**
-     * The Ops Manager's note, carried verbatim
+     * The Ops Manager's note, carried verbatim — manual-adjustment arm only
      */
-    note: string;
+    note?: string;
     /**
      * The recorded reason when a draw overrode the FEFO default batch (absent on every other adjustment)
      */
     overrideReason?: string;
+    /**
+     * The GRN the movement landed under (grn-receipt arm only)
+     */
+    grnId?: string;
+    /**
+     * The PO received against (grn-receipt arm only — absent on a blind receipt)
+     */
+    poId?: string;
+    /**
+     * The exact PO line (grn-receipt arm only — absent on the blind arm)
+     */
+    poLineId?: string;
 };
 
 export type LedgerEventDto = {
@@ -879,7 +891,7 @@ export type PurchaseOrderLineDto = {
      */
     receivedQty: number;
     /**
-     * Derived: orderedQty − receivedQty
+     * Derived: orderedQty − receivedQty (may go negative after an approved over-receipt — Story 3.3 relaxes the 3.1 `minimum: 0` bound)
      */
     openQty: number;
     /**
@@ -965,6 +977,231 @@ export type ClosePurchaseOrderDto = {
 export type PurchaseOrderCloseResponse = {
     purchaseOrder: PurchaseOrderDto;
     successor: PurchaseOrderDto | null;
+};
+
+export type GrnLineInputDto = {
+    /**
+     * The PO line received against — null on a blind receipt's lines
+     */
+    poLineId?: string | null;
+    skuId: string;
+    /**
+     * Catalog batch code (required for batch-tracked SKUs, forbidden otherwise)
+     */
+    batchCode?: string | null;
+    /**
+     * Optional batch mfg date (ISO-8601 UTC, Z-suffixed)
+     */
+    mfgDate?: string | null;
+    /**
+     * Physically received quantity in base UoM (positive integer)
+     */
+    qty: number;
+};
+
+export type SubmitGoodsReceiptDto = {
+    /**
+     * Warehouse the receipt lands in
+     */
+    warehouseId: string;
+    /**
+     * The purchase order received against — null on a blind receipt
+     */
+    poId?: string | null;
+    /**
+     * The blind-receive reason code (required when poId is null, forbidden otherwise)
+     */
+    blindReasonCode?: 'unannounced-delivery' | 'po-not-found' | 'other';
+    /**
+     * Device time of the receipt (ISO-8601 UTC, Z-suffixed)
+     */
+    occurredAt: string;
+    /**
+     * The physically received lines
+     */
+    lines: Array<GrnLineInputDto>;
+};
+
+export type GrnLineDto = {
+    id: string;
+    grnId: string;
+    poLineId: string | null;
+    skuId: string;
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * Physical truth: everything that arrived
+     */
+    qty: number;
+    /**
+     * The within-open portion applied immediately
+     */
+    appliedQty: number;
+    /**
+     * The excess pended for approval
+     */
+    excessQty: number;
+};
+
+export type RejectedGrnLineDto = {
+    poLineId: string;
+    skuId: string;
+    qty: number;
+    /**
+     * Machine reason (po-line-not-found | po-line-not-open)
+     */
+    code: string;
+    /**
+     * Human-readable reason naming the line state
+     */
+    reason: string;
+};
+
+export type GoodsReceiptDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * Server-assigned code (GRN-<n>, unique per tenant)
+     */
+    code: string;
+    poId: string | null;
+    blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other';
+    /**
+     * recorded (the v1 terminal state)
+     */
+    status: string;
+    deviceId: string;
+    recordedBy: string;
+    /**
+     * Device time (AD-1), ISO-8601 UTC
+     */
+    occurredAt: string;
+    /**
+     * Server ingest time (AD-1), ISO-8601 UTC
+     */
+    recordedAt: string;
+    lines: Array<GrnLineDto>;
+    rejectedLines?: Array<RejectedGrnLineDto>;
+};
+
+export type GoodsReceiptResponse = {
+    goodsReceipt: GoodsReceiptDto;
+};
+
+export type CatalogSnapshotSkuDto = {
+    id: string;
+    code: string;
+    name: string;
+    barcode: string;
+    uom: string;
+    batchTracked: boolean;
+    serialTracked: boolean;
+};
+
+export type CatalogSnapshotPoDto = {
+    id: string;
+    code: string;
+    warehouseId: string;
+    vendorId: string;
+    /**
+     * Per-line ordered / received / open quantities
+     */
+    lines: Array<PurchaseOrderLineDto>;
+};
+
+export type CatalogSnapshotResponse = {
+    /**
+     * ISO-8601 UTC capture time
+     */
+    generatedAt: string;
+    warehouseId: string;
+    skus: Array<CatalogSnapshotSkuDto>;
+    /**
+     * The warehouse's open POs with their lines
+     */
+    openPurchaseOrders: Array<CatalogSnapshotPoDto>;
+};
+
+export type GoodsReceiptEntryDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * Server-assigned code (GRN-<n>)
+     */
+    code: string;
+    poId: string | null;
+    /**
+     * Set only on a blind receipt
+     */
+    blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other';
+    /**
+     * recorded (the v1 terminal state)
+     */
+    status: string;
+    recordedBy: string;
+    /**
+     * Device time (ISO-8601 UTC)
+     */
+    occurredAt: string;
+    /**
+     * Server ingest time (ISO-8601 UTC)
+     */
+    recordedAt: string;
+    /**
+     * Received (sku, batch) lines
+     */
+    lineCount: number;
+    /**
+     * Physical units across all lines
+     */
+    totalUnits: number;
+    /**
+     * Units applied immediately (the excess pends)
+     */
+    appliedUnits: number;
+};
+
+export type GoodsReceiptListResponse = {
+    items: Array<GoodsReceiptEntryDto>;
+    nextCursor?: string | null;
+};
+
+export type OverReceiptDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    grnId: string;
+    /**
+     * The GRN code (server-assigned)
+     */
+    grnCode: string;
+    grnLineId: string;
+    poId: string | null;
+    poLineId: string | null;
+    skuId: string;
+    /**
+     * The excess held for approval (positive integer)
+     */
+    excessQty: number;
+    status: 'pending' | 'approved' | 'rejected';
+    requestedBy: string;
+    /**
+     * ISO-8601 UTC
+     */
+    requestedAt: string;
+    decidedBy: string | null;
+    decidedAt: string | null;
+};
+
+export type OverReceiptListResponse = {
+    items: Array<OverReceiptDto>;
+    nextCursor?: string | null;
+};
+
+export type OverReceiptDecisionResponse = {
+    overReceipt: OverReceiptDto;
 };
 
 export type TenancyControllerRegisterData = {
@@ -2787,3 +3024,308 @@ export type InboundControllerClosePurchaseOrderResponses = {
 };
 
 export type InboundControllerClosePurchaseOrderResponse = InboundControllerClosePurchaseOrderResponses[keyof InboundControllerClosePurchaseOrderResponses];
+
+export type ReceivingControllerListGoodsReceiptsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Narrow to one warehouse
+         */
+        warehouseId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/receiving/goods-receipts';
+};
+
+export type ReceivingControllerListGoodsReceiptsErrors = {
+    /**
+     * Malformed cursor (invalid-cursor), malformed warehouseId, or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouseId filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReceivingControllerListGoodsReceiptsError = ReceivingControllerListGoodsReceiptsErrors[keyof ReceivingControllerListGoodsReceiptsErrors];
+
+export type ReceivingControllerListGoodsReceiptsResponses = {
+    /**
+     * The GRN page (headers with line/unit sums — the Inbound surface's list read)
+     */
+    200: GoodsReceiptListResponse;
+};
+
+export type ReceivingControllerListGoodsReceiptsResponse = ReceivingControllerListGoodsReceiptsResponses[keyof ReceivingControllerListGoodsReceiptsResponses];
+
+export type ReceivingControllerSubmitGoodsReceiptData = {
+    body: SubmitGoodsReceiptDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts';
+};
+
+export type ReceivingControllerSubmitGoodsReceiptErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked), or the operator was demoted to accountant (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse, purchase order, or a line's SKU does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The PO is not open (po-not-open, naming the status), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerSubmitGoodsReceiptError = ReceivingControllerSubmitGoodsReceiptErrors[keyof ReceivingControllerSubmitGoodsReceiptErrors];
+
+export type ReceivingControllerSubmitGoodsReceiptResponses = {
+    /**
+     * GRN recorded: server-assigned code, per-line physical/applied/excess quantities, ledger events for the applied portion (the idempotency snapshot)
+     */
+    201: GoodsReceiptResponse;
+};
+
+export type ReceivingControllerSubmitGoodsReceiptResponse = ReceivingControllerSubmitGoodsReceiptResponses[keyof ReceivingControllerSubmitGoodsReceiptResponses];
+
+export type ReceivingControllerGetCatalogSnapshotData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query: {
+        /**
+         * Warehouse the snapshot is scoped to
+         */
+        warehouseId: string;
+    };
+    url: '/tenants/{tenantId}/devices/catalog-snapshot';
+};
+
+export type ReceivingControllerGetCatalogSnapshotErrors = {
+    /**
+     * Malformed warehouseId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReceivingControllerGetCatalogSnapshotError = ReceivingControllerGetCatalogSnapshotErrors[keyof ReceivingControllerGetCatalogSnapshotErrors];
+
+export type ReceivingControllerGetCatalogSnapshotResponses = {
+    /**
+     * The warehouse's SKU scan identity + open purchase orders with per-line quantities
+     */
+    200: CatalogSnapshotResponse;
+};
+
+export type ReceivingControllerGetCatalogSnapshotResponse = ReceivingControllerGetCatalogSnapshotResponses[keyof ReceivingControllerGetCatalogSnapshotResponses];
+
+export type ReceivingControllerListOverReceiptsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        status?: 'pending' | 'approved' | 'rejected';
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/receiving/over-receipts';
+};
+
+export type ReceivingControllerListOverReceiptsErrors = {
+    /**
+     * Malformed status, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ReceivingControllerListOverReceiptsError = ReceivingControllerListOverReceiptsErrors[keyof ReceivingControllerListOverReceiptsErrors];
+
+export type ReceivingControllerListOverReceiptsResponses = {
+    200: OverReceiptListResponse;
+};
+
+export type ReceivingControllerListOverReceiptsResponse = ReceivingControllerListOverReceiptsResponses[keyof ReceivingControllerListOverReceiptsResponses];
+
+export type ReceivingControllerApproveOverReceiptData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        overReceiptId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/over-receipts/{overReceiptId}/approve';
+};
+
+export type ReceivingControllerApproveOverReceiptErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed overReceiptId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks review.decide (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No over-receipt with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Already approved/rejected (over-receipt-decided), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerApproveOverReceiptError = ReceivingControllerApproveOverReceiptErrors[keyof ReceivingControllerApproveOverReceiptErrors];
+
+export type ReceivingControllerApproveOverReceiptResponses = {
+    200: OverReceiptDecisionResponse;
+};
+
+export type ReceivingControllerApproveOverReceiptResponse = ReceivingControllerApproveOverReceiptResponses[keyof ReceivingControllerApproveOverReceiptResponses];
+
+export type ReceivingControllerRejectOverReceiptData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        overReceiptId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/over-receipts/{overReceiptId}/reject';
+};
+
+export type ReceivingControllerRejectOverReceiptErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed overReceiptId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks review.decide (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No over-receipt with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Already approved/rejected (over-receipt-decided), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerRejectOverReceiptError = ReceivingControllerRejectOverReceiptErrors[keyof ReceivingControllerRejectOverReceiptErrors];
+
+export type ReceivingControllerRejectOverReceiptResponses = {
+    200: OverReceiptDecisionResponse;
+};
+
+export type ReceivingControllerRejectOverReceiptResponse = ReceivingControllerRejectOverReceiptResponses[keyof ReceivingControllerRejectOverReceiptResponses];

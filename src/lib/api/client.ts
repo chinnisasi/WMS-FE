@@ -7,6 +7,13 @@ import {
   devicesControllerMintEnrollmentCode,
   devicesControllerRevokeDevice,
   healthControllerHealth,
+  inboundControllerGetPurchaseOrder,
+  inboundControllerListPurchaseOrders,
+  inboundControllerListVendors,
+  receivingControllerApproveOverReceipt,
+  receivingControllerListGoodsReceipts,
+  receivingControllerListOverReceipts,
+  receivingControllerRejectOverReceipt,
   tenancyControllerCreateBin,
   tenancyControllerCreateWarehouse,
   tenancyControllerCreateZone,
@@ -38,13 +45,18 @@ import type {
   DeviceListResponse,
   DeviceResponse,
   GenerateBinsDto,
+  GoodsReceiptListResponse,
   HealthResponse,
   InviteUserDto,
   InviteUserResponse,
   MeResponse,
   MintEnrollmentCodeResponse,
+  OverReceiptDecisionResponse,
+  OverReceiptListResponse,
   PatchBinDto,
   PatchSkuDto,
+  PurchaseOrderListResponse,
+  PurchaseOrderResponse,
   RegisterTenantDto,
   SetUserRoleDto,
   SetupChecklistResponse,
@@ -55,6 +67,7 @@ import type {
   TenantRegistrationResponse,
   UserListResponse,
   UserResponse,
+  VendorListResponse,
   WarehouseListResponse,
   WarehouseResponse,
   ZoneListResponse,
@@ -496,6 +509,130 @@ export async function fetchApiRevokeDevice(
 ): Promise<DeviceResponse> {
   const { data, error } = await devicesControllerRevokeDevice({
     path: { tenantId, deviceId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+// ── Inbound + receiving (stories 3.1 / 3.3) ─────────────────────────────────
+
+export async function fetchApiListVendors(
+  tenantId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<VendorListResponse> {
+  const { data, error } = await inboundControllerListVendors({
+    path: { tenantId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiListPurchaseOrders(
+  tenantId: string,
+  warehouseId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<PurchaseOrderListResponse> {
+  const { data, error } = await inboundControllerListPurchaseOrders({
+    path: { tenantId, warehouseId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiGetPurchaseOrder(
+  tenantId: string,
+  poId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PurchaseOrderResponse> {
+  const { data, error } = await inboundControllerGetPurchaseOrder({
+    path: { tenantId, poId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** The GRN list (story 3.3) — one warehouse's (or the tenant's) receipts. */
+export async function fetchApiListGoodsReceipts(
+  tenantId: string,
+  options?: { warehouseId?: string; cursor?: string; signal?: AbortSignal },
+): Promise<GoodsReceiptListResponse> {
+  const { data, error } = await receivingControllerListGoodsReceipts({
+    path: { tenantId },
+    query:
+      options?.warehouseId === undefined && options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** The over-receipt queue (story 3.3) — the Conflicts & Reviews read. */
+export async function fetchApiListOverReceipts(
+  tenantId: string,
+  options?: { status?: 'pending' | 'approved' | 'rejected'; cursor?: string; signal?: AbortSignal },
+): Promise<OverReceiptListResponse> {
+  const { data, error } = await receivingControllerListOverReceipts({
+    path: { tenantId },
+    query:
+      options?.status === undefined && options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.status === undefined ? {} : { status: options.status }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Approves an over-receipt (capability `review.decide`) — the excess applies. */
+export async function fetchApiApproveOverReceipt(
+  tenantId: string,
+  overReceiptId: string,
+  idempotencyKey: string,
+): Promise<OverReceiptDecisionResponse> {
+  const { data, error } = await receivingControllerApproveOverReceipt({
+    path: { tenantId, overReceiptId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Rejects an over-receipt (capability `review.decide`) — the excess stays unapplied. */
+export async function fetchApiRejectOverReceipt(
+  tenantId: string,
+  overReceiptId: string,
+  idempotencyKey: string,
+): Promise<OverReceiptDecisionResponse> {
+  const { data, error } = await receivingControllerRejectOverReceipt({
+    path: { tenantId, overReceiptId },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {

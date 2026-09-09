@@ -1,12 +1,7 @@
-import { SurfacePlaceholder } from '@/components/shell/surface-placeholder';
+import { OverReceiptQueue } from '@/components/conflicts/over-receipt-queue';
 
-export const metadata = { title: 'Conflicts' };
+export const metadata = { title: 'Conflicts & Reviews' };
 
 export default function ConflictsPage() {
-  return (
-    <SurfacePlaceholder
-      title="Conflicts"
-      description="IA skeleton surface — functionality lands in a later story."
-    />
-  );
+  return <OverReceiptQueue />;
 }
