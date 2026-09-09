@@ -15,7 +15,7 @@ jobs:
         with:
           bun-version: 1.4.2
 
-      - name: Install dependencies (workspaces incl. mobile)
+      - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Lint
@@ -29,21 +29,6 @@ jobs:
 
       - name: Build
         run: bun run build
-
-  mobile:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-
-      - name: Install dependencies (workspaces incl. mobile)
-        run: bun install --frozen-lockfile
-
-      - name: Typecheck Expo app
-        run: cd mobile && bun run typecheck
 
   # Mirrors the meta-repo workspace layout so the documented pipeline path
   # (`../../backend/wms-be/openapi/openapi.json`) resolves exactly as it does
@@ -65,7 +50,7 @@ jobs:
         with:
           bun-version: 1.4.2
 
-      - name: Install dependencies (workspaces incl. mobile)
+      - name: Install dependencies
         run: bun install --frozen-lockfile
         working-directory: workspace/core/frontend/wms-fe
 

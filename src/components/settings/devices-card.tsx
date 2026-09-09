@@ -142,7 +142,26 @@ function DevicesCardSessioned() {
             <button
               type="button"
               onClick={() => {
-                void navigator.clipboard?.writeText(code.code);
+                void navigator.clipboard?.writeText(code.code).catch(() => undefined);
+              }}
+              className="shrink-0 rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+            >
+              Copy
+            </button>
+          </div>
+          <div className="text-xs font-medium">Tenant id (the device app asks for it too):</div>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={session?.tenant.id ?? ''}
+              onFocus={(e) => e.target.select()}
+              className="w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 font-mono text-xs focus-visible:outline-2 focus-visible:outline-(--ring)"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (session === null) return;
+                void navigator.clipboard?.writeText(session.tenant.id).catch(() => undefined);
               }}
               className="shrink-0 rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
             >
@@ -150,7 +169,8 @@ function DevicesCardSessioned() {
             </button>
           </div>
           <div className="text-xs text-(--muted-foreground)">
-            Enter it once in the device app — it works a single time, then expires.
+            Enter the tenant id and the code once in the device app — the code works a single
+            time, then expires.
           </div>
         </div>
       )}
