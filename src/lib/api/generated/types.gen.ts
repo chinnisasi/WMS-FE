@@ -336,6 +336,127 @@ export type EchoResponse = {
     time: string;
 };
 
+export type MintEnrollmentCodeDto = {
+    [key: string]: unknown;
+};
+
+export type MintEnrollmentCodeResponse = {
+    /**
+     * The one-time enrollment code (raw — shown once)
+     */
+    code: string;
+    /**
+     * ISO-8601 instant the code expires (15-minute TTL)
+     */
+    expiresAt: string;
+};
+
+export type EnrollDeviceDto = {
+    /**
+     * The one-time enrollment code minted in web Settings
+     */
+    code: string;
+    /**
+     * Human-readable device label (1-100 characters)
+     */
+    label: string;
+    /**
+     * The badge-in PIN (4-6 digits, set during enrollment)
+     */
+    pin: string;
+};
+
+export type EnrolledDeviceResponse = {
+    id: string;
+    tenantId: string;
+    label: string;
+};
+
+export type EnrollDeviceResponse = {
+    device: EnrolledDeviceResponse;
+    /**
+     * The device-bound credential (30-day TTL, server-checked)
+     */
+    deviceToken: string;
+    expiresInSeconds: number;
+    /**
+     * The offline-store key, sealed under DEVICE_ENCRYPTION_KEY (AES-256-GCM envelope) — unwrap once into the device keychain
+     */
+    offlineStoreKeySealed: string;
+};
+
+export type BadgeInDto = {
+    /**
+     * The badge-in operator (email)
+     */
+    operatorEmail: string;
+    /**
+     * The operator badge-in PIN (4-6 digits)
+     */
+    pin: string;
+};
+
+export type BadgeInOperatorResponse = {
+    id: string;
+    email: string;
+    role: 'owner' | 'ops_manager' | 'operator' | 'accountant';
+};
+
+export type BadgeInDeviceResponse = {
+    id: string;
+    label: string;
+};
+
+export type BadgeInResponse = {
+    /**
+     * The revocable operator-bound device session token
+     */
+    accessToken: string;
+    tokenType: 'Bearer';
+    expiresInSeconds: number;
+    operator: BadgeInOperatorResponse;
+    device: BadgeInDeviceResponse;
+};
+
+export type DeviceResponse = {
+    id: string;
+    label: string | null;
+    operatorUserId: string | null;
+    operatorEmail: string | null;
+    status: 'active' | 'revoked';
+    wipeFlag: boolean;
+    enrolledAt: string | null;
+    lastSeenAt: string | null;
+    revokedAt: string | null;
+    createdAt: string;
+};
+
+export type DeviceListResponse = {
+    items: Array<DeviceResponse>;
+    nextCursor: string | null;
+};
+
+export type DeviceSelfTestEchoDto = {
+    /**
+     * The queued self-test op payload the device replayed
+     */
+    payload: {
+        [key: string]: unknown;
+    };
+};
+
+export type DeviceSelfTestEchoResponse = {
+    deviceId: string;
+    operatorUserId: string;
+    echoed: {
+        [key: string]: unknown;
+    };
+    /**
+     * Server receive instant (ISO-8601 UTC)
+     */
+    receivedAt: string;
+};
+
 export type BatchInputDto = {
     /**
      * Batch code — unique per tenant + SKU; ensured idempotently on intake
@@ -665,6 +786,185 @@ export type SerialDetailResponse = {
      * Full movement history (oldest first, one query)
      */
     history: Array<SerialLedgerEntryDto>;
+};
+
+export type CreateVendorDto = {
+    /**
+     * Vendor code — unique per tenant
+     */
+    code: string;
+    /**
+     * Vendor name
+     */
+    name: string;
+    /**
+     * The tenant’s default vendor (Epic 6 suggested-PO drafts read it)
+     */
+    isDefault?: boolean;
+};
+
+export type VendorDto = {
+    id: string;
+    tenantId: string;
+    /**
+     * Vendor code (unique per tenant)
+     */
+    code: string;
+    name: string;
+    /**
+     * The tenant’s default vendor flag
+     */
+    isDefault: boolean;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+};
+
+export type VendorResponse = {
+    vendor: VendorDto;
+};
+
+export type VendorListResponse = {
+    items: Array<VendorDto>;
+    nextCursor?: string | null;
+};
+
+export type PurchaseOrderLineInputDto = {
+    /**
+     * Existing line to update (amend only) — omitted means a new line
+     */
+    id?: string;
+    skuId: string;
+    /**
+     * Ordered quantity in base UoM (positive integer)
+     */
+    orderedQty: number;
+    /**
+     * Unit cost as integer paise (AD-9 — never a float)
+     */
+    unitCostPaise: number;
+    /**
+     * Expected receipt date (ISO-8601 UTC, Z-suffixed); optional
+     */
+    expectedDate?: string;
+};
+
+export type CreatePurchaseOrderDto = {
+    /**
+     * Warehouse the PO is scoped to (receiving is per-warehouse)
+     */
+    warehouseId: string;
+    vendorId: string;
+    /**
+     * PO code — client-supplied, unique per tenant
+     */
+    code: string;
+    /**
+     * At least one line with a known SKU
+     */
+    lines: Array<PurchaseOrderLineInputDto>;
+};
+
+export type PurchaseOrderLineDto = {
+    id: string;
+    poId: string;
+    skuId: string;
+    /**
+     * Ordered quantity in base UoM
+     */
+    orderedQty: number;
+    /**
+     * Received-to-date in base UoM (0 until 3.3 receipts land)
+     */
+    receivedQty: number;
+    /**
+     * Derived: orderedQty − receivedQty
+     */
+    openQty: number;
+    /**
+     * Unit cost as integer paise
+     */
+    unitCostPaise: number;
+    /**
+     * Expected receipt date (ISO-8601 UTC), null when unset
+     */
+    expectedDate: string | null;
+    /**
+     * Line status: open, or the close disposition (cancelled / carried)
+     */
+    status: string;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+};
+
+export type PurchaseOrderDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    vendorId: string;
+    /**
+     * PO code (unique per tenant)
+     */
+    code: string;
+    status: 'open' | 'closed';
+    /**
+     * The closed PO whose open quantities this successor carries (null on an original PO)
+     */
+    carriedFromPoId: string | null;
+    /**
+     * Per-line ordered / received / open (detail and mutations; headers only on the list)
+     */
+    lines: Array<PurchaseOrderLineDto>;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last-mutation time
+     */
+    updatedAt: string;
+};
+
+export type PurchaseOrderResponse = {
+    purchaseOrder: PurchaseOrderDto;
+};
+
+export type PurchaseOrderListResponse = {
+    items: Array<PurchaseOrderDto>;
+    nextCursor?: string | null;
+};
+
+export type AmendPurchaseOrderDto = {
+    /**
+     * The complete new line set (update by id, add without id, remove by absence) — at least one line
+     */
+    lines: Array<PurchaseOrderLineInputDto>;
+};
+
+export type CloseDispositionInputDto = {
+    /**
+     * The PO line being dispositioned
+     */
+    lineId: string;
+    /**
+     * cancelled: the line dies; carried: its open quantity moves to the successor PO
+     */
+    disposition: 'cancelled' | 'carried';
+};
+
+export type ClosePurchaseOrderDto = {
+    /**
+     * One disposition per PO line (close is total — every line must be dispositioned)
+     */
+    lines: Array<CloseDispositionInputDto>;
+};
+
+export type PurchaseOrderCloseResponse = {
+    purchaseOrder: PurchaseOrderDto;
+    successor: PurchaseOrderDto | null;
 };
 
 export type TenancyControllerRegisterData = {
@@ -1584,6 +1884,255 @@ export type EchoControllerEchoResponses = {
 
 export type EchoControllerEchoResponse = EchoControllerEchoResponses[keyof EchoControllerEchoResponses];
 
+export type DevicesControllerMintEnrollmentCodeData = {
+    body: MintEnrollmentCodeDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/enrollment-codes';
+};
+
+export type DevicesControllerMintEnrollmentCodeErrors = {
+    /**
+     * Missing or malformed Idempotency-Key
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks device.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DevicesControllerMintEnrollmentCodeError = DevicesControllerMintEnrollmentCodeErrors[keyof DevicesControllerMintEnrollmentCodeErrors];
+
+export type DevicesControllerMintEnrollmentCodeResponses = {
+    201: MintEnrollmentCodeResponse;
+};
+
+export type DevicesControllerMintEnrollmentCodeResponse = DevicesControllerMintEnrollmentCodeResponses[keyof DevicesControllerMintEnrollmentCodeResponses];
+
+export type DevicesControllerEnrollData = {
+    body: EnrollDeviceDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * The minting tenant (embedded in the enrollment handoff)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/enroll';
+};
+
+export type DevicesControllerEnrollErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, invalid body, or an unknown/used/expired code (enrollment-code-invalid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DevicesControllerEnrollError = DevicesControllerEnrollErrors[keyof DevicesControllerEnrollErrors];
+
+export type DevicesControllerEnrollResponses = {
+    201: EnrollDeviceResponse;
+};
+
+export type DevicesControllerEnrollResponse = DevicesControllerEnrollResponses[keyof DevicesControllerEnrollResponses];
+
+export type DevicesControllerBadgeInData = {
+    body: BadgeInDto;
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/badge-in';
+};
+
+export type DevicesControllerBadgeInErrors = {
+    /**
+     * Missing/invalid device token (unauthenticated), or wrong operator/PIN (badge-invalid)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type DevicesControllerBadgeInError = DevicesControllerBadgeInErrors[keyof DevicesControllerBadgeInErrors];
+
+export type DevicesControllerBadgeInResponses = {
+    200: BadgeInResponse;
+};
+
+export type DevicesControllerBadgeInResponse = DevicesControllerBadgeInResponses[keyof DevicesControllerBadgeInResponses];
+
+export type DevicesControllerListDevicesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/devices';
+};
+
+export type DevicesControllerListDevicesErrors = {
+    /**
+     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type DevicesControllerListDevicesError = DevicesControllerListDevicesErrors[keyof DevicesControllerListDevicesErrors];
+
+export type DevicesControllerListDevicesResponses = {
+    200: DeviceListResponse;
+};
+
+export type DevicesControllerListDevicesResponse = DevicesControllerListDevicesResponses[keyof DevicesControllerListDevicesResponses];
+
+export type DevicesControllerRevokeDeviceData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        deviceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/{deviceId}/revoke';
+};
+
+export type DevicesControllerRevokeDeviceErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed deviceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks device.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Device does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DevicesControllerRevokeDeviceError = DevicesControllerRevokeDeviceErrors[keyof DevicesControllerRevokeDeviceErrors];
+
+export type DevicesControllerRevokeDeviceResponses = {
+    200: DeviceResponse;
+};
+
+export type DevicesControllerRevokeDeviceResponse = DevicesControllerRevokeDeviceResponses[keyof DevicesControllerRevokeDeviceResponses];
+
+export type DevicesControllerSelfTestEchoData = {
+    body: DeviceSelfTestEchoDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/self-test/echo';
+};
+
+export type DevicesControllerSelfTestEchoErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked), or the operator was demoted (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DevicesControllerSelfTestEchoError = DevicesControllerSelfTestEchoErrors[keyof DevicesControllerSelfTestEchoErrors];
+
+export type DevicesControllerSelfTestEchoResponses = {
+    200: DeviceSelfTestEchoResponse;
+};
+
+export type DevicesControllerSelfTestEchoResponse = DevicesControllerSelfTestEchoResponses[keyof DevicesControllerSelfTestEchoResponses];
+
 export type InventoryControllerAdjustStockData = {
     body: StockAdjustmentDto;
     headers: {
@@ -1879,3 +2428,362 @@ export type InventoryControllerGetSerialResponses = {
 };
 
 export type InventoryControllerGetSerialResponse = InventoryControllerGetSerialResponses[keyof InventoryControllerGetSerialResponses];
+
+export type InboundControllerListVendorsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/vendors';
+};
+
+export type InboundControllerListVendorsErrors = {
+    /**
+     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type InboundControllerListVendorsError = InboundControllerListVendorsErrors[keyof InboundControllerListVendorsErrors];
+
+export type InboundControllerListVendorsResponses = {
+    200: VendorListResponse;
+};
+
+export type InboundControllerListVendorsResponse = InboundControllerListVendorsResponses[keyof InboundControllerListVendorsResponses];
+
+export type InboundControllerCreateVendorData = {
+    body: CreateVendorDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/vendors';
+};
+
+export type InboundControllerCreateVendorErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks vendor.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Vendor code already in use (conflict, naming the code), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InboundControllerCreateVendorError = InboundControllerCreateVendorErrors[keyof InboundControllerCreateVendorErrors];
+
+export type InboundControllerCreateVendorResponses = {
+    /**
+     * Vendor created (the idempotency snapshot)
+     */
+    201: VendorResponse;
+};
+
+export type InboundControllerCreateVendorResponse = InboundControllerCreateVendorResponses[keyof InboundControllerCreateVendorResponses];
+
+export type InboundControllerCreatePurchaseOrderData = {
+    body: CreatePurchaseOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/purchase-orders';
+};
+
+export type InboundControllerCreatePurchaseOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, invalid body, or a non-positive qty / unit cost / malformed expectedDate (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks po.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse, vendor, or a line's SKU does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * PO code already in use (conflict, naming the code), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InboundControllerCreatePurchaseOrderError = InboundControllerCreatePurchaseOrderErrors[keyof InboundControllerCreatePurchaseOrderErrors];
+
+export type InboundControllerCreatePurchaseOrderResponses = {
+    /**
+     * PO created open with per-line ordered / received (0) / open quantities (the idempotency snapshot)
+     */
+    201: PurchaseOrderResponse;
+};
+
+export type InboundControllerCreatePurchaseOrderResponse = InboundControllerCreatePurchaseOrderResponses[keyof InboundControllerCreatePurchaseOrderResponses];
+
+export type InboundControllerListPurchaseOrdersData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Only POs of one status
+         */
+        status?: 'open' | 'closed';
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inbound/purchase-orders';
+};
+
+export type InboundControllerListPurchaseOrdersErrors = {
+    /**
+     * Malformed status, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InboundControllerListPurchaseOrdersError = InboundControllerListPurchaseOrdersErrors[keyof InboundControllerListPurchaseOrdersErrors];
+
+export type InboundControllerListPurchaseOrdersResponses = {
+    /**
+     * The warehouse's PO page (headers only — the detail read carries the lines; keyset cursor)
+     */
+    200: PurchaseOrderListResponse;
+};
+
+export type InboundControllerListPurchaseOrdersResponse = InboundControllerListPurchaseOrdersResponses[keyof InboundControllerListPurchaseOrdersResponses];
+
+export type InboundControllerGetPurchaseOrderData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        poId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/purchase-orders/{poId}';
+};
+
+export type InboundControllerGetPurchaseOrderErrors = {
+    /**
+     * Malformed poId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No purchase order with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InboundControllerGetPurchaseOrderError = InboundControllerGetPurchaseOrderErrors[keyof InboundControllerGetPurchaseOrderErrors];
+
+export type InboundControllerGetPurchaseOrderResponses = {
+    /**
+     * The PO with its lines (oldest first); a closed PO keeps its close dispositions and quantities queryable exactly as at close
+     */
+    200: PurchaseOrderResponse;
+};
+
+export type InboundControllerGetPurchaseOrderResponse = InboundControllerGetPurchaseOrderResponses[keyof InboundControllerGetPurchaseOrderResponses];
+
+export type InboundControllerAmendPurchaseOrderData = {
+    body: AmendPurchaseOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        poId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/purchase-orders/{poId}';
+};
+
+export type InboundControllerAmendPurchaseOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, invalid body, or a non-positive qty / unit cost / malformed expectedDate (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks po.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * PO or a referenced line id does not exist in this tenant (not-found), or a line's SKU is unknown (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The PO is not open (po-not-open, naming the status), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InboundControllerAmendPurchaseOrderError = InboundControllerAmendPurchaseOrderErrors[keyof InboundControllerAmendPurchaseOrderErrors];
+
+export type InboundControllerAmendPurchaseOrderResponses = {
+    /**
+     * PO amended: ordered / open recomputed, receivedQty untouched (the idempotency snapshot)
+     */
+    200: PurchaseOrderResponse;
+};
+
+export type InboundControllerAmendPurchaseOrderResponse = InboundControllerAmendPurchaseOrderResponses[keyof InboundControllerAmendPurchaseOrderResponses];
+
+export type InboundControllerClosePurchaseOrderData = {
+    body: ClosePurchaseOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        poId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/purchase-orders/{poId}/close';
+};
+
+export type InboundControllerClosePurchaseOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, invalid body, a missing/duplicate line disposition, or a carried line with no open quantity (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks po.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * PO or a dispositioned line id does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The PO is already closed (po-not-open, naming the status), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InboundControllerClosePurchaseOrderError = InboundControllerClosePurchaseOrderErrors[keyof InboundControllerClosePurchaseOrderErrors];
+
+export type InboundControllerClosePurchaseOrderResponses = {
+    /**
+     * The closed PO (lines show their dispositions) plus the successor PO when ≥1 line was carried (null otherwise)
+     */
+    200: PurchaseOrderCloseResponse;
+};
+
+export type InboundControllerClosePurchaseOrderResponse = InboundControllerClosePurchaseOrderResponses[keyof InboundControllerClosePurchaseOrderResponses];

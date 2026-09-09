@@ -2,7 +2,7 @@
 
 WMS web dashboard — Next.js 16 App Router shell carrying the shared design-token layer (DESIGN.md), the sidebar IA skeleton, and the interaction primitives. Package manager is **bun** everywhere.
 
-Also hosts the **mobile scan client** (Expo 57) under `mobile/` — it lives in this repo for now (Story 1.1 decision) and is structured for mechanical extraction to its own repo later. See `mobile/README.md`.
+The mobile scan client (Expo 57) lives in its own repo: `wms-mobile` (`workspace/core/mobile/wms-mobile`, registered in the WMS-Meta repo catalog; story 3.2 extraction).
 
 ## Layout
 
@@ -15,7 +15,6 @@ src/components/     shell (sidebar, ⌘K palette), KPI tile, data-table primitiv
 src/lib/            brand tokens, cursor-pagination helper, navigation IA
 src/lib/api/        GENERATED typed client from wms-be's OpenAPI doc — never
                     hand-edit; never hand-write API types (AD-8)
-mobile/             Expo 57 scan client (own package.json; extraction-ready)
 ```
 
 ## Commands
@@ -29,7 +28,6 @@ bun run lint          # eslint
 bun run test          # bun test (token/IA/cursor suites)
 bun run typecheck     # tsc --noEmit
 bun run api:generate  # regenerate src/lib/api from wms-be openapi/openapi.json
-cd mobile && bunx expo start   # Expo Go / simulator
 ```
 
 ## Design-token layer

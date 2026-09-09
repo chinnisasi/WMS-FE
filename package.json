@@ -3,9 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "description": "WMS web dashboard — Next.js 16 App Router shell with the shared design-token layer",
-  "workspaces": [
-    "mobile"
-  ],
   "engines": {
     "bun": ">=1.2"
   },
