@@ -336,6 +336,337 @@ export type EchoResponse = {
     time: string;
 };
 
+export type BatchInputDto = {
+    /**
+     * Batch code — unique per tenant + SKU; ensured idempotently on intake
+     */
+    code: string;
+    /**
+     * Manufacturing date (ISO-8601 UTC, Z-suffixed); recorded at intake
+     */
+    mfgDate?: string;
+    /**
+     * Expiry date (ISO-8601 UTC, Z-suffixed); optional at intake, orders FEFO (nulls last)
+     */
+    expiryDate?: string;
+    /**
+     * Required when a draw names an explicit batch instead of the FEFO default — recorded verbatim in the ledger reference doc
+     */
+    overrideReason?: string;
+};
+
+export type StockAdjustmentDto = {
+    /**
+     * Warehouse holding the bin
+     */
+    warehouseId: string;
+    skuId: string;
+    binId: string;
+    /**
+     * Signed base-UoM integer; positive into the bin, negative out
+     */
+    quantityDelta: number;
+    /**
+     * Machine reason for the correction (e.g. stock-count)
+     */
+    reasonCode: string;
+    /**
+     * The Ops Manager's note, carried verbatim on the event
+     */
+    note: string;
+    /**
+     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
+     */
+    occurredAt?: string;
+    /**
+     * Batch arm (batch-tracked SKUs only): intake identity, or the explicit override draw (with overrideReason)
+     */
+    batch?: BatchInputDto;
+    /**
+     * Serial arm (serial-tracked SKUs only): one serial number per unit — quantityDelta must equal the count
+     */
+    serials?: Array<string>;
+};
+
+export type LedgerEventSnapshotDto = {
+    id: string;
+    /**
+     * Gap-free per-warehouse replay order
+     */
+    seq: number;
+    type: string;
+    skuId: string;
+    binId: string | null;
+    /**
+     * Signed base-UoM delta
+     */
+    quantityDelta: number;
+    /**
+     * ISO-8601 UTC business time
+     */
+    occurredAt: string;
+    /**
+     * ISO-8601 UTC commit time
+     */
+    recordedAt: string;
+};
+
+export type OnHandSnapshotDto = {
+    skuId: string;
+    binId: string;
+    /**
+     * On-hand in base UoM after the movement
+     */
+    quantity: number;
+};
+
+export type StockAdjustmentResponse = {
+    event: LedgerEventSnapshotDto;
+    onHand: OnHandSnapshotDto;
+};
+
+export type LedgerReferenceDocDto = {
+    /**
+     * Discriminator of the typed reference union
+     */
+    kind: string;
+    /**
+     * Machine reason for the correction (e.g. stock-count)
+     */
+    reasonCode: string;
+    /**
+     * The Ops Manager's note, carried verbatim
+     */
+    note: string;
+    /**
+     * The recorded reason when a draw overrode the FEFO default batch (absent on every other adjustment)
+     */
+    overrideReason?: string;
+};
+
+export type LedgerEventDto = {
+    id: string;
+    seq: number;
+    type: string;
+    skuId: string;
+    fromBinId: string | null;
+    toBinId: string | null;
+    quantityDelta: number;
+    /**
+     * Story 2.4 batch arm — the catalog batch id; null on every arm-less (legacy) event
+     */
+    batchRef: string | null;
+    /**
+     * Story 2.4 serial arm — the catalog serial id; null on every arm-less (legacy) event
+     */
+    serialRef: string | null;
+    /**
+     * The typed reference document itself ({kind, reasonCode, note, overrideReason?} today) — the event's reference document, extended additively by future event kinds
+     */
+    referenceDoc: LedgerReferenceDocDto | null;
+    actorUserId: string;
+    occurredAt: string;
+    recordedAt: string;
+    /**
+     * sha256 over the canonical event bytes (chain link)
+     */
+    eventHash: string;
+    /**
+     * ISO-8601 UTC commit time of the append
+     */
+    createdAt: string;
+};
+
+export type LedgerEventListResponse = {
+    items: Array<LedgerEventDto>;
+    nextCursor?: string | null;
+};
+
+export type StockEntryDto = {
+    /**
+     * The projection row id (the cursor tiebreaker)
+     */
+    id: string;
+    warehouseId: string;
+    skuId: string;
+    binId: string;
+    /**
+     * On-hand in base UoM (non-negative)
+     */
+    quantity: number;
+    /**
+     * ISO-8601 UTC projection-row commit time (the cursor sort key)
+     */
+    createdAt: string;
+};
+
+export type StockListResponse = {
+    items: Array<StockEntryDto>;
+    nextCursor?: string | null;
+};
+
+export type BatchListItemDto = {
+    id: string;
+    /**
+     * Batch code (unique per tenant + SKU)
+     */
+    code: string;
+    /**
+     * Manufacturing date (ISO-8601 UTC), null when unrecorded
+     */
+    mfgDate: string | null;
+    /**
+     * Expiry date (ISO-8601 UTC), null when unrecorded — orders last (FEFO)
+     */
+    expiryDate: string | null;
+    /**
+     * Batch lifecycle status (active today)
+     */
+    status: string;
+    /**
+     * On-hand of this batch in the queried warehouse (the bin filter applied; 0 when none)
+     */
+    quantity: number;
+};
+
+export type BatchListResponse = {
+    items: Array<BatchListItemDto>;
+};
+
+export type BatchBinOnHandDto = {
+    warehouseId: string;
+    binId: string;
+    /**
+     * On-hand of the batch in this bin
+     */
+    quantity: number;
+};
+
+export type BatchLedgerEntryDto = {
+    warehouseId: string;
+    /**
+     * Gap-free per-warehouse replay order
+     */
+    seq: number;
+    type: string;
+    skuId: string;
+    /**
+     * Signed base-UoM delta
+     */
+    quantityDelta: number;
+    fromBinId: string | null;
+    toBinId: string | null;
+    /**
+     * The serial arm on a combined batch+serial event
+     */
+    serialRef: string | null;
+    /**
+     * ISO-8601 UTC business time
+     */
+    occurredAt: string;
+    /**
+     * ISO-8601 UTC commit time
+     */
+    recordedAt: string;
+    /**
+     * sha256 over the canonical event bytes (chain link)
+     */
+    eventHash: string;
+};
+
+export type BatchDetailResponse = {
+    id: string;
+    /**
+     * The SKU the batch belongs to
+     */
+    skuId: string;
+    /**
+     * Batch code (unique per tenant + SKU)
+     */
+    code: string;
+    /**
+     * Manufacturing date (ISO-8601 UTC), null when unrecorded
+     */
+    mfgDate: string | null;
+    /**
+     * Expiry date (ISO-8601 UTC), null when unrecorded
+     */
+    expiryDate: string | null;
+    /**
+     * Batch lifecycle status (active today)
+     */
+    status: string;
+    /**
+     * Per-bin on-hand rows across every warehouse of the tenant
+     */
+    bins: Array<BatchBinOnHandDto>;
+    /**
+     * Full movement history (oldest first, one query)
+     */
+    history: Array<BatchLedgerEntryDto>;
+};
+
+export type SerialLocationDto = {
+    warehouseId: string;
+    binId: string;
+};
+
+export type SerialLedgerEntryDto = {
+    warehouseId: string;
+    /**
+     * Gap-free per-warehouse replay order
+     */
+    seq: number;
+    type: string;
+    skuId: string;
+    /**
+     * Signed base-UoM delta (±1 per serial unit)
+     */
+    quantityDelta: number;
+    fromBinId: string | null;
+    toBinId: string | null;
+    /**
+     * The batch the unit moved with (null when unbatched)
+     */
+    batchRef: string | null;
+    /**
+     * ISO-8601 UTC business time
+     */
+    occurredAt: string;
+    /**
+     * ISO-8601 UTC commit time
+     */
+    recordedAt: string;
+    /**
+     * sha256 over the canonical event bytes (chain link)
+     */
+    eventHash: string;
+};
+
+export type SerialDetailResponse = {
+    id: string;
+    /**
+     * The SKU the serial belongs to
+     */
+    skuId: string;
+    /**
+     * The serial number (unique per tenant + SKU)
+     */
+    serialNumber: string;
+    /**
+     * Serial lifecycle status (active today)
+     */
+    status: string;
+    /**
+     * Derived current location — the ledger’s latest event’s bin (tenant-wide); null when never moved
+     */
+    location: SerialLocationDto | null;
+    /**
+     * Full movement history (oldest first, one query)
+     */
+    history: Array<SerialLedgerEntryDto>;
+};
+
 export type TenancyControllerRegisterData = {
     body: RegisterTenantDto;
     headers: {
@@ -1252,3 +1583,299 @@ export type EchoControllerEchoResponses = {
 };
 
 export type EchoControllerEchoResponse = EchoControllerEchoResponses[keyof EchoControllerEchoResponses];
+
+export type InventoryControllerAdjustStockData = {
+    body: StockAdjustmentDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/adjustments';
+};
+
+export type InventoryControllerAdjustStockErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, invalid body, or a Story 2.4 batch/serial arm violation (validation-failed): batch/serials on an untracked SKU, a tracked movement missing its arm, malformed batch dates (or expiry preceding mfg), overrideReason on an intake or missing on an override draw, duplicate serials, or a quantityDelta that does not equal the serial count
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks stock.adjust (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse, bin, or SKU does not exist in this tenant (not-found), or an explicit batch code does not exist for the SKU (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Concurrent request on the same Idempotency-Key (conflict); or a serial-tracked movement scans a serial that already lives in a bin (duplicate-serial, naming it) or draws a serial the ledger last saw in another bin (serial-elsewhere, naming the last-known bin)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse), or the movement would drive on-hand, or the resolved/overridden batch's on-hand, below zero (insufficient-on-hand names the bin, and the batchRef on a batch-tracked draw)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InventoryControllerAdjustStockError = InventoryControllerAdjustStockErrors[keyof InventoryControllerAdjustStockErrors];
+
+export type InventoryControllerAdjustStockResponses = {
+    /**
+     * Adjustment committed: the ledger event snapshot plus the resulting on-hand quantity
+     */
+    201: StockAdjustmentResponse;
+};
+
+export type InventoryControllerAdjustStockResponse = InventoryControllerAdjustStockResponses[keyof InventoryControllerAdjustStockResponses];
+
+export type InventoryControllerListEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Only events of one SKU
+         */
+        skuId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/events';
+};
+
+export type InventoryControllerListEventsErrors = {
+    /**
+     * Malformed skuId query, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InventoryControllerListEventsError = InventoryControllerListEventsErrors[keyof InventoryControllerListEventsErrors];
+
+export type InventoryControllerListEventsResponses = {
+    /**
+     * The warehouse's ledger event-timeline page (newest first, keyset cursor)
+     */
+    200: LedgerEventListResponse;
+};
+
+export type InventoryControllerListEventsResponse = InventoryControllerListEventsResponses[keyof InventoryControllerListEventsResponses];
+
+export type InventoryControllerListStockData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Only rows of one SKU
+         */
+        skuId?: string;
+        /**
+         * Only rows of one bin
+         */
+        binId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/stock';
+};
+
+export type InventoryControllerListStockErrors = {
+    /**
+     * Malformed skuId/binId query, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InventoryControllerListStockError = InventoryControllerListStockErrors[keyof InventoryControllerListStockErrors];
+
+export type InventoryControllerListStockResponses = {
+    /**
+     * The warehouse's on-hand page (keyset cursor) — plain stock truth for tracked and untracked SKUs alike, no batch fields
+     */
+    200: StockListResponse;
+};
+
+export type InventoryControllerListStockResponse = InventoryControllerListStockResponses[keyof InventoryControllerListStockResponses];
+
+export type InventoryControllerListBatchesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * The SKU whose batches are listed (required — 400 when omitted)
+         */
+        skuId?: string;
+        /**
+         * Only on-hand rows of one bin (the quantity narrows with it)
+         */
+        binId?: string;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/batches';
+};
+
+export type InventoryControllerListBatchesErrors = {
+    /**
+     * Missing or malformed skuId/binId query (validation-failed — skuId is required)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InventoryControllerListBatchesError = InventoryControllerListBatchesErrors[keyof InventoryControllerListBatchesErrors];
+
+export type InventoryControllerListBatchesResponses = {
+    /**
+     * The SKU's batches with their on-hand quantity (0 when none) — the FEFO read order is data, not policy; excluding expired stock is the draw policy, not a read filter
+     */
+    200: BatchListResponse;
+};
+
+export type InventoryControllerListBatchesResponse = InventoryControllerListBatchesResponses[keyof InventoryControllerListBatchesResponses];
+
+export type InventoryControllerGetBatchData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        batchId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/batches/{batchId}';
+};
+
+export type InventoryControllerGetBatchErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No batch with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InventoryControllerGetBatchError = InventoryControllerGetBatchErrors[keyof InventoryControllerGetBatchErrors];
+
+export type InventoryControllerGetBatchResponses = {
+    /**
+     * The batch identity plus the bins (any warehouse of the tenant) where its stock lives and its ledger history (oldest first)
+     */
+    200: BatchDetailResponse;
+};
+
+export type InventoryControllerGetBatchResponse = InventoryControllerGetBatchResponses[keyof InventoryControllerGetBatchResponses];
+
+export type InventoryControllerGetSerialData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        serialId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/serials/{serialId}';
+};
+
+export type InventoryControllerGetSerialErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No serial with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InventoryControllerGetSerialError = InventoryControllerGetSerialErrors[keyof InventoryControllerGetSerialErrors];
+
+export type InventoryControllerGetSerialResponses = {
+    /**
+     * The serial identity, its ledger-derived location (the latest event's bin; null when never moved) and its full movement history (oldest first)
+     */
+    200: SerialDetailResponse;
+};
+
+export type InventoryControllerGetSerialResponse = InventoryControllerGetSerialResponses[keyof InventoryControllerGetSerialResponses];

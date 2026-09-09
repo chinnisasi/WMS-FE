@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { CatalogControllerEditSkuData, CatalogControllerEditSkuErrors, CatalogControllerEditSkuResponses, CatalogControllerImportCatalogData, CatalogControllerImportCatalogErrors, CatalogControllerImportCatalogResponses, CatalogControllerListSkusData, CatalogControllerListSkusErrors, CatalogControllerListSkusResponses, EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, TenancyControllerCreateBinData, TenancyControllerCreateBinErrors, TenancyControllerCreateBinResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerCreateZoneData, TenancyControllerCreateZoneErrors, TenancyControllerCreateZoneResponses, TenancyControllerGenerateBinGridData, TenancyControllerGenerateBinGridErrors, TenancyControllerGenerateBinGridResponses, TenancyControllerListBinsData, TenancyControllerListBinsErrors, TenancyControllerListBinsResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerListZonesData, TenancyControllerListZonesErrors, TenancyControllerListZonesResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerSetBinBlockedData, TenancyControllerSetBinBlockedErrors, TenancyControllerSetBinBlockedResponses, TenancyControllerSetupChecklistData, TenancyControllerSetupChecklistErrors, TenancyControllerSetupChecklistResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses, UsersControllerAcceptInviteData, UsersControllerAcceptInviteErrors, UsersControllerAcceptInviteResponses, UsersControllerInviteUserData, UsersControllerInviteUserErrors, UsersControllerInviteUserResponses, UsersControllerListUsersData, UsersControllerListUsersErrors, UsersControllerListUsersResponses, UsersControllerMeData, UsersControllerMeErrors, UsersControllerMeResponses, UsersControllerSetUserRoleData, UsersControllerSetUserRoleErrors, UsersControllerSetUserRoleResponses } from './types.gen';
+import type { CatalogControllerEditSkuData, CatalogControllerEditSkuErrors, CatalogControllerEditSkuResponses, CatalogControllerImportCatalogData, CatalogControllerImportCatalogErrors, CatalogControllerImportCatalogResponses, CatalogControllerListSkusData, CatalogControllerListSkusErrors, CatalogControllerListSkusResponses, EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, InventoryControllerAdjustStockData, InventoryControllerAdjustStockErrors, InventoryControllerAdjustStockResponses, InventoryControllerGetBatchData, InventoryControllerGetBatchErrors, InventoryControllerGetBatchResponses, InventoryControllerGetSerialData, InventoryControllerGetSerialErrors, InventoryControllerGetSerialResponses, InventoryControllerListBatchesData, InventoryControllerListBatchesErrors, InventoryControllerListBatchesResponses, InventoryControllerListEventsData, InventoryControllerListEventsErrors, InventoryControllerListEventsResponses, InventoryControllerListStockData, InventoryControllerListStockErrors, InventoryControllerListStockResponses, TenancyControllerCreateBinData, TenancyControllerCreateBinErrors, TenancyControllerCreateBinResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerCreateZoneData, TenancyControllerCreateZoneErrors, TenancyControllerCreateZoneResponses, TenancyControllerGenerateBinGridData, TenancyControllerGenerateBinGridErrors, TenancyControllerGenerateBinGridResponses, TenancyControllerListBinsData, TenancyControllerListBinsErrors, TenancyControllerListBinsResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerListZonesData, TenancyControllerListZonesErrors, TenancyControllerListZonesResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerSetBinBlockedData, TenancyControllerSetBinBlockedErrors, TenancyControllerSetBinBlockedResponses, TenancyControllerSetupChecklistData, TenancyControllerSetupChecklistErrors, TenancyControllerSetupChecklistResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses, UsersControllerAcceptInviteData, UsersControllerAcceptInviteErrors, UsersControllerAcceptInviteResponses, UsersControllerInviteUserData, UsersControllerInviteUserErrors, UsersControllerInviteUserResponses, UsersControllerListUsersData, UsersControllerListUsersErrors, UsersControllerListUsersResponses, UsersControllerMeData, UsersControllerMeErrors, UsersControllerMeResponses, UsersControllerSetUserRoleData, UsersControllerSetUserRoleErrors, UsersControllerSetUserRoleResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -250,4 +250,62 @@ export const echoControllerEcho = <ThrowOnError extends boolean = false>(options
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Records a manual stock adjustment (one ledger event + on-hand projection in one commit)
+ */
+export const inventoryControllerAdjustStock = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerAdjustStockData, ThrowOnError>): RequestResult<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError> => (options.client ?? client).post<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/inventory/adjustments',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Lists one warehouse's ledger event timeline (keyset cursor pagination, newest first)
+ */
+export const inventoryControllerListEvents = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerListEventsData, ThrowOnError>): RequestResult<InventoryControllerListEventsResponses, InventoryControllerListEventsErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerListEventsResponses, InventoryControllerListEventsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/events',
+    ...options
+});
+
+/**
+ * Lists one warehouse's on-hand projection, SKU/bin filterable (keyset cursor pagination)
+ */
+export const inventoryControllerListStock = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerListStockData, ThrowOnError>): RequestResult<InventoryControllerListStockResponses, InventoryControllerListStockErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerListStockResponses, InventoryControllerListStockErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/stock',
+    ...options
+});
+
+/**
+ * Lists a SKU's batches of one warehouse joined with on-hand (FEFO order — expiry ASC nulls last; expired batches are still listed)
+ */
+export const inventoryControllerListBatches = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerListBatchesData, ThrowOnError>): RequestResult<InventoryControllerListBatchesResponses, InventoryControllerListBatchesErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerListBatchesResponses, InventoryControllerListBatchesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/batches',
+    ...options
+});
+
+/**
+ * One batch's detail — catalog identity, per-bin on-hand across the tenant, and its full movement history (one query)
+ */
+export const inventoryControllerGetBatch = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerGetBatchData, ThrowOnError>): RequestResult<InventoryControllerGetBatchResponses, InventoryControllerGetBatchErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerGetBatchResponses, InventoryControllerGetBatchErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/inventory/batches/{batchId}',
+    ...options
+});
+
+/**
+ * One serial's detail — catalog identity, its derived tenant-wide location, and its full movement history (one query)
+ */
+export const inventoryControllerGetSerial = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerGetSerialData, ThrowOnError>): RequestResult<InventoryControllerGetSerialResponses, InventoryControllerGetSerialErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerGetSerialResponses, InventoryControllerGetSerialErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/inventory/serials/{serialId}',
+    ...options
 });
