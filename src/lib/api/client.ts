@@ -3,6 +3,9 @@ import {
   catalogControllerEditSku,
   catalogControllerImportCatalog,
   catalogControllerListSkus,
+  devicesControllerListDevices,
+  devicesControllerMintEnrollmentCode,
+  devicesControllerRevokeDevice,
   healthControllerHealth,
   tenancyControllerCreateBin,
   tenancyControllerCreateWarehouse,
@@ -32,11 +35,14 @@ import type {
   CreateBinDto,
   CreateWarehouseDto,
   CreateZoneDto,
+  DeviceListResponse,
+  DeviceResponse,
   GenerateBinsDto,
   HealthResponse,
   InviteUserDto,
   InviteUserResponse,
   MeResponse,
+  MintEnrollmentCodeResponse,
   PatchBinDto,
   PatchSkuDto,
   RegisterTenantDto,
@@ -437,6 +443,60 @@ export async function fetchApiAcceptInvite(
 export async function fetchApiMe(tenantId: string): Promise<MeResponse> {
   const { data, error } = await usersControllerMe({
     path: { tenantId },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Mint a one-time device enrollment code (story 3.2, capability
+ * `device.manage`) — the device app redeems it once, within its TTL.
+ */
+export async function fetchApiMintEnrollmentCode(
+  tenantId: string,
+  idempotencyKey: string,
+): Promise<MintEnrollmentCodeResponse> {
+  const { data, error } = await devicesControllerMintEnrollmentCode({
+    path: { tenantId },
+    body: {},
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** The tenant's enrolled devices — a read, open to any tenant member. */
+export async function fetchApiListDevices(
+  tenantId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<DeviceListResponse> {
+  const { data, error } = await devicesControllerListDevices({
+    path: { tenantId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Revoke a device (capability `device.manage`) — wipe-flagged, audited,
+ * effective on the device's next request; re-revoke is idempotent.
+ */
+export async function fetchApiRevokeDevice(
+  tenantId: string,
+  deviceId: string,
+  idempotencyKey: string,
+): Promise<DeviceResponse> {
+  const { data, error } = await devicesControllerRevokeDevice({
+    path: { tenantId, deviceId },
+    headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
     throw unwrapError(error, 400);

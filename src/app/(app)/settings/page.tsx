@@ -1,4 +1,5 @@
 import { WarehouseCreateForm, WarehouseList } from '@/components/settings/warehouse-create-form';
+import { DevicesCard } from '@/components/settings/devices-card';
 import { ImportCatalogCard } from '@/components/settings/import-catalog';
 import { SetupChecklistCard } from '@/components/settings/setup-checklist-card';
 import { SkuTableCard } from '@/components/settings/sku-table';
@@ -22,12 +23,7 @@ export default function SettingsPage() {
       <SkuTableCard />
       <UsersCard />
       <WarehouseList />
-      <div className="flex flex-col gap-2 text-sm">
-        <div className="rounded-md border border-(--border) p-3">
-          <div className="font-medium">Device enrollment</div>
-          <div className="text-(--muted-foreground)">Scanner pairing lands in a later epic.</div>
-        </div>
-      </div>
+      <DevicesCard />
     </section>
   );
 }

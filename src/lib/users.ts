@@ -21,13 +21,15 @@ export const CAPABILITIES = [
   'sku.edit',
   'users.invite',
   'users.role_change',
+  // Story 3.2 — floor-device lifecycle (mint enrollment codes, revoke).
+  'device.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
   owner: CAPABILITIES,
-  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit'],
+  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage'],
   operator: [],
   accountant: [],
 };

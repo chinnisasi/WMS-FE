@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { CatalogControllerEditSkuData, CatalogControllerEditSkuErrors, CatalogControllerEditSkuResponses, CatalogControllerImportCatalogData, CatalogControllerImportCatalogErrors, CatalogControllerImportCatalogResponses, CatalogControllerListSkusData, CatalogControllerListSkusErrors, CatalogControllerListSkusResponses, EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, InventoryControllerAdjustStockData, InventoryControllerAdjustStockErrors, InventoryControllerAdjustStockResponses, InventoryControllerGetBatchData, InventoryControllerGetBatchErrors, InventoryControllerGetBatchResponses, InventoryControllerGetSerialData, InventoryControllerGetSerialErrors, InventoryControllerGetSerialResponses, InventoryControllerListBatchesData, InventoryControllerListBatchesErrors, InventoryControllerListBatchesResponses, InventoryControllerListEventsData, InventoryControllerListEventsErrors, InventoryControllerListEventsResponses, InventoryControllerListStockData, InventoryControllerListStockErrors, InventoryControllerListStockResponses, TenancyControllerCreateBinData, TenancyControllerCreateBinErrors, TenancyControllerCreateBinResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerCreateZoneData, TenancyControllerCreateZoneErrors, TenancyControllerCreateZoneResponses, TenancyControllerGenerateBinGridData, TenancyControllerGenerateBinGridErrors, TenancyControllerGenerateBinGridResponses, TenancyControllerListBinsData, TenancyControllerListBinsErrors, TenancyControllerListBinsResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerListZonesData, TenancyControllerListZonesErrors, TenancyControllerListZonesResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerSetBinBlockedData, TenancyControllerSetBinBlockedErrors, TenancyControllerSetBinBlockedResponses, TenancyControllerSetupChecklistData, TenancyControllerSetupChecklistErrors, TenancyControllerSetupChecklistResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses, UsersControllerAcceptInviteData, UsersControllerAcceptInviteErrors, UsersControllerAcceptInviteResponses, UsersControllerInviteUserData, UsersControllerInviteUserErrors, UsersControllerInviteUserResponses, UsersControllerListUsersData, UsersControllerListUsersErrors, UsersControllerListUsersResponses, UsersControllerMeData, UsersControllerMeErrors, UsersControllerMeResponses, UsersControllerSetUserRoleData, UsersControllerSetUserRoleErrors, UsersControllerSetUserRoleResponses } from './types.gen';
+import type { CatalogControllerEditSkuData, CatalogControllerEditSkuErrors, CatalogControllerEditSkuResponses, CatalogControllerImportCatalogData, CatalogControllerImportCatalogErrors, CatalogControllerImportCatalogResponses, CatalogControllerListSkusData, CatalogControllerListSkusErrors, CatalogControllerListSkusResponses, DevicesControllerBadgeInData, DevicesControllerBadgeInErrors, DevicesControllerBadgeInResponses, DevicesControllerEnrollData, DevicesControllerEnrollErrors, DevicesControllerEnrollResponses, DevicesControllerListDevicesData, DevicesControllerListDevicesErrors, DevicesControllerListDevicesResponses, DevicesControllerMintEnrollmentCodeData, DevicesControllerMintEnrollmentCodeErrors, DevicesControllerMintEnrollmentCodeResponses, DevicesControllerRevokeDeviceData, DevicesControllerRevokeDeviceErrors, DevicesControllerRevokeDeviceResponses, DevicesControllerSelfTestEchoData, DevicesControllerSelfTestEchoErrors, DevicesControllerSelfTestEchoResponses, EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, InboundControllerAmendPurchaseOrderData, InboundControllerAmendPurchaseOrderErrors, InboundControllerAmendPurchaseOrderResponses, InboundControllerClosePurchaseOrderData, InboundControllerClosePurchaseOrderErrors, InboundControllerClosePurchaseOrderResponses, InboundControllerCreatePurchaseOrderData, InboundControllerCreatePurchaseOrderErrors, InboundControllerCreatePurchaseOrderResponses, InboundControllerCreateVendorData, InboundControllerCreateVendorErrors, InboundControllerCreateVendorResponses, InboundControllerGetPurchaseOrderData, InboundControllerGetPurchaseOrderErrors, InboundControllerGetPurchaseOrderResponses, InboundControllerListPurchaseOrdersData, InboundControllerListPurchaseOrdersErrors, InboundControllerListPurchaseOrdersResponses, InboundControllerListVendorsData, InboundControllerListVendorsErrors, InboundControllerListVendorsResponses, InventoryControllerAdjustStockData, InventoryControllerAdjustStockErrors, InventoryControllerAdjustStockResponses, InventoryControllerGetBatchData, InventoryControllerGetBatchErrors, InventoryControllerGetBatchResponses, InventoryControllerGetSerialData, InventoryControllerGetSerialErrors, InventoryControllerGetSerialResponses, InventoryControllerListBatchesData, InventoryControllerListBatchesErrors, InventoryControllerListBatchesResponses, InventoryControllerListEventsData, InventoryControllerListEventsErrors, InventoryControllerListEventsResponses, InventoryControllerListStockData, InventoryControllerListStockErrors, InventoryControllerListStockResponses, TenancyControllerCreateBinData, TenancyControllerCreateBinErrors, TenancyControllerCreateBinResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerCreateZoneData, TenancyControllerCreateZoneErrors, TenancyControllerCreateZoneResponses, TenancyControllerGenerateBinGridData, TenancyControllerGenerateBinGridErrors, TenancyControllerGenerateBinGridResponses, TenancyControllerListBinsData, TenancyControllerListBinsErrors, TenancyControllerListBinsResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerListZonesData, TenancyControllerListZonesErrors, TenancyControllerListZonesResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerSetBinBlockedData, TenancyControllerSetBinBlockedErrors, TenancyControllerSetBinBlockedResponses, TenancyControllerSetupChecklistData, TenancyControllerSetupChecklistErrors, TenancyControllerSetupChecklistResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses, UsersControllerAcceptInviteData, UsersControllerAcceptInviteErrors, UsersControllerAcceptInviteResponses, UsersControllerInviteUserData, UsersControllerInviteUserErrors, UsersControllerInviteUserResponses, UsersControllerListUsersData, UsersControllerListUsersErrors, UsersControllerListUsersResponses, UsersControllerMeData, UsersControllerMeErrors, UsersControllerMeResponses, UsersControllerSetUserRoleData, UsersControllerSetUserRoleErrors, UsersControllerSetUserRoleResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -253,6 +253,75 @@ export const echoControllerEcho = <ThrowOnError extends boolean = false>(options
 });
 
 /**
+ * Mints a one-time device enrollment code (device.manage) — 15-minute TTL, single redemption
+ */
+export const devicesControllerMintEnrollmentCode = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerMintEnrollmentCodeData, ThrowOnError>): RequestResult<DevicesControllerMintEnrollmentCodeResponses, DevicesControllerMintEnrollmentCodeErrors, ThrowOnError> => (options.client ?? client).post<DevicesControllerMintEnrollmentCodeResponses, DevicesControllerMintEnrollmentCodeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/devices/enrollment-codes',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Enrolls a device (unauthenticated): redeems the one-time code for a device credential + sealed offline-store key
+ */
+export const devicesControllerEnroll = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerEnrollData, ThrowOnError>): RequestResult<DevicesControllerEnrollResponses, DevicesControllerEnrollErrors, ThrowOnError> => (options.client ?? client).post<DevicesControllerEnrollResponses, DevicesControllerEnrollErrors, ThrowOnError>({
+    url: '/tenants/{tenantId}/devices/enroll',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Badge-in: the device credential + operator PIN mint the revocable operator-bound device session
+ */
+export const devicesControllerBadgeIn = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerBadgeInData, ThrowOnError>): RequestResult<DevicesControllerBadgeInResponses, DevicesControllerBadgeInErrors, ThrowOnError> => (options.client ?? client).post<DevicesControllerBadgeInResponses, DevicesControllerBadgeInErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/devices/badge-in',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Lists the tenant's enrolled devices (keyset cursor pagination — open to any member)
+ */
+export const devicesControllerListDevices = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerListDevicesData, ThrowOnError>): RequestResult<DevicesControllerListDevicesResponses, DevicesControllerListDevicesErrors, ThrowOnError> => (options.client ?? client).get<DevicesControllerListDevicesResponses, DevicesControllerListDevicesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/devices',
+    ...options
+});
+
+/**
+ * Revokes a device (device.manage) — wipe-flagged, audited, effective on the device’s next request; re-revoke idempotent
+ */
+export const devicesControllerRevokeDevice = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerRevokeDeviceData, ThrowOnError>): RequestResult<DevicesControllerRevokeDeviceResponses, DevicesControllerRevokeDeviceErrors, ThrowOnError> => (options.client ?? client).post<DevicesControllerRevokeDeviceResponses, DevicesControllerRevokeDeviceErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/devices/{deviceId}/revoke',
+    ...options
+});
+
+/**
+ * Device self-test echo (badge-in session required): the substrate replay target — re-authorizes device status + operator role per call
+ */
+export const devicesControllerSelfTestEcho = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerSelfTestEchoData, ThrowOnError>): RequestResult<DevicesControllerSelfTestEchoResponses, DevicesControllerSelfTestEchoErrors, ThrowOnError> => (options.client ?? client).post<DevicesControllerSelfTestEchoResponses, DevicesControllerSelfTestEchoErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/devices/self-test/echo',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * Records a manual stock adjustment (one ledger event + on-hand projection in one commit)
  */
 export const inventoryControllerAdjustStock = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerAdjustStockData, ThrowOnError>): RequestResult<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError> => (options.client ?? client).post<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError>({
@@ -308,4 +377,83 @@ export const inventoryControllerGetSerial = <ThrowOnError extends boolean = fals
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/tenants/{tenantId}/inventory/serials/{serialId}',
     ...options
+});
+
+/**
+ * Lists the tenant's vendors (keyset cursor pagination — open to any member)
+ */
+export const inboundControllerListVendors = <ThrowOnError extends boolean = false>(options: Options<InboundControllerListVendorsData, ThrowOnError>): RequestResult<InboundControllerListVendorsResponses, InboundControllerListVendorsErrors, ThrowOnError> => (options.client ?? client).get<InboundControllerListVendorsResponses, InboundControllerListVendorsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/vendors',
+    ...options
+});
+
+/**
+ * Creates a vendor (vendor.manage) — code unique per tenant
+ */
+export const inboundControllerCreateVendor = <ThrowOnError extends boolean = false>(options: Options<InboundControllerCreateVendorData, ThrowOnError>): RequestResult<InboundControllerCreateVendorResponses, InboundControllerCreateVendorErrors, ThrowOnError> => (options.client ?? client).post<InboundControllerCreateVendorResponses, InboundControllerCreateVendorErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/vendors',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Creates a purchase order (po.manage) — warehouse-scoped, ≥1 line, code unique per tenant
+ */
+export const inboundControllerCreatePurchaseOrder = <ThrowOnError extends boolean = false>(options: Options<InboundControllerCreatePurchaseOrderData, ThrowOnError>): RequestResult<InboundControllerCreatePurchaseOrderResponses, InboundControllerCreatePurchaseOrderErrors, ThrowOnError> => (options.client ?? client).post<InboundControllerCreatePurchaseOrderResponses, InboundControllerCreatePurchaseOrderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/inbound/purchase-orders',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Lists one warehouse's purchase orders, status-filterable (keyset cursor pagination)
+ */
+export const inboundControllerListPurchaseOrders = <ThrowOnError extends boolean = false>(options: Options<InboundControllerListPurchaseOrdersData, ThrowOnError>): RequestResult<InboundControllerListPurchaseOrdersResponses, InboundControllerListPurchaseOrdersErrors, ThrowOnError> => (options.client ?? client).get<InboundControllerListPurchaseOrdersResponses, InboundControllerListPurchaseOrdersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inbound/purchase-orders',
+    ...options
+});
+
+/**
+ * One purchase order's detail — per line the ordered / received-to-date / open quantities at all times
+ */
+export const inboundControllerGetPurchaseOrder = <ThrowOnError extends boolean = false>(options: Options<InboundControllerGetPurchaseOrderData, ThrowOnError>): RequestResult<InboundControllerGetPurchaseOrderResponses, InboundControllerGetPurchaseOrderErrors, ThrowOnError> => (options.client ?? client).get<InboundControllerGetPurchaseOrderResponses, InboundControllerGetPurchaseOrderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/inbound/purchase-orders/{poId}',
+    ...options
+});
+
+/**
+ * Amends an open purchase order (po.manage) — the full line set: update by id, add without id, remove by absence
+ */
+export const inboundControllerAmendPurchaseOrder = <ThrowOnError extends boolean = false>(options: Options<InboundControllerAmendPurchaseOrderData, ThrowOnError>): RequestResult<InboundControllerAmendPurchaseOrderResponses, InboundControllerAmendPurchaseOrderErrors, ThrowOnError> => (options.client ?? client).patch<InboundControllerAmendPurchaseOrderResponses, InboundControllerAmendPurchaseOrderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/inbound/purchase-orders/{poId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Closes a purchase order (po.manage) with a per-line disposition — carried open quantities auto-create one successor open PO
+ */
+export const inboundControllerClosePurchaseOrder = <ThrowOnError extends boolean = false>(options: Options<InboundControllerClosePurchaseOrderData, ThrowOnError>): RequestResult<InboundControllerClosePurchaseOrderResponses, InboundControllerClosePurchaseOrderErrors, ThrowOnError> => (options.client ?? client).post<InboundControllerClosePurchaseOrderResponses, InboundControllerClosePurchaseOrderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/inbound/purchase-orders/{poId}/close',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });

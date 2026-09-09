@@ -28,7 +28,7 @@ afterEach(() => {
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
-    expect(ROLE_CAPABILITIES.owner.length).toBe(8);
+    expect(ROLE_CAPABILITIES.owner.length).toBe(9);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -37,6 +37,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'sku.edit')).toBe(true);
     expect(roleHasCapability('owner', 'users.invite')).toBe(true);
     expect(roleHasCapability('owner', 'users.role_change')).toBe(true);
+    expect(roleHasCapability('owner', 'device.manage')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -48,6 +49,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'sku.edit')).toBe(true);
     expect(roleHasCapability('ops_manager', 'users.invite')).toBe(false);
     expect(roleHasCapability('ops_manager', 'users.role_change')).toBe(false);
+    expect(roleHasCapability('ops_manager', 'device.manage')).toBe(true);
   });
 
   test('operator and accountant are read-only', () => {
