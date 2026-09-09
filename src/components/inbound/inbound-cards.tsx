@@ -12,6 +12,7 @@ import {
   useVendorMap,
   type PurchaseOrderHeader,
 } from '@/lib/use-inbound';
+import { openQtyLabel } from '@/lib/over-receipt';
 import type { GoodsReceiptEntryDto, PurchaseOrderLineDto } from '@/lib/api/generated';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
@@ -161,7 +162,7 @@ function PurchaseOrdersCard({
 
 /** One PO line: `SKU 100 ord · 40 rec · 60 open` (negative open = over-received). */
 function PoLineRow({ line, skuCode }: { line: PurchaseOrderLineDto; skuCode: string | null }) {
-  const open = line.openQty < 0 ? `${line.openQty} (over-received)` : String(line.openQty);
+  const open = openQtyLabel(line.openQty);
   return (
     <div className="flex flex-wrap items-center gap-x-2 text-xs">
       <span className="font-mono">{skuCode ?? '(unknown SKU)'}</span>

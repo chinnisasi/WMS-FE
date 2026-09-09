@@ -994,7 +994,7 @@ export type GrnLineInputDto = {
      */
     mfgDate?: string | null;
     /**
-     * Physically received quantity in base UoM (positive integer)
+     * Physically received quantity in base UoM (positive integer, at most 2147483647 — the int4 bound of the line table)
      */
     qty: number;
 };
@@ -1161,6 +1161,10 @@ export type GoodsReceiptEntryDto = {
      * Units applied immediately (the excess pends)
      */
     appliedUnits: number;
+    /**
+     * Row creation time (the keyset cursor field), ISO-8601 UTC
+     */
+    createdAt: string;
 };
 
 export type GoodsReceiptListResponse = {
@@ -1193,6 +1197,10 @@ export type OverReceiptDto = {
     requestedAt: string;
     decidedBy: string | null;
     decidedAt: string | null;
+    /**
+     * Row creation time (the keyset cursor field), ISO-8601 UTC
+     */
+    createdAt: string;
 };
 
 export type OverReceiptListResponse = {

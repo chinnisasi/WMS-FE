@@ -256,11 +256,22 @@ export function useOverReceipts(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
-  const [requested, setRequested] = useState<{ tenantId: string; cursor: string | null } | null>(null);
-  const activeCursor = requested !== null && requested.tenantId === tenantId ? requested.cursor : null;
+  const [requested, setRequested] = useState<{
+    tenantId: string;
+    status: 'pending' | 'approved' | 'rejected';
+    cursor: string | null;
+  } | null>(null);
+  // The cursor is scoped to the scope it was asked for — a cursor paged on
+  // one status tab is a first-page request on another (a cursor from the
+  // pending tab must never ride the approved query, or rows are skipped).
+  const activeCursor =
+    requested !== null && requested.tenantId === tenantId && requested.status === status
+      ? requested.cursor
+      : null;
   const [revision, setRevision] = useState(0);
   const [page, setPage] = useState<{
     tenantId: string;
+    status: 'pending' | 'approved' | 'rejected';
     requested: string | null;
     page: OverReceiptsPage;
   } | null>(null);
@@ -293,6 +304,7 @@ export function useOverReceipts(
         if (!cancelled) {
           setPage({
             tenantId,
+            status,
             requested: activeCursor,
             page: {
               items: result.items,
@@ -314,9 +326,9 @@ export function useOverReceipts(
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null) return;
-      setRequested({ tenantId, cursor });
+      setRequested({ tenantId, status, cursor });
     },
-    [tenantId],
+    [tenantId, status],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
@@ -324,6 +336,7 @@ export function useOverReceipts(
     tenantId === null ||
     page === null ||
     page.tenantId !== tenantId ||
+    page.status !== status ||
     page.requested !== activeCursor
   ) {
     return null;

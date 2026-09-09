@@ -3,12 +3,12 @@
 import { useState, useSyncExternalStore } from 'react';
 
 import {
-  ApiProblem,
   fetchApiApproveOverReceipt,
   fetchApiRejectOverReceipt,
 } from '@/lib/api/client';
 import type { OverReceiptDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { decisionReason, openQtyLabel } from '@/lib/over-receipt';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useOverReceipts, useSkuMap, useUserMap } from '@/lib/use-inbound';
@@ -96,7 +96,7 @@ function OverReceiptQueueSessioned() {
       });
       queue?.reload();
     } catch (error) {
-      setOutcome({ tone: 'rejected', word: 'Not decided', reason: rejectionReason(error) });
+      setOutcome({ tone: 'rejected', word: 'Not decided', reason: decisionReason(error) });
     } finally {
       setDecidingId(null);
     }
@@ -203,7 +203,7 @@ function OverReceiptCard({
       {line !== null && (
         <div className="text-xs text-(--muted-foreground)">
           Line: {line.orderedQty} ordered · {line.receivedQty} received-to-date ·{' '}
-          {line.openQty < 0 ? `${line.openQty} open (over-received)` : `${line.openQty} open`}
+          {openQtyLabel(line.openQty)} open
         </div>
       )}
       <div className="text-xs text-(--muted-foreground)">
@@ -244,30 +244,4 @@ function OverReceiptCard({
       )}
     </article>
   );
-}
-
-/**
- * Clients branch on the machine-readable problem `code`, never on prose —
- * same convention as the settings forms, extended with the decision codes.
- */
-function rejectionReason(error: unknown): string {
-  if (error instanceof ApiProblem) {
-    switch (error.code) {
-      case 'over-receipt-decided':
-        return 'This over-receipt was already decided — refresh the queue.';
-      case 'not-found':
-        return 'This over-receipt no longer exists — refresh the queue.';
-      case 'role-denied':
-        return 'Your role cannot decide over-receipts.';
-      case 'idempotency-key-reuse':
-        return 'This decision was already processed.';
-      case 'unauthenticated':
-        return 'Your session expired — sign in again.';
-      case 'validation-failed':
-        return error.detail ?? 'Check the request and try again.';
-      default:
-        return error.detail ?? `Decision failed (${error.code}).`;
-    }
-  }
-  return 'The API is unreachable — is wms-be running?';
 }
