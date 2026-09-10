@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from '@/lib/api/client';
-import { decisionReason, openQtyLabel } from './over-receipt';
+import { decisionReason, openQtyLabel, qcReason } from './over-receipt';
 
 /**
  * The story 3.3 surface copy decisions: an approved over-receipt
@@ -57,6 +57,53 @@ describe('decisionReason (the decision problem-code strings)', () => {
 
   test('a non-ApiProblem failure is the unreachable copy', () => {
     expect(decisionReason(new Error('fetch failed'))).toBe(
+      'The API is unreachable — is wms-be running?',
+    );
+  });
+});
+
+describe('qcReason (the story 3.4 hold/release problem-code strings)', () => {
+  test('each QC hold problem code maps to its plain-words reason', () => {
+    expect(qcReason(new ApiProblem('qc-hold-open', 409))).toBe(
+      'An open QC hold already covers this scope — release it first.',
+    );
+    expect(qcReason(new ApiProblem('qc-hold-released', 409))).toBe(
+      'This hold was already released — refresh the list.',
+    );
+    expect(qcReason(new ApiProblem('qc-hold-origin-bin-gone', 409))).toBe(
+      'The origin bin no longer exists, so the stock cannot return to it — the hold stays open.',
+    );
+    expect(qcReason(new ApiProblem('not-found', 404))).toBe(
+      'This hold no longer exists — refresh the list.',
+    );
+    expect(qcReason(new ApiProblem('role-denied', 403))).toBe(
+      'Your role cannot place or release QC holds.',
+    );
+    expect(qcReason(new ApiProblem('idempotency-key-reuse', 422))).toBe(
+      'This action was already processed.',
+    );
+    expect(qcReason(new ApiProblem('unauthenticated', 401))).toBe(
+      'Your session expired — sign in again.',
+    );
+  });
+
+  test('a validation failure surfaces the problem detail verbatim', () => {
+    expect(qcReason(new ApiProblem('validation-failed', 400, 'The scope has 0 on-hand units'))).toBe(
+      'The scope has 0 on-hand units',
+    );
+  });
+
+  test('an unmapped problem code falls back to the detail or the code', () => {
+    expect(qcReason(new ApiProblem('unknown-problem', 500, 'Something broke'))).toBe(
+      'Something broke',
+    );
+    expect(qcReason(new ApiProblem('unknown-problem', 500))).toBe(
+      'The action failed (unknown-problem).',
+    );
+  });
+
+  test('a non-ApiProblem failure is the unreachable copy', () => {
+    expect(qcReason(new Error('fetch failed'))).toBe(
       'The API is unreachable — is wms-be running?',
     );
   });

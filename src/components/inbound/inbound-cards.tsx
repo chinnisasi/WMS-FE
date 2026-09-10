@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -280,7 +280,7 @@ function QcHoldsCard({
   warehouseLabel: string | null;
 }) {
   const [tab, setTab] = useState<HoldTab>('open');
-  const holds = useQcHolds(tab);
+  const holds = useQcHolds(warehouseId, tab);
   const skus = useSkuMap();
   const users = useUserMap();
   const bins = useBinCodeMap(warehouseId);
@@ -295,10 +295,16 @@ function QcHoldsCard({
 
   const [outcome, setOutcome] = useState<HoldOutcome>(null);
   const [releasingId, setReleasingId] = useState<string | null>(null);
+  // A pre-render double-click fires both handlers before the disabled state
+  // renders — this synchronous re-entry guard makes the second click a
+  // no-op instead of a NEW command whose fresh Idempotency-Key would 409
+  // right after the first release succeeded.
+  const releaseInFlight = useRef<Set<string>>(new Set());
 
   async function release(hold: QcHoldDto) {
     const session = readSession();
-    if (session === null) return;
+    if (session === null || releaseInFlight.current.has(hold.id)) return;
+    releaseInFlight.current.add(hold.id);
     setReleasingId(hold.id);
     setOutcome(null);
     try {
@@ -313,6 +319,7 @@ function QcHoldsCard({
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not released', reason: qcReason(error) });
     } finally {
+      releaseInFlight.current.delete(hold.id);
       setReleasingId(null);
     }
   }
@@ -425,24 +432,49 @@ function PlaceQcHoldForm({
   warehouseId: string | null;
   onPlaced: () => void;
 }) {
-  const scopes = useStockScopes(warehouseId);
+  const scopesData = useStockScopes(warehouseId);
+  const openHolds = useQcHolds(warehouseId, 'open');
   const skus = useSkuMap();
   const bins = useBinCodeMap(warehouseId);
   const [picked, setPicked] = useState<string>('');
   const [reason, setReason] = useState('');
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The same synchronous re-entry guard the Release button carries: a
+  // pre-render double-click must be a no-op, not a second command with a
+  // fresh Idempotency-Key that 409s after the first placement succeeded.
+  const placingRef = useRef(false);
   // `picked` is "skuId:binId" (the select's value) or '' — split into the
   // two ids the place command carries.
   const scopeParts = picked === '' ? null : picked.split(':');
   const selectedSku = scopeParts?.[0] ?? null;
   const selectedBin = scopeParts?.[1] ?? null;
 
+  // Offerable scopes only: nothing already under an open hold (a guaranteed
+  // 409) and nothing sitting in the system QC-hold bin (a guaranteed 400) —
+  // until the bin codes load, nothing is offered rather than guessing.
+  const heldScopes = new Set(
+    (openHolds?.items ?? []).map((hold) => `${hold.skuId}:${hold.binId}`),
+  );
+  const offerable =
+    scopesData === null || bins === null
+      ? []
+      : scopesData.rows.filter(
+          (row) => bins[row.binId] !== 'QC-HOLD' && !heldScopes.has(`${row.skuId}:${row.binId}`),
+        );
+
   async function submit() {
     const session = readSession();
-    if (session === null || warehouseId === null || selectedSku === null || selectedBin === null) {
+    if (
+      session === null ||
+      warehouseId === null ||
+      selectedSku === null ||
+      selectedBin === null ||
+      placingRef.current
+    ) {
       return;
     }
+    placingRef.current = true;
     setPlacing(true);
     setError(null);
     try {
@@ -458,10 +490,15 @@ function PlaceQcHoldForm({
       );
       setPicked('');
       setReason('');
+      // The just-held scope leaves the picker (its units moved into the QC
+      // bin) and joins the open-holds list.
+      scopesData?.reload();
+      openHolds?.reload();
       onPlaced();
     } catch (caught) {
       setError(qcReason(caught));
     } finally {
+      placingRef.current = false;
       setPlacing(false);
     }
   }
@@ -484,7 +521,7 @@ function PlaceQcHoldForm({
           className="rounded-sm border border-(--border) bg-(--background) px-2 py-1 text-xs"
         >
           <option value="">Pick an on-hand scope…</option>
-          {(scopes ?? []).map((row) => (
+          {offerable.map((row) => (
             <option key={`${row.skuId}:${row.binId}`} value={`${row.skuId}:${row.binId}`}>
               {skus?.[row.skuId]?.code ?? '(unknown SKU)'} @ {bins?.[row.binId] ?? row.binId} ·{' '}
               {row.quantity} on hand
@@ -513,9 +550,10 @@ function PlaceQcHoldForm({
           {error}
         </div>
       )}
-      {scopes !== null && scopes.length === 0 && (
+      {scopesData !== null && offerable.length === 0 && (
         <div className="text-xs text-(--muted-foreground)">
-          No on-hand stock in this warehouse — a hold quarantines stock that exists.
+          No holdable on-hand stock in this warehouse — a hold quarantines stock that exists and
+          is not already held.
         </div>
       )}
     </form>

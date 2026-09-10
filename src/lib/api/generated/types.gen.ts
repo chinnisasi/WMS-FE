@@ -1248,6 +1248,9 @@ export type QcHoldDto = {
      */
     heldAt: string;
     releasedBy: string | null;
+    /**
+     * ISO-8601 UTC instant when released; null while the hold is open
+     */
     releasedAt: string | null;
     /**
      * Row creation time (the keyset cursor field), ISO-8601 UTC
@@ -3408,6 +3411,9 @@ export type ReceivingControllerListQcHoldsData = {
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
+        /**
+         * Page size (values above the 200 ceiling are clamped to it)
+         */
         limit?: number;
     };
     url: '/tenants/{tenantId}/receiving/qc-holds';
@@ -3435,6 +3441,9 @@ export type ReceivingControllerListQcHoldsErrors = {
 export type ReceivingControllerListQcHoldsError = ReceivingControllerListQcHoldsErrors[keyof ReceivingControllerListQcHoldsErrors];
 
 export type ReceivingControllerListQcHoldsResponses = {
+    /**
+     * The QC-hold page (newest first — the Inbound surface's holds read)
+     */
     200: QcHoldListResponse;
 };
 
@@ -3460,7 +3469,7 @@ export type ReceivingControllerPlaceQcHoldData = {
 
 export type ReceivingControllerPlaceQcHoldErrors = {
     /**
-     * Missing or malformed Idempotency-Key, an invalid body, or an empty scope (validation-failed)
+     * Missing or malformed Idempotency-Key, an invalid body, an empty scope, a serial-tracked SKU, or the system QC-hold bin as the hold origin (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -3545,6 +3554,9 @@ export type ReceivingControllerReleaseQcHoldErrors = {
 export type ReceivingControllerReleaseQcHoldError = ReceivingControllerReleaseQcHoldErrors[keyof ReceivingControllerReleaseQcHoldErrors];
 
 export type ReceivingControllerReleaseQcHoldResponses = {
+    /**
+     * Hold released: the released hold row with its releasedBy/releasedAt (the idempotency snapshot)
+     */
     200: QcHoldResponse;
 };
 

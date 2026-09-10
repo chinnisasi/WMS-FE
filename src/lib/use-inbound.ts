@@ -482,6 +482,7 @@ export interface QcHoldsPage {
 }
 
 export function useQcHolds(
+  warehouseId: string | null,
   status: 'open' | 'released',
 ): (QcHoldsPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
   const tenantId = useSyncExternalStore(
@@ -491,35 +492,43 @@ export function useQcHolds(
   );
   const [requested, setRequested] = useState<{
     tenantId: string;
+    warehouseId: string | null;
     status: 'open' | 'released';
     cursor: string | null;
   } | null>(null);
   // The cursor is scoped to the scope it was asked for — a cursor paged on
-  // one status tab is a first-page request on another.
+  // one warehouse or status tab is a first-page request on another.
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId && requested.status === status
+    requested !== null &&
+    requested.tenantId === tenantId &&
+    requested.warehouseId === warehouseId &&
+    requested.status === status
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
   const [page, setPage] = useState<{
     tenantId: string;
+    warehouseId: string | null;
     status: 'open' | 'released';
     requested: string | null;
     page: QcHoldsPage;
   } | null>(null);
 
   useEffect(() => {
-    if (tenantId === null) return;
+    if (tenantId === null || warehouseId === null) return;
     let cancelled = false;
     (async () => {
       try {
         const result = await fetchApiListQcHolds(
           tenantId,
-          activeCursor === null ? { status } : { status, cursor: activeCursor },
+          activeCursor === null
+            ? { warehouseId, status }
+            : { warehouseId, status, cursor: activeCursor },
         );
         if (cancelled) return;
         setPage({
           tenantId,
+          warehouseId,
           status,
           requested: activeCursor,
           page: { items: result.items, nextCursor: result.nextCursor ?? null },
@@ -531,21 +540,23 @@ export function useQcHolds(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, status, activeCursor, revision]);
+  }, [tenantId, warehouseId, status, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
-      if (tenantId === null) return;
-      setRequested({ tenantId, status, cursor });
+      if (tenantId === null || warehouseId === null) return;
+      setRequested({ tenantId, warehouseId, status, cursor });
     },
-    [tenantId, status],
+    [tenantId, warehouseId, status],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
   if (
     tenantId === null ||
+    warehouseId === null ||
     page === null ||
     page.tenantId !== tenantId ||
+    page.warehouseId !== warehouseId ||
     page.status !== status ||
     page.requested !== activeCursor
   ) {
@@ -557,9 +568,13 @@ export function useQcHolds(
 /**
  * The active warehouse's on-hand (sku, bin) scopes with stock (story 2.2's
  * read) as the QC hold form's scope choices — the full page chain behind
- * `fetchAllPages`, positive-quantity rows only.
+ * `fetchAllPages`, positive-quantity rows only. `reload` refetches the whole
+ * chain (a just-held scope's units move into the QC bin, so its row drops
+ * out of the picker).
  */
-export function useStockScopes(warehouseId: string | null): readonly StockEntryDto[] | null {
+export function useStockScopes(
+  warehouseId: string | null,
+): { rows: readonly StockEntryDto[]; reload: () => void } | null {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -570,6 +585,7 @@ export function useStockScopes(warehouseId: string | null): readonly StockEntryD
     warehouseId: string;
     rows: readonly StockEntryDto[];
   } | null>(null);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     if (tenantId === null || warehouseId === null) return;
@@ -593,11 +609,13 @@ export function useStockScopes(warehouseId: string | null): readonly StockEntryD
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId]);
+  }, [tenantId, warehouseId, revision]);
+
+  const reload = useCallback(() => setRevision((r) => r + 1), []);
 
   if (tenantId === null || warehouseId === null) return null;
   if (rows === null || rows.tenantId !== tenantId || rows.warehouseId !== warehouseId) return null;
-  return rows.rows;
+  return { rows: rows.rows, reload };
 }
 
 /**
