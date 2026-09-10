@@ -3824,7 +3824,7 @@ export type PutawayControllerPlacePutawayErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A concurrent idempotent request (conflict), or a serial-tracked placement scans a serial that already lives in a bin or was last seen in another bin (duplicate-serial / serial-elsewhere, naming it)
+     * A concurrent idempotent request (conflict), or a serial-tracked placement scans a serial that is not in the Receiving bin — it lives elsewhere, was already drawn out, or was last seen in another bin (serial-elsewhere, naming the bin)
      */
     409: ProblemDetailsDto;
     /**
@@ -3839,7 +3839,7 @@ export type PutawayControllerPlacePutawayResponses = {
     /**
      * Placement recorded: the placement snapshot with suggestion-vs-actual (the idempotency snapshot — a replay re-serves it, nothing re-moves)
      */
-    200: PutawayPlacementResponse;
+    201: PutawayPlacementResponse;
 };
 
 export type PutawayControllerPlacePutawayResponse = PutawayControllerPlacePutawayResponses[keyof PutawayControllerPlacePutawayResponses];
