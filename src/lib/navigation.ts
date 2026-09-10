@@ -17,7 +17,8 @@ export interface NavItem {
    * that declares any capability is hidden from roles holding none of them —
    * hide surfaces, never "blocked" screens. No epic-1 surface is
    * mutation-centric enough to declare one yet (warehouse/catalog setup lives
-   * inside Settings); operational epics declare theirs here as they land.
+   * inside Settings); operational epics declare theirs here as they land —
+   * story 3.3 gates Conflicts & Reviews behind `review.decide`.
    */
   readonly capabilities?: readonly Capability[];
 }
@@ -28,7 +29,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'inbound', label: 'Inbound', href: '/inbound', monogram: 'IB' },
   { id: 'outbound', label: 'Outbound', href: '/outbound', monogram: 'OB' },
   { id: 'moves', label: 'Moves', href: '/moves', monogram: 'MV' },
-  { id: 'conflicts', label: 'Conflicts & Reviews', href: '/conflicts', monogram: 'CR' },
+  { id: 'conflicts', label: 'Conflicts & Reviews', href: '/conflicts', monogram: 'CR', capabilities: ['review.decide'] },
   { id: 'notifications', label: 'Notifications', href: '/notifications', monogram: 'NO' },
   { id: 'replenishment', label: 'Replenishment', href: '/replenishment', monogram: 'RP' },
   { id: 'channels', label: 'Channels', href: '/channels', monogram: 'CH' },
