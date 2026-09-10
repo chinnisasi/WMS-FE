@@ -3411,9 +3411,6 @@ export type ReceivingControllerListQcHoldsData = {
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
-        /**
-         * Page size (values above the 200 ceiling are clamped to it)
-         */
         limit?: number;
     };
     url: '/tenants/{tenantId}/receiving/qc-holds';
