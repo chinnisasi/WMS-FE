@@ -25,8 +25,10 @@ import {
   tenancyControllerListBins,
   tenancyControllerListWarehouses,
   tenancyControllerListZones,
+  tenancyControllerMergeBin,
   tenancyControllerRegister,
   tenancyControllerSetBinBlocked,
+  tenancyControllerRetireBin,
   tenancyControllerSetupChecklist,
   tenancyControllerSignIn,
   usersControllerAcceptInvite,
@@ -41,6 +43,7 @@ import type {
   AcceptInviteResponse,
   BinGridResponse,
   BinListResponse,
+  BinMergeResponse,
   BinResponse,
   CatalogImportResponse,
   CreateBinDto,
@@ -51,6 +54,7 @@ import type {
   GenerateBinsDto,
   GoodsReceiptListResponse,
   HealthResponse,
+  MergeBinDto,
   InviteUserDto,
   InviteUserResponse,
   MeResponse,
@@ -309,6 +313,46 @@ export async function fetchApiSetBinBlocked(
   const { data, error } = await tenancyControllerSetBinBlocked({
     path: { tenantId, warehouseId, binId },
     body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Merges a bin into another (capability `bin.retire`, story 3.6) — the
+ * source's stock moves through real ledger movements and the source retires
+ * in the same commit.
+ */
+export async function fetchApiMergeBin(
+  tenantId: string,
+  warehouseId: string,
+  sourceBinId: string,
+  body: MergeBinDto,
+  idempotencyKey: string,
+): Promise<BinMergeResponse> {
+  const { data, error } = await tenancyControllerMergeBin({
+    path: { tenantId, warehouseId, binId: sourceBinId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Retires a bin (capability `bin.retire`) — one-way, only an EMPTY bin can. */
+export async function fetchApiRetireBin(
+  tenantId: string,
+  warehouseId: string,
+  binId: string,
+  idempotencyKey: string,
+): Promise<BinResponse> {
+  const { data, error } = await tenancyControllerRetireBin({
+    path: { tenantId, warehouseId, binId },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {

@@ -123,6 +123,18 @@ export type BinResponse = {
     capacity: number;
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
     blocked: boolean;
+    /**
+     * The one-way retirement instant (null while the bin is live) — Story 3.6
+     */
+    retiredAt: string | null;
+    /**
+     * Who retired the bin (null while the bin is live) — Story 3.6
+     */
+    retiredBy: string | null;
+    /**
+     * The Receiving/QC-hold system bins (never blockable, mergeable, or retired)
+     */
+    systemOwned: boolean;
     createdAt: string;
 };
 
@@ -168,6 +180,36 @@ export type PatchBinDto = {
      * true blocks the bin (broken); false unblocks
      */
     blocked: boolean;
+};
+
+export type MergeBinDto = {
+    /**
+     * The bin the source bin's stock consolidates into
+     */
+    targetBinId: string;
+};
+
+export type BinMovedSummary = {
+    /**
+     * Distinct SKUs whose arms moved
+     */
+    skus: number;
+    /**
+     * Total base-UoM units moved
+     */
+    units: number;
+};
+
+export type BinMergeResponse = {
+    /**
+     * The source bin, post-merge (retired in the same commit)
+     */
+    source: BinResponse;
+    target: BinResponse;
+    /**
+     * Distinct SKUs whose arms moved, and the total base-UoM units moved
+     */
+    moved: BinMovedSummary;
 };
 
 export type SetupChecklistStepResponse = {
@@ -1875,7 +1917,7 @@ export type TenancyControllerSetBinBlockedData = {
 
 export type TenancyControllerSetBinBlockedErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or invalid body
+     * Missing or malformed Idempotency-Key, invalid body, or a system bin (validation-failed names the bin)
      */
     400: ProblemDetailsDto;
     /**
@@ -1891,6 +1933,10 @@ export type TenancyControllerSetBinBlockedErrors = {
      */
     404: ProblemDetailsDto;
     /**
+     * The bin is retired (bin-retired — retirement is terminal)
+     */
+    409: ProblemDetailsDto;
+    /**
      * Idempotency key reused with a different payload (idempotency-key-reuse)
      */
     422: ProblemDetailsDto;
@@ -1903,6 +1949,119 @@ export type TenancyControllerSetBinBlockedResponses = {
 };
 
 export type TenancyControllerSetBinBlockedResponse = TenancyControllerSetBinBlockedResponses[keyof TenancyControllerSetBinBlockedResponses];
+
+export type TenancyControllerMergeBinData = {
+    body: MergeBinDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        /**
+         * The SOURCE bin
+         */
+        binId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}/merge';
+};
+
+export type TenancyControllerMergeBinErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a structural guard (validation-failed / bin-retired / bin-blocked — a blocked SOURCE is allowed, the only way to empty a blocked bin; only the target must be live), or a target overflow (bin-full names capacity and occupancy — nothing committed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks bin.retire (role-denied — Owner and Ops Manager only)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Source or target bin does not exist in this warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A source/target bin has an open QC hold (bin-merge-hold-open names the bin and the hold)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerMergeBinError = TenancyControllerMergeBinErrors[keyof TenancyControllerMergeBinErrors];
+
+export type TenancyControllerMergeBinResponses = {
+    200: BinMergeResponse;
+};
+
+export type TenancyControllerMergeBinResponse = TenancyControllerMergeBinResponses[keyof TenancyControllerMergeBinResponses];
+
+export type TenancyControllerRetireBinData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        binId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}/retire';
+};
+
+export type TenancyControllerRetireBinErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a system bin (validation-failed), or the bin still holds stock (bin-not-empty names the (sku, batch, qty) rows)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks bin.retire (role-denied — Owner and Ops Manager)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Bin does not exist in this warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The bin is already retired (bin-retired — retirement is terminal)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerRetireBinError = TenancyControllerRetireBinErrors[keyof TenancyControllerRetireBinErrors];
+
+export type TenancyControllerRetireBinResponses = {
+    200: BinResponse;
+};
+
+export type TenancyControllerRetireBinResponse = TenancyControllerRetireBinResponses[keyof TenancyControllerRetireBinResponses];
 
 export type TenancyControllerSetupChecklistData = {
     body?: never;
