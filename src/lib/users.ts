@@ -28,14 +28,19 @@ export const CAPABILITIES = [
   // Story 3.4 — QC hold/release (the Inbound surface's QC Holds card): an
   // Ops Manager quarantines a (sku, bin) scope and releases it.
   'qc.manage',
+  // Story 3.5 — directed putaway (web reads only; the device holds
+  // `putaway.place`). The first non-empty operator capability: operators
+  // place stock from the floor, so the mirror hides no putaway surface from
+  // them (the web surface is read-only anyway).
+  'putaway.execute',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
   owner: CAPABILITIES,
-  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage', 'review.decide', 'qc.manage'],
-  operator: [],
+  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage', 'review.decide', 'qc.manage', 'putaway.execute'],
+  operator: ['putaway.execute'],
   accountant: [],
 };
 
