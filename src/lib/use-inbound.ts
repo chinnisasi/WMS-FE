@@ -4,21 +4,29 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import {
   fetchApiGetPurchaseOrder,
+  fetchApiListBins,
   fetchApiListGoodsReceipts,
   fetchApiListOverReceipts,
   fetchApiListPurchaseOrders,
+  fetchApiListQcHolds,
   fetchApiListSkus,
+  fetchApiListStock,
   fetchApiListUsers,
   fetchApiListVendors,
+  fetchApiListZones,
 } from '@/lib/api/client';
 import type {
+  BinResponse,
   GoodsReceiptEntryDto,
   OverReceiptDto,
   PurchaseOrderDto,
   PurchaseOrderLineDto,
+  QcHoldDto,
   SkuResponse,
+  StockEntryDto,
   UserResponse,
   VendorDto,
+  ZoneResponse,
 } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CATALOG_CHANGED_EVENT } from '@/lib/catalog';
@@ -460,5 +468,205 @@ export function useUserMap(): Readonly<Record<string, UserResponse>> | null {
   }, [tenantId, revision]);
 
   if (tenantId === null || map === null || map.tenantId !== tenantId) return null;
+  return map.map;
+}
+/**
+ * One keyset page of the QC holds list (story 3.4) — the Inbound surface's
+ * QC Holds card. No join data rides the rows: the card composes SKU codes
+ * and holder emails through `useSkuMap` / `useUserMap`.
+ */
+export interface QcHoldsPage {
+  items: readonly QcHoldDto[];
+  /** Cursor for the Next button; null on the last page. */
+  nextCursor: string | null;
+}
+
+export function useQcHolds(
+  warehouseId: string | null,
+  status: 'open' | 'released',
+): (QcHoldsPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [requested, setRequested] = useState<{
+    tenantId: string;
+    warehouseId: string | null;
+    status: 'open' | 'released';
+    cursor: string | null;
+  } | null>(null);
+  // The cursor is scoped to the scope it was asked for — a cursor paged on
+  // one warehouse or status tab is a first-page request on another.
+  const activeCursor =
+    requested !== null &&
+    requested.tenantId === tenantId &&
+    requested.warehouseId === warehouseId &&
+    requested.status === status
+      ? requested.cursor
+      : null;
+  const [revision, setRevision] = useState(0);
+  const [page, setPage] = useState<{
+    tenantId: string;
+    warehouseId: string | null;
+    status: 'open' | 'released';
+    requested: string | null;
+    page: QcHoldsPage;
+  } | null>(null);
+
+  useEffect(() => {
+    if (tenantId === null || warehouseId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await fetchApiListQcHolds(
+          tenantId,
+          activeCursor === null
+            ? { warehouseId, status }
+            : { warehouseId, status, cursor: activeCursor },
+        );
+        if (cancelled) return;
+        setPage({
+          tenantId,
+          warehouseId,
+          status,
+          requested: activeCursor,
+          page: { items: result.items, nextCursor: result.nextCursor ?? null },
+        });
+      } catch {
+        // Quiet chrome on failure — the render-time key check hides stale data.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, warehouseId, status, activeCursor, revision]);
+
+  const onCursor = useCallback(
+    (cursor: string | null) => {
+      if (tenantId === null || warehouseId === null) return;
+      setRequested({ tenantId, warehouseId, status, cursor });
+    },
+    [tenantId, warehouseId, status],
+  );
+  const reload = useCallback(() => setRevision((r) => r + 1), []);
+
+  if (
+    tenantId === null ||
+    warehouseId === null ||
+    page === null ||
+    page.tenantId !== tenantId ||
+    page.warehouseId !== warehouseId ||
+    page.status !== status ||
+    page.requested !== activeCursor
+  ) {
+    return null;
+  }
+  return { ...page.page, onCursor, reload };
+}
+
+/**
+ * The active warehouse's on-hand (sku, bin) scopes with stock (story 2.2's
+ * read) as the QC hold form's scope choices — the full page chain behind
+ * `fetchAllPages`, positive-quantity rows only. `reload` refetches the whole
+ * chain (a just-held scope's units move into the QC bin, so its row drops
+ * out of the picker).
+ */
+export function useStockScopes(
+  warehouseId: string | null,
+): { rows: readonly StockEntryDto[]; reload: () => void } | null {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [rows, setRows] = useState<{
+    tenantId: string;
+    warehouseId: string;
+    rows: readonly StockEntryDto[];
+  } | null>(null);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    if (tenantId === null || warehouseId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const all = await fetchAllPages<StockEntryDto>(async (options) => {
+          const page = await fetchApiListStock(tenantId, warehouseId, options);
+          return { items: page.items, nextCursor: page.nextCursor ?? null };
+        });
+        if (cancelled) return;
+        setRows({
+          tenantId,
+          warehouseId,
+          rows: all.filter((row) => row.quantity > 0),
+        });
+      } catch {
+        // Quiet chrome on failure — the render-time key check hides stale data.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, warehouseId, revision]);
+
+  const reload = useCallback(() => setRevision((r) => r + 1), []);
+
+  if (tenantId === null || warehouseId === null) return null;
+  if (rows === null || rows.tenantId !== tenantId || rows.warehouseId !== warehouseId) return null;
+  return { rows: rows.rows, reload };
+}
+
+/**
+ * The active warehouse's bin id → code map (story 1.3's read) — the QC Holds
+ * card names each hold's origin bin without a join per row. Zones chain their
+ * own bin pages; both chains walk `fetchAllPages`.
+ */
+export function useBinCodeMap(warehouseId: string | null): Readonly<Record<string, string>> | null {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [map, setMap] = useState<{ tenantId: string; warehouseId: string; map: Record<string, string> } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (tenantId === null || warehouseId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const zones = await fetchAllPages<ZoneResponse>((options) =>
+          fetchApiListZones(tenantId, warehouseId, options),
+        );
+        const binCode: Record<string, string> = {};
+        await Promise.all(
+          zones.map(async (zone) => {
+            try {
+              const bins = await fetchAllPages<BinResponse>((options) =>
+                fetchApiListBins(tenantId, warehouseId, zone.id, options),
+              );
+              for (const bin of bins) binCode[bin.id] = bin.code;
+            } catch {
+              // A zone that fails to list leaves its bins showing "—".
+            }
+          }),
+        );
+        if (!cancelled) {
+          setMap({ tenantId, warehouseId, map: binCode });
+        }
+      } catch {
+        // Quiet chrome on failure.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, warehouseId]);
+
+  if (tenantId === null || warehouseId === null) return null;
+  if (map === null || map.tenantId !== tenantId || map.warehouseId !== warehouseId) return null;
   return map.map;
 }

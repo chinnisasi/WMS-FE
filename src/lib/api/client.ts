@@ -10,9 +10,13 @@ import {
   inboundControllerGetPurchaseOrder,
   inboundControllerListPurchaseOrders,
   inboundControllerListVendors,
+  inventoryControllerListStock,
   receivingControllerApproveOverReceipt,
   receivingControllerListGoodsReceipts,
   receivingControllerListOverReceipts,
+  receivingControllerListQcHolds,
+  receivingControllerPlaceQcHold,
+  receivingControllerReleaseQcHold,
   receivingControllerRejectOverReceipt,
   tenancyControllerCreateBin,
   tenancyControllerCreateWarehouse,
@@ -53,6 +57,10 @@ import type {
   MintEnrollmentCodeResponse,
   OverReceiptDecisionResponse,
   OverReceiptListResponse,
+  PlaceQcHoldDto,
+  QcHoldListResponse,
+  QcHoldResponse,
+  StockListResponse,
   PatchBinDto,
   PatchSkuDto,
   PurchaseOrderListResponse,
@@ -634,6 +642,101 @@ export async function fetchApiRejectOverReceipt(
   const { data, error } = await receivingControllerRejectOverReceipt({
     path: { tenantId, overReceiptId },
     headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** The QC holds list (story 3.4) — warehouse- and status-filterable. */
+export async function fetchApiListQcHolds(
+  tenantId: string,
+  options?: {
+    warehouseId?: string;
+    status?: 'open' | 'released';
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<QcHoldListResponse> {
+  const { data, error } = await receivingControllerListQcHolds({
+    path: { tenantId },
+    query:
+      options?.warehouseId === undefined &&
+      options?.status === undefined &&
+      options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
+            ...(options.status === undefined ? {} : { status: options.status }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Places a QC hold (capability `qc.manage`, story 3.4) — the (sku, bin)
+ * scope's stock relocates into the warehouse's system QC-hold bin server-side.
+ */
+export async function fetchApiPlaceQcHold(
+  tenantId: string,
+  body: PlaceQcHoldDto,
+  idempotencyKey: string,
+): Promise<QcHoldResponse> {
+  const { data, error } = await receivingControllerPlaceQcHold({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Releases a QC hold (capability `qc.manage`) — the stock returns to its origin bin. */
+export async function fetchApiReleaseQcHold(
+  tenantId: string,
+  holdId: string,
+  idempotencyKey: string,
+): Promise<QcHoldResponse> {
+  const { data, error } = await receivingControllerReleaseQcHold({
+    path: { tenantId, holdId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The on-hand stock rows (story 2.2 read) for the QC hold form's scope
+ * choices — the (sku, bin) scopes with on-hand to hold.
+ */
+export async function fetchApiListStock(
+  tenantId: string,
+  warehouseId: string,
+  options?: { skuId?: string; binId?: string; cursor?: string; signal?: AbortSignal },
+): Promise<StockListResponse> {
+  const { data, error } = await inventoryControllerListStock({
+    path: { tenantId, warehouseId },
+    query:
+      options?.skuId === undefined &&
+      options?.binId === undefined &&
+      options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.skuId === undefined ? {} : { skuId: options.skuId }),
+            ...(options.binId === undefined ? {} : { binId: options.binId }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
   });
   if (error || !data) {
     throw unwrapError(error, 400);

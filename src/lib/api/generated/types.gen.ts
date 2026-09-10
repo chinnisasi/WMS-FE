@@ -1212,6 +1212,61 @@ export type OverReceiptDecisionResponse = {
     overReceipt: OverReceiptDto;
 };
 
+export type PlaceQcHoldDto = {
+    /**
+     * Warehouse holding the stock
+     */
+    warehouseId: string;
+    skuId: string;
+    /**
+     * The scope's origin bin — captured at hold time; release returns the stock here
+     */
+    binId: string;
+    /**
+     * Why the stock is quarantined (free-form, carried verbatim; at most 200 characters)
+     */
+    reason: string;
+};
+
+export type QcHoldDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    skuId: string;
+    /**
+     * The origin bin (release returns here)
+     */
+    binId: string;
+    /**
+     * Why the stock is quarantined (carried verbatim)
+     */
+    reason: string;
+    status: 'open' | 'released';
+    heldBy: string;
+    /**
+     * ISO-8601 UTC
+     */
+    heldAt: string;
+    releasedBy: string | null;
+    /**
+     * ISO-8601 UTC instant when released; null while the hold is open
+     */
+    releasedAt: string | null;
+    /**
+     * Row creation time (the keyset cursor field), ISO-8601 UTC
+     */
+    createdAt: string;
+};
+
+export type QcHoldResponse = {
+    qcHold: QcHoldDto;
+};
+
+export type QcHoldListResponse = {
+    items: Array<QcHoldDto>;
+    nextCursor?: string | null;
+};
+
 export type TenancyControllerRegisterData = {
     body: RegisterTenantDto;
     headers: {
@@ -3337,3 +3392,169 @@ export type ReceivingControllerRejectOverReceiptResponses = {
 };
 
 export type ReceivingControllerRejectOverReceiptResponse = ReceivingControllerRejectOverReceiptResponses[keyof ReceivingControllerRejectOverReceiptResponses];
+
+export type ReceivingControllerListQcHoldsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Filter by warehouse
+         */
+        warehouseId?: string;
+        status?: 'open' | 'released';
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/receiving/qc-holds';
+};
+
+export type ReceivingControllerListQcHoldsErrors = {
+    /**
+     * Malformed status, cursor, warehouseId, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouseId filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReceivingControllerListQcHoldsError = ReceivingControllerListQcHoldsErrors[keyof ReceivingControllerListQcHoldsErrors];
+
+export type ReceivingControllerListQcHoldsResponses = {
+    /**
+     * The QC-hold page (newest first — the Inbound surface's holds read)
+     */
+    200: QcHoldListResponse;
+};
+
+export type ReceivingControllerListQcHoldsResponse = ReceivingControllerListQcHoldsResponses[keyof ReceivingControllerListQcHoldsResponses];
+
+export type ReceivingControllerPlaceQcHoldData = {
+    body: PlaceQcHoldDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/qc-holds';
+};
+
+export type ReceivingControllerPlaceQcHoldErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, an empty scope, a serial-tracked SKU, or the system QC-hold bin as the hold origin (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks qc.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse, SKU, or bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * An open hold already covers this scope (qc-hold-open), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerPlaceQcHoldError = ReceivingControllerPlaceQcHoldErrors[keyof ReceivingControllerPlaceQcHoldErrors];
+
+export type ReceivingControllerPlaceQcHoldResponses = {
+    /**
+     * Hold placed: the open hold row (the idempotency snapshot)
+     */
+    201: QcHoldResponse;
+};
+
+export type ReceivingControllerPlaceQcHoldResponse = ReceivingControllerPlaceQcHoldResponses[keyof ReceivingControllerPlaceQcHoldResponses];
+
+export type ReceivingControllerReleaseQcHoldData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        holdId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/qc-holds/{holdId}/release';
+};
+
+export type ReceivingControllerReleaseQcHoldErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed holdId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks qc.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No QC hold with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Already released (qc-hold-released), the origin bin no longer exists (qc-hold-origin-bin-gone), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerReleaseQcHoldError = ReceivingControllerReleaseQcHoldErrors[keyof ReceivingControllerReleaseQcHoldErrors];
+
+export type ReceivingControllerReleaseQcHoldResponses = {
+    /**
+     * Hold released: the released hold row with its releasedBy/releasedAt (the idempotency snapshot)
+     */
+    200: QcHoldResponse;
+};
+
+export type ReceivingControllerReleaseQcHoldResponse = ReceivingControllerReleaseQcHoldResponses[keyof ReceivingControllerReleaseQcHoldResponses];
