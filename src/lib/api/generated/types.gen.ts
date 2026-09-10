@@ -1110,6 +1110,59 @@ export type CatalogSnapshotPoDto = {
     lines: Array<PurchaseOrderLineDto>;
 };
 
+export type PutawayBinDto = {
+    id: string;
+    code: string;
+    zoneId: string;
+    zoneCode: string;
+    /**
+     * The fixed bin type (shelf/pallet/floor/staging)
+     */
+    type: string;
+    /**
+     * Capacity in base-UoM units
+     */
+    capacity: number;
+    /**
+     * Broken-bin flag — blocked bins reject placements
+     */
+    blocked: boolean;
+    /**
+     * System bins (Receiving/QC-hold) are never placement targets
+     */
+    systemOwned: boolean;
+};
+
+export type SuggestedBinDto = {
+    binId: string;
+    binCode: string;
+};
+
+export type PutawayTaskDto = {
+    grnId: string;
+    /**
+     * The GRN code (server-assigned)
+     */
+    grnCode: string;
+    grnLineId: string;
+    skuId: string;
+    skuCode: string;
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * min(applied, receiving-bin on-hand) — the placeable units
+     */
+    qty: number;
+    /**
+     * The suggested bin; null when no storage bin has room
+     */
+    suggestedBin: SuggestedBinDto | null;
+    /**
+     * The one-line capacity-only rationale
+     */
+    rationale: string;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -1121,6 +1174,14 @@ export type CatalogSnapshotResponse = {
      * The warehouse's open POs with their lines
      */
     openPurchaseOrders: Array<CatalogSnapshotPoDto>;
+    /**
+     * Story 3.5 (additive): every bin of the warehouse — blocked/system bins included so the device can reject a scan against them pre-queue
+     */
+    bins: Array<PutawayBinDto>;
+    /**
+     * Story 3.5 (additive): the derived putaway tasks with the capacity-only suggestions (advisory — the server re-gates at placement)
+     */
+    putawayTasks: Array<PutawayTaskDto>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -1264,6 +1325,122 @@ export type QcHoldResponse = {
 
 export type QcHoldListResponse = {
     items: Array<QcHoldDto>;
+    nextCursor?: string | null;
+};
+
+export type PlacePutawayDto = {
+    /**
+     * Warehouse the placement lands in
+     */
+    warehouseId: string;
+    /**
+     * The GRN whose received stock is being put away
+     */
+    grnId: string;
+    /**
+     * The GRN line this placement moves
+     */
+    grnLineId: string;
+    skuId: string;
+    /**
+     * Catalog batch identity (required for batch-tracked SKUs, forbidden otherwise)
+     */
+    batchId?: string | null;
+    /**
+     * Placed quantity in base UoM (positive integer — partial placements allowed)
+     */
+    qty: number;
+    /**
+     * The target bin the operator scanned/entered
+     */
+    toBinId: string;
+    /**
+     * The mismatch reason (required when the target bin differs from the suggested bin)
+     */
+    reasonCode?: 'pallet-too-heavy' | 'suggested-bin-occupied' | 'consolidation-with-existing-stock' | 'operator-preference' | 'other';
+    /**
+     * Device time of the placement (ISO-8601 UTC, Z-suffixed)
+     */
+    occurredAt: string;
+    /**
+     * The serial numbers of a serial-tracked placement (one per unit, no duplicates)
+     */
+    serials?: Array<string>;
+};
+
+export type PutawayPlacementDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    grnId: string;
+    /**
+     * The GRN code (server-assigned)
+     */
+    grnCode: string;
+    grnLineId: string;
+    skuId: string;
+    /**
+     * The SKU code (joined for the report surface)
+     */
+    skuCode: string;
+    batchId: string | null;
+    /**
+     * The catalog batch code; null on non-batch-tracked SKUs
+     */
+    batchCode: string | null;
+    /**
+     * The placed quantity (positive integer)
+     */
+    qty: number;
+    /**
+     * The system Receiving bin the units left
+     */
+    fromBinId: string;
+    /**
+     * The target bin the operator placed into
+     */
+    toBinId: string;
+    /**
+     * The target bin code
+     */
+    toBinCode: string;
+    /**
+     * The server's re-derived suggestion; null when no bin fit
+     */
+    suggestedBinId: string | null;
+    /**
+     * The suggested bin's code; null when no bin fit
+     */
+    suggestedBinCode: string | null;
+    /**
+     * The recorded mismatch reason; null when the suggestion was followed
+     */
+    reasonCode: 'pallet-too-heavy' | 'suggested-bin-occupied' | 'consolidation-with-existing-stock' | 'operator-preference' | 'other';
+    placedBy: string;
+    /**
+     * Device time of the placement (AD-1), ISO-8601 UTC
+     */
+    placedAt: string;
+    /**
+     * The floor device that recorded the placement
+     */
+    deviceId: string;
+    /**
+     * Row creation time, ISO-8601 UTC
+     */
+    createdAt: string;
+};
+
+export type PutawayPlacementResponse = {
+    placement: PutawayPlacementDto;
+};
+
+export type PutawayTaskListResponse = {
+    items: Array<PutawayTaskDto>;
+};
+
+export type PutawayPlacementListResponse = {
+    items: Array<PutawayPlacementDto>;
     nextCursor?: string | null;
 };
 
@@ -3558,3 +3735,158 @@ export type ReceivingControllerReleaseQcHoldResponses = {
 };
 
 export type ReceivingControllerReleaseQcHoldResponse = ReceivingControllerReleaseQcHoldResponses[keyof ReceivingControllerReleaseQcHoldResponses];
+
+export type PutawayControllerListPlacementsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Narrow to one warehouse
+         */
+        warehouseId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/putaway/placements';
+};
+
+export type PutawayControllerListPlacementsErrors = {
+    /**
+     * Malformed cursor (invalid-cursor), malformed warehouseId, or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouseId filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PutawayControllerListPlacementsError = PutawayControllerListPlacementsErrors[keyof PutawayControllerListPlacementsErrors];
+
+export type PutawayControllerListPlacementsResponses = {
+    /**
+     * The placement page (newest first, suggestion-vs-actual carried)
+     */
+    200: PutawayPlacementListResponse;
+};
+
+export type PutawayControllerListPlacementsResponse = PutawayControllerListPlacementsResponses[keyof PutawayControllerListPlacementsResponses];
+
+export type PutawayControllerPlacePutawayData = {
+    body: PlacePutawayDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/putaway/placements';
+};
+
+export type PutawayControllerPlacePutawayErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, a system target bin (validation-failed naming the bin), a blocked bin (bin-blocked naming the bin), a full bin (bin-full naming the bin, its capacity and occupancy), an over-place (validation-failed naming the remaining quantity), a missing/malformed mismatch reason, or a serial-arm violation (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked), or the operator lacks putaway.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse, GRN line, SKU, batch, or bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict), or a serial-tracked placement scans a serial that is not in the Receiving bin — it lives elsewhere, was already drawn out, or was last seen in another bin (serial-elsewhere, naming the bin)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse), or a diverged replay would drive the Receiving bin below zero (insufficient-on-hand — quarantined, never corrupting)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PutawayControllerPlacePutawayError = PutawayControllerPlacePutawayErrors[keyof PutawayControllerPlacePutawayErrors];
+
+export type PutawayControllerPlacePutawayResponses = {
+    /**
+     * Placement recorded: the placement snapshot with suggestion-vs-actual (the idempotency snapshot — a replay re-serves it, nothing re-moves)
+     */
+    201: PutawayPlacementResponse;
+};
+
+export type PutawayControllerPlacePutawayResponse = PutawayControllerPlacePutawayResponses[keyof PutawayControllerPlacePutawayResponses];
+
+export type PutawayControllerListPutawayTasksData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query: {
+        /**
+         * Warehouse the tasks are derived for
+         */
+        warehouseId: string;
+    };
+    url: '/tenants/{tenantId}/putaway/tasks';
+};
+
+export type PutawayControllerListPutawayTasksErrors = {
+    /**
+     * Malformed warehouseId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PutawayControllerListPutawayTasksError = PutawayControllerListPutawayTasksErrors[keyof PutawayControllerListPutawayTasksErrors];
+
+export type PutawayControllerListPutawayTasksResponses = {
+    /**
+     * The derived tasks (oldest receipt first) with suggested bins
+     */
+    200: PutawayTaskListResponse;
+};
+
+export type PutawayControllerListPutawayTasksResponse = PutawayControllerListPutawayTasksResponses[keyof PutawayControllerListPutawayTasksResponses];

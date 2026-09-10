@@ -28,7 +28,7 @@ afterEach(() => {
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
-    expect(ROLE_CAPABILITIES.owner.length).toBe(11);
+    expect(ROLE_CAPABILITIES.owner.length).toBe(12);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -40,6 +40,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'device.manage')).toBe(true);
     expect(roleHasCapability('owner', 'review.decide')).toBe(true);
     expect(roleHasCapability('owner', 'qc.manage')).toBe(true);
+    expect(roleHasCapability('owner', 'putaway.execute')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -54,15 +55,18 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'device.manage')).toBe(true);
     expect(roleHasCapability('ops_manager', 'review.decide')).toBe(true);
     expect(roleHasCapability('ops_manager', 'qc.manage')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'putaway.execute')).toBe(true);
   });
 
-  test('operator and accountant are read-only', () => {
-    for (const role of ['operator', 'accountant'] as const) {
-      expect(ROLE_CAPABILITIES[role].length).toBe(0);
-      expect(roleHasCapability(role, 'warehouse.create')).toBe(false);
-      expect(roleHasCapability(role, 'users.invite')).toBe(false);
-      expect(roleHasCapability(role, 'sku.edit')).toBe(false);
-    }
+  test('operator holds exactly putaway.execute (Story 3.5 — the first non-empty operator capability); accountant is read-only', () => {
+    expect(ROLE_CAPABILITIES.operator).toEqual(['putaway.execute']);
+    expect(roleHasCapability('operator', 'putaway.execute')).toBe(true);
+    expect(roleHasCapability('operator', 'warehouse.create')).toBe(false);
+    expect(roleHasCapability('operator', 'users.invite')).toBe(false);
+    expect(roleHasCapability('operator', 'sku.edit')).toBe(false);
+    expect(ROLE_CAPABILITIES.accountant.length).toBe(0);
+    expect(roleHasCapability('accountant', 'putaway.execute')).toBe(false);
+    expect(roleHasCapability('accountant', 'users.invite')).toBe(false);
   });
 
   test('users.invite and users.role_change belong to the owner alone', () => {
@@ -91,6 +95,17 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         roleHasCapability(role, 'qc.manage'),
       ),
     ).toEqual(['owner', 'ops_manager']);
+  });
+
+  // Story 3.5 — the placement command's capability (the device holds the
+  // mutation; the web surface stays read-only): owner, ops_manager, and —
+  // deliberately, the first non-empty operator capability — operator.
+  test('putaway.execute belongs to owner, ops_manager, and operator', () => {
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'putaway.execute'),
+      ),
+    ).toEqual(['owner', 'ops_manager', 'operator']);
   });
 });
 
