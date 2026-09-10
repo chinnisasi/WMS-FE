@@ -1021,6 +1021,133 @@ export type PurchaseOrderCloseResponse = {
     successor: PurchaseOrderDto | null;
 };
 
+export type OrderLineInputDto = {
+    /**
+     * The ordered SKU
+     */
+    skuId: string;
+    /**
+     * Ordered quantity in base UoM — a positive integer
+     */
+    quantity: number;
+};
+
+export type CreateOrderDto = {
+    /**
+     * The ordering warehouse
+     */
+    warehouseId: string;
+    /**
+     * 'manual' (client entry) or 'ingested' (a channel adapter's delivery)
+     */
+    source?: 'manual' | 'ingested';
+    /**
+     * The channel's integration id — required together with externalEventId on an ingested order
+     */
+    integrationId?: string;
+    /**
+     * The channel's external event id — the dedup ref (≤200 chars)
+     */
+    externalEventId?: string;
+    lines: Array<OrderLineInputDto>;
+};
+
+export type OrderLineDto = {
+    id: string;
+    orderId: string;
+    skuId: string;
+    /**
+     * Ordered quantity (base UoM)
+     */
+    qty: number;
+    /**
+     * Units acceptance actually holds through the reservation journal (≤ qty)
+     */
+    reservedQty: number;
+    /**
+     * Derived shortfall (qty − reservedQty) — the backorder remainder
+     */
+    shortfallQty: number;
+    /**
+     * 'open' when fully reserved, 'backordered' when any part is short
+     */
+    status: 'open' | 'backordered';
+    /**
+     * The line’s journal hold (null when nothing could be reserved)
+     */
+    reservationId: string | null;
+    /**
+     * The hold’s live journal state (held / released / committed / expired)
+     */
+    reservationState: string | null;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+};
+
+export type OrderDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * 'accepted' or 'cancelled'
+     */
+    status: 'accepted' | 'cancelled';
+    /**
+     * 'manual' or 'ingested'
+     */
+    source: 'manual' | 'ingested';
+    /**
+     * Channel integration (null on a manual order)
+     */
+    integrationId: string | null;
+    /**
+     * Channel external event id (null on a manual order)
+     */
+    externalEventId: string | null;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last update
+     */
+    updatedAt: string;
+    lines: Array<OrderLineDto>;
+};
+
+export type OrderResponse = {
+    order: OrderDto;
+};
+
+export type CancelOrderDto = {
+    [key: string]: unknown;
+};
+
+export type OrderEntryDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    status: 'accepted' | 'cancelled';
+    source: 'manual' | 'ingested';
+    integrationId: string | null;
+    externalEventId: string | null;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last update
+     */
+    updatedAt: string;
+};
+
+export type OrderListResponse = {
+    items: Array<OrderEntryDto>;
+    nextCursor?: string | null;
+};
+
 export type GrnLineInputDto = {
     /**
      * The PO line received against — null on a blind receipt's lines
@@ -3423,6 +3550,219 @@ export type InboundControllerClosePurchaseOrderResponses = {
 };
 
 export type InboundControllerClosePurchaseOrderResponse = InboundControllerClosePurchaseOrderResponses[keyof InboundControllerClosePurchaseOrderResponses];
+
+export type OutboundControllerCreateOrderData = {
+    body: CreateOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders';
+};
+
+export type OutboundControllerCreateOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks orders.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse or a line's SKU does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict), or a concurrent first delivery of the same channel payload (conflict — retry to read the settled result)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse), or the channel ref already created a DIFFERENT payload (order-source-conflict)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The atomic-decision store is unreachable — the creation fails closed, nothing written (reservation-store-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type OutboundControllerCreateOrderError = OutboundControllerCreateOrderErrors[keyof OutboundControllerCreateOrderErrors];
+
+export type OutboundControllerCreateOrderResponses = {
+    /**
+     * Order accepted with per-line reserved / shortfall quantities (the idempotency snapshot)
+     */
+    201: OrderResponse;
+};
+
+export type OutboundControllerCreateOrderResponse = OutboundControllerCreateOrderResponses[keyof OutboundControllerCreateOrderResponses];
+
+export type OutboundControllerCancelOrderData = {
+    body: CancelOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/cancel';
+};
+
+export type OutboundControllerCancelOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks orders.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A consuming flow already claimed a hold (conflict), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The reservation store is unreachable (reservation-store-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type OutboundControllerCancelOrderError = OutboundControllerCancelOrderErrors[keyof OutboundControllerCancelOrderErrors];
+
+export type OutboundControllerCancelOrderResponses = {
+    /**
+     * The cancelled order (per-line holds released; the idempotency snapshot)
+     */
+    200: OrderResponse;
+};
+
+export type OutboundControllerCancelOrderResponse = OutboundControllerCancelOrderResponses[keyof OutboundControllerCancelOrderResponses];
+
+export type OutboundControllerGetOrderData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}';
+};
+
+export type OutboundControllerGetOrderErrors = {
+    /**
+     * Malformed orderId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No order with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerGetOrderError = OutboundControllerGetOrderErrors[keyof OutboundControllerGetOrderErrors];
+
+export type OutboundControllerGetOrderResponses = {
+    /**
+     * The order with its lines (oldest first); a cancelled order keeps its per-line release truth queryable
+     */
+    200: OrderResponse;
+};
+
+export type OutboundControllerGetOrderResponse = OutboundControllerGetOrderResponses[keyof OutboundControllerGetOrderResponses];
+
+export type OutboundControllerListOrdersData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/orders';
+};
+
+export type OutboundControllerListOrdersErrors = {
+    /**
+     * Malformed cursor or out-of-range limit (invalid-cursor / validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerListOrdersError = OutboundControllerListOrdersErrors[keyof OutboundControllerListOrdersErrors];
+
+export type OutboundControllerListOrdersResponses = {
+    /**
+     * The warehouse's order page (headers only — the detail read carries the lines; keyset cursor)
+     */
+    200: OrderListResponse;
+};
+
+export type OutboundControllerListOrdersResponse = OutboundControllerListOrdersResponses[keyof OutboundControllerListOrdersResponses];
 
 export type ReceivingControllerListGoodsReceiptsData = {
     body?: never;
