@@ -25,13 +25,16 @@ export const CAPABILITIES = [
   'device.manage',
   // Story 3.3 — over-receipt approve/reject (the Conflicts & Reviews queue).
   'review.decide',
+  // Story 3.4 — QC hold/release (the Inbound surface's QC Holds card): an
+  // Ops Manager quarantines a (sku, bin) scope and releases it.
+  'qc.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
   owner: CAPABILITIES,
-  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage', 'review.decide'],
+  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage', 'review.decide', 'qc.manage'],
   operator: [],
   accountant: [],
 };

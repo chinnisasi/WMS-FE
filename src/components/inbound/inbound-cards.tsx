@@ -1,21 +1,29 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { fetchApiPlaceQcHold, fetchApiReleaseQcHold } from '@/lib/api/client';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import {
+  useBinCodeMap,
   useGoodsReceipts,
   usePurchaseOrders,
+  useQcHolds,
   useSkuMap,
+  useStockScopes,
+  useUserMap,
   useVendorMap,
   type PurchaseOrderHeader,
 } from '@/lib/use-inbound';
-import { openQtyLabel } from '@/lib/over-receipt';
-import type { GoodsReceiptEntryDto, PurchaseOrderLineDto } from '@/lib/api/generated';
+import { openQtyLabel, qcReason } from '@/lib/over-receipt';
+import type { GoodsReceiptEntryDto, PurchaseOrderLineDto, QcHoldDto } from '@/lib/api/generated';
+import { roleHasCapability } from '@/lib/users';
+import { ulid } from '@/lib/ulid';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { FeedbackBanner } from '@/components/feedback/banner';
 
 /**
  * The Inbound surface (stories 3.1 / 3.3) — the review half of receiving:
@@ -76,6 +84,7 @@ function InboundCardsSessioned() {
     <div className="flex flex-col gap-4">
       <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
       <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+      <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
     </div>
   );
 }
@@ -245,5 +254,270 @@ function GoodsReceiptsCard({
         emptyMessage={warehouseId === null ? 'Create a warehouse first.' : 'No receipts recorded yet.'}
       />
     </section>
+  );
+}
+
+/**
+ * The warehouse's QC holds (story 3.4): the holds with their reason, held-by,
+ * and held-at (the AC — QC-held stock is visible on the Inbound surface with
+ * its hold reason), the release action on open rows, and the place-hold form
+ * scoped to the warehouse's on-hand (sku, bin) rows. Both mutations are
+ * gated again here behind `qc.manage` so a direct URL visit renders
+ * read-only (hide surfaces, never "blocked" screens); the buttons carry a
+ * fresh ULID Idempotency-Key so a double click replays, never duplicates.
+ * Mobile is untouched — the hold is a web Ops-Manager action, no new task.
+ */
+const holdTabs = ['open', 'released'] as const;
+type HoldTab = (typeof holdTabs)[number];
+
+type HoldOutcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
+
+function QcHoldsCard({
+  warehouseId,
+  warehouseLabel,
+}: {
+  warehouseId: string | null;
+  warehouseLabel: string | null;
+}) {
+  const [tab, setTab] = useState<HoldTab>('open');
+  const holds = useQcHolds(tab);
+  const skus = useSkuMap();
+  const users = useUserMap();
+  const bins = useBinCodeMap(warehouseId);
+  // Story 1.5 gating pattern: subscribed (not a bare readSession() at
+  // render) so a /me bootstrap role rewrite re-renders the actions.
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  const canManage = roleHasCapability(role, 'qc.manage');
+
+  const [outcome, setOutcome] = useState<HoldOutcome>(null);
+  const [releasingId, setReleasingId] = useState<string | null>(null);
+
+  async function release(hold: QcHoldDto) {
+    const session = readSession();
+    if (session === null) return;
+    setReleasingId(hold.id);
+    setOutcome(null);
+    try {
+      await fetchApiReleaseQcHold(session.tenant.id, hold.id, ulid());
+      setOutcome({
+        tone: 'accepted',
+        word: 'QC hold released',
+        reason:
+          'The held units returned to the recorded origin bin; the ledger carries the qc.released movements and the decision is audit-trailed.',
+      });
+      holds?.reload();
+    } catch (error) {
+      setOutcome({ tone: 'rejected', word: 'Not released', reason: qcReason(error) });
+    } finally {
+      setReleasingId(null);
+    }
+  }
+
+  const columns: readonly DataTableColumn<QcHoldDto>[] = [
+    {
+      key: 'sku',
+      header: 'SKU',
+      render: (hold) => (
+        <span className="font-mono text-xs">{skus?.[hold.skuId]?.code ?? '(unknown SKU)'}</span>
+      ),
+    },
+    {
+      key: 'bin',
+      header: 'Origin bin',
+      render: (hold) => <span className="font-mono text-xs">{bins?.[hold.binId] ?? '—'}</span>,
+    },
+    { key: 'reason', header: 'Reason', render: (hold) => hold.reason },
+    {
+      key: 'heldBy',
+      header: 'Held by',
+      render: (hold) => users?.[hold.heldBy]?.email ?? 'unknown user',
+    },
+    {
+      key: 'heldAt',
+      header: 'Held at',
+      render: (hold) => <time dateTime={hold.heldAt}>{new Date(hold.heldAt).toLocaleString()}</time>,
+    },
+    {
+      key: 'release',
+      header: 'Status',
+      render: (hold) =>
+        hold.status === 'released' ? (
+          <span className="text-(--muted-foreground)">
+            released
+            {hold.releasedAt !== null && (
+              <>
+                {' '}
+                <time dateTime={hold.releasedAt}>{new Date(hold.releasedAt).toLocaleString()}</time>
+              </>
+            )}
+          </span>
+        ) : canManage ? (
+          <button
+            type="button"
+            disabled={releasingId === hold.id}
+            onClick={() => {
+              void release(hold);
+            }}
+            className="rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60"
+          >
+            Release
+          </button>
+        ) : (
+          <span className="rounded-sm bg-(--muted) px-1.5 py-0.5 text-xs">open</span>
+        ),
+    },
+  ];
+
+  return (
+    <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
+      <div className="flex flex-col gap-0.5">
+        <h2 className="font-medium">QC holds</h2>
+        <div className="text-(--muted-foreground)">
+          {warehouseLabel === null
+            ? 'Pick a warehouse to review its QC holds.'
+            : `${warehouseLabel} — a hold quarantines a (sku, bin) scope: the stock relocates into the warehouse's system QC-hold bin and drops out of ATP until released.`}
+        </div>
+      </div>
+
+      <div className="flex gap-1 text-xs" role="tablist" aria-label="QC hold status">
+        {holdTabs.map((s) => (
+          <button
+            key={s}
+            type="button"
+            role="tab"
+            aria-selected={tab === s}
+            onClick={() => setTab(s)}
+            className={`rounded-sm border border-(--border) px-2 py-1 ${
+              tab === s ? 'bg-(--muted) font-medium' : 'hover:bg-(--muted)'
+            }`}
+          >
+            {s === 'open' ? 'Open' : 'Released'}
+          </button>
+        ))}
+      </div>
+
+      {canManage && <PlaceQcHoldForm warehouseId={warehouseId} onPlaced={() => holds?.reload()} />}
+
+      <DataTable<QcHoldDto>
+        columns={columns}
+        rows={holds?.items ?? []}
+        nextCursor={holds?.nextCursor ?? null}
+        onCursor={holds?.onCursor}
+        emptyMessage={warehouseId === null ? 'Create a warehouse first.' : `No ${tab} holds.`}
+      />
+
+      {outcome !== null && (
+        <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />
+      )}
+    </section>
+  );
+}
+
+/** The place-hold form: pick an on-hand (sku, bin) scope, name the reason. */
+function PlaceQcHoldForm({
+  warehouseId,
+  onPlaced,
+}: {
+  warehouseId: string | null;
+  onPlaced: () => void;
+}) {
+  const scopes = useStockScopes(warehouseId);
+  const skus = useSkuMap();
+  const bins = useBinCodeMap(warehouseId);
+  const [picked, setPicked] = useState<string>('');
+  const [reason, setReason] = useState('');
+  const [placing, setPlacing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // `picked` is "skuId:binId" (the select's value) or '' — split into the
+  // two ids the place command carries.
+  const scopeParts = picked === '' ? null : picked.split(':');
+  const selectedSku = scopeParts?.[0] ?? null;
+  const selectedBin = scopeParts?.[1] ?? null;
+
+  async function submit() {
+    const session = readSession();
+    if (session === null || warehouseId === null || selectedSku === null || selectedBin === null) {
+      return;
+    }
+    setPlacing(true);
+    setError(null);
+    try {
+      await fetchApiPlaceQcHold(
+        session.tenant.id,
+        {
+          warehouseId,
+          skuId: selectedSku,
+          binId: selectedBin,
+          reason,
+        },
+        ulid(),
+      );
+      setPicked('');
+      setReason('');
+      onPlaced();
+    } catch (caught) {
+      setError(qcReason(caught));
+    } finally {
+      setPlacing(false);
+    }
+  }
+
+  if (warehouseId === null) return null;
+  return (
+    <form
+      className="flex flex-col gap-2 rounded-sm border border-(--border) p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <div className="text-xs font-medium">Place a hold</div>
+      <div className="flex flex-wrap gap-2">
+        <select
+          aria-label="Stock scope (SKU at bin)"
+          value={picked}
+          onChange={(event) => setPicked(event.target.value)}
+          className="rounded-sm border border-(--border) bg-(--background) px-2 py-1 text-xs"
+        >
+          <option value="">Pick an on-hand scope…</option>
+          {(scopes ?? []).map((row) => (
+            <option key={`${row.skuId}:${row.binId}`} value={`${row.skuId}:${row.binId}`}>
+              {skus?.[row.skuId]?.code ?? '(unknown SKU)'} @ {bins?.[row.binId] ?? row.binId} ·{' '}
+              {row.quantity} on hand
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          aria-label="Hold reason"
+          value={reason}
+          maxLength={200}
+          placeholder="Why is this stock quarantined?"
+          onChange={(event) => setReason(event.target.value)}
+          className="min-w-40 flex-1 rounded-sm border border-(--border) bg-(--background) px-2 py-1"
+        />
+        <button
+          type="submit"
+          disabled={placing || selectedSku === null || reason.trim() === ''}
+          className="rounded-sm bg-(--primary) px-3 py-1 text-xs font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
+        >
+          Hold scope
+        </button>
+      </div>
+      {error !== null && (
+        <div role="alert" className="text-xs text-(--destructive)">
+          {error}
+        </div>
+      )}
+      {scopes !== null && scopes.length === 0 && (
+        <div className="text-xs text-(--muted-foreground)">
+          No on-hand stock in this warehouse — a hold quarantines stock that exists.
+        </div>
+      )}
+    </form>
   );
 }

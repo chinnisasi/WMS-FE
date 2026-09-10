@@ -28,7 +28,7 @@ afterEach(() => {
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
-    expect(ROLE_CAPABILITIES.owner.length).toBe(10);
+    expect(ROLE_CAPABILITIES.owner.length).toBe(11);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -39,6 +39,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'users.role_change')).toBe(true);
     expect(roleHasCapability('owner', 'device.manage')).toBe(true);
     expect(roleHasCapability('owner', 'review.decide')).toBe(true);
+    expect(roleHasCapability('owner', 'qc.manage')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -52,6 +53,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'users.role_change')).toBe(false);
     expect(roleHasCapability('ops_manager', 'device.manage')).toBe(true);
     expect(roleHasCapability('ops_manager', 'review.decide')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'qc.manage')).toBe(true);
   });
 
   test('operator and accountant are read-only', () => {
@@ -78,6 +80,15 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
         roleHasCapability(role, 'review.decide'),
+      ),
+    ).toEqual(['owner', 'ops_manager']);
+  });
+
+  // Story 3.4 — the QC hold/release decisions: owner or ops_manager only.
+  test('qc.manage belongs to owner and ops_manager', () => {
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'qc.manage'),
       ),
     ).toEqual(['owner', 'ops_manager']);
   });

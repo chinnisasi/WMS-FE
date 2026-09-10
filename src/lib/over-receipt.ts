@@ -36,3 +36,33 @@ export function decisionReason(error: unknown): string {
   }
   return 'The API is unreachable — is wms-be running?';
 }
+
+/**
+ * Story 3.4 — the QC hold/release surfaces' machine-problem reason strings,
+ * same contract as `decisionReason`: branch on the problem `code`.
+ */
+export function qcReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'qc-hold-open':
+        return 'An open QC hold already covers this scope — release it first.';
+      case 'qc-hold-released':
+        return 'This hold was already released — refresh the list.';
+      case 'qc-hold-origin-bin-gone':
+        return 'The origin bin no longer exists, so the stock cannot return to it — the hold stays open.';
+      case 'not-found':
+        return 'This hold no longer exists — refresh the list.';
+      case 'role-denied':
+        return 'Your role cannot place or release QC holds.';
+      case 'idempotency-key-reuse':
+        return 'This action was already processed.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Check the request and try again.';
+      default:
+        return error.detail ?? `The action failed (${error.code}).`;
+    }
+  }
+  return 'The API is unreachable — is wms-be running?';
+}
