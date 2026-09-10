@@ -1,13 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   ApiProblem,
   fetchApiCreateBin,
   fetchApiCreateZone,
   fetchApiGenerateBinGrid,
+  fetchApiListBins,
+  fetchApiMergeBin,
+  fetchApiRetireBin,
   fetchApiSetBinBlocked,
 } from '@/lib/api/client';
 import type { BinResponse, ZoneResponse } from '@/lib/api/generated';
@@ -15,6 +18,7 @@ import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId
 import { readSession, subscribeSession } from '@/lib/auth';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
+import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { useWarehouseZones } from '@/lib/use-warehouse-zones';
 import { useZoneBins } from '@/lib/use-zone-bins';
@@ -34,11 +38,12 @@ const BIN_TYPES = ['shelf', 'pallet', 'floor', 'staging'] as const;
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
 
 /**
- * Zones/bins setup (Story 1.3), hosted as Settings sub-cards — no new route:
- * zone create, the grid generator, manual bin create, and the zone→bins
- * table with the block toggle (the only bin edit in this story). Every submit
- * sends a fresh ULID Idempotency-Key, so a double click replays the same
- * response instead of duplicating master data.
+ * Zones/bins setup (Stories 1.3 + 3.6), hosted as Settings sub-cards — no new
+ * route: zone create, the grid generator, manual bin create, and the zone→bins
+ * table with the block toggle (story 1.3) plus the merge and retire
+ * administration actions (story 3.6, `bin.retire` roles). Every submit sends
+ * a fresh ULID Idempotency-Key, so a double click replays the same response
+ * instead of duplicating master data.
  */
 export function ZonesBinsSetup() {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
@@ -106,12 +111,14 @@ function ZonesBinsSetupSessioned() {
 
   // Story 1.5 gating: the zone→bins table is a read (open to every member);
   // the create forms and the block toggle render only for roles holding the
-  // matching capability — hide surfaces, never "blocked" screens. The
-  // backend per-command role read remains the authority.
+  // matching capability — hide surfaces, never "blocked" screens. Story 3.6:
+  // merge + retire gate on the new `bin.retire` (Owner + Ops Manager only).
+  // The backend per-command role read remains the authority.
   const role = readSession()?.user.role;
   const canCreateZone = roleHasCapability(role, 'zone.create');
   const canCreateBin = roleHasCapability(role, 'bin.create');
   const canBlockBin = roleHasCapability(role, 'bin.block');
+  const canRetireBin = roleHasCapability(role, 'bin.retire');
 
   return (
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
@@ -172,6 +179,7 @@ function ZonesBinsSetupSessioned() {
             onSelectZone={setZoneId}
             bins={bins}
             canBlockBin={canBlockBin}
+            canRetireBin={canRetireBin}
           />
         </>
       )}
@@ -547,7 +555,7 @@ const binColumns: readonly DataTableColumn<BinResponse>[] = [
   { key: 'type', header: 'Type' },
 ];
 
-/** The zone→bins table with the block toggle (the only bin edit in 1.3). */
+/** The zone→bins table with the block toggle (1.3) and merge/retire (3.6). */
 function ZoneBinsTable({
   tenantId,
   warehouseId,
@@ -556,6 +564,7 @@ function ZoneBinsTable({
   onSelectZone,
   bins,
   canBlockBin,
+  canRetireBin,
 }: {
   tenantId: string;
   warehouseId: string;
@@ -565,9 +574,20 @@ function ZoneBinsTable({
   bins: ReturnType<typeof useZoneBins>;
   /** Story 1.5: the block toggle renders only for `bin.block` roles. */
   canBlockBin: boolean;
+  /** Story 3.6: merge/retire render only for `bin.retire` roles. */
+  canRetireBin: boolean;
 }) {
   const [busyBinId, setBusyBinId] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  // The merge flow: the picked source bin (null = closed). The target picker
+  // offers the WAREHOUSE's live bins (any zone), excluding system bins,
+  // already-retired bins, and the source itself.
+  const [mergeSource, setMergeSource] = useState<BinResponse | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
+  const [mergeTargets, setMergeTargets] = useState<readonly BinResponse[] | null>(null);
+  // The picker's fetch sequence — a rapid second pick supersedes the first
+  // fetch, so a stale response must never win the race into state.
+  const mergeFetchSeq = useRef(0);
 
   async function toggleBlocked(bin: BinResponse) {
     const session = readSession();
@@ -597,37 +617,161 @@ function ZoneBinsTable({
     }
   }
 
+  /** Story 3.6 — the one-way retire; only an EMPTY bin is accepted by the API. */
+  async function retireBin(bin: BinResponse) {
+    const session = readSession();
+    if (session === null) return;
+    setBusyBinId(bin.id);
+    setOutcome(null);
+    try {
+      const retired = await fetchApiRetireBin(tenantId, warehouseId, bin.id, ulid());
+      setOutcome({
+        tone: 'accepted',
+        word: `${retired.code} retired`,
+        reason: 'Retirement is terminal: the code stays reserved, the bin leaves every suggestion and device snapshot.',
+      });
+      bins?.reload();
+      notifyZonesChanged();
+    } catch (error) {
+      // `bin-not-empty` names the offending (sku, batch, qty) rows verbatim.
+      setOutcome({ tone: 'rejected', word: 'Not retired', reason: rejectionReason(error) });
+    } finally {
+      setBusyBinId(null);
+    }
+  }
+
+  async function confirmMerge() {
+    const session = readSession();
+    if (session === null || mergeSource === null || mergeTargetId === null) return;
+    setBusyBinId(mergeSource.id);
+    setOutcome(null);
+    try {
+      const merged = await fetchApiMergeBin(
+        tenantId,
+        warehouseId,
+        mergeSource.id,
+        { targetBinId: mergeTargetId },
+        ulid(),
+      );
+      setOutcome({
+        tone: 'accepted',
+        word: `${merged.source.code} merged into ${merged.target.code}`,
+        reason: `${merged.moved.units} units across ${merged.moved.skus} SKUs moved; the source is retired and its code stays reserved.`,
+      });
+      setMergeSource(null);
+      setMergeTargetId(null);
+      setMergeTargets(null);
+      bins?.reload();
+      notifyZonesChanged();
+    } catch (error) {
+      setOutcome({ tone: 'rejected', word: 'Not merged', reason: rejectionReason(error) });
+      // The merge refused — the picker stays open so the viewer can pick
+      // another target (or cancel) without re-navigating.
+    } finally {
+      setBusyBinId(null);
+    }
+  }
+
+  function openMergePicker(bin: BinResponse) {
+    setMergeSource(bin);
+    setMergeTargetId(null);
+    setMergeTargets(null);
+    const seq = ++mergeFetchSeq.current;
+    (async () => {
+      try {
+        const zoneBins = await Promise.all(
+          zones.map((zone) =>
+            fetchAllPages((cursor) => fetchApiListBins(tenantId, warehouseId, zone.id, cursor)),
+          ),
+        );
+        // A newer pick superseded this fetch — its response must not win.
+        if (seq !== mergeFetchSeq.current) return;
+        setMergeTargets(
+          zoneBins
+            .flat()
+            .filter(
+              (candidate) =>
+                candidate.retiredAt === null && !candidate.systemOwned && candidate.id !== bin.id,
+            ),
+        );
+      } catch {
+        if (seq !== mergeFetchSeq.current) return;
+        setMergeTargets([]);
+        setOutcome({
+          tone: 'rejected',
+          word: 'Not merged',
+          reason: 'Could not load the warehouse bins — retry the merge.',
+        });
+      }
+    })();
+  }
+
+  const canOperate = canBlockBin || canRetireBin;
   const columns: readonly DataTableColumn<BinResponse>[] = [
     ...binColumns,
     {
       key: 'blocked',
       header: 'Status',
       render: (bin) =>
-        bin.blocked ? (
+        bin.retiredAt !== null ? (
+          <span className="rounded-full border border-(--border) px-2 py-0.5 text-xs text-(--muted-foreground)">
+            Retired
+          </span>
+        ) : bin.blocked ? (
           <span className="rounded-full border border-(--destructive) px-2 py-0.5 text-xs text-(--destructive)">
             Blocked
           </span>
         ) : (
           <span className="rounded-full border border-(--border) bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">
-            Active
+            {bin.systemOwned ? 'System' : 'Active'}
           </span>
         ),
     },
-    ...(canBlockBin
+    ...(canOperate
       ? [
           {
             key: 'actions',
             header: '',
-            render: (bin: BinResponse) => (
-              <button
-                type="button"
-                disabled={busyBinId === bin.id}
-                onClick={() => toggleBlocked(bin)}
-                className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
-              >
-                {busyBinId === bin.id ? '…' : bin.blocked ? 'Unblock' : 'Block'}
-              </button>
-            ),
+            render: (bin: BinResponse) => {
+              // Story 3.6: system bins and retired bins are operationally
+              // gone — every administration action is inert on them (the
+              // backend refuses anyway; the UI mirrors the matrix).
+              const inert = bin.systemOwned || bin.retiredAt !== null;
+              return (
+                <div className="flex justify-end gap-1">
+                  {canBlockBin && (
+                    <button
+                      type="button"
+                      disabled={inert || busyBinId === bin.id}
+                      onClick={() => toggleBlocked(bin)}
+                      className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
+                    >
+                      {busyBinId === bin.id ? '…' : bin.blocked ? 'Unblock' : 'Block'}
+                    </button>
+                  )}
+                  {canRetireBin && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={inert || busyBinId === bin.id}
+                        onClick={() => openMergePicker(bin)}
+                        className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
+                      >
+                        Merge
+                      </button>
+                      <button
+                        type="button"
+                        disabled={inert || busyBinId === bin.id}
+                        onClick={() => retireBin(bin)}
+                        className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
+                      >
+                        Retire
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            },
           } satisfies DataTableColumn<BinResponse>,
         ]
       : []),
@@ -636,6 +780,51 @@ function ZoneBinsTable({
   return (
     <div className="flex flex-col gap-2">
       <ZonePicker zones={zones} value={selectedZoneId} onChange={(id) => onSelectZone(id)} label="Zone bins" />
+      {mergeSource !== null && (
+        <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
+          <div className="text-xs text-(--muted-foreground)">
+            Merging {mergeSource.code} — all of its stock moves into the target and the source
+            retires in the same commit. Pick a target bin (live storage bins only).
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <select
+              className={selectClass}
+              value={mergeTargetId ?? ''}
+              onChange={(e) => setMergeTargetId(e.target.value)}
+            >
+              <option value="" disabled>
+                {mergeTargets === null ? 'Loading bins…' : 'Pick a target bin…'}
+              </option>
+              {(mergeTargets ?? [])
+                .filter((bin) => !bin.blocked)
+                .map((bin) => (
+                  <option key={bin.id} value={bin.id}>
+                    {bin.code}
+                  </option>
+                ))}
+            </select>
+            <button
+              type="button"
+              disabled={mergeTargetId === null || busyBinId === mergeSource.id}
+              onClick={() => confirmMerge()}
+              className="self-end rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
+            >
+              {busyBinId === mergeSource.id ? 'Merging…' : 'Merge'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMergeSource(null);
+                setMergeTargetId(null);
+                setMergeTargets(null);
+              }}
+              className="self-end rounded-sm border border-(--border) px-3 py-2 text-sm hover:bg-(--muted)"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       <DataTable<BinResponse>
         columns={columns}
         rows={bins?.items ?? []}
@@ -674,6 +863,20 @@ function rejectionReason(error: unknown, attemptedCode?: string): string {
         return 'Your session expired — sign in again.';
       case 'validation-failed':
         return error.detail ?? 'Check the entered values and try again.';
+      // Story 3.6 — bin administration codes (the backend's detail names the
+      // bin / the offending (sku, batch, qty) rows verbatim).
+      case 'bin-not-empty':
+        return error.detail ?? 'The bin still holds stock — move it out before retiring.';
+      case 'bin-retired':
+        // The backend's detail names the retired bin (target vs source vs
+        // placement) — surface it like the sibling codes do.
+        return error.detail ?? 'That bin is retired — retirement is terminal.';
+      case 'bin-merge-hold-open':
+        return error.detail ?? 'Release the QC hold before merging.';
+      case 'bin-full':
+        return error.detail ?? 'The target bin is full — pick one with room.';
+      case 'bin-blocked':
+        return error.detail ?? 'The target bin is blocked — unblock it first.';
       default:
         return error.detail ?? `Request failed (${error.code}).`;
     }

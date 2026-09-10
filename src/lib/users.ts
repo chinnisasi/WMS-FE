@@ -33,13 +33,16 @@ export const CAPABILITIES = [
   // place stock from the floor, so the mirror hides no putaway surface from
   // them (the web surface is read-only anyway).
   'putaway.execute',
+  // Story 3.6 — bin administration (merge + retire; the block toggle stays
+  // on `bin.block`): Owner and Ops Manager only — retirement is terminal.
+  'bin.retire',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
   owner: CAPABILITIES,
-  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage', 'review.decide', 'qc.manage', 'putaway.execute'],
+  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage', 'review.decide', 'qc.manage', 'putaway.execute', 'bin.retire'],
   operator: ['putaway.execute'],
   accountant: [],
 };

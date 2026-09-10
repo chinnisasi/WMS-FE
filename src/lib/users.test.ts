@@ -28,7 +28,7 @@ afterEach(() => {
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
-    expect(ROLE_CAPABILITIES.owner.length).toBe(12);
+    expect(ROLE_CAPABILITIES.owner.length).toBe(13);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -41,6 +41,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'review.decide')).toBe(true);
     expect(roleHasCapability('owner', 'qc.manage')).toBe(true);
     expect(roleHasCapability('owner', 'putaway.execute')).toBe(true);
+    expect(roleHasCapability('owner', 'bin.retire')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -56,6 +57,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'review.decide')).toBe(true);
     expect(roleHasCapability('ops_manager', 'qc.manage')).toBe(true);
     expect(roleHasCapability('ops_manager', 'putaway.execute')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'bin.retire')).toBe(true);
   });
 
   test('operator holds exactly putaway.execute (Story 3.5 — the first non-empty operator capability); accountant is read-only', () => {
@@ -106,6 +108,16 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         roleHasCapability(role, 'putaway.execute'),
       ),
     ).toEqual(['owner', 'ops_manager', 'operator']);
+  });
+
+  // Story 3.6 — merge/retire are terminal administration: owner or
+  // ops_manager only (the block toggle stays on `bin.block`).
+  test('bin.retire belongs to owner and ops_manager', () => {
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'bin.retire'),
+      ),
+    ).toEqual(['owner', 'ops_manager']);
   });
 });
 
