@@ -1148,6 +1148,209 @@ export type OrderListResponse = {
     nextCursor?: string | null;
 };
 
+export type CreateWavePolicyDto = {
+    /**
+     * The warehouse the policy waves in
+     */
+    warehouseId: string;
+    /**
+     * Policy name — unique per warehouse
+     */
+    name: string;
+    /**
+     * 'single' — one picklist per order; 'batch' — ONE picklist across the wave's orders, grouped by bin so each bin is visited once
+     */
+    grouping: 'single' | 'batch';
+    priority?: number;
+    /**
+     * Cap on the orders one wave draws (absent = the server default, 200)
+     */
+    maxOrders?: number;
+    /**
+     * Carrier cutoff as a 24-hour HH:MM wall clock in Asia/Kolkata. It gates RELEASE, never generation — planning ahead of a cutoff is the point. Absent = release is always allowed. 00:00 is rejected: it would refuse release for the whole day.
+     */
+    cutoffLocalTime?: string;
+    /**
+     * Carrier reference — shape-validated only: there is no carriers table until story 4.6 / Epic 7, so nothing yet proves the id names a real carrier
+     */
+    carrierRef?: string;
+};
+
+export type WavePolicyDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    name: string;
+    grouping: 'single' | 'batch';
+    priority: number;
+    maxOrders: number | null;
+    /**
+     * HH:MM wall clock, or null
+     */
+    cutoffLocalTime: string | null;
+    /**
+     * The IANA zone the cutoff is compared in
+     */
+    cutoffTimezone: string;
+    /**
+     * Unvalidated carrier ref (4.6)
+     */
+    carrierRef: string | null;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last update
+     */
+    updatedAt: string;
+};
+
+export type WavePolicyResponse = {
+    policy: WavePolicyDto;
+};
+
+export type WavePolicyListResponse = {
+    items: Array<WavePolicyDto>;
+    nextCursor?: string | null;
+};
+
+export type GenerateWaveDto = {
+    /**
+     * The warehouse being waved
+     */
+    warehouseId: string;
+    /**
+     * The wave policy this wave is generated under
+     */
+    policyId: string;
+    /**
+     * Explicit order selection. Absent = every eligible accepted order in the warehouse, oldest first, capped by the policy.
+     */
+    orderIds?: Array<string>;
+};
+
+export type PicklistLineDto = {
+    id: string;
+    picklistId: string;
+    orderId: string;
+    orderLineId: string;
+    skuId: string;
+    /**
+     * Suggested bin; null when unfulfillable
+     */
+    binId: string | null;
+    /**
+     * The suggested bin’s code — the walk key
+     */
+    binCode: string | null;
+    /**
+     * Suggested batch (FEFO within the bin); null when the SKU carries no batch stock
+     */
+    batchId: string | null;
+    /**
+     * The order line’s journal hold, carried forward — never re-reserved here
+     */
+    reservationId: string | null;
+    /**
+     * Units to draw at this bin (0 on an unfulfillable slice) — always from the order line’s reservedQty, never its qty
+     */
+    qty: number;
+    /**
+     * Uncovered units — non-zero only on an unfulfillable slice
+     */
+    shortfallQty: number;
+    /**
+     * The order line’s slice index (an order line may span bins)
+     */
+    sliceSeq: number;
+    /**
+     * Position on the walk (bins.code ascending)
+     */
+    walkSeq: number;
+    status: 'planned' | 'unfulfillable' | 'cancelled';
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+};
+
+export type PicklistDto = {
+    id: string;
+    waveId: string;
+    /**
+     * The single order served; null on a batch picklist
+     */
+    orderId: string | null;
+    status: 'planned' | 'ready' | 'cancelled';
+    /**
+     * Distinct bin stops on this walk — the "steps" of the batching guarantee
+     */
+    stopCount: number;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last update
+     */
+    updatedAt: string;
+    /**
+     * Pick lines in walk order
+     */
+    lines: Array<PicklistLineDto>;
+};
+
+export type WaveDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    policyId: string;
+    status: 'planned' | 'released' | 'cancelled';
+    releasedAt: string | null;
+    cancelledAt: string | null;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last update
+     */
+    updatedAt: string;
+    picklists: Array<PicklistDto>;
+};
+
+export type WaveResponse = {
+    wave: WaveDto;
+};
+
+export type WaveEntryDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    policyId: string;
+    status: 'planned' | 'released' | 'cancelled';
+    releasedAt: string | null;
+    cancelledAt: string | null;
+    /**
+     * Picklists on this wave
+     */
+    picklistCount: number;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last update
+     */
+    updatedAt: string;
+};
+
+export type WaveListResponse = {
+    items: Array<WaveEntryDto>;
+    nextCursor?: string | null;
+};
+
 export type GrnLineInputDto = {
     /**
      * The PO line received against — null on a blind receipt's lines
@@ -3763,6 +3966,373 @@ export type OutboundControllerListOrdersResponses = {
 };
 
 export type OutboundControllerListOrdersResponse = OutboundControllerListOrdersResponses[keyof OutboundControllerListOrdersResponses];
+
+export type OutboundControllerCreateWavePolicyData = {
+    body: CreateWavePolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/wave-policies';
+};
+
+export type OutboundControllerCreateWavePolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks waves.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A policy of that name already exists in the warehouse, or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerCreateWavePolicyError = OutboundControllerCreateWavePolicyErrors[keyof OutboundControllerCreateWavePolicyErrors];
+
+export type OutboundControllerCreateWavePolicyResponses = {
+    /**
+     * The created policy (the idempotency snapshot)
+     */
+    201: WavePolicyResponse;
+};
+
+export type OutboundControllerCreateWavePolicyResponse = OutboundControllerCreateWavePolicyResponses[keyof OutboundControllerCreateWavePolicyResponses];
+
+export type OutboundControllerListWavePoliciesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/wave-policies';
+};
+
+export type OutboundControllerListWavePoliciesErrors = {
+    /**
+     * Malformed cursor or out-of-range limit (invalid-cursor / validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerListWavePoliciesError = OutboundControllerListWavePoliciesErrors[keyof OutboundControllerListWavePoliciesErrors];
+
+export type OutboundControllerListWavePoliciesResponses = {
+    /**
+     * The warehouse's wave-policy page
+     */
+    200: WavePolicyListResponse;
+};
+
+export type OutboundControllerListWavePoliciesResponse = OutboundControllerListWavePoliciesResponses[keyof OutboundControllerListWavePoliciesResponses];
+
+export type OutboundControllerGenerateWaveData = {
+    body: GenerateWaveDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/waves';
+};
+
+export type OutboundControllerGenerateWaveErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or invalid body (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks waves.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse, policy, or a named order does not exist in this tenant/warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * An order is already on an open wave — one order belongs to at most one open wave; the problem names the claiming wave (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * No accepted order is free to wave (no-eligible-orders), the selection exceeds the policy cap (wave-cap-exceeded), or the idempotency key was reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerGenerateWaveError = OutboundControllerGenerateWaveErrors[keyof OutboundControllerGenerateWaveErrors];
+
+export type OutboundControllerGenerateWaveResponses = {
+    /**
+     * The planned wave with its picklists and pick lines in walk order (the idempotency snapshot)
+     */
+    201: WaveResponse;
+};
+
+export type OutboundControllerGenerateWaveResponse = OutboundControllerGenerateWaveResponses[keyof OutboundControllerGenerateWaveResponses];
+
+export type OutboundControllerReleaseWaveData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        waveId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/waves/{waveId}/release';
+};
+
+export type OutboundControllerReleaseWaveErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks waves.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Wave does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The policy cutoff has passed for the Kolkata-local day and the wave stays planned (cutoff-passed), the wave is cancelled, or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerReleaseWaveError = OutboundControllerReleaseWaveErrors[keyof OutboundControllerReleaseWaveErrors];
+
+export type OutboundControllerReleaseWaveResponses = {
+    /**
+     * The released wave (an already-released wave replays as an idempotent no-op — no second wave.released event)
+     */
+    200: WaveResponse;
+};
+
+export type OutboundControllerReleaseWaveResponse = OutboundControllerReleaseWaveResponses[keyof OutboundControllerReleaseWaveResponses];
+
+export type OutboundControllerCancelWaveData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        waveId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/waves/{waveId}/cancel';
+};
+
+export type OutboundControllerCancelWaveErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks waves.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Wave does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerCancelWaveError = OutboundControllerCancelWaveErrors[keyof OutboundControllerCancelWaveErrors];
+
+export type OutboundControllerCancelWaveResponses = {
+    /**
+     * The cancelled wave (idempotent on replay and on an already-cancelled wave)
+     */
+    200: WaveResponse;
+};
+
+export type OutboundControllerCancelWaveResponse = OutboundControllerCancelWaveResponses[keyof OutboundControllerCancelWaveResponses];
+
+export type OutboundControllerGetWaveData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        waveId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/waves/{waveId}';
+};
+
+export type OutboundControllerGetWaveErrors = {
+    /**
+     * Malformed waveId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No wave with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerGetWaveError = OutboundControllerGetWaveErrors[keyof OutboundControllerGetWaveErrors];
+
+export type OutboundControllerGetWaveResponses = {
+    /**
+     * The wave with its picklists and pick lines in walk order
+     */
+    200: WaveResponse;
+};
+
+export type OutboundControllerGetWaveResponse = OutboundControllerGetWaveResponses[keyof OutboundControllerGetWaveResponses];
+
+export type OutboundControllerListWavesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/waves';
+};
+
+export type OutboundControllerListWavesErrors = {
+    /**
+     * Malformed cursor or out-of-range limit (invalid-cursor / validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerListWavesError = OutboundControllerListWavesErrors[keyof OutboundControllerListWavesErrors];
+
+export type OutboundControllerListWavesResponses = {
+    /**
+     * The warehouse's wave page (headers only — the detail read carries the picklists)
+     */
+    200: WaveListResponse;
+};
+
+export type OutboundControllerListWavesResponse = OutboundControllerListWavesResponses[keyof OutboundControllerListWavesResponses];
 
 export type ReceivingControllerListGoodsReceiptsData = {
     body?: never;
