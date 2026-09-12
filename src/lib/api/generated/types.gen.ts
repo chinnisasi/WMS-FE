@@ -1390,6 +1390,10 @@ export type PickDto = {
      */
     suggestedBatchId: string | null;
     /**
+     * The plan’s suggested batch code — paired with the id, like the bin arms
+     */
+    suggestedBatchCode: string | null;
+    /**
      * Units drawn (base UoM)
      */
     qty: number;
