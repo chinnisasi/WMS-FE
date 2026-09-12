@@ -1268,7 +1268,7 @@ export type PicklistLineDto = {
      * Position on the walk (bins.code ascending)
      */
     walkSeq: number;
-    status: 'planned' | 'unfulfillable' | 'cancelled';
+    status: 'planned' | 'unfulfillable' | 'picked' | 'cancelled';
     /**
      * ISO-8601 UTC creation time
      */
@@ -1322,6 +1322,107 @@ export type WaveDto = {
 
 export type WaveResponse = {
     wave: WaveDto;
+};
+
+export type RecordPickDto = {
+    /**
+     * Warehouse the pick draws from
+     */
+    warehouseId: string;
+    /**
+     * The picklist whose walk is being executed
+     */
+    picklistId: string;
+    /**
+     * The pick line being drawn (one slice of one order line)
+     */
+    picklistLineId: string;
+    /**
+     * The SKU the operator scanned — verified against the line
+     */
+    skuId: string;
+    /**
+     * The bin the operator scanned — checked against live stock, not against the plan
+     */
+    binId: string;
+    /**
+     * Units drawn in base UoM — exactly the line’s planned quantity (full-quantity picks only in this release)
+     */
+    qty: number;
+    /**
+     * Device time of the pick (ISO-8601 UTC, Z-suffixed)
+     */
+    occurredAt: string;
+    /**
+     * The serial numbers of a serial-tracked pick (one per drawn unit, no duplicates)
+     */
+    serials?: Array<string>;
+};
+
+export type PickDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    waveId: string;
+    picklistId: string;
+    picklistLineId: string;
+    orderId: string;
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    /**
+     * The bin the units were actually drawn from
+     */
+    binId: string;
+    binCode: string;
+    /**
+     * The plan’s suggested bin (advisory)
+     */
+    suggestedBinId: string | null;
+    suggestedBinCode: string | null;
+    /**
+     * The batch re-derived FEFO in the scanned bin; null when untracked or when the draw spanned several batches
+     */
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * The plan’s suggested batch (advisory)
+     */
+    suggestedBatchId: string | null;
+    /**
+     * The plan’s suggested batch code — paired with the id, like the bin arms
+     */
+    suggestedBatchCode: string | null;
+    /**
+     * Units drawn (base UoM)
+     */
+    qty: number;
+    /**
+     * The order line’s journal hold
+     */
+    reservationId: string | null;
+    /**
+     * True when this pick settled the hold (held → committed) in the same transaction as the draw
+     */
+    reservationCommitted: boolean;
+    /**
+     * The pick line’s status after the pick
+     */
+    lineStatus: 'planned' | 'unfulfillable' | 'picked' | 'cancelled';
+    pickedBy: string;
+    /**
+     * Device time of the pick (AD-1)
+     */
+    pickedAt: string;
+    deviceId: string;
+    /**
+     * ISO-8601 UTC server record time
+     */
+    createdAt: string;
+};
+
+export type PickResponse = {
+    pick: PickDto;
 };
 
 export type WaveEntryDto = {
@@ -1535,6 +1636,43 @@ export type PutawayTaskDto = {
     rationale: string;
 };
 
+export type PickTaskDto = {
+    waveId: string;
+    picklistId: string;
+    picklistLineId: string;
+    orderId: string;
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * The suggested bin (the walk stop)
+     */
+    binId: string;
+    /**
+     * The suggested bin’s code — the walk key
+     */
+    binCode: string;
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * Units to draw at this stop
+     */
+    qty: number;
+    /**
+     * The order line’s slice index
+     */
+    sliceSeq: number;
+    /**
+     * Position on the walk (bins.code ascending)
+     */
+    walkSeq: number;
+    /**
+     * Distinct bin stops left on this picklist’s walk
+     */
+    stopCount: number;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -1554,6 +1692,10 @@ export type CatalogSnapshotResponse = {
      * Story 3.5 (additive): the derived putaway tasks with the capacity-only suggestions (advisory — the server re-gates at placement)
      */
     putawayTasks: Array<PutawayTaskDto>;
+    /**
+     * Story 4.3 (additive): the pick tasks of every ready picklist on a released wave, in walk order (the bin/batch each names is advisory — the server re-derives both at pick time)
+     */
+    pickTasks: Array<PickTaskDto>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -4241,6 +4383,62 @@ export type OutboundControllerCancelWaveResponses = {
 };
 
 export type OutboundControllerCancelWaveResponse = OutboundControllerCancelWaveResponses[keyof OutboundControllerCancelWaveResponses];
+
+export type OutboundControllerRecordPickData = {
+    body: RecordPickDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/picks';
+};
+
+export type OutboundControllerRecordPickErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, a quantity that is not the line’s whole planned quantity, a blocked bin (bin-blocked), a retired bin (bin-retired), a system bin, the wrong item scanned (wrong-item naming the expected SKU), or a serial-arm violation (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), unknown or revoked device (device-revoked), or the operator lacks picks.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse, picklist line, order, SKU or bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The wave is not released / the picklist is not ready / the line is already picked / the order is not accepted / the hold is already terminal (conflict), a concurrent idempotent request (conflict), or a serial that does not live in the scanned bin (serial-elsewhere)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse), or the bin drained before this (queued) pick replayed (insufficient-on-hand, naming the bin’s live on-hand — nothing persists)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerRecordPickError = OutboundControllerRecordPickErrors[keyof OutboundControllerRecordPickErrors];
+
+export type OutboundControllerRecordPickResponses = {
+    /**
+     * Pick recorded: the pick snapshot with suggestion-vs-actual bin/batch (the idempotency snapshot — a replay re-serves it, nothing re-draws)
+     */
+    201: PickResponse;
+};
+
+export type OutboundControllerRecordPickResponse = OutboundControllerRecordPickResponses[keyof OutboundControllerRecordPickResponses];
 
 export type OutboundControllerGetWaveData = {
     body?: never;
