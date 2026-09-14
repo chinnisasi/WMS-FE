@@ -1257,9 +1257,13 @@ export type PicklistLineDto = {
      */
     qty: number;
     /**
-     * Uncovered units — non-zero only on an unfulfillable slice
+     * Uncovered units — non-zero on an unfulfillable slice (nothing pickable was ever found) and on a short one (story 4.4: qty − shortfallQty is what actually moved)
      */
     shortfallQty: number;
+    /**
+     * Story 4.4: why a short line came up short; null on every other line
+     */
+    reasonCode: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | null;
     /**
      * The order line’s slice index (an order line may span bins)
      */
@@ -1268,7 +1272,7 @@ export type PicklistLineDto = {
      * Position on the walk (bins.code ascending)
      */
     walkSeq: number;
-    status: 'planned' | 'unfulfillable' | 'picked' | 'cancelled';
+    status: 'planned' | 'unfulfillable' | 'picked' | 'short' | 'cancelled';
     /**
      * ISO-8601 UTC creation time
      */
@@ -1346,7 +1350,7 @@ export type RecordPickDto = {
      */
     binId: string;
     /**
-     * Units drawn in base UoM — exactly the line’s planned quantity (full-quantity picks only in this release)
+     * Units actually drawn in base UoM. Equal to the line’s planned quantity for an ordinary pick; BELOW it (down to 0, an empty bin) for a short pick, which must carry a reasonCode. Above the plan is always a 400.
      */
     qty: number;
     /**
@@ -1361,10 +1365,48 @@ export type RecordPickDto = {
      * Story 4.3b (AD-14): the scanned bin’s state_epoch as the device read it from the sealed snapshot at task start. Opaque and compared only for equality — never interpreted. Omit it (or send null) and the replay behaves exactly as it did before this story: a device whose cache predates the field is never refused for the absence of it.
      */
     binStateEpoch?: number | null;
+    /**
+     * Story 4.4: why this stop came up short. REQUIRED whenever qty is below the line’s planned quantity (including 0), refused outside the fixed set with a 400 naming the whole set, and ignored when qty equals the plan (that is an ordinary full pick). It is part of the idempotency payload hash — the reason is intent, not an observation.
+     */
+    reasonCode?: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other';
+};
+
+export type ReplannedSliceDto = {
+    /**
+     * The NEW pick line carrying the remainder
+     */
+    picklistLineId: string;
+    /**
+     * The alternate bin — never the bin that came up short
+     */
+    binId: string;
+    /**
+     * The alternate bin’s code — the walk key
+     */
+    binCode: string;
+    /**
+     * FEFO batch suggestion; null when untracked
+     */
+    batchId: string | null;
+    /**
+     * Units to draw at the alternate bin
+     */
+    qty: number;
+    /**
+     * The order line’s next unused slice index
+     */
+    sliceSeq: number;
+    /**
+     * Walk position — after every stop the picklist already had
+     */
+    walkSeq: number;
 };
 
 export type PickDto = {
-    id: string;
+    /**
+     * The picks row id — NULL on a zero-unit short pick (story 4.4), which writes no picks row at all: nothing moved, so there is no ledger event and no settlement record. Every other pick, short or whole, has one.
+     */
+    id: string | null;
     tenantId: string;
     warehouseId: string;
     waveId: string;
@@ -1410,9 +1452,29 @@ export type PickDto = {
      */
     reservationCommitted: boolean;
     /**
-     * The pick line’s status after the pick
+     * The pick line’s status after the pick — picked on a whole-quantity draw, short (story 4.4, terminal) when the operator drew fewer units than the stop planned
      */
-    lineStatus: 'planned' | 'unfulfillable' | 'picked' | 'cancelled';
+    lineStatus: 'planned' | 'unfulfillable' | 'picked' | 'short' | 'cancelled';
+    /**
+     * Units the stop planned but never moved — 0 on a whole-quantity pick
+     */
+    shortfallQty: number;
+    /**
+     * Why the stop came up short (story 4.4); null on a whole-quantity pick
+     */
+    reasonCode: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | null;
+    /**
+     * True when this command RELEASED the order line’s hold (story 4.4): a short pick releases the whole hold and re-grants the remainder, because reservations are whole-quantity rows with no partial commit
+     */
+    reservationReleased: boolean;
+    /**
+     * The fresh hold covering everything the order line still owes after the release — null when there was no remainder, or when it could not be re-held (the partial-order path). The re-planned slices and every still-open sibling slice carry it.
+     */
+    replanReservationId: string | null;
+    /**
+     * The new slices the remainder was re-planned onto — empty on the partial-order path
+     */
+    replanned: Array<ReplannedSliceDto>;
     pickedBy: string;
     /**
      * Device time of the pick (AD-1)
@@ -4416,7 +4478,7 @@ export type OutboundControllerRecordPickData = {
 
 export type OutboundControllerRecordPickErrors = {
     /**
-     * Missing or malformed Idempotency-Key, an invalid body, a quantity that is not the line’s whole planned quantity, a blocked bin (bin-blocked), a retired bin (bin-retired), a system bin, the wrong item scanned (wrong-item naming the expected SKU), or a serial-arm violation (validation-failed)
+     * Missing or malformed Idempotency-Key, an invalid body, a quantity ABOVE the line’s planned quantity, a short pick with no reasonCode or one outside the fixed set (the 400 names the whole set), a blocked bin (bin-blocked), a retired bin (bin-retired), a system bin, the wrong item scanned (wrong-item naming the expected SKU), or a serial-arm violation (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -4445,7 +4507,7 @@ export type OutboundControllerRecordPickError = OutboundControllerRecordPickErro
 
 export type OutboundControllerRecordPickResponses = {
     /**
-     * Pick recorded: the pick snapshot with suggestion-vs-actual bin/batch (the idempotency snapshot — a replay re-serves it, nothing re-draws)
+     * Pick recorded: the pick snapshot with suggestion-vs-actual bin/batch (the idempotency snapshot — a replay re-serves it, nothing re-draws). On a short pick it also carries the shortfall, the reason, whether the hold was released and re-granted, and the slices the remainder was re-planned onto (empty on the partial-order path)
      */
     201: PickResponse;
 };
