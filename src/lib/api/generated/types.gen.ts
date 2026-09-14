@@ -1357,6 +1357,10 @@ export type RecordPickDto = {
      * The serial numbers of a serial-tracked pick (one per drawn unit, no duplicates)
      */
     serials?: Array<string>;
+    /**
+     * Story 4.3b (AD-14): the scanned bin’s state_epoch as the device read it from the sealed snapshot at task start. Opaque and compared only for equality — never interpreted. Omit it (or send null) and the replay behaves exactly as it did before this story: a device whose cache predates the field is never refused for the absence of it.
+     */
+    binStateEpoch?: number | null;
 };
 
 export type PickDto = {
@@ -1419,6 +1423,10 @@ export type PickDto = {
      * ISO-8601 UTC server record time
      */
     createdAt: string;
+    /**
+     * Story 4.3b (AD-14): the taxonomy arm this pick settled under — none (no epoch sent, or the bin’s epoch still matched), applied (the epoch had moved and the draw stood on its own), settled (the moved-on bin still covered the draw and this pick settled the order line’s hold). The taxonomy’s two refusal arms write nothing, so they never appear here.
+     */
+    conflictClass: 'none' | 'applied' | 'settled';
 };
 
 export type PickResponse = {
@@ -1671,6 +1679,10 @@ export type PickTaskDto = {
      * Distinct bin stops left on this picklist’s walk
      */
     stopCount: number;
+    /**
+     * Story 4.3b (AD-14): the stop bin’s state_epoch at snapshot time — opaque, compared only for equality. The device carries it back on the queued pick so the server can classify a conflict instead of rejecting blindly. Null when the bin has no epoch row yet (no movement has ever touched it).
+     */
+    binStateEpoch: number | null;
 };
 
 export type CatalogSnapshotResponse = {
@@ -4420,11 +4432,11 @@ export type OutboundControllerRecordPickErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The wave is not released / the picklist is not ready / the line is already picked / the order is not accepted / the hold is already terminal (conflict), a concurrent idempotent request (conflict), or a serial that does not live in the scanned bin (serial-elsewhere)
+     * AD-14 case 3 — the bin’s state_epoch moved and it no longer covers the draw (pick-bin-short, naming the bin and its live on-hand; RE-PLANNABLE, the client keeps the op). AD-14 case 4 — a premise moved terminally: the hold is expired/terminal, or the line, picklist, wave or order was cancelled or already picked (pick-unresolvable; TERMINAL, the client quarantines with session attribution). Also: the wave is not yet released / the picklist is not yet ready (conflict, retryable), a concurrent idempotent request (conflict), or a serial that does not live in the scanned bin (serial-elsewhere). None of these persist anything and none consume the idempotency key
      */
     409: ProblemDetailsDto;
     /**
-     * Idempotency key reused with a different payload (idempotency-key-reuse), or the bin drained before this (queued) pick replayed (insufficient-on-hand, naming the bin’s live on-hand — nothing persists)
+     * Idempotency key reused with a different payload (idempotency-key-reuse), or the bin drained before this (queued) pick replayed with NO bin epoch to prove it moved (insufficient-on-hand, naming the bin’s live on-hand — nothing persists; this is the pre-4.3b behaviour a device that has not refreshed still gets)
      */
     422: ProblemDetailsDto;
 };
