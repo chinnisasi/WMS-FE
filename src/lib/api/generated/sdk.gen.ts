@@ -578,7 +578,7 @@ export const outboundControllerCancelWave = <ThrowOnError extends boolean = fals
 });
 
 /**
- * pick.record — records one scan-verified pick exactly once (badge-in session required): the pick.picked ledger draw empties the scanned bin and the order line’s reservation settles held → committed in the SAME transaction; the line flips to picked
+ * pick.record — records one scan-verified pick exactly once (badge-in session required): the pick.picked ledger draw empties the scanned bin and the order line’s reservation settles held → committed in the SAME transaction; the line flips to picked. Story 4.3b: the optional binStateEpoch is compared under the bin’s row lock before any write and classifies a conflict by the AD-14 taxonomy — apply/settle answer 201, pick-bin-short is re-plannable, pick-unresolvable is terminal
  */
 export const outboundControllerRecordPick = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerRecordPickData, ThrowOnError>): RequestResult<OutboundControllerRecordPickResponses, OutboundControllerRecordPickErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerRecordPickResponses, OutboundControllerRecordPickErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
