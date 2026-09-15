@@ -4230,7 +4230,7 @@ export type OutboundControllerPackOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The order is already packed, is cancelled, was never waved, or still has a planned pick line (conflict, naming the outstanding line); or a concurrent idempotent request (conflict). Nothing is written
+     * The order is already packed, is cancelled, was never waved, had its whole plan withdrawn by a wave cancel (re-wave it), or still has a planned pick line (conflict, naming the outstanding line); or a concurrent idempotent request (conflict). Nothing is written
      */
     409: ProblemDetailsDto;
     /**
