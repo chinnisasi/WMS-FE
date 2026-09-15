@@ -1091,9 +1091,9 @@ export type OrderDto = {
     tenantId: string;
     warehouseId: string;
     /**
-     * 'accepted' or 'cancelled'
+     * The order's lifecycle arm. 'ready_to_dispatch' (story 4.5) is a packed order: verified at the bench against what was picked and waiting for dispatch.
      */
-    status: 'accepted' | 'cancelled';
+    status: 'accepted' | 'ready_to_dispatch' | 'cancelled';
     /**
      * 'manual' or 'ingested'
      */
@@ -1125,11 +1125,113 @@ export type CancelOrderDto = {
     [key: string]: unknown;
 };
 
+export type PackScanLineDto = {
+    /**
+     * The SKU the operator scanned
+     */
+    skuId: string;
+    /**
+     * Units of this SKU counted into the parcel, in base UoM. Two lines naming the same SKU sum — the bench scans items, not lines.
+     */
+    qty: number;
+};
+
+export type PackDimensionsDto = {
+    /**
+     * Length in millimetres
+     */
+    lengthMm: number;
+    /**
+     * Width in millimetres
+     */
+    widthMm: number;
+    /**
+     * Height in millimetres
+     */
+    heightMm: number;
+};
+
+export type PackOrderDto = {
+    /**
+     * What the operator scanned into the parcel. May be empty only when the order picked nothing at all (every stop reported an empty bin).
+     */
+    scanned: Array<PackScanLineDto>;
+    /**
+     * Optional parcel weight in grams. Absence is never an error; a non-positive value is a 400.
+     */
+    weightGrams?: number | null;
+    /**
+     * Optional parcel dimensions in millimetres — all three sides together, or the object omitted.
+     */
+    dimensionsMm?: PackDimensionsDto | null;
+};
+
+export type PackedLineDto = {
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * What the order asked for
+     */
+    orderedQty: number;
+    /**
+     * What is actually in the parcel — the PICKED units
+     */
+    packedQty: number;
+    /**
+     * Derived: orderedQty − packedQty (non-zero on a short-picked line)
+     */
+    shortfallQty: number;
+    /**
+     * The pack.packed event this line’s verification was journalled as
+     */
+    ledgerEventId: string;
+};
+
+export type PackDto = {
+    orderId: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * Always ready_to_dispatch on a successful pack
+     */
+    orderStatus: 'accepted' | 'ready_to_dispatch' | 'cancelled';
+    source: 'manual' | 'ingested';
+    integrationId: string | null;
+    externalEventId: string | null;
+    /**
+     * The operator who packed it
+     */
+    packedBy: string;
+    /**
+     * ISO-8601 UTC pack time
+     */
+    packedAt: string;
+    /**
+     * Parcel weight in grams; null when unmeasured
+     */
+    weightGrams: number | null;
+    /**
+     * Parcel dimensions in millimetres; null when unmeasured
+     */
+    dimensionsMm: PackDimensionsDto | null;
+    /**
+     * Total units in the parcel — the sum of every line’s packedQty
+     */
+    totalUnits: number;
+    lines: Array<PackedLineDto>;
+};
+
+export type PackResponse = {
+    pack: PackDto;
+};
+
 export type OrderEntryDto = {
     id: string;
     tenantId: string;
     warehouseId: string;
-    status: 'accepted' | 'cancelled';
+    status: 'accepted' | 'ready_to_dispatch' | 'cancelled';
     source: 'manual' | 'ingested';
     integrationId: string | null;
     externalEventId: string | null;
@@ -4090,6 +4192,63 @@ export type OutboundControllerCancelOrderResponses = {
 };
 
 export type OutboundControllerCancelOrderResponse = OutboundControllerCancelOrderResponses[keyof OutboundControllerCancelOrderResponses];
+
+export type OutboundControllerPackOrderData = {
+    body: PackOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/pack';
+};
+
+export type OutboundControllerPackOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter, a malformed scan line, or a non-positive weight/dimension (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks pack.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order, or a scanned SKU, does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is already packed, is cancelled, was never waved, had its whole plan withdrawn by a wave cancel (re-wave it), or still has a planned pick line (conflict, naming the outstanding line); or a concurrent idempotent request (conflict). Nothing is written
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The scanned contents differ from what was picked — an extra SKU, a missing SKU or a wrong quantity (pack-mismatch, naming every divergent SKU with both quantities; nothing written). Also: idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerPackOrderError = OutboundControllerPackOrderErrors[keyof OutboundControllerPackOrderErrors];
+
+export type OutboundControllerPackOrderResponses = {
+    /**
+     * The packing slip: per line the ordered / packed / shortfall quantities with the SKU code and name, the parcel’s measurements, and the pack.packed event each line was journalled as (the idempotency snapshot — a replay re-serves it, nothing re-packs)
+     */
+    201: PackResponse;
+};
+
+export type OutboundControllerPackOrderResponse = OutboundControllerPackOrderResponses[keyof OutboundControllerPackOrderResponses];
 
 export type OutboundControllerGetOrderData = {
     body?: never;
