@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
+import { stubGlobal } from './test/globals';
+
 import { THEME_STORAGE_KEY, readStoredTheme, writeStoredTheme } from './theme';
 
 /**
@@ -8,11 +10,10 @@ import { THEME_STORAGE_KEY, readStoredTheme, writeStoredTheme } from './theme';
  * round-trips cleanly, tolerates a corrupted/blocked storage.
  */
 const store = new Map<string, string>();
-// @ts-expect-error — test stub for the storage the lib targets
-globalThis.localStorage = {
+stubGlobal('localStorage', {
   getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
   setItem: (k: string, v: string) => void store.set(k, v),
-};
+});
 
 describe('theme persistence', () => {
   afterEach(() => {
@@ -30,22 +31,20 @@ describe('theme persistence', () => {
   test('rejects corrupted values and tolerates a blocked storage', () => {
     store.set(THEME_STORAGE_KEY, 'Dark');
     expect(readStoredTheme()).toBeNull();
-    // @ts-expect-error — simulate storage throwing (blocked site data)
-    globalThis.localStorage = {
+    stubGlobal('localStorage', {
       getItem: () => {
         throw new Error('blocked');
       },
       setItem: () => {
         throw new Error('blocked');
       },
-    };
+    });
     expect(readStoredTheme()).toBeNull();
     expect(() => writeStoredTheme('dark')).not.toThrow();
     // restore the stub for other suites
-    // @ts-expect-error — test stub for the storage the lib targets
-    globalThis.localStorage = {
+    stubGlobal('localStorage', {
       getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
       setItem: (k: string, v: string) => void store.set(k, v),
-    };
+    });
   });
 });

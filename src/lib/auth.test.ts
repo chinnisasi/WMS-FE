@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
+import { restoreGlobals, stubGlobal } from './test/globals';
+
 import {
   SESSION_CHANGED_EVENT,
   SESSION_HINT_COOKIE,
@@ -30,7 +32,7 @@ function installShims(): void {
   cookieJar = new Map();
   // Minimal document.cookie shim: set via `name=value; ...` assignments,
   // read back as `name=value` pairs (enough for the hint cookie's shape).
-  (globalThis as Record<string, unknown>).document = {
+  stubGlobal('document', {
     set cookie(value: string) {
       const [pair] = value.split(';');
       const eq = pair!.indexOf('=');
@@ -46,17 +48,17 @@ function installShims(): void {
     get cookie() {
       return [...cookieJar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
     },
-  } as unknown as Document;
-  (globalThis as Record<string, unknown>).localStorage = {
+  } as unknown as Document);
+  stubGlobal('localStorage', {
     getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
     setItem: (key: string, value: string) => void store.set(key, value),
     removeItem: (key: string) => {
       store.delete(key);
       removed.push(key);
     },
-  } as Storage;
+  } as Storage);
   const eventTarget = new EventTarget();
-  (globalThis as Record<string, unknown>).window = {
+  stubGlobal('window', {
     dispatchEvent: (event: Event) => {
       dispatched.push(event.type);
       return eventTarget.dispatchEvent(event);
@@ -65,7 +67,7 @@ function installShims(): void {
     // listener wiring; bun's environment has no DOM window of its own.
     addEventListener: eventTarget.addEventListener.bind(eventTarget),
     removeEventListener: eventTarget.removeEventListener.bind(eventTarget),
-  } as unknown as typeof window;
+  } as unknown as typeof window);
 }
 
 const SESSION: StoredSession = {
@@ -93,9 +95,7 @@ afterEach(() => {
   // Drop any expiry timer a write scheduled (clearSession clears it) before
   // the shims go away, so no stray timer outlives a test.
   clearSession();
-  delete (globalThis as Record<string, unknown>).localStorage;
-  delete (globalThis as Record<string, unknown>).window;
-  delete (globalThis as Record<string, unknown>).document;
+  restoreGlobals();
 });
 
 describe('readSession (pure snapshot read)', () => {
