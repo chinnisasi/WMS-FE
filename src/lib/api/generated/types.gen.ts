@@ -5717,7 +5717,7 @@ export type CarriersControllerConnectErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * This carrier is already connected for the tenant — rotate instead (carrier-already-connected)
+     * This carrier is already connected for the tenant — rotate instead (carrier-already-connected), or the same Idempotency-Key is in flight concurrently (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -5759,7 +5759,7 @@ export type CarriersControllerRotateData = {
 
 export type CarriersControllerRotateErrors = {
     /**
-     * Missing or malformed Idempotency-Key, malformed connectionId, or credential material missing a required field (validation-failed)
+     * Missing or malformed Idempotency-Key, malformed connectionId, credential material missing a required field, or a connection whose carrier this build no longer registers (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -5774,6 +5774,10 @@ export type CarriersControllerRotateErrors = {
      * No such connection in this tenant (not-found)
      */
     404: ProblemDetailsDto;
+    /**
+     * The same Idempotency-Key is being processed concurrently (conflict)
+     */
+    409: ProblemDetailsDto;
     /**
      * Idempotency key reused with a different payload (idempotency-key-reuse)
      */
@@ -5828,6 +5832,10 @@ export type CarriersControllerDisconnectErrors = {
      * No such connection in this tenant, or it was already disconnected (not-found)
      */
     404: ProblemDetailsDto;
+    /**
+     * The same Idempotency-Key is being processed concurrently (conflict)
+     */
+    409: ProblemDetailsDto;
     /**
      * Idempotency key reused with a different payload (idempotency-key-reuse)
      */
