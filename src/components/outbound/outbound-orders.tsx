@@ -1,0 +1,652 @@
+'use client';
+
+import Link from 'next/link';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+
+import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
+import type { OrderEntryDto, SkuResponse } from '@/lib/api/generated';
+import { readSession, subscribeSession } from '@/lib/auth';
+import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
+import {
+  canCancelOrder,
+  cancelOutcome,
+  cancelReason,
+  channelRefLabel,
+  createOutcome,
+  createReason,
+  filterPage,
+  holdStateLabel,
+  lineQuantityLabel,
+  lineTotals,
+  ORDER_STATUSES,
+  orderSourceLabel,
+  orderStatusLabel,
+  orderTotalsLabel,
+  pageFilterCount,
+  parseDraftLines,
+  type DraftLine,
+  type Outcome,
+  type OrderStatus,
+} from '@/lib/outbound-orders';
+import {
+  useOrderDetail,
+  useOutboundOrders,
+  useOutboundSkus,
+  useOutboundWarehouses,
+} from '@/lib/use-outbound-orders';
+import { roleHasCapability } from '@/lib/users';
+import { ulid } from '@/lib/ulid';
+import {
+  readActiveWarehouseId,
+  subscribeActiveWarehouse,
+  writeActiveWarehouseId,
+} from '@/lib/warehouses';
+
+import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { FeedbackBanner } from '@/components/feedback/banner';
+
+const inputClass =
+  'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
+const labelClass = 'text-sm font-medium';
+const selectClass = `${inputClass} appearance-none`;
+const buttonClass = 'rounded-sm border border-(--border) px-3 py-2 text-sm hover:bg-(--muted) disabled:opacity-40';
+const primaryClass =
+  'rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60';
+
+/**
+ * The Outbound orders surface (story 4.2b) — the first web consumer of the
+ * order lifecycle stories 4.1–4.6 shipped: the active warehouse's orders
+ * newest-first, a row that expands into its per-line ordered / reserved /
+ * shortfall quantities and hold state, manual multi-line entry, and cancel.
+ *
+ * Gating hides, never blocks: the list and the expanded detail are readable
+ * by every role, while the create form and the cancel affordance render only
+ * for `orders.manage` (Owner + Ops Manager — deliberately not Operator). The
+ * nav entry itself stays ungated. The backend's per-command role read is the
+ * authority either way.
+ *
+ * Waves, picklists, pack and dispatch are separate stories; nothing here
+ * touches them.
+ */
+export function OutboundOrders() {
+  // `null` = unknown (server render) → render nothing, no hydration mismatch.
+  const sessioned = useSyncExternalStore(
+    subscribeSession,
+    () => readSession() !== null,
+    () => null as boolean | null,
+  );
+
+  if (sessioned === null) return null;
+  if (!sessioned) {
+    return (
+      <Shell>
+        <div className="text-(--muted-foreground)">
+          Sign in to review outbound orders —{' '}
+          <Link href="/login" className="text-(--primary) underline underline-offset-2">
+            go to sign in
+          </Link>
+          .
+        </div>
+      </Shell>
+    );
+  }
+  return <OutboundOrdersSessioned />;
+}
+
+/**
+ * The heading renders in every state, including a failed warehouse read —
+ * a surface that goes entirely blank tells the viewer nothing about where
+ * they are or what went wrong.
+ */
+function Shell({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-medium">Orders</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** A failed read: the reason, and the way to try again. Never progress copy. */
+function ReadFailure({ word, reason, onRetry }: { word: string; reason: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <FeedbackBanner tone="rejected" word={word} reason={reason} />
+      <button type="button" onClick={onRetry} className={buttonClass}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
+function OutboundOrdersSessioned() {
+  const warehouses = useOutboundWarehouses();
+  const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
+  const items = warehouses.state === 'ready' ? warehouses.data.items : [];
+  const activeId = useSyncExternalStore(
+    subscribeActiveWarehouse,
+    () => (tenantId === null ? null : readActiveWarehouseId(tenantId)),
+    () => null,
+  );
+  // Story 1.5 gating pattern: subscribed (not a bare readSession() at
+  // render) so a /me bootstrap role rewrite re-renders the affordances.
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  const canManageOrders = roleHasCapability(role, 'orders.manage');
+
+  if (warehouses.state === 'loading') {
+    return (
+      <Shell>
+        <div className="text-(--muted-foreground)">Loading warehouses…</div>
+      </Shell>
+    );
+  }
+  if (warehouses.state === 'failed') {
+    return (
+      <Shell>
+        <ReadFailure word="Warehouses unavailable" reason={warehouses.reason} onRetry={warehouses.reload} />
+      </Shell>
+    );
+  }
+
+  // The warehouse whose orders are listed: the sidebar switcher's pick when
+  // it still belongs to this tenant, else the tenant's first warehouse.
+  const warehouseId =
+    activeId !== null && items.some((w) => w.id === activeId) ? activeId : (items[0]?.id ?? null);
+  const warehouse = items.find((w) => w.id === warehouseId);
+
+  if (tenantId === null || warehouseId === null) {
+    return (
+      <Shell>
+        <div className="text-(--muted-foreground)">
+          Create a warehouse first — orders are raised against one.
+        </div>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell
+      action={
+        items.length > 1 ? (
+          <label className="flex items-center gap-2 text-xs">
+            <span className="text-(--muted-foreground)">Warehouse</span>
+            <select
+              className={`${selectClass} w-auto py-1`}
+              value={warehouseId}
+              onChange={(e) => writeActiveWarehouseId(tenantId, e.target.value)}
+            >
+              {items.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.code} {w.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : undefined
+      }
+    >
+      <div className="text-(--muted-foreground)">
+        {warehouse === undefined
+          ? 'Outbound orders'
+          : `${warehouse.code} ${warehouse.name} — newest first. Acceptance reserves stock line by line.`}
+      </div>
+      {canManageOrders && (
+        // Remounts on a warehouse switch so a half-typed draft can never post
+        // against the warehouse the viewer just left.
+        <OrderCreateForm key={warehouseId} tenantId={tenantId} warehouseId={warehouseId} />
+      )}
+      {/* Keyed likewise: DataTable's internal cursor, the status filter, the
+          expanded row and any pending confirmation all belong to one
+          warehouse and must not survive a switch. */}
+      <OrdersTable
+        key={warehouseId}
+        tenantId={tenantId}
+        warehouseId={warehouseId}
+        canManageOrders={canManageOrders}
+      />
+    </Shell>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Manual entry                                                        */
+/* ------------------------------------------------------------------ */
+
+interface DraftRow extends DraftLine {
+  /** Stable across removals — an index key would move focus and IME state. */
+  readonly id: string;
+}
+
+function emptyRow(): DraftRow {
+  return { id: ulid(), skuId: '', quantity: '' };
+}
+
+/**
+ * Manual multi-line order entry (capability `orders.manage`). Acceptance
+ * reserves `min(qty, atp)` per line, so a line above ATP still comes back
+ * 201 — the result reads as accepted with a named shortfall, never as a
+ * failure.
+ *
+ * The `Idempotency-Key` is minted once per DRAFT, not per attempt: a create
+ * that times out after the server committed is then safe to retry, because
+ * the replay returns the original response instead of raising a second
+ * order. Editing the draft mints a fresh key — the same key with a changed
+ * body is what the backend answers 422 `idempotency-key-reuse` to — and so
+ * does a successful submit, which clears the draft.
+ */
+function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehouseId: string }) {
+  const skus = useOutboundSkus();
+  const [draft, setDraft] = useState<readonly DraftRow[]>([emptyRow()]);
+  const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+
+  const skuMap = skus.state === 'ready' ? skus.data : null;
+  const skuList: readonly SkuResponse[] =
+    skuMap === null ? [] : Object.values(skuMap).sort((a, b) => a.code.localeCompare(b.code));
+
+  /** Any draft edit invalidates the key the previous attempt would replay. */
+  function editDraft(next: (rows: readonly DraftRow[]) => readonly DraftRow[]) {
+    setIdempotencyKey(null);
+    setDraft(next);
+  }
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const parsed = parseDraftLines(draft);
+    if (parsed.problem !== null) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: parsed.problem });
+      return;
+    }
+    // Reused across retries of an unchanged draft; minted afresh otherwise.
+    const key = idempotencyKey ?? ulid();
+    setIdempotencyKey(key);
+    setPending(true);
+    setOutcome(null);
+    try {
+      const { order } = await fetchApiCreateOrder(
+        tenantId,
+        { warehouseId, source: 'manual', lines: [...parsed.lines] },
+        key,
+      );
+      setDraft([emptyRow()]);
+      setIdempotencyKey(null);
+      setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId]?.code ?? skuId));
+      notifyOutboundChanged();
+    } catch (error) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: createReason(error) });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  if (skus.state === 'loading') {
+    return (
+      <div className="rounded-sm border border-(--border) p-3 text-xs text-(--muted-foreground)">
+        Loading SKUs…
+      </div>
+    );
+  }
+  if (skus.state === 'failed') {
+    // No SKUs, no honest picker — the form is not offered rather than
+    // offered empty.
+    return (
+      <div className="rounded-sm border border-(--border) p-3">
+        <ReadFailure word="SKUs unavailable" reason={skus.reason} onRetry={skus.reload} />
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-sm border border-(--border) p-3">
+      <div className="text-xs text-(--muted-foreground)">
+        Raise an order — acceptance reserves each line against available stock. A line above what is
+        available is accepted and backordered for the remainder.
+      </div>
+      <div className="flex flex-col gap-2">
+        {draft.map((row, index) => (
+          <div key={row.id} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="flex flex-[3] flex-col gap-1">
+              <span className={labelClass}>SKU</span>
+              <select
+                className={selectClass}
+                value={row.skuId}
+                onChange={(e) =>
+                  editDraft((rows) =>
+                    rows.map((r) => (r.id === row.id ? { ...r, skuId: e.target.value } : r)),
+                  )
+                }
+                required
+              >
+                <option value="" disabled>
+                  Pick a SKU…
+                </option>
+                {skuList.map((sku) => (
+                  <option key={sku.id} value={sku.id}>
+                    {sku.code} {sku.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-1 flex-col gap-1">
+              <span className={labelClass}>Quantity</span>
+              <input
+                className={inputClass}
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                value={row.quantity}
+                onChange={(e) =>
+                  editDraft((rows) =>
+                    rows.map((r) => (r.id === row.id ? { ...r, quantity: e.target.value } : r)),
+                  )
+                }
+                required
+                placeholder="1"
+              />
+            </label>
+            <button
+              type="button"
+              aria-label={`Remove line ${index + 1}`}
+              disabled={draft.length === 1}
+              onClick={() => editDraft((rows) => rows.filter((r) => r.id !== row.id))}
+              className={buttonClass}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => editDraft((rows) => [...rows, emptyRow()])}
+          className={buttonClass}
+        >
+          Add line
+        </button>
+        <button type="submit" disabled={pending} className={primaryClass}>
+          {pending ? 'Creating…' : 'Create order'}
+        </button>
+      </div>
+      {outcome !== null && (
+        <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />
+      )}
+    </form>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* The list                                                            */
+/* ------------------------------------------------------------------ */
+
+function OrdersTable({
+  tenantId,
+  warehouseId,
+  canManageOrders,
+}: {
+  tenantId: string;
+  warehouseId: string;
+  canManageOrders: boolean;
+}) {
+  const orders = useOutboundOrders(warehouseId);
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  // Bumped to remount DataTable, whose Prev/Next cursor is internal state —
+  // without it the table would still offer Prev on what is now page one.
+  const [pageEpoch, setPageEpoch] = useState(0);
+
+  const { onCursor } = orders;
+  useEffect(() => {
+    // A create or a cancel invalidates the keyset position (a new order
+    // lands at the top of page one), so any outbound change returns the list
+    // to page one before it refetches. Otherwise the banner reports an
+    // acceptance the page on screen demonstrably cannot show.
+    const onChange = () => {
+      onCursor(null);
+      setPageEpoch((epoch) => epoch + 1);
+    };
+    window.addEventListener(OUTBOUND_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(OUTBOUND_CHANGED_EVENT, onChange);
+  }, [onCursor]);
+
+  const loaded = orders.state === 'ready' ? orders.data.items : [];
+  const rows = filterPage(loaded, statusFilter);
+
+  async function confirmCancel(orderId: string) {
+    setBusyId(orderId);
+    setOutcome(null);
+    try {
+      const { order } = await fetchApiCancelOrder(tenantId, orderId, ulid());
+      setOutcome(cancelOutcome(order));
+      setConfirmId(null);
+      notifyOutboundChanged();
+    } catch (error) {
+      // The refusal stays on screen with the confirmation still open — its
+      // two real causes (a committed reservation, a drawn pick line) are
+      // invisible in every field this client holds, so the server's own
+      // words are what gets rendered.
+      setOutcome({ tone: 'rejected', word: 'Not cancelled', reason: cancelReason(error) });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const columns: readonly DataTableColumn<OrderEntryDto>[] = [
+    {
+      key: 'id',
+      header: 'Order',
+      render: (order) => (
+        <button
+          type="button"
+          aria-expanded={expandedId === order.id}
+          aria-controls={expandedId === order.id ? expandedRowId(order.id) : undefined}
+          onClick={() => setExpandedId((id) => (id === order.id ? null : order.id))}
+          className="flex items-center gap-2 text-left underline-offset-2 hover:underline"
+        >
+          <span aria-hidden className="text-(--muted-foreground)">
+            {expandedId === order.id ? '▾' : '▸'}
+          </span>
+          <span className="font-mono text-xs">{order.id}</span>
+        </button>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (order) => (
+        <span className="rounded-full border border-(--border) bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">
+          {orderStatusLabel(order.status)}
+        </span>
+      ),
+    },
+    { key: 'source', header: 'Source', render: (order) => orderSourceLabel(order.source) },
+    {
+      key: 'channel',
+      header: 'Channel refs',
+      render: (order) => <span className="font-mono text-xs">{channelRefLabel(order)}</span>,
+    },
+    {
+      key: 'createdAt',
+      header: 'Created',
+      render: (order) => <time dateTime={order.createdAt}>{new Date(order.createdAt).toLocaleString()}</time>,
+    },
+    {
+      key: 'updatedAt',
+      header: 'Updated',
+      render: (order) => <time dateTime={order.updatedAt}>{new Date(order.updatedAt).toLocaleString()}</time>,
+    },
+    ...(canManageOrders
+      ? [
+          {
+            key: 'actions',
+            header: '',
+            render: (order: OrderEntryDto) =>
+              // No affordance at all for a state the backend would refuse:
+              // ready_to_dispatch, dispatched and cancelled are downstream or
+              // already done.
+              canCancelOrder(order.status) ? (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    // Any cancel in flight disables every row: `busyId` and
+                    // the outcome banner are single, so two concurrent
+                    // cancels would leave one of them unreported.
+                    disabled={busyId !== null}
+                    onClick={() => setConfirmId(order.id)}
+                    className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : null,
+          } satisfies DataTableColumn<OrderEntryDto>,
+        ]
+      : []),
+  ];
+
+  const confirmTarget = confirmId === null ? null : (loaded.find((o) => o.id === confirmId) ?? null);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <label className="flex flex-col gap-1">
+          {/* The list API offers cursor + limit and nothing else — no status
+              filter, no sort, no search. Naming the scope in the control is
+              what keeps it from implying it searched the whole warehouse. */}
+          <span className="text-xs text-(--muted-foreground)">Filter this page</span>
+          <select
+            className={`${selectClass} w-auto py-1`}
+            value={statusFilter ?? ''}
+            onChange={(e) => setStatusFilter(e.target.value === '' ? null : (e.target.value as OrderStatus))}
+          >
+            <option value="">All statuses</option>
+            {ORDER_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {orderStatusLabel(status)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="text-xs text-(--muted-foreground)">
+          {pageFilterCount(rows.length, loaded.length)}
+        </span>
+      </div>
+
+      {confirmTarget !== null && (
+        <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
+          <div className="text-xs text-(--muted-foreground)">
+            Cancelling order <span className="font-mono">{confirmTarget.id}</span> releases every
+            reservation it still holds. A stock hold a picklist already claimed is refused by the
+            server, and the order stays as it is.
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busyId !== null}
+              onClick={() => confirmCancel(confirmTarget.id)}
+              className={primaryClass}
+            >
+              {busyId === confirmTarget.id ? 'Cancelling…' : 'Cancel this order'}
+            </button>
+            <button type="button" onClick={() => setConfirmId(null)} className={buttonClass}>
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {orders.state === 'failed' ? (
+        <ReadFailure word="Orders unavailable" reason={orders.reason} onRetry={orders.reload} />
+      ) : (
+        <DataTable<OrderEntryDto>
+          key={pageEpoch}
+          columns={columns}
+          rows={rows}
+          nextCursor={orders.state === 'ready' ? orders.data.nextCursor : null}
+          onCursor={orders.onCursor}
+          renderExpanded={(order) =>
+            expandedId === order.id ? <OrderDetailPanel orderId={order.id} /> : null
+          }
+          emptyMessage={
+            orders.state === 'loading'
+              ? 'Loading orders…'
+              : loaded.length === 0
+                ? 'No orders in this warehouse yet.'
+                : 'No orders on this page match that status.'
+          }
+        />
+      )}
+      {outcome !== null && (
+        <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * One order's lines, fetched when the row expands. A failure is reported on
+ * this row alone — the list around it is untouched, and an empty line list
+ * would read as "this order has no lines", which is never true.
+ */
+function OrderDetailPanel({ orderId }: { orderId: string }) {
+  const detail = useOrderDetail(orderId);
+  const skus = useOutboundSkus();
+  // The SKU map only decorates: a line falls back to its raw `skuId` rather
+  // than blocking the quantities, which are what this panel exists for.
+  const skuMap = skus.state === 'ready' ? skus.data : null;
+
+  if (detail.state === 'loading') {
+    return <div className="text-xs text-(--muted-foreground)">Loading lines…</div>;
+  }
+  if (detail.state === 'failed') {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <div role="alert" className="text-xs text-(--destructive)">
+          {detail.reason}
+        </div>
+        <button type="button" onClick={detail.reload} className={`${buttonClass} text-xs`}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-xs text-(--muted-foreground)">
+        {orderTotalsLabel(lineTotals(detail.data.lines))}
+      </div>
+      <ul className="flex flex-col gap-1">
+        {detail.data.lines.map((line) => (
+          <li key={line.id} className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-mono">{skuMap?.[line.skuId]?.code ?? line.skuId}</span>
+            <span className="text-(--muted-foreground)">{skuMap?.[line.skuId]?.name ?? ''}</span>
+            <span className="data">{lineQuantityLabel(line)}</span>
+            <span
+              className={
+                line.status === 'backordered'
+                  ? 'rounded-full border border-(--destructive) px-2 py-0.5 text-(--destructive)'
+                  : 'rounded-full border border-(--border) px-2 py-0.5 text-(--muted-foreground)'
+              }
+            >
+              {line.status === 'backordered' ? 'Backordered' : 'Open'}
+            </span>
+            <span className="text-(--muted-foreground)">Hold: {holdStateLabel(line)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

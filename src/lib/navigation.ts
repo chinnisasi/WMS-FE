@@ -19,6 +19,13 @@ export interface NavItem {
    * mutation-centric enough to declare one yet (warehouse/catalog setup lives
    * inside Settings); operational epics declare theirs here as they land —
    * story 3.3 gates Conflicts & Reviews behind `review.decide`.
+   *
+   * A gate belongs here only when the surface has nothing to *read* for a
+   * role that cannot act — which is true of the Conflicts action queue and
+   * of nothing else so far. Outbound (story 4.2b) is deliberately ungated
+   * for that reason, like `inbound` and `inventory`: its list and expanded
+   * order detail are readable by every role, and only the create form and
+   * the cancel affordance consult `orders.manage`, inside the component.
    */
   readonly capabilities?: readonly Capability[];
 }
