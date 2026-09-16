@@ -31,7 +31,7 @@ afterEach(() => {
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
-    expect(ROLE_CAPABILITIES.owner.length).toBe(21);
+    expect(ROLE_CAPABILITIES.owner.length).toBe(22);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -53,6 +53,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'picks.execute')).toBe(true);
     expect(roleHasCapability('owner', 'pack.execute')).toBe(true);
     expect(roleHasCapability('owner', 'dispatch.execute')).toBe(true);
+    expect(roleHasCapability('owner', 'carrier.manage')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -77,6 +78,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'picks.execute')).toBe(true);
     expect(roleHasCapability('ops_manager', 'pack.execute')).toBe(true);
     expect(roleHasCapability('ops_manager', 'dispatch.execute')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'carrier.manage')).toBe(true);
     // Membership, spelled out — a length check passes a list of the right
     // size with the wrong member in it, which is the drift this file exists
     // to catch. The expected set is written here rather than derived from
@@ -102,6 +104,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'picks.execute',
         'pack.execute',
         'dispatch.execute',
+        'carrier.manage',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -124,6 +127,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('operator', 'sku.edit')).toBe(false);
     expect(roleHasCapability('operator', 'orders.manage')).toBe(false);
     expect(roleHasCapability('operator', 'waves.manage')).toBe(false);
+    // Story 4.6b — configuring a carrier account is settings work, not a
+    // floor verb: the operator column stays at four.
+    expect(roleHasCapability('operator', 'carrier.manage')).toBe(false);
     expect(ROLE_CAPABILITIES.accountant.length).toBe(0);
     expect(roleHasCapability('accountant', 'putaway.execute')).toBe(false);
     expect(roleHasCapability('accountant', 'users.invite')).toBe(false);
@@ -167,6 +173,16 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         roleHasCapability(role, 'putaway.execute'),
       ),
     ).toEqual(['owner', 'ops_manager', 'operator']);
+  });
+
+  // Story 4.6b — the carrier credential vault: a settings capability, owner
+  // or ops_manager only (the `device.manage` shape).
+  test('carrier.manage belongs to owner and ops_manager', () => {
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'carrier.manage'),
+      ),
+    ).toEqual(['owner', 'ops_manager']);
   });
 
   // Story 3.6 — merge/retire are terminal administration: owner or

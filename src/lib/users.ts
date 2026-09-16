@@ -63,6 +63,13 @@ export const CAPABILITIES = [
   // + Ops Manager + Operator, mirroring `pack.execute`: the person who hands
   // the parcel to the courier is the one who packed it.
   'dispatch.execute',
+  // Story 4.6b — the carrier credential vault (connect a carrier account,
+  // rotate its material, disconnect it). A settings capability like
+  // `device.manage`: Owner and Ops Manager only — an API key is not a floor
+  // verb. No web surface consumes it yet; the mirror stays in step with the
+  // backend so the drift guard keeps passing and the surface that lands next
+  // has the gate ready.
+  'carrier.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
