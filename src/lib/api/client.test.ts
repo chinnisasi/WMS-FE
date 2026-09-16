@@ -5,13 +5,20 @@ import { restoreGlobals, stubGlobal } from '../test/globals';
 import {
   ApiProblem,
   fetchApiCancelOrder,
+  fetchApiCancelWave,
   fetchApiCreateOrder,
   fetchApiCreateWarehouse,
+  fetchApiCreateWavePolicy,
+  fetchApiGenerateWave,
   fetchApiGetOrder,
+  fetchApiGetWave,
   fetchApiInviteUser,
   fetchApiListOrders,
   fetchApiListWarehouses,
+  fetchApiListWavePolicies,
+  fetchApiListWaves,
   fetchApiRegisterTenant,
+  fetchApiReleaseWave,
   refreshSessionUser,
 } from './client';
 import { SESSION_STORAGE_KEY, writeSession, clearSession } from '../auth';
@@ -91,6 +98,44 @@ describe('ApiProblem error mapping', () => {
       expect(problem.code).toBe('duplicate-email');
       expect(problem.status).toBe(409);
       expect(problem.detail).toContain('priya@example.com');
+    }
+  });
+
+  test('a transport failure is surfaced as the fetch’s own Error, not as an ApiProblem', async () => {
+    // The generated client hands a rejected fetch back as `error`, so this
+    // used to be dressed up as ApiProblem('request-failed') with the raw
+    // "TypeError: Failed to fetch" as its detail — which every reason mapper
+    // then rendered verbatim, making the house "is wms-be running?" copy
+    // unreachable in practice. There is no HTTP response and no server
+    // `code` here, so the Error travels as itself.
+    stubGlobal('fetch', (async () => {
+      throw new TypeError('Failed to fetch');
+    }) as unknown as typeof fetch);
+    try {
+      await fetchApiListWarehouses(SESSION.tenant.id);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(ApiProblem);
+      expect(error).toBeInstanceOf(TypeError);
+    }
+  });
+
+  test('a non-JSON error body (a proxy’s HTML 502) never reaches a surface as markup', async () => {
+    // `String(error)` used to become the `detail` every reason mapper renders
+    // in its default arm, putting a `<html>…` page on screen. There is no
+    // problem `code` here and nothing the server said in a usable shape, so
+    // it is transport-shaped and the house unreachable copy fires.
+    stubGlobal('fetch', (async () =>
+      new Response('<html><body>502 Bad Gateway</body></html>', {
+        status: 502,
+        headers: { 'content-type': 'text/html' },
+      })) as unknown as typeof fetch);
+    try {
+      await fetchApiListWarehouses(SESSION.tenant.id);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(ApiProblem);
+      expect(String(error)).not.toContain('<html>');
     }
   });
 
@@ -348,6 +393,186 @@ describe('outbound order wrappers (story 4.2b)', () => {
       expect(problem.status).toBe(409);
       expect(problem.title).toBe(sentence);
       expect(problem.detail).toBe(sentence);
+    }
+    clearSession();
+  });
+});
+
+describe('outbound wave wrappers (story 4.2c)', () => {
+  const WAREHOUSE_ID = '0198f7a2-1b3c-7d4e-8f90-99aabbccddee';
+  const WAVE_ID = '0198f7a2-1b3c-7d4e-8f90-5566778899aa';
+  const POLICY_ID = '0198f7a2-1b3c-7d4e-8f90-bbccddee0011';
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+
+  test('the wave list is warehouse-scoped and sends no query on the first page', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListWaves(SESSION.tenant.id, WAREHOUSE_ID);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/warehouses/${WAREHOUSE_ID}/outbound/waves`,
+    );
+    expect(url.search).toBe('');
+    clearSession();
+  });
+
+  test('a cursor is passed through as the keyset query', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListWaves(SESSION.tenant.id, WAREHOUSE_ID, { cursor: 'opaque-cursor' });
+    expect(new URL(lastRequest!.url).searchParams.get('cursor')).toBe('opaque-cursor');
+    clearSession();
+  });
+
+  test('the policy list is warehouse-scoped too', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListWavePolicies(SESSION.tenant.id, WAREHOUSE_ID);
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/warehouses/${WAREHOUSE_ID}/outbound/wave-policies`,
+    );
+    clearSession();
+  });
+
+  test('the wave detail read hits the tenant-scoped wave path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { wave: { id: WAVE_ID, picklists: [] } });
+    await fetchApiGetWave(SESSION.tenant.id, WAVE_ID);
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/waves/${WAVE_ID}`,
+    );
+    expect(lastRequest!.method).toBe('GET');
+    clearSession();
+  });
+
+  test('creating a policy sends the body and the Idempotency-Key header', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { policy: { id: POLICY_ID } });
+    await fetchApiCreateWavePolicy(
+      SESSION.tenant.id,
+      { warehouseId: WAREHOUSE_ID, name: 'Evening courier', grouping: 'batch', cutoffLocalTime: '18:00' },
+      KEY,
+    );
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/wave-policies`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({
+      warehouseId: WAREHOUSE_ID,
+      name: 'Evening courier',
+      grouping: 'batch',
+      cutoffLocalTime: '18:00',
+    });
+    clearSession();
+  });
+
+  test('generate sends the selection body — omitting orderIds is the auto-sweep', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { wave: { id: WAVE_ID, picklists: [] } });
+    await fetchApiGenerateWave(
+      SESSION.tenant.id,
+      { warehouseId: WAREHOUSE_ID, policyId: POLICY_ID },
+      KEY,
+    );
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/waves`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({
+      warehouseId: WAREHOUSE_ID,
+      policyId: POLICY_ID,
+    });
+    clearSession();
+  });
+
+  test('generate carries an explicit order selection when one is given', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { wave: { id: WAVE_ID, picklists: [] } });
+    await fetchApiGenerateWave(
+      SESSION.tenant.id,
+      { warehouseId: WAREHOUSE_ID, policyId: POLICY_ID, orderIds: ['o-1', 'o-2'] },
+      KEY,
+    );
+    expect(await lastRequest!.json()).toEqual({
+      warehouseId: WAREHOUSE_ID,
+      policyId: POLICY_ID,
+      orderIds: ['o-1', 'o-2'],
+    });
+    clearSession();
+  });
+
+  test('release sends NO body and still sets the Idempotency-Key header', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { wave: { id: WAVE_ID, status: 'released', picklists: [] } });
+    await fetchApiReleaseWave(SESSION.tenant.id, WAVE_ID, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/waves/${WAVE_ID}/release`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    // Unlike cancel-order, whose `{}` is REQUIRED, this endpoint declares no
+    // body at all — sending one would be a contract drift the suite must catch.
+    expect(await lastRequest!.text()).toBe('');
+    clearSession();
+  });
+
+  test('cancel sends NO body and still sets the Idempotency-Key header', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { wave: { id: WAVE_ID, status: 'cancelled', picklists: [] } });
+    await fetchApiCancelWave(SESSION.tenant.id, WAVE_ID, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/waves/${WAVE_ID}/cancel`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.text()).toBe('');
+    clearSession();
+  });
+
+  test('a 409 cutoff-passed release refusal unwraps with its title and detail intact', async () => {
+    writeSession(SESSION);
+    const sentence =
+      'The 18:00 Asia/Kolkata cutoff has passed — the wave stays planned.';
+    stubFetch(409, {
+      type: 'about:blank',
+      code: 'cutoff-passed',
+      title: sentence,
+      status: 409,
+      detail: sentence,
+    });
+    try {
+      await fetchApiReleaseWave(SESSION.tenant.id, WAVE_ID, KEY);
+      expect.unreachable();
+    } catch (error) {
+      const problem = error as ApiProblem;
+      expect(problem).toBeInstanceOf(ApiProblem);
+      expect(problem.status).toBe(409);
+      expect(problem.code).toBe('cutoff-passed');
+      expect(problem.detail).toBe(sentence);
+    }
+    clearSession();
+  });
+
+  test('a 422 generate refusal keeps the machine-readable code the mapper branches on', async () => {
+    writeSession(SESSION);
+    stubFetch(422, {
+      type: 'about:blank',
+      code: 'no-eligible-orders',
+      title: 'No accepted order is free to wave',
+      status: 422,
+      detail: 'Every accepted order in this warehouse is already on an open wave.',
+    });
+    try {
+      await fetchApiGenerateWave(
+        SESSION.tenant.id,
+        { warehouseId: WAREHOUSE_ID, policyId: POLICY_ID },
+        KEY,
+      );
+      expect.unreachable();
+    } catch (error) {
+      const problem = error as ApiProblem;
+      expect(problem.code).toBe('no-eligible-orders');
+      expect(problem.status).toBe(422);
     }
     clearSession();
   });
