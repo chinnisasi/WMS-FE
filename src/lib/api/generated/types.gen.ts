@@ -1091,9 +1091,9 @@ export type OrderDto = {
     tenantId: string;
     warehouseId: string;
     /**
-     * The order's lifecycle arm. 'ready_to_dispatch' (story 4.5) is a packed order: verified at the bench against what was picked and waiting for dispatch.
+     * The order's lifecycle arm. 'ready_to_dispatch' (story 4.5) is a packed order: verified at the bench against what was picked and waiting for dispatch. 'dispatched' (story 4.6) is terminal — the order shipped, its shipment is journalled and its reservations are retired; there is no un-dispatch.
      */
-    status: 'accepted' | 'ready_to_dispatch' | 'cancelled';
+    status: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
     /**
      * 'manual' or 'ingested'
      */
@@ -1196,7 +1196,7 @@ export type PackDto = {
     /**
      * Always ready_to_dispatch on a successful pack
      */
-    orderStatus: 'accepted' | 'ready_to_dispatch' | 'cancelled';
+    orderStatus: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
     source: 'manual' | 'ingested';
     integrationId: string | null;
     externalEventId: string | null;
@@ -1227,11 +1227,87 @@ export type PackResponse = {
     pack: PackDto;
 };
 
+export type DispatchOrderDto = {
+    /**
+     * Optional free-text carrier (e.g. a manual courier). Absence is never an error; a blank string is treated as absent.
+     */
+    carrierName?: string | null;
+    /**
+     * Optional free-text tracking or consignment reference. Absence is never an error; a blank string is treated as absent.
+     */
+    trackingNumber?: string | null;
+};
+
+export type DispatchedLineDto = {
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * What the order asked for
+     */
+    orderedQty: number;
+    /**
+     * What actually shipped for this line — the PICKED units
+     */
+    dispatchedQty: number;
+    /**
+     * Derived: orderedQty − dispatchedQty (non-zero on a short-picked line)
+     */
+    shortfallQty: number;
+    /**
+     * The dispatch.dispatched event this line’s shipment was journalled as
+     */
+    ledgerEventId: string;
+};
+
+export type DispatchDto = {
+    orderId: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * Always dispatched on a successful dispatch
+     */
+    orderStatus: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+    source: 'manual' | 'ingested';
+    integrationId: string | null;
+    externalEventId: string | null;
+    /**
+     * The operator who dispatched it
+     */
+    dispatchedBy: string;
+    /**
+     * ISO-8601 UTC dispatch time
+     */
+    dispatchedAt: string;
+    /**
+     * Free-text carrier; null when none was recorded
+     */
+    carrierName: string | null;
+    /**
+     * Free-text tracking reference; null when none was recorded
+     */
+    trackingNumber: string | null;
+    /**
+     * Total units shipped — the sum of every line’s dispatchedQty
+     */
+    totalUnits: number;
+    /**
+     * The reservation holds this dispatch retired committed → released — the ATP correction. Empty when the order had none left to retire.
+     */
+    retiredReservationIds: Array<string>;
+    lines: Array<DispatchedLineDto>;
+};
+
+export type DispatchResponse = {
+    dispatch: DispatchDto;
+};
+
 export type OrderEntryDto = {
     id: string;
     tenantId: string;
     warehouseId: string;
-    status: 'accepted' | 'ready_to_dispatch' | 'cancelled';
+    status: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
     source: 'manual' | 'ingested';
     integrationId: string | null;
     externalEventId: string | null;
@@ -4249,6 +4325,63 @@ export type OutboundControllerPackOrderResponses = {
 };
 
 export type OutboundControllerPackOrderResponse = OutboundControllerPackOrderResponses[keyof OutboundControllerPackOrderResponses];
+
+export type OutboundControllerDispatchOrderData = {
+    body?: DispatchOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/dispatch';
+};
+
+export type OutboundControllerDispatchOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter, or an over-long carrier / tracking value (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks dispatch.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is already dispatched under a different key, or is not packed — it reads accepted or cancelled (conflict, naming the status); or a concurrent idempotent request (conflict). Nothing is written
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerDispatchOrderError = OutboundControllerDispatchOrderErrors[keyof OutboundControllerDispatchOrderErrors];
+
+export type OutboundControllerDispatchOrderResponses = {
+    /**
+     * The dispatch record: per line the ordered / dispatched / shortfall quantities with the SKU code and name and the dispatch.dispatched event it was journalled as, the carrier arms, and the reservation holds this dispatch retired (the idempotency snapshot — a replay re-serves it, nothing re-dispatches)
+     */
+    201: DispatchResponse;
+};
+
+export type OutboundControllerDispatchOrderResponse = OutboundControllerDispatchOrderResponses[keyof OutboundControllerDispatchOrderResponses];
 
 export type OutboundControllerGetOrderData = {
     body?: never;
