@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
+import { restoreGlobals, stubGlobal } from '../test/globals';
+
 import {
   ApiProblem,
   fetchApiCancelOrder,
@@ -29,32 +31,30 @@ import type { StoredSession } from '../auth';
 let lastRequest: Request | undefined;
 
 function stubFetch(status: number, body: unknown): void {
-  (globalThis as Record<string, unknown>).fetch = (async (input: RequestInfo | URL) => {
+  stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     lastRequest = input instanceof Request ? input : new Request(input.toString());
     return new Response(JSON.stringify(body), {
       status,
       headers: { 'content-type': 'application/json' },
     });
-  }) as unknown as typeof fetch;
+  }) as unknown as typeof fetch);
 }
 
 let store: Map<string, string>;
 
 beforeEach(() => {
   store = new Map();
-  (globalThis as Record<string, unknown>).localStorage = {
+  stubGlobal('localStorage', {
     getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
     setItem: (key: string, value: string) => void store.set(key, value),
     removeItem: (key: string) => void store.delete(key),
-  } as Storage;
+  } as Storage);
   // auth.ts dispatches on write/clear; a no-op window is enough here.
-  (globalThis as Record<string, unknown>).window = { dispatchEvent: () => true };
+  stubGlobal('window', { dispatchEvent: () => true });
 });
 
 afterEach(() => {
-  delete (globalThis as Record<string, unknown>).fetch;
-  delete (globalThis as Record<string, unknown>).localStorage;
-  delete (globalThis as Record<string, unknown>).window;
+  restoreGlobals();
   lastRequest = undefined;
 });
 

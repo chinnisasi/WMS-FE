@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
+import { restoreGlobals, stubGlobal } from './test/globals';
+
 import type { Capability } from './users';
 import { notifyUsersChanged, roleHasCapability, ROLE_CAPABILITIES, USERS_CHANGED_EVENT } from './users';
 
@@ -15,16 +17,16 @@ let dispatched: string[] = [];
 beforeEach(() => {
   dispatched = [];
   // notifyUsersChanged dispatches on window; a minimal shim suffices.
-  (globalThis as Record<string, unknown>).window = {
+  stubGlobal('window', {
     dispatchEvent: (event: Event) => {
       dispatched.push(event.type);
       return true;
     },
-  } as unknown as typeof window;
+  } as unknown as typeof window);
 });
 
 afterEach(() => {
-  delete (globalThis as Record<string, unknown>).window;
+  restoreGlobals();
 });
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {

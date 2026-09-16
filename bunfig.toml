@@ -1,0 +1,5 @@
+# `bun test` configuration. The preload installs a DOM (happy-dom) as real
+# globals before any test file is evaluated, which is what lets component
+# tests render. Pure-logic tests under src/lib are unaffected by its presence.
+[test]
+preload = ["./happydom.ts"]
