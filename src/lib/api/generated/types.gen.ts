@@ -2210,6 +2210,95 @@ export type PutawayPlacementListResponse = {
     nextCursor?: string | null;
 };
 
+export type CarrierCredentialFieldResponse = {
+    /**
+     * Wire name inside the `credential` object
+     */
+    name: string;
+    /**
+     * Human label for the field
+     */
+    label: string;
+    /**
+     * A required field absent or blank is a 400
+     */
+    required: boolean;
+    /**
+     * What the operator should paste here
+     */
+    description: string;
+};
+
+export type CarrierCatalogueEntryResponse = {
+    /**
+     * Registry code — the `carrierCode` connect takes
+     */
+    code: string;
+    displayName: string;
+    /**
+     * What this carrier needs to be configured with (declaration order)
+     */
+    credentialFields: Array<CarrierCredentialFieldResponse>;
+};
+
+export type CarrierCatalogueResponse = {
+    items: Array<CarrierCatalogueEntryResponse>;
+};
+
+export type CarrierConnectionResponse = {
+    /**
+     * The stable handle rotation preserves
+     */
+    id: string;
+    tenantId: string;
+    carrierCode: string;
+    /**
+     * The registry display name for the code
+     */
+    carrierName: string;
+    accountLabel: string;
+    /**
+     * 1 at connect, +1 per rotation
+     */
+    credentialVersion: number;
+    connectedBy: string;
+    rotatedAt: string | null;
+    rotatedBy: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CarrierConnectionListResponse = {
+    items: Array<CarrierConnectionResponse>;
+    nextCursor: string | null;
+};
+
+export type ConnectCarrierDto = {
+    /**
+     * A code the adapter registry knows
+     */
+    carrierCode: string;
+    /**
+     * The operator's name for this account
+     */
+    accountLabel: string;
+    /**
+     * The carrier credential fields, as declared by GET /carriers for this code. Write-only: sealed under CARRIER_ENCRYPTION_KEY and never returned, listed or logged.
+     */
+    credential: {
+        [key: string]: string;
+    };
+};
+
+export type RotateCarrierCredentialDto = {
+    /**
+     * The replacement credential fields for this connection’s carrier. The connection id is unchanged; credentialVersion increments.
+     */
+    credential: {
+        [key: string]: string;
+    };
+};
+
 export type TenancyControllerRegisterData = {
     body: RegisterTenantDto;
     headers: {
@@ -5523,3 +5612,232 @@ export type PutawayControllerListPutawayTasksResponses = {
 };
 
 export type PutawayControllerListPutawayTasksResponse = PutawayControllerListPutawayTasksResponses[keyof PutawayControllerListPutawayTasksResponses];
+
+export type CarriersControllerCatalogueData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/carriers';
+};
+
+export type CarriersControllerCatalogueErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type CarriersControllerCatalogueError = CarriersControllerCatalogueErrors[keyof CarriersControllerCatalogueErrors];
+
+export type CarriersControllerCatalogueResponses = {
+    200: CarrierCatalogueResponse;
+};
+
+export type CarriersControllerCatalogueResponse = CarriersControllerCatalogueResponses[keyof CarriersControllerCatalogueResponses];
+
+export type CarriersControllerListConnectionsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/carriers/connections';
+};
+
+export type CarriersControllerListConnectionsErrors = {
+    /**
+     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type CarriersControllerListConnectionsError = CarriersControllerListConnectionsErrors[keyof CarriersControllerListConnectionsErrors];
+
+export type CarriersControllerListConnectionsResponses = {
+    200: CarrierConnectionListResponse;
+};
+
+export type CarriersControllerListConnectionsResponse = CarriersControllerListConnectionsResponses[keyof CarriersControllerListConnectionsResponses];
+
+export type CarriersControllerConnectData = {
+    body: ConnectCarrierDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/carriers/connections';
+};
+
+export type CarriersControllerConnectErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an unknown carrierCode, or credential material missing a required field (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks carrier.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * This carrier is already connected for the tenant — rotate instead (carrier-already-connected)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The deployment has no CARRIER_ENCRYPTION_KEY (carrier-encryption-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type CarriersControllerConnectError = CarriersControllerConnectErrors[keyof CarriersControllerConnectErrors];
+
+export type CarriersControllerConnectResponses = {
+    201: CarrierConnectionResponse;
+};
+
+export type CarriersControllerConnectResponse = CarriersControllerConnectResponses[keyof CarriersControllerConnectResponses];
+
+export type CarriersControllerRotateData = {
+    body: RotateCarrierCredentialDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/carriers/connections/{connectionId}/rotate';
+};
+
+export type CarriersControllerRotateErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, malformed connectionId, or credential material missing a required field (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks carrier.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such connection in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The deployment has no CARRIER_ENCRYPTION_KEY (carrier-encryption-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type CarriersControllerRotateError = CarriersControllerRotateErrors[keyof CarriersControllerRotateErrors];
+
+export type CarriersControllerRotateResponses = {
+    200: CarrierConnectionResponse;
+};
+
+export type CarriersControllerRotateResponse = CarriersControllerRotateResponses[keyof CarriersControllerRotateResponses];
+
+export type CarriersControllerDisconnectData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/carriers/connections/{connectionId}/disconnect';
+};
+
+export type CarriersControllerDisconnectErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed connectionId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks carrier.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such connection in this tenant, or it was already disconnected (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CarriersControllerDisconnectError = CarriersControllerDisconnectErrors[keyof CarriersControllerDisconnectErrors];
+
+export type CarriersControllerDisconnectResponses = {
+    200: CarrierConnectionResponse;
+};
+
+export type CarriersControllerDisconnectResponse = CarriersControllerDisconnectResponses[keyof CarriersControllerDisconnectResponses];
