@@ -15,7 +15,8 @@
     "lint": "eslint .",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "api:generate": "openapi-ts"
+    "api:generate": "openapi-ts",
+    "check:capability-mirror": "bun run scripts/check-capability-mirror.ts"
   },
   "dependencies": {
     "@hey-api/client-fetch": "0.13.1",

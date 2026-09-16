@@ -61,3 +61,12 @@ jobs:
       - name: Generated-client drift guard (client matches committed spec)
         run: git diff --exit-code src/lib/api/generated
         working-directory: workspace/core/frontend/wms-fe
+
+      # src/lib/users.ts is a hand-maintained mirror of wms-be's
+      # permissions.ts, and users.test.ts can only restate the file under
+      # test — three capabilities were missing from epics 2-3 before anything
+      # noticed. This job already has wms-be checked out, so it is the place
+      # to compare them.
+      - name: Capability-mirror drift guard (users.ts matches permissions.ts)
+        run: bun run check:capability-mirror
+        working-directory: workspace/core/frontend/wms-fe

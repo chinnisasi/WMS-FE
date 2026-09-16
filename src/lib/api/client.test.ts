@@ -2,8 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
   ApiProblem,
+  fetchApiCancelOrder,
+  fetchApiCreateOrder,
   fetchApiCreateWarehouse,
+  fetchApiGetOrder,
   fetchApiInviteUser,
+  fetchApiListOrders,
   fetchApiListWarehouses,
   fetchApiRegisterTenant,
   refreshSessionUser,
@@ -237,6 +241,114 @@ describe('401 response interceptor', () => {
       // mapped error — asserted elsewhere
     }
     expect(store.has(SESSION_STORAGE_KEY)).toBe(true);
+    clearSession();
+  });
+});
+
+
+/**
+ * Story 4.2b — the Outbound orders wrappers. The assertions that matter are
+ * the ones a component can never make: the URL the warehouse-scoped list
+ * actually hits, that every mutating call carries its `Idempotency-Key`
+ * header, that cancel sends the required empty body, and that the problem
+ * `title` survives unwrapping (the 409 cancel refusal is rendered verbatim,
+ * so dropping it would silently blank the only explanation the user gets).
+ */
+describe('outbound order wrappers (story 4.2b)', () => {
+  const WAREHOUSE_ID = '0198f7a2-1b3c-7d4e-8f90-99aabbccddee';
+  const ORDER_ID = '0198f7a2-1b3c-7d4e-8f90-0011223344ff';
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+
+  test('the order list is warehouse-scoped and passes the keyset cursor through', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListOrders(SESSION.tenant.id, WAREHOUSE_ID, { cursor: 'opaque-cursor', limit: 50 });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/warehouses/${WAREHOUSE_ID}/outbound/orders`,
+    );
+    expect(url.searchParams.get('cursor')).toBe('opaque-cursor');
+    expect(url.searchParams.get('limit')).toBe('50');
+    expect(lastRequest!.method).toBe('GET');
+    clearSession();
+  });
+
+  test('a first-page list sends no query at all', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListOrders(SESSION.tenant.id, WAREHOUSE_ID);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    clearSession();
+  });
+
+  test('the detail read hits the tenant-scoped order path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { order: { id: ORDER_ID, lines: [] } });
+    await fetchApiGetOrder(SESSION.tenant.id, ORDER_ID);
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/orders/${ORDER_ID}`,
+    );
+    clearSession();
+  });
+
+  test('create sends the body and the Idempotency-Key header', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { order: { id: ORDER_ID, lines: [] } });
+    await fetchApiCreateOrder(
+      SESSION.tenant.id,
+      { warehouseId: WAREHOUSE_ID, lines: [{ skuId: 'sku-1', quantity: 4 }] },
+      KEY,
+    );
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({
+      warehouseId: WAREHOUSE_ID,
+      lines: [{ skuId: 'sku-1', quantity: 4 }],
+    });
+    clearSession();
+  });
+
+  test('cancel sends the required empty body and the Idempotency-Key header', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { order: { id: ORDER_ID, status: 'cancelled', lines: [] } });
+    await fetchApiCancelOrder(SESSION.tenant.id, ORDER_ID, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/orders/${ORDER_ID}/cancel`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    // The endpoint's body is required and is `{}` — omitting it 400s.
+    expect(await lastRequest!.json()).toEqual({});
+    clearSession();
+  });
+
+  test('a 409 cancel refusal unwraps with its title and detail intact', async () => {
+    writeSession(SESSION);
+    // The real wire shape: wms-be's ProblemException sets `message` to the
+    // DETAIL, and the problem-details filter renders `title` from
+    // `exception.message` — so a refusal arrives with title === detail and
+    // the exception's own title ("Order has drawn pick lines") never leaves
+    // the server. `verbatim()` collapses the pair; both fields are still
+    // carried, which is RFC 9457 hygiene the next endpoint may rely on.
+    const sentence =
+      'Order "0198f7a2" has 2 drawn pick line(s) — a consuming flow already claimed them.';
+    stubFetch(409, {
+      type: 'about:blank',
+      code: 'conflict',
+      title: sentence,
+      status: 409,
+      detail: sentence,
+      errors: [sentence],
+    });
+    try {
+      await fetchApiCancelOrder(SESSION.tenant.id, ORDER_ID, KEY);
+      expect.unreachable();
+    } catch (error) {
+      const problem = error as ApiProblem;
+      expect(problem).toBeInstanceOf(ApiProblem);
+      expect(problem.status).toBe(409);
+      expect(problem.title).toBe(sentence);
+      expect(problem.detail).toBe(sentence);
+    }
     clearSession();
   });
 });

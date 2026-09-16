@@ -21,6 +21,13 @@ export const CAPABILITIES = [
   'sku.edit',
   'users.invite',
   'users.role_change',
+  // Story 2.1 — the manual stock adjustment (the first ledger movement
+  // producer). Owner + Ops Manager.
+  'stock.adjust',
+  // Story 3.1 — the inbound module's mutations (vendor master data + the PO
+  // lifecycle). Owner and Ops Manager only.
+  'vendor.manage',
+  'po.manage',
   // Story 3.2 — floor-device lifecycle (mint enrollment codes, revoke).
   'device.manage',
   // Story 3.3 — over-receipt approve/reject (the Conflicts & Reviews queue).
@@ -36,14 +43,45 @@ export const CAPABILITIES = [
   // Story 3.6 — bin administration (merge + retire; the block toggle stays
   // on `bin.block`): Owner and Ops Manager only — retirement is terminal.
   'bin.retire',
+  // Story 4.1 — the outbound module's order mutations (manual entry and
+  // ingested-channel creation, both accepted with per-line ATP reservation;
+  // cancellation releases the holds). Owner and Ops Manager only — an
+  // Operator picks what was planned, it does not plan. Gates the Outbound
+  // orders surface's create form and cancel affordance (story 4.2b).
+  'orders.manage',
+  // Story 4.2 — waves and their policies (generate, release, cancel; a
+  // policy IS the wave rule). Owner and Ops Manager only.
+  'waves.manage',
+  // Story 4.3 — the scan-verified pick command. Owner + Ops Manager +
+  // Operator (the floor executes the walk the planner released).
+  'picks.execute',
+  // Story 4.5 — the pack-station verification command. Owner + Ops Manager +
+  // Operator: a Pack Station is a place in the building, and the person
+  // standing at it is an Operator.
+  'pack.execute',
+  // Story 4.6 — the dispatch command, the order's terminal transition. Owner
+  // + Ops Manager + Operator, mirroring `pack.execute`: the person who hands
+  // the parcel to the courier is the one who packed it.
+  'dispatch.execute',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
 
+/**
+ * The only capabilities the Ops Manager does not hold. Stated once, as the
+ * implementation of the grant below rather than as a comment above a
+ * hand-copied list — a copy drifts the moment a capability is added, which is
+ * exactly how this mirror fell eight entries behind in the first place.
+ */
+const OWNER_ONLY_CAPABILITIES: readonly Capability[] = ['users.invite', 'users.role_change'];
+
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
   owner: CAPABILITIES,
-  ops_manager: ['warehouse.create', 'zone.create', 'bin.create', 'bin.block', 'catalog.import', 'sku.edit', 'device.manage', 'review.decide', 'qc.manage', 'putaway.execute', 'bin.retire'],
-  operator: ['putaway.execute'],
+  // Every operational mutation, no user management.
+  ops_manager: CAPABILITIES.filter((capability) => !OWNER_ONLY_CAPABILITIES.includes(capability)),
+  // The floor verbs only: place, pick, pack, dispatch. Notably **not**
+  // `orders.manage` — an Operator never creates or cancels an order.
+  operator: ['putaway.execute', 'picks.execute', 'pack.execute', 'dispatch.execute'],
   accountant: [],
 };
 

@@ -11,6 +11,10 @@ import {
   inboundControllerListPurchaseOrders,
   inboundControllerListVendors,
   inventoryControllerListStock,
+  outboundControllerCancelOrder,
+  outboundControllerCreateOrder,
+  outboundControllerGetOrder,
+  outboundControllerListOrders,
   receivingControllerApproveOverReceipt,
   receivingControllerListGoodsReceipts,
   receivingControllerListOverReceipts,
@@ -59,6 +63,9 @@ import type {
   InviteUserResponse,
   MeResponse,
   MintEnrollmentCodeResponse,
+  CreateOrderDto,
+  OrderListResponse,
+  OrderResponse,
   OverReceiptDecisionResponse,
   OverReceiptListResponse,
   PlaceQcHoldDto,
@@ -134,23 +141,34 @@ export class ApiProblem extends Error {
   readonly code: string;
   readonly detail?: string;
   readonly status: number;
+  /**
+   * The problem's human-readable `title` (RFC 9457). Surfaces branch on
+   * `code`, never on prose — but a refusal whose cause is invisible in every
+   * DTO the client holds (story 4.2b: an order cancel refused for committed
+   * reservations or drawn pick lines) can only be explained by rendering the
+   * server's own words, so the title is carried rather than dropped.
+   */
+  readonly title?: string;
 
-  constructor(code: string, status: number, detail?: string) {
+  constructor(code: string, status: number, detail?: string, title?: string) {
     super(detail ?? code);
     this.code = code;
     this.status = status;
     this.detail = detail;
+    this.title = title;
   }
 }
 
 function unwrapError(error: unknown, fallbackStatus: number): ApiProblem {
   if (isProblemDetails(error)) {
-    return new ApiProblem(error.code, error.status ?? fallbackStatus, error.detail);
+    return new ApiProblem(error.code, error.status ?? fallbackStatus, error.detail, error.title);
   }
   return new ApiProblem('request-failed', fallbackStatus, String(error));
 }
 
-function isProblemDetails(error: unknown): error is { code: string; detail?: string; status?: number } {
+function isProblemDetails(
+  error: unknown,
+): error is { code: string; detail?: string; status?: number; title?: string } {
   return typeof error === 'object' && error !== null && 'code' in error;
 }
 
@@ -781,6 +799,101 @@ export async function fetchApiListStock(
             ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
           },
     signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * One warehouse's order page (story 4.1 read, surfaced by 4.2b) — newest
+ * first, keyset cursor. The endpoint offers `cursor` + `limit` and nothing
+ * else: no status filter, no sort, no search. The surface's status control is
+ * therefore page-scoped and says so, rather than pretending to search the
+ * whole warehouse.
+ */
+export async function fetchApiListOrders(
+  tenantId: string,
+  warehouseId: string,
+  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<OrderListResponse> {
+  const { data, error } = await outboundControllerListOrders({
+    path: { tenantId, warehouseId },
+    query:
+      options?.cursor === undefined && options?.limit === undefined
+        ? undefined
+        : {
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+            ...(options.limit === undefined ? {} : { limit: options.limit }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * One order's detail — the lines with their ordered / reserved / shortfall
+ * quantities and live hold state. The list row cannot carry these
+ * (`OrderEntryDto` has no `lines`), so the surface fetches this when a row
+ * expands.
+ */
+export async function fetchApiGetOrder(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<OrderResponse> {
+  const { data, error } = await outboundControllerGetOrder({
+    path: { tenantId, orderId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Creates an order (capability `orders.manage`, story 4.1). Acceptance
+ * reserves `min(qty, atp)` per line, so a 201 can legitimately come back with
+ * `reservedQty < qty` and `status: 'backordered'` lines — success with a
+ * shortfall, never an error.
+ */
+export async function fetchApiCreateOrder(
+  tenantId: string,
+  body: CreateOrderDto,
+  idempotencyKey: string,
+): Promise<OrderResponse> {
+  const { data, error } = await outboundControllerCreateOrder({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Cancels an accepted order (capability `orders.manage`) — every open
+ * per-line reservation is released. The endpoint's body is required and
+ * empty. A 409 means a consuming flow already claimed a hold (committed
+ * reservations, drawn pick lines); neither cause is visible in any DTO the
+ * client holds, so callers render the server's words.
+ */
+export async function fetchApiCancelOrder(
+  tenantId: string,
+  orderId: string,
+  idempotencyKey: string,
+): Promise<OrderResponse> {
+  const { data, error } = await outboundControllerCancelOrder({
+    path: { tenantId, orderId },
+    body: {},
+    headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
     throw unwrapError(error, 400);
