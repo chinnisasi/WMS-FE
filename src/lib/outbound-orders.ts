@@ -178,8 +178,12 @@ export function cancelOutcome(order: OrderDto): Outcome {
 /**
  * The server's words, verbatim — `title`, then `detail` when it adds
  * anything. Used wherever the client cannot know better than the backend.
+ *
+ * Exported for `outbound-waves.ts`, whose refusals are verbatim for the same
+ * reason and more often: `cutoff-passed`, `wave-cap-exceeded` and the
+ * open-wave claim are all decided by state no DTO the client holds can show.
  */
-function verbatim(problem: ApiProblem): string {
+export function verbatim(problem: ApiProblem): string {
   const title = problem.title ?? '';
   const detail = problem.detail ?? '';
   if (title !== '' && detail !== '' && detail !== title) return `${title} — ${detail}`;
@@ -297,10 +301,17 @@ export function readReason(error: unknown, subject: string): string {
 /* The page-scoped status filter                                       */
 /* ------------------------------------------------------------------ */
 
-/** `null` = no filter. Filters the loaded page, never the warehouse. */
-export function filterPage<T extends { status: OrderStatus }>(
+/**
+ * `null` = no filter. Filters the loaded page, never the warehouse.
+ *
+ * Generic over the status union (not pinned to `OrderStatus`) so the waves
+ * surface filters its own three-arm lifecycle through the same function
+ * rather than re-deriving it — the list APIs offer `cursor` + `limit` only,
+ * and that limitation is identical on both.
+ */
+export function filterPage<T extends { readonly status: string }>(
   rows: readonly T[],
-  status: OrderStatus | null,
+  status: T['status'] | null,
 ): readonly T[] {
   return status === null ? rows : rows.filter((row) => row.status === status);
 }

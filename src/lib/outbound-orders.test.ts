@@ -25,6 +25,7 @@ import {
   pageFilterCount,
   parseDraftLines,
   UNREACHABLE_REASON,
+  type OrderStatus,
 } from './outbound-orders';
 
 /**
@@ -343,10 +344,14 @@ describe('readReason (the surface-level reads report their own failure)', () => 
 });
 
 describe('the page-scoped status filter', () => {
-  const rows = [
-    { id: 'a', status: 'accepted' as const },
-    { id: 'b', status: 'cancelled' as const },
-    { id: 'c', status: 'accepted' as const },
+  // Annotated with the lifecycle union rather than three literal types:
+  // `filterPage` is now generic over the row's own status union (the waves
+  // surface filters its three arms through the same function), so the rows a
+  // test hands it must declare the union they belong to.
+  const rows: readonly { id: string; status: OrderStatus }[] = [
+    { id: 'a', status: 'accepted' },
+    { id: 'b', status: 'cancelled' },
+    { id: 'c', status: 'accepted' },
   ];
 
   test('no filter keeps the loaded page intact', () => {

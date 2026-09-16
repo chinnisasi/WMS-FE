@@ -1,11 +1,9 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
 import type { OrderEntryDto, SkuResponse } from '@/lib/api/generated';
-import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import {
   canCancelOrder,
@@ -28,190 +26,55 @@ import {
   type Outcome,
   type OrderStatus,
 } from '@/lib/outbound-orders';
-import {
-  useOrderDetail,
-  useOutboundOrders,
-  useOutboundSkus,
-  useOutboundWarehouses,
-} from '@/lib/use-outbound-orders';
+import { useOrderDetail, useOutboundOrders, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
-import {
-  readActiveWarehouseId,
-  subscribeActiveWarehouse,
-  writeActiveWarehouseId,
-} from '@/lib/warehouses';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
-
-const inputClass =
-  'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
-const labelClass = 'text-sm font-medium';
-const selectClass = `${inputClass} appearance-none`;
-const buttonClass = 'rounded-sm border border-(--border) px-3 py-2 text-sm hover:bg-(--muted) disabled:opacity-40';
-const primaryClass =
-  'rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60';
+import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
+import {
+  buttonClass,
+  inputClass,
+  labelClass,
+  primaryClass,
+  ReadFailure,
+  Section,
+  selectClass,
+} from '@/components/outbound/shell';
 
 /**
  * The Outbound orders surface (story 4.2b) — the first web consumer of the
- * order lifecycle stories 4.1–4.6 shipped: the active warehouse's orders
+ * order lifecycle stories 4.1-4.6 shipped: the active warehouse's orders
  * newest-first, a row that expands into its per-line ordered / reserved /
  * shortfall quantities and hold state, manual multi-line entry, and cancel.
+ *
+ * The session, the warehouse and the role are resolved once by `outbound.tsx`
+ * and passed in — this surface used to walk the warehouse list itself and
+ * render a second picker beside the waves surface's.
  *
  * Gating hides, never blocks: the list and the expanded detail are readable
  * by every role, while the create form and the cancel affordance render only
  * for `orders.manage` (Owner + Ops Manager — deliberately not Operator). The
  * nav entry itself stays ungated. The backend's per-command role read is the
  * authority either way.
- *
- * Waves, picklists, pack and dispatch are separate stories; nothing here
- * touches them.
  */
-export function OutboundOrders() {
-  // `null` = unknown (server render) → render nothing, no hydration mismatch.
-  const sessioned = useSyncExternalStore(
-    subscribeSession,
-    () => readSession() !== null,
-    () => null as boolean | null,
-  );
-
-  if (sessioned === null) return null;
-  if (!sessioned) {
-    return (
-      <Shell>
-        <div className="text-(--muted-foreground)">
-          Sign in to review outbound orders —{' '}
-          <Link href="/login" className="text-(--primary) underline underline-offset-2">
-            go to sign in
-          </Link>
-          .
-        </div>
-      </Shell>
-    );
-  }
-  return <OutboundOrdersSessioned />;
-}
-
-/**
- * The heading renders in every state, including a failed warehouse read —
- * a surface that goes entirely blank tells the viewer nothing about where
- * they are or what went wrong.
- */
-function Shell({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-medium">Orders</h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** A failed read: the reason, and the way to try again. Never progress copy. */
-function ReadFailure({ word, reason, onRetry }: { word: string; reason: string; onRetry: () => void }) {
-  return (
-    <div className="flex flex-col items-start gap-2">
-      <FeedbackBanner tone="rejected" word={word} reason={reason} />
-      <button type="button" onClick={onRetry} className={buttonClass}>
-        Retry
-      </button>
-    </div>
-  );
-}
-
-function OutboundOrdersSessioned() {
-  const warehouses = useOutboundWarehouses();
-  const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
-  const items = warehouses.state === 'ready' ? warehouses.data.items : [];
-  const activeId = useSyncExternalStore(
-    subscribeActiveWarehouse,
-    () => (tenantId === null ? null : readActiveWarehouseId(tenantId)),
-    () => null,
-  );
-  // Story 1.5 gating pattern: subscribed (not a bare readSession() at
-  // render) so a /me bootstrap role rewrite re-renders the affordances.
-  const role = useSyncExternalStore(
-    subscribeSession,
-    () => readSession()?.user.role,
-    () => undefined,
-  );
+export function OutboundOrders({ tenantId, warehouseId, warehouseLabel, role }: OutboundSurfaceProps) {
   const canManageOrders = roleHasCapability(role, 'orders.manage');
-
-  if (warehouses.state === 'loading') {
-    return (
-      <Shell>
-        <div className="text-(--muted-foreground)">Loading warehouses…</div>
-      </Shell>
-    );
-  }
-  if (warehouses.state === 'failed') {
-    return (
-      <Shell>
-        <ReadFailure word="Warehouses unavailable" reason={warehouses.reason} onRetry={warehouses.reload} />
-      </Shell>
-    );
-  }
-
-  // The warehouse whose orders are listed: the sidebar switcher's pick when
-  // it still belongs to this tenant, else the tenant's first warehouse.
-  const warehouseId =
-    activeId !== null && items.some((w) => w.id === activeId) ? activeId : (items[0]?.id ?? null);
-  const warehouse = items.find((w) => w.id === warehouseId);
-
-  if (tenantId === null || warehouseId === null) {
-    return (
-      <Shell>
-        <div className="text-(--muted-foreground)">
-          Create a warehouse first — orders are raised against one.
-        </div>
-      </Shell>
-    );
-  }
-
   return (
-    <Shell
-      action={
-        items.length > 1 ? (
-          <label className="flex items-center gap-2 text-xs">
-            <span className="text-(--muted-foreground)">Warehouse</span>
-            <select
-              className={`${selectClass} w-auto py-1`}
-              value={warehouseId}
-              onChange={(e) => writeActiveWarehouseId(tenantId, e.target.value)}
-            >
-              {items.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.code} {w.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : undefined
-      }
-    >
+    <Section title="Orders">
       <div className="text-(--muted-foreground)">
-        {warehouse === undefined
+        {warehouseLabel === null
           ? 'Outbound orders'
-          : `${warehouse.code} ${warehouse.name} — newest first. Acceptance reserves stock line by line.`}
+          : `${warehouseLabel} — newest first. Acceptance reserves stock line by line.`}
       </div>
-      {canManageOrders && (
-        // Remounts on a warehouse switch so a half-typed draft can never post
-        // against the warehouse the viewer just left.
-        <OrderCreateForm key={warehouseId} tenantId={tenantId} warehouseId={warehouseId} />
-      )}
-      {/* Keyed likewise: DataTable's internal cursor, the status filter, the
-          expanded row and any pending confirmation all belong to one
-          warehouse and must not survive a switch. */}
+      {canManageOrders && <OrderCreateForm tenantId={tenantId} warehouseId={warehouseId} />}
       <OrdersTable
-        key={warehouseId}
         tenantId={tenantId}
         warehouseId={warehouseId}
         canManageOrders={canManageOrders}
       />
-    </Shell>
+    </Section>
   );
 }
 

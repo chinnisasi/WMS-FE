@@ -12,9 +12,16 @@ import {
   inboundControllerListVendors,
   inventoryControllerListStock,
   outboundControllerCancelOrder,
+  outboundControllerCancelWave,
   outboundControllerCreateOrder,
+  outboundControllerCreateWavePolicy,
+  outboundControllerGenerateWave,
   outboundControllerGetOrder,
+  outboundControllerGetWave,
   outboundControllerListOrders,
+  outboundControllerListWavePolicies,
+  outboundControllerListWaves,
+  outboundControllerReleaseWave,
   receivingControllerApproveOverReceipt,
   receivingControllerListGoodsReceipts,
   receivingControllerListOverReceipts,
@@ -64,6 +71,8 @@ import type {
   MeResponse,
   MintEnrollmentCodeResponse,
   CreateOrderDto,
+  CreateWavePolicyDto,
+  GenerateWaveDto,
   OrderListResponse,
   OrderResponse,
   OverReceiptDecisionResponse,
@@ -89,6 +98,10 @@ import type {
   VendorListResponse,
   WarehouseListResponse,
   WarehouseResponse,
+  WaveListResponse,
+  WavePolicyListResponse,
+  WavePolicyResponse,
+  WaveResponse,
   ZoneListResponse,
   ZoneResponse,
 } from './generated/types.gen';
@@ -159,9 +172,37 @@ export class ApiProblem extends Error {
   }
 }
 
-function unwrapError(error: unknown, fallbackStatus: number): ApiProblem {
+/**
+ * The failure a wrapper throws.
+ *
+ * A problem+json body becomes an `ApiProblem` carrying the machine-readable
+ * `code` every surface branches on. A TRANSPORT failure is different in kind:
+ * the generated client hands back the rejected fetch's own Error (wms-be
+ * down, DNS, CORS, an aborted request) and there is no HTTP response, no
+ * `code`, and nothing the server said. Dressing that up as
+ * `ApiProblem('request-failed')` put the raw `"TypeError: Failed to fetch"`
+ * on screen, because every reason mapper renders `detail` in its default arm
+ * — the house "is wms-be running?" copy those mappers keep for a non-problem
+ * error was unreachable in practice. It is surfaced as the Error it is so
+ * that copy fires.
+ *
+ * A non-problem JSON error body (a 500 with `{ message: 'boom' }`) is still an
+ * answer from the server and still becomes `ApiProblem('request-failed')`.
+ */
+function unwrapError(error: unknown, fallbackStatus: number): Error {
   if (isProblemDetails(error)) {
     return new ApiProblem(error.code, error.status ?? fallbackStatus, error.detail, error.title);
+  }
+  if (error instanceof Error) {
+    return error;
+  }
+  if (typeof error !== 'object' || error === null) {
+    // A non-JSON error body — a proxy's HTML 502 page, a plain-text gateway
+    // message. `String(error)` used to become the `detail` every mapper
+    // renders, putting raw markup on screen; there is nothing here the
+    // server said in a shape a client can use, so it is transport-shaped
+    // too and the house unreachable copy fires.
+    return new Error(`The request failed with status ${fallbackStatus} and no problem details.`);
   }
   return new ApiProblem('request-failed', fallbackStatus, String(error));
 }
@@ -893,6 +934,172 @@ export async function fetchApiCancelOrder(
   const { data, error } = await outboundControllerCancelOrder({
     path: { tenantId, orderId },
     body: {},
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Waves, policies and picklists (story 4.2, surfaced by 4.2c)         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One warehouse's wave-policy page. A policy IS the wave rule — grouping,
+ * priority, the order cap and the carrier cutoff — so the generate form
+ * picks from this list rather than asking for the rule per wave.
+ */
+export async function fetchApiListWavePolicies(
+  tenantId: string,
+  warehouseId: string,
+  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<WavePolicyListResponse> {
+  const { data, error } = await outboundControllerListWavePolicies({
+    path: { tenantId, warehouseId },
+    query:
+      options?.cursor === undefined && options?.limit === undefined
+        ? undefined
+        : {
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+            ...(options.limit === undefined ? {} : { limit: options.limit }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Creates a wave policy (capability `waves.manage`). The cutoff is an
+ * explicit `HH:MM` wall clock compared in an explicit IANA zone, and it gates
+ * RELEASE only — planning ahead of a cutoff is the point. `00:00` is refused
+ * by the backend (it would refuse release for the whole day).
+ */
+export async function fetchApiCreateWavePolicy(
+  tenantId: string,
+  body: CreateWavePolicyDto,
+  idempotencyKey: string,
+): Promise<WavePolicyResponse> {
+  const { data, error } = await outboundControllerCreateWavePolicy({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * One warehouse's wave page (headers only — `picklistCount` and nothing
+ * deeper). Newest first, keyset cursor, no status filter and no search, so
+ * the surface's status control is page-scoped and says so.
+ */
+export async function fetchApiListWaves(
+  tenantId: string,
+  warehouseId: string,
+  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<WaveListResponse> {
+  const { data, error } = await outboundControllerListWaves({
+    path: { tenantId, warehouseId },
+    query:
+      options?.cursor === undefined && options?.limit === undefined
+        ? undefined
+        : {
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+            ...(options.limit === undefined ? {} : { limit: options.limit }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * One wave's detail — its picklists and every pick line in walk order. There
+ * is no picklist endpoint: the stops a picker walks come free with this read,
+ * which is why expanding a wave row fetches the wave once.
+ */
+export async function fetchApiGetWave(
+  tenantId: string,
+  waveId: string,
+  options?: { signal?: AbortSignal },
+): Promise<WaveResponse> {
+  const { data, error } = await outboundControllerGetWave({
+    path: { tenantId, waveId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Generates a wave (capability `waves.manage`) — one call drives both
+ * selection paths: omit `orderIds` for the auto-sweep of every eligible
+ * accepted order, pass them for an explicit selection.
+ */
+export async function fetchApiGenerateWave(
+  tenantId: string,
+  body: GenerateWaveDto,
+  idempotencyKey: string,
+): Promise<WaveResponse> {
+  const { data, error } = await outboundControllerGenerateWave({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Releases a wave to the floor (capability `waves.manage`).
+ *
+ * NO body — unlike cancel-order, whose empty `{}` is required. The endpoint
+ * still requires an `Idempotency-Key`, and an already-released wave replays
+ * as a 200 no-op rather than raising a second `wave.released` event.
+ *
+ * A 409 `cutoff-passed` is decided by the SERVER's clock against the policy
+ * cutoff; the browser's at-risk amber is advisory and never gates this call.
+ */
+export async function fetchApiReleaseWave(
+  tenantId: string,
+  waveId: string,
+  idempotencyKey: string,
+): Promise<WaveResponse> {
+  const { data, error } = await outboundControllerReleaseWave({
+    path: { tenantId, waveId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Cancels a wave (capability `waves.manage`) — its picklists and pick lines
+ * go cancelled and its orders become eligible for waving again; no
+ * reservation and no stock moves. NO body, same as release.
+ */
+export async function fetchApiCancelWave(
+  tenantId: string,
+  waveId: string,
+  idempotencyKey: string,
+): Promise<WaveResponse> {
+  const { data, error } = await outboundControllerCancelWave({
+    path: { tenantId, waveId },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
