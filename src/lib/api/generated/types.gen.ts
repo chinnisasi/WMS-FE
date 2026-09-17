@@ -105,7 +105,7 @@ export type ZoneListResponse = {
 export type CreateBinDto = {
     code: string;
     /**
-     * Positive integer, base-UoM units
+     * Bin capacity. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
      */
     capacity: number;
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
@@ -150,7 +150,7 @@ export type GenerateBinsDto = {
     baysPerAisle: number;
     levelsPerBay: number;
     /**
-     * Capacity per bin, base-UoM units
+     * Capacity per bin. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
      */
     capacity: number;
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
@@ -355,11 +355,11 @@ export type PatchSkuDto = {
     batchTracked?: boolean;
     serialTracked?: boolean;
     /**
-     * Base-UoM units
+     * A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
      */
     reorderPoint?: number;
     /**
-     * Base-UoM units
+     * A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
      */
     reorderQty?: number;
     barcode?: string;
@@ -526,7 +526,7 @@ export type StockAdjustmentDto = {
     skuId: string;
     binId: string;
     /**
-     * Signed base-UoM integer; positive into the bin, negative out
+     * Signed quantity; positive into the bin, negative out. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places. A non-zero magnitude below 0.001 is refused rather than rounded to zero.
      */
     quantityDelta: number;
     /**
@@ -891,7 +891,7 @@ export type PurchaseOrderLineInputDto = {
     id?: string;
     skuId: string;
     /**
-     * Ordered quantity in base UoM (positive integer)
+     * Ordered quantity. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
      */
     orderedQty: number;
     /**
@@ -1027,7 +1027,7 @@ export type OrderLineInputDto = {
      */
     skuId: string;
     /**
-     * Ordered quantity in base UoM — a positive integer
+     * Ordered quantity. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
      */
     quantity: number;
 };
@@ -1528,7 +1528,7 @@ export type RecordPickDto = {
      */
     binId: string;
     /**
-     * Units actually drawn in base UoM. Equal to the line’s planned quantity for an ordinary pick; BELOW it (down to 0, an empty bin) for a short pick, which must carry a reasonCode. Above the plan is always a 400.
+     * Units actually drawn in base UoM. Equal to the line’s planned quantity for an ordinary pick; BELOW it (down to 0, an empty bin) for a short pick, which must carry a reasonCode. Above the plan is always a 400. A non-zero value below 0.001 is refused rather than rounded to zero — zero means an empty bin, which is a different report.
      */
     qty: number;
     /**
@@ -1715,7 +1715,7 @@ export type GrnLineInputDto = {
      */
     mfgDate?: string | null;
     /**
-     * Physically received quantity in base UoM (positive integer, at most 2147483647 — the int4 bound of the line table)
+     * Physically received quantity. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
      */
     qty: number;
 };
@@ -2113,7 +2113,7 @@ export type PlacePutawayDto = {
      */
     batchId?: string | null;
     /**
-     * Placed quantity in base UoM (positive integer — partial placements allowed)
+     * Placed quantity — partial placements allowed. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
      */
     qty: number;
     /**
