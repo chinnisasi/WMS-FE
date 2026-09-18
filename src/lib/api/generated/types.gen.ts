@@ -105,7 +105,7 @@ export type ZoneListResponse = {
 export type CreateBinDto = {
     code: string;
     /**
-     * Bin capacity. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
+     * Bin capacity. A bin's shared space across every SKU it holds — the one quantity with no unit of its own, so it counts WHOLE units, at least one. A fractional or zero capacity is refused.
      */
     capacity: number;
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
@@ -150,7 +150,7 @@ export type GenerateBinsDto = {
     baysPerAisle: number;
     levelsPerBay: number;
     /**
-     * Capacity per bin. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
+     * Capacity per bin. A bin's shared space across every SKU it holds — the one quantity with no unit of its own, so it counts WHOLE units, at least one. A fractional or zero capacity is refused.
      */
     capacity: number;
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
@@ -307,7 +307,7 @@ export type CatalogImportResponse = {
 };
 
 export type SkuUomConversionResponse = {
-    uom: string;
+    uom: 'each' | 'box' | 'case' | 'carton' | 'pack' | 'pallet' | 'bag' | 'drum' | 'roll' | 'crate' | 'bundle' | 'pair' | 'dozen' | 'bottle' | 'can' | 'tin' | 'jar' | 'tube' | 'tray' | 'sheet' | 'bar' | 'cylinder' | 'keg' | 'set' | 'g' | 'kg' | 'tonne' | 'ml' | 'litre' | 'kl' | 'mm' | 'cm' | 'm' | 'sqm' | 'sqft';
     /**
      * Positive integer, relative to the SKU's base UoM
      */
@@ -319,7 +319,7 @@ export type SkuResponse = {
     tenantId: string;
     code: string;
     name: string;
-    uom: string;
+    uom: 'each' | 'box' | 'case' | 'carton' | 'pack' | 'pallet' | 'bag' | 'drum' | 'roll' | 'crate' | 'bundle' | 'pair' | 'dozen' | 'bottle' | 'can' | 'tin' | 'jar' | 'tube' | 'tray' | 'sheet' | 'bar' | 'cylinder' | 'keg' | 'set' | 'g' | 'kg' | 'tonne' | 'ml' | 'litre' | 'kl' | 'mm' | 'cm' | 'm' | 'sqm' | 'sqft';
     /**
      * GST in basis points (1800 = 18%)
      */
@@ -355,11 +355,11 @@ export type PatchSkuDto = {
     batchTracked?: boolean;
     serialTracked?: boolean;
     /**
-     * A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
+     * A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     reorderPoint?: number;
     /**
-     * A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
+     * A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     reorderQty?: number;
     barcode?: string;
@@ -526,7 +526,7 @@ export type StockAdjustmentDto = {
     skuId: string;
     binId: string;
     /**
-     * Signed quantity; positive into the bin, negative out. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places. A non-zero magnitude below 0.001 is refused rather than rounded to zero.
+     * Signed quantity; positive into the bin, negative out. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     quantityDelta: number;
     /**
@@ -891,7 +891,7 @@ export type PurchaseOrderLineInputDto = {
     id?: string;
     skuId: string;
     /**
-     * Ordered quantity. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
+     * Ordered quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     orderedQty: number;
     /**
@@ -1027,7 +1027,7 @@ export type OrderLineInputDto = {
      */
     skuId: string;
     /**
-     * Ordered quantity. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
+     * Ordered quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     quantity: number;
 };
@@ -1528,7 +1528,7 @@ export type RecordPickDto = {
      */
     binId: string;
     /**
-     * Units actually drawn in base UoM. Equal to the line’s planned quantity for an ordinary pick; BELOW it (down to 0, an empty bin) for a short pick, which must carry a reasonCode. Above the plan is always a 400. A non-zero value below 0.001 is refused rather than rounded to zero — zero means an empty bin, which is a different report.
+     * Units actually drawn in base UoM. Equal to the line’s planned quantity for an ordinary pick; BELOW it (down to 0, an empty bin) for a short pick, which must carry a reasonCode. Above the plan is always a 400. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     qty: number;
     /**
@@ -1715,7 +1715,7 @@ export type GrnLineInputDto = {
      */
     mfgDate?: string | null;
     /**
-     * Physically received quantity. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
+     * Physically received quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     qty: number;
 };
@@ -1815,7 +1815,11 @@ export type CatalogSnapshotSkuDto = {
     code: string;
     name: string;
     barcode: string;
-    uom: string;
+    uom: 'each' | 'box' | 'case' | 'carton' | 'pack' | 'pallet' | 'bag' | 'drum' | 'roll' | 'crate' | 'bundle' | 'pair' | 'dozen' | 'bottle' | 'can' | 'tin' | 'jar' | 'tube' | 'tray' | 'sheet' | 'bar' | 'cylinder' | 'keg' | 'set' | 'g' | 'kg' | 'tonne' | 'ml' | 'litre' | 'kl' | 'mm' | 'cm' | 'm' | 'sqm' | 'sqft';
+    /**
+     * Decimal places this SKU's base UoM may express (each = 0, kg = 3). The device validates entry against it OFFLINE, inside the Rejected banner, so a too-precise scan is refused before it is ever queued.
+     */
+    uomPrecision: number;
     batchTracked: boolean;
     serialTracked: boolean;
 };
@@ -2113,7 +2117,7 @@ export type PlacePutawayDto = {
      */
     batchId?: string | null;
     /**
-     * Placed quantity — partial placements allowed. A quantity in the SKU's base UoM, to at most 3 decimal places. A value with more precision than that is rounded to 3 decimal places.
+     * Placed quantity — partial placements allowed. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     qty: number;
     /**
