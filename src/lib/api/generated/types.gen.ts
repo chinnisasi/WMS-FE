@@ -3506,7 +3506,7 @@ export type CatalogControllerCreateProductData = {
 
 export type CatalogControllerCreateProductErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or an invalid name/axes (validation-failed / empty-product-edit)
+     * Missing or malformed Idempotency-Key, or an invalid name/axes (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -3533,7 +3533,7 @@ export type CatalogControllerCreateProductResponses = {
     /**
      * The created product (a matching Idempotency-Key replays it)
      */
-    200: ProductResponse;
+    201: ProductResponse;
 };
 
 export type CatalogControllerCreateProductResponse = CatalogControllerCreateProductResponses[keyof CatalogControllerCreateProductResponses];
