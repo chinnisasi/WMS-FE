@@ -9,6 +9,7 @@ import {
   fetchApiCreateOrder,
   fetchApiCreateWarehouse,
   fetchApiCreateWavePolicy,
+  fetchApiEditSku,
   fetchApiGenerateWave,
   fetchApiGetOrder,
   fetchApiGetWave,
@@ -225,6 +226,66 @@ describe('bearer interceptor', () => {
     expect(lastRequest!.headers.get('Authorization')).toBe(`Bearer ${SESSION.token}`);
     const body = (await lastRequest!.json()) as Record<string, unknown>;
     expect(body).toEqual({ email: 'arjun@example.com', role: 'operator' });
+    clearSession();
+  });
+  test('the SKU edit PATCH forwards the five attribute fields verbatim (story 11.2)', async () => {
+    writeSession(SESSION);
+    stubFetch(200, {
+      id: 'sku-1',
+      tenantId: SESSION.tenant.id,
+      code: 'SPICE-01',
+      name: 'Turmeric 500g',
+      uom: 'each',
+      uomPrecision: 0,
+      gstRateBps: 1800,
+      hsn: '10062020',
+      batchTracked: false,
+      serialTracked: false,
+      catchWeightTracked: false,
+      weightGrams: 500,
+      lengthMm: 200,
+      widthMm: 150,
+      heightMm: 100,
+      countryOfOrigin: 'IN',
+      reorderPoint: '50',
+      reorderQty: '100',
+      barcode: 'BC-SPICE-01',
+      uomConversions: [],
+      createdAt: '2026-09-01T00:00:00.000Z',
+    });
+    // The five story-11.2 attributes go through the same PATCH as the
+    // pre-existing fields — the wrapper must forward them verbatim, including
+    // the `null` clears (the hsn template) and the absent fields (undefined
+    // keys drop out of the JSON body, so the idempotency hash never changes).
+    await fetchApiEditSku(
+      SESSION.tenant.id,
+      'sku-1',
+      {
+        name: 'Turmeric 500g',
+        gstRate: 1800,
+        hsn: null,
+        batchTracked: false,
+        serialTracked: false,
+        weightGrams: 500,
+        lengthMm: null,
+        widthMm: 150,
+        heightMm: 100,
+        countryOfOrigin: 'IN',
+        reorderPoint: 50,
+        reorderQty: 100,
+        barcode: 'BC-SPICE-01',
+      },
+      '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    );
+    const body = (await lastRequest!.json()) as Record<string, unknown>;
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(lastRequest!.url).toContain('/catalog/skus/sku-1');
+    expect(body.weightGrams).toBe(500);
+    expect(body.lengthMm).toBeNull();
+    expect(body.widthMm).toBe(150);
+    expect(body.heightMm).toBe(100);
+    expect(body.countryOfOrigin).toBe('IN');
+    expect(body.hsn).toBeNull();
     clearSession();
   });
 });

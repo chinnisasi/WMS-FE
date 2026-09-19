@@ -359,6 +359,26 @@ export type SkuResponse = {
      * Story 10.3: handled by unit, priced by weight — each physical unit received carries its own captured weight on a handling_units row. Mutually exclusive with serialTracked.
      */
     catchWeightTracked: boolean;
+    /**
+     * Static catalog weight in grams — what carriers rate from. Positive whole number ≤ 1,000,000 (1 tonne), or null when unset. NOT the per-handling-unit catch weight (that lives on handling_units).
+     */
+    weightGrams: number | null;
+    /**
+     * Length in millimetres. Positive whole number ≤ 10,000, or null when unset.
+     */
+    lengthMm: number | null;
+    /**
+     * Width in millimetres. Positive whole number ≤ 10,000, or null when unset.
+     */
+    widthMm: number | null;
+    /**
+     * Height in millimetres. Positive whole number ≤ 10,000, or null when unset.
+     */
+    heightMm: number | null;
+    /**
+     * Country of origin, ISO 3166-1 alpha-2 uppercase (e.g. IN, CN), or null when unset.
+     */
+    countryOfOrigin: string | null;
     reorderPoint: number;
     reorderQty: number;
     /**
@@ -390,6 +410,26 @@ export type PatchSkuDto = {
      * Story 10.3: handled by unit, priced by weight. Turning it on for a serial-tracked SKU (or the reverse) is a 400 — two per-unit identity systems over one unit is unsupported.
      */
     catchWeightTracked?: boolean;
+    /**
+     * Static catalog weight in grams (positive whole number, ≤ 1,000,000). Omit to leave unchanged; null to clear.
+     */
+    weightGrams?: number | null;
+    /**
+     * Length in millimetres (positive whole number, ≤ 10,000). Omit to leave unchanged; null to clear.
+     */
+    lengthMm?: number | null;
+    /**
+     * Width in millimetres (positive whole number, ≤ 10,000). Omit to leave unchanged; null to clear.
+     */
+    widthMm?: number | null;
+    /**
+     * Height in millimetres (positive whole number, ≤ 10,000). Omit to leave unchanged; null to clear.
+     */
+    heightMm?: number | null;
+    /**
+     * Country of origin, ISO 3166-1 alpha-2 uppercase (e.g. IN, CN). Omit to leave unchanged; null or "" to clear.
+     */
+    countryOfOrigin?: string | null;
     /**
      * A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
