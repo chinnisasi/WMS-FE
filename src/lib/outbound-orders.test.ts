@@ -606,6 +606,15 @@ describe('parseDestinationFields (story 11-1 — nothing is sent that the backen
     expect(parseDestinationFields(emptyDestinationFields()).problem).toContain('destination needs');
   });
 
+  test('an origin refusal names the origin — the warehouse form reuses the parser', () => {
+    expect(parseDestinationFields(emptyDestinationFields(), 'origin').problem).toBe(
+      'The origin needs a contact name, a phone, an address line 1, a city, a state and a pincode.',
+    );
+    expect(parseDestinationFields({ ...FULL, city: '' }, 'origin').problem).toBe(
+      'The origin needs a city.',
+    );
+  });
+
   test('a pincode that is not six digits is refused, leading zeros included', () => {
     // Six digits AS TEXT: the pincode never becomes a number.
     expect(parseDestinationFields({ ...FULL, pincode: '110001' }).problem).toBeNull();

@@ -452,13 +452,18 @@ export interface ParsedDestination {
 const PINCODE_RE = /^\d{6}$/;
 
 /**
- * The destination form fields → the wire address. Trim every field, drop a
+ * The address form fields → the wire address, for either use of the ONE
+ * field set (`label` names it in the refusal copy: 'destination' on the
+ * order form, 'origin' on the warehouse form). Trim every field, drop a
  * blank `line2`, refuse a required field left empty (naming it) and a
  * pincode that is not six digits. The backend re-checks all of this behind
  * its replay lookup; this parser only decides shape, exactly as
  * `parseDraftLines` does for lines.
  */
-export function parseDestinationFields(fields: DestinationFields): ParsedDestination {
+export function parseDestinationFields(
+  fields: DestinationFields,
+  label: 'destination' | 'origin' = 'destination',
+): ParsedDestination {
   const trimmed = {
     contactName: fields.contactName.trim(),
     phone: fields.phone.trim(),
@@ -469,22 +474,22 @@ export function parseDestinationFields(fields: DestinationFields): ParsedDestina
     pincode: fields.pincode.trim(),
   };
   const missing = [
-    ['contactName', 'contact name'],
-    ['phone', 'phone'],
-    ['line1', 'address line 1'],
-    ['city', 'city'],
-    ['state', 'state'],
-    ['pincode', 'pincode'],
+    ['contactName', 'a contact name'],
+    ['phone', 'a phone'],
+    ['line1', 'an address line 1'],
+    ['city', 'a city'],
+    ['state', 'a state'],
+    ['pincode', 'a pincode'],
   ].filter(([key]) => trimmed[key as keyof typeof trimmed] === '');
   if (missing.length > 0) {
-    const labels = missing.map(([, label]) => label);
+    const labels = missing.map(([, text]) => text);
     const list =
       labels.length === 1
-        ? `a ${labels[0]}`
-        : `${labels.slice(0, -1).map((label) => `a ${label}`).join(', ')} and a ${labels[labels.length - 1]}`;
+        ? labels[0]
+        : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
     return {
       destination: null,
-      problem: `The destination needs ${list}.`,
+      problem: `The ${label} needs ${list}.`,
     };
   }
   if (!PINCODE_RE.test(trimmed.pincode)) {

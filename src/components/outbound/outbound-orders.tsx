@@ -146,7 +146,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     // Nothing is requested that the backend would only answer 400 to: the
     // destination's shape is decided here first (the server re-checks it
     // behind its replay lookup — the DTO's word is never trusted twice).
-    const address = parseDestinationFields(destination);
+    const address = parseDestinationFields(destination, 'destination');
     if (address.problem !== null) {
       setOutcome({ tone: 'rejected', word: 'Not created', reason: address.problem });
       return;

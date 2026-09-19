@@ -68,16 +68,17 @@ export function WarehouseCreateForm() {
     event.preventDefault();
     const session = readSession();
     if (session === null) return;
-    setPending(true);
     setOutcome(null);
     // Nothing is requested that the backend would only answer 400 to: the
     // origin's shape is decided here first (the server re-checks it behind
-    // its replay lookup).
-    const address = parseDestinationFields(origin);
+    // its replay lookup) — and BEFORE setPending(true), so a refused shape
+    // leaves the submit button enabled (the order form's order).
+    const address = parseDestinationFields(origin, 'origin');
     if (address.problem !== null) {
       setOutcome({ tone: 'rejected', word: 'Not created', reason: address.problem });
       return;
     }
+    setPending(true);
     try {
       const warehouse = await fetchApiCreateWarehouse(
         session.tenant.id,
