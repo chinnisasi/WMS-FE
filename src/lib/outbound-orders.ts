@@ -399,14 +399,19 @@ export function parseDraftLines(draft: readonly DraftLine[]): ParsedLines {
     // The STRING shape, not `Number()`: the parser accepts `1e3` (→ 1000) and
     // `0x10` (→ 16), neither of which a `type="number"` field can produce and
     // both of which the backend refuses. Quantities are fractional now
-    // (story 10.5) — a decimal literal is in the grammar, but the magnitude
-    // floor of 1 still holds. A value finer than the SKU's unit allows is
-    // NEVER clamped or rounded here: the backend's precision refusal (naming
-    // the unit and its precision) is the authority, and this parser only
-    // decides shape.
+    // (story 10.5) — a decimal literal is in the grammar, and the backend's
+    // floor is `@Min(0.001)`, so any POSITIVE decimal passes; only zero is
+    // refused here (the backend refuses it too — the parser's job is "nothing
+    // is sent that the backend would only 400"). A value finer than the SKU's
+    // unit allows is NEVER clamped or rounded here: the backend's precision
+    // refusal (naming the unit and its precision) is the authority, and this
+    // parser only decides shape.
     const raw = line.quantity.trim();
-    if (!/^\d+(?:\.\d+)?$/.test(raw) || Number(raw) < 1) {
-      return { lines: [], problem: "Every quantity is a decimal of 1 or more, at the SKU's unit precision." };
+    if (!/^\d+(?:\.\d+)?$/.test(raw) || Number(raw) <= 0) {
+      return {
+        lines: [],
+        problem: "Every quantity is a decimal greater than zero, at the SKU's unit precision.",
+      };
     }
     const quantity = Number(raw);
     if (quantity > MAX_LINE_QUANTITY) {

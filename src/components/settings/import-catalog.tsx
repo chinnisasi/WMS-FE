@@ -149,8 +149,13 @@ function ImportCatalogCardSessioned() {
   );
 }
 
-/** The honest post-run view: counts, per-row error table, downloadable report. */
-function ImportResult({ result }: { result: CatalogImportResponse }) {
+/**
+ * The honest post-run view: counts, per-row error table, downloadable report.
+ * Exported (not only module-private) so the component test can pin the
+ * per-row table directly — its verbatim-`detail` contract is the point of
+ * story 10.5's import-report row.
+ */
+export function ImportResult({ result }: { result: CatalogImportResponse }) {
   const allClean = result.failedRows === 0 && result.errors.length === 0;
   return (
     <div className="flex flex-col gap-2">

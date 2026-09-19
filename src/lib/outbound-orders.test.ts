@@ -490,9 +490,25 @@ describe('parseDraftLines (nothing is sent that the backend would only 400)', ()
 
   test('a decimal quantity is accepted — the order form no longer refuses what the backend accepts', () => {
     // Story 10.5: quantities are fractional now. A decimal literal is in the
-    // grammar; its precision is never clamped here.
+    // grammar, the backend's floor is `@Min(0.001)`, and the precision is
+    // never clamped here.
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '2.5' }])).toEqual({
       lines: [{ skuId: 'sku-1', quantity: 2.5 }],
+      problem: null,
+    });
+    // Sub-1 fractional lines are accepted server-side (`@Min(0.001)`), so the
+    // parser passes them — refusing 0.5 would refuse a body the backend takes.
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0.5' }])).toEqual({
+      lines: [{ skuId: 'sku-1', quantity: 0.5 }],
+      problem: null,
+    });
+  });
+
+  test('a value finer than any unit declares passes through for the server to refuse', () => {
+    // The client validates shape, never precision — 0.0004 is a decimal
+    // literal the parser must not round or clamp.
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0.0004' }])).toEqual({
+      lines: [{ skuId: 'sku-1', quantity: 0.0004 }],
       problem: null,
     });
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '2.5004' }])).toEqual({
@@ -501,10 +517,12 @@ describe('parseDraftLines (nothing is sent that the backend would only 400)', ()
     });
   });
 
-  test('a non-positive quantity is refused before any request — the magnitude floor stays 1', () => {
-    const expected = "Every quantity is a decimal of 1 or more, at the SKU's unit precision.";
+  test('zero and non-shape quantities are refused before any request', () => {
+    // Zero is the backend's own refusal (`@Min(0.001)`), so the parser keeps
+    // it off the wire; the magnitude floor is zero, not one.
+    const expected = "Every quantity is a decimal greater than zero, at the SKU's unit precision.";
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0' }]).problem).toBe(expected);
-    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0.5' }]).problem).toBe(expected);
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0.000' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '-3' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: 'abc' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '2.' }]).problem).toBe(expected);
@@ -513,7 +531,7 @@ describe('parseDraftLines (nothing is sent that the backend would only 400)', ()
   test('numeric notations Number() accepts but the field and backend do not are refused', () => {
     // `Number('1e3')` is 1000 and `Number('0x10')` is 16 — neither can come
     // out of a type="number" field, and both are silent quantity changes.
-    const expected = "Every quantity is a decimal of 1 or more, at the SKU's unit precision.";
+    const expected = "Every quantity is a decimal greater than zero, at the SKU's unit precision.";
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '1e3' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0x10' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '+4' }]).problem).toBe(expected);
