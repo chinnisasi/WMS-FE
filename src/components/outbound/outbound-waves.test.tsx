@@ -207,6 +207,19 @@ function stubRouter(): void {
     if (method === 'GET' && pathname.endsWith('/outbound/orders')) {
       return json(200, { items: [], nextCursor: null });
     }
+    // The wave-detail panel's SKU read (story 10.5): both fixture lines'
+    // SKUs are kg at precision 3, so the expanded walk and the totals
+    // sentence render at the DECLARED precision — the arm the fallback-only
+    // test never exercised.
+    if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
+      return json(200, {
+        items: [
+          { id: 'sku-1', code: 'SPICE-01', name: 'Turmeric', uom: 'kg', uomPrecision: 3 },
+          { id: 'sku-2', code: 'FLOUR-01', name: 'Flour', uom: 'kg', uomPrecision: 3 },
+        ],
+        nextCursor: null,
+      });
+    }
     return json(404, { code: 'not-found', title: 'Unrouted in this test', status: 404 });
   }) as unknown as typeof fetch);
 }
@@ -543,8 +556,13 @@ describe('the waves.manage gate', () => {
     const body = text(view);
     expect(body).toContain('A-01-01');
     expect(body).toContain('B-02-07');
-    expect(body).toContain('4 to pick');
-    expect(body).toContain('1 order · 1 picklist · 2 stops · 2 lines · 7 units to pick');
+    // The stops' SKUs RESOLVE (the stub serves the catalog): each stop names
+    // its own unit at declared precision — the story 10.5 headline, which a
+    // fallback-only fixture could never assert.
+    expect(body).toContain('4.000 kg to pick');
+    expect(body).toContain('3.000 kg to pick');
+    // …and the shared-unit totals render at that unit too.
+    expect(body).toContain('1 order · 1 picklist · 2 stops · 2 lines · 7.000 kg to pick');
   });
 
   test('an Ops Manager is offered the policy and generate affordances', async () => {

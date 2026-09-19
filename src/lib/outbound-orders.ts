@@ -1,5 +1,6 @@
 import { ApiProblem } from '@/lib/api/client';
 import type { OrderDto, OrderEntryDto, OrderLineDto } from '@/lib/api/generated';
+import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 
 /**
  * Pure copy and derivation for the Outbound orders surface (story 4.2b) —
@@ -114,17 +115,34 @@ export function lineTotals(lines: readonly OrderLineDto[]): LineTotals {
  * shortfall claim, so it lives here and is tested rather than sitting
  * untestable in JSX where dropping the shortfall clause would stay green.
  */
-export function orderTotalsLabel(totals: LineTotals): string {
-  const head = `${totals.lines} ${totals.lines === 1 ? 'line' : 'lines'} · ${totals.qty} ordered · ${totals.reservedQty} reserved`;
+/**
+ * The aggregate quantities in a totals sentence render at the shared unit's
+ * precision with the unit named — when the order's lines all resolve to one
+ * unit. A mixed-unit (or unresolvable-SKU) order has no precision to state,
+ * so its totals keep the unit-agnostic "`N` units" fallback copy.
+ */
+export function orderTotalsLabel(totals: LineTotals, uom?: QuantityUom | null): string {
+  const q = (value: number) => quantityLabel(value, uom ?? null);
+  const head = `${totals.lines} ${totals.lines === 1 ? 'line' : 'lines'} · ${q(totals.qty)} ordered · ${q(totals.reservedQty)} reserved`;
   if (totals.shortfallQty === 0) return head;
   const backordered = `${totals.backorderedLines} backordered ${totals.backorderedLines === 1 ? 'line' : 'lines'}`;
-  return `${head} · ${totals.shortfallQty} short across ${backordered}`;
+  return `${head} · ${q(totals.shortfallQty)} short across ${backordered}`;
 }
 
-/** One line's quantities, as the expanded row states them. */
-export function lineQuantityLabel(line: Pick<OrderLineDto, 'qty' | 'reservedQty' | 'shortfallQty'>): string {
-  const base = `${line.qty} ordered · ${line.reservedQty} reserved`;
-  return line.shortfallQty > 0 ? `${base} · ${line.shortfallQty} short` : base;
+/**
+ * One line's quantities, as the expanded row states them. The line's OWN SKU
+ * names the unit and its precision per row — a column mixing units has no
+ * single alignment, so each row states its own. A line whose SKU cannot be
+ * resolved falls back to the unit-agnostic "`N` units" rather than guessing
+ * a precision.
+ */
+export function lineQuantityLabel(
+  line: Pick<OrderLineDto, 'qty' | 'reservedQty' | 'shortfallQty'>,
+  uom?: QuantityUom | null,
+): string {
+  const q = (value: number) => quantityLabel(value, uom ?? null);
+  const base = `${q(line.qty)} ordered · ${q(line.reservedQty)} reserved`;
+  return line.shortfallQty > 0 ? `${base} · ${q(line.shortfallQty)} short` : base;
 }
 
 export interface Outcome {
@@ -136,24 +154,38 @@ export interface Outcome {
 /**
  * The create result. A shortfall is reported as part of the acceptance — the
  * order exists, the reservations that could be taken were taken, and the
- * remainder is backordered. `skuLabel` resolves the line's SKU because
- * `OrderLineDto` carries `skuId` alone (no code, no name).
+ * remainder is backordered. `skuOf` resolves the line's SKU because
+ * `OrderLineDto` carries `skuId` alone (no code, no name) — and its unit, so
+ * the short-fall quantities are named at the SKU's precision with its unit,
+ * falling back to the raw id and the unit-agnostic "`N` units" when it
+ * cannot be resolved.
  */
 export const MAX_NAMED_SHORT_LINES = 5;
 
-export function createOutcome(order: OrderDto, skuLabel: (skuId: string) => string): Outcome {
+export function createOutcome(
+  order: OrderDto,
+  skuOf: (skuId: string) => (QuantityUom & { readonly code: string }) | undefined,
+): Outcome {
   const totals = lineTotals(order.lines);
+  const code = (skuId: string) => skuOf(skuId)?.code ?? skuId;
+  const shared = sharedQuantityUom(order.lines, skuOf);
+  const q = (value: number) => quantityLabel(value, shared);
   if (totals.shortfallQty === 0) {
     return {
       tone: 'accepted',
       word: 'Order accepted',
-      reason: `${totals.lines} ${totals.lines === 1 ? 'line' : 'lines'}, ${totals.qty} units reserved in full.`,
+      reason: `${totals.lines} ${totals.lines === 1 ? 'line' : 'lines'}, ${q(totals.qty)} reserved in full.`,
     };
   }
   const shortLines = order.lines.filter((line) => line.shortfallQty > 0);
   const named = shortLines
     .slice(0, MAX_NAMED_SHORT_LINES)
-    .map((line) => `${skuLabel(line.skuId)} short ${line.shortfallQty}`)
+    // A short line is named per ITS OWN SKU's unit, even inside a mixed order
+    // where the totals sentence had to stay unit-agnostic.
+    .map((line) => {
+      const sku = skuOf(line.skuId);
+      return `${code(line.skuId)} short ${quantityLabel(line.shortfallQty, sku ?? null)}`;
+    })
     .join(', ');
   // An order carries up to 200 lines; naming them all would make the banner
   // a paragraph. The expanded row has the full per-line truth.
@@ -162,7 +194,7 @@ export function createOutcome(order: OrderDto, skuLabel: (skuId: string) => stri
   return {
     tone: 'accepted',
     word: 'Accepted with a shortfall',
-    reason: `${totals.reservedQty} of ${totals.qty} units reserved; ${totals.backorderedLines} of ${totals.lines} lines backordered — ${short}.`,
+    reason: `${q(totals.reservedQty)} of ${q(totals.qty)} reserved; ${totals.backorderedLines} of ${totals.lines} lines backordered — ${short}.`,
   };
 }
 
@@ -362,14 +394,23 @@ export function parseDraftLines(draft: readonly DraftLine[]): ParsedLines {
     if (line.skuId === '') {
       return { lines: [], problem: 'Every line needs a SKU.' };
     }
-    // The STRING shape, not `Number()`: the parser accepts `1e3` (→ 1000) and
+    // The STRING shape, not `Number()`: `parseQuantityInput` is the one
+    // decimal-literal grammar (the bare `Number()` accepts `1e3` (→ 1000) and
     // `0x10` (→ 16), neither of which a `type="number"` field can produce and
-    // both of which the backend refuses. Digits only.
-    const raw = line.quantity.trim();
-    if (!/^\d+$/.test(raw) || Number(raw) < 1) {
-      return { lines: [], problem: 'Every quantity is a whole number of 1 or more.' };
+    // both of which the backend refuses). Quantities are fractional now
+    // (story 10.5), and the backend's floor is `@Min(0.001)`, so any POSITIVE
+    // decimal passes; only zero is refused here (the backend refuses it too —
+    // the parser's job is "nothing is sent that the backend would only 400").
+    // A value finer than the SKU's unit allows is NEVER clamped or rounded
+    // here: the backend's precision refusal (naming the unit and its
+    // precision) is the authority, and this parser only decides shape.
+    const quantity = parseQuantityInput(line.quantity);
+    if (quantity === null || quantity <= 0) {
+      return {
+        lines: [],
+        problem: 'Every quantity is a decimal greater than zero.',
+      };
     }
-    const quantity = Number(raw);
     if (quantity > MAX_LINE_QUANTITY) {
       return { lines: [], problem: `A line quantity is at most ${MAX_LINE_QUANTITY}.` };
     }

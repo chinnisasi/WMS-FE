@@ -413,8 +413,40 @@ describe('the picklist and stop copy', () => {
   });
 
   test('a stop states its quantity, and its uncovered units when it has them', () => {
-    expect(pickLineQuantityLabel(line())).toBe('4 to pick');
-    expect(pickLineQuantityLabel(line({ qty: 4, shortfallQty: 2 }))).toBe('4 to pick · 2 uncovered');
+    expect(pickLineQuantityLabel(line())).toBe('4 units to pick');
+    expect(pickLineQuantityLabel(line({ qty: 4, shortfallQty: 2 }))).toBe('4 units to pick · 2 units uncovered');
+  });
+
+  test('a stop whose SKU resolves names its unit at the unit\'s declared precision', () => {
+    // Story 10.5: a batch walk mixes units, so each row names its own —
+    // a kg stop renders 2.500 kg, an each stop grows no decimal suffix.
+    const kg = { uom: 'kg', uomPrecision: 3 };
+    expect(pickLineQuantityLabel(line({ qty: 2.5 }), kg)).toBe('2.500 kg to pick');
+    expect(pickLineQuantityLabel(line({ qty: 2.5, shortfallQty: 0.5 }), kg)).toBe(
+      '2.500 kg to pick · 0.500 kg uncovered',
+    );
+    expect(pickLineQuantityLabel(line({ qty: 4 }), { uom: 'each', uomPrecision: 0 })).toBe(
+      '4 each to pick',
+    );
+    // An unresolvable SKU keeps the unit-agnostic fallback, never a guessed precision.
+    expect(pickLineQuantityLabel(line({ qty: 2.5 }), null)).toBe('2.5 units to pick');
+  });
+
+  test('a wave whose stops share one unit renders its totals at that unit', () => {
+    const kg = { uom: 'kg', uomPrecision: 3 };
+    expect(waveTotalsLabel(waveTotals([picklist({ lines: [line({ qty: 2.5 })] })]), kg)).toBe(
+      '1 order · 1 picklist · 2 stops · 1 line · 2.500 kg to pick',
+    );
+    const uncovered = picklist({
+      stopCount: 1,
+      lines: [
+        line({ qty: 4 }),
+        line({ id: 'l-2', status: 'unfulfillable', binId: null, binCode: null, qty: 0, shortfallQty: 3 }),
+      ],
+    });
+    expect(waveTotalsLabel(waveTotals([uncovered]), kg)).toBe(
+      '1 order · 1 picklist · 1 stop · 2 lines · 4.000 kg to pick · 3.000 kg uncovered · 1 line with nothing to pick',
+    );
   });
 
   test('an unfulfillable slice has no bin and says so rather than rendering null', () => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from '@/lib/api/client';
-import type { OrderDto, OrderLineDto } from '@/lib/api/generated';
+import type { OrderDto, OrderLineDto, SkuResponse } from '@/lib/api/generated';
 import {
   canCancelOrder,
   MAX_LINE_QUANTITY,
@@ -68,7 +68,18 @@ function order(over: Partial<OrderDto> = {}): OrderDto {
   };
 }
 
-const SKU_LABEL = (skuId: string) => ({ 'sku-1': 'SPICE-01', 'sku-2': 'SPICE-02' })[skuId] ?? skuId;
+/**
+ * The SKU resolver the way the component supplies it: code, unit and the
+ * unit's declared precision (story 10.5). `sku-1`/`sku-2` are both
+ * `each`-counted so the single-unit fixtures share one unit; `sku-kg` is the
+ * measured one the decimal tests use.
+ */
+const SKUS: Record<string, SkuResponse> = {
+  'sku-1': { id: 'sku-1', code: 'SPICE-01', uom: 'each', uomPrecision: 0 } as SkuResponse,
+  'sku-2': { id: 'sku-2', code: 'SPICE-02', uom: 'each', uomPrecision: 0 } as SkuResponse,
+  'sku-kg': { id: 'sku-kg', code: 'FLOUR-01', uom: 'kg', uomPrecision: 3 } as SkuResponse,
+};
+const skuOf = (skuId: string) => SKUS[skuId];
 
 describe('status and source labels', () => {
   test('the filter list is derived from the label Record — every arm, in order', () => {
@@ -114,11 +125,48 @@ describe('line quantities', () => {
 
   test('a fully reserved line states two numbers, a short line three', () => {
     expect(lineQuantityLabel({ qty: 10, reservedQty: 10, shortfallQty: 0 })).toBe(
-      '10 ordered · 10 reserved',
+      '10 units ordered · 10 units reserved',
     );
     expect(lineQuantityLabel({ qty: 10, reservedQty: 4, shortfallQty: 6 })).toBe(
-      '10 ordered · 4 reserved · 6 short',
+      '10 units ordered · 4 units reserved · 6 units short',
     );
+  });
+
+  test('a line whose SKU resolves names its unit at the unit\'s declared precision', () => {
+    // Declared precision, never storage precision — 2.5 kg is 2.500 kg, and
+    // an each-counted unit grows no decimal suffix.
+    expect(lineQuantityLabel({ qty: 2.5, reservedQty: 1.25, shortfallQty: 0 }, SKUS['sku-kg'])).toBe(
+      '2.500 kg ordered · 1.250 kg reserved',
+    );
+    expect(
+      lineQuantityLabel({ qty: 2.5, reservedQty: 1, shortfallQty: 1.5 }, SKUS['sku-kg']),
+    ).toBe('2.500 kg ordered · 1.000 kg reserved · 1.500 kg short');
+    expect(lineQuantityLabel({ qty: 10, reservedQty: 10, shortfallQty: 0 }, SKUS['sku-1'])).toBe(
+      '10 each ordered · 10 each reserved',
+    );
+  });
+
+  test('a line whose SKU cannot resolve keeps the unit-agnostic fallback, never a guessed precision', () => {
+    expect(lineQuantityLabel({ qty: 2.5, reservedQty: 1.5, shortfallQty: 0 }, null)).toBe(
+      '2.5 units ordered · 1.5 units reserved',
+    );
+  });
+
+  test('an order whose lines share one unit renders its totals at that unit', () => {
+    // The acceptance case: a kg SKU ordered at 2.5 renders 2.500 kg in the
+    // order summary — declared precision, unit named.
+    expect(
+      orderTotalsLabel(
+        { lines: 1, qty: 2.5, reservedQty: 2.5, shortfallQty: 0, backorderedLines: 0 },
+        SKUS['sku-kg'],
+      ),
+    ).toBe('1 line · 2.500 kg ordered · 2.500 kg reserved');
+    expect(
+      orderTotalsLabel(
+        { lines: 1, qty: 2.5, reservedQty: 1.5, shortfallQty: 1, backorderedLines: 1 },
+        SKUS['sku-kg'],
+      ),
+    ).toBe('1 line · 2.500 kg ordered · 1.500 kg reserved · 1.000 kg short across 1 backordered line');
   });
 
   test('every hold state is house copy, never a raw journal enum value', () => {
@@ -145,16 +193,16 @@ describe('line quantities', () => {
     // rather than left in JSX where deleting the clause would stay green.
     expect(
       orderTotalsLabel({ lines: 2, qty: 18, reservedQty: 18, shortfallQty: 0, backorderedLines: 0 }),
-    ).toBe('2 lines · 18 ordered · 18 reserved');
+    ).toBe('2 lines · 18 units ordered · 18 units reserved');
     expect(
       orderTotalsLabel({ lines: 2, qty: 18, reservedQty: 13, shortfallQty: 5, backorderedLines: 1 }),
-    ).toBe('2 lines · 18 ordered · 13 reserved · 5 short across 1 backordered line');
+    ).toBe('2 lines · 18 units ordered · 13 units reserved · 5 units short across 1 backordered line');
     expect(
       orderTotalsLabel({ lines: 4, qty: 40, reservedQty: 10, shortfallQty: 30, backorderedLines: 3 }),
-    ).toBe('4 lines · 40 ordered · 10 reserved · 30 short across 3 backordered lines');
+    ).toBe('4 lines · 40 units ordered · 10 units reserved · 30 units short across 3 backordered lines');
     expect(
       orderTotalsLabel({ lines: 1, qty: 10, reservedQty: 10, shortfallQty: 0, backorderedLines: 0 }),
-    ).toBe('1 line · 10 ordered · 10 reserved');
+    ).toBe('1 line · 10 units ordered · 10 units reserved');
   });
 });
 
@@ -162,11 +210,11 @@ describe('createOutcome (over-ATP is acceptance, not failure)', () => {
   test('a fully reservable order reads as a plain acceptance', () => {
     const outcome = createOutcome(
       order({ lines: [line({ qty: 10 }), line({ id: 'line-2', skuId: 'sku-2', qty: 5, reservedQty: 5 })] }),
-      SKU_LABEL,
+      skuOf,
     );
     expect(outcome.tone).toBe('accepted');
     expect(outcome.word).toBe('Order accepted');
-    expect(outcome.reason).toBe('2 lines, 15 units reserved in full.');
+    expect(outcome.reason).toBe('2 lines, 15 each reserved in full.');
   });
 
   test('an over-ATP order is accepted with a named shortfall — never rejected', () => {
@@ -184,26 +232,68 @@ describe('createOutcome (over-ATP is acceptance, not failure)', () => {
           }),
         ],
       }),
-      SKU_LABEL,
+      skuOf,
     );
     expect(outcome.tone).toBe('accepted');
     expect(outcome.word).toBe('Accepted with a shortfall');
     expect(outcome.reason).toBe(
-      '13 of 18 units reserved; 1 of 2 lines backordered — SPICE-02 short 5.',
+      '13 each of 18 each reserved; 1 of 2 lines backordered — SPICE-02 short 5 each.',
+    );
+  });
+
+  test('a measured SKU names its short quantity at its own unit, inside a mixed order too', () => {
+    const outcome = createOutcome(
+      order({
+        lines: [
+          line({ qty: 10, reservedQty: 10, shortfallQty: 0, status: 'open' }),
+          line({
+            id: 'line-2',
+            skuId: 'sku-kg',
+            qty: 2.5,
+            reservedQty: 1.25,
+            shortfallQty: 1.5,
+            status: 'backordered',
+          }),
+        ],
+      }),
+      skuOf,
+    );
+    expect(outcome.tone).toBe('accepted');
+    expect(outcome.word).toBe('Accepted with a shortfall');
+    // The totals stay unit-agnostic (mixed units share nothing) while the
+    // named short line renders at its own SKU's declared precision.
+    expect(outcome.reason).toBe(
+      '11.25 units of 12.5 units reserved; 1 of 2 lines backordered — FLOUR-01 short 1.500 kg.',
+    );
+  });
+
+  test('an unresolvable SKU falls back to the raw id and the unit-agnostic fallback', () => {
+    const outcome = createOutcome(
+      order({
+        lines: [line({ skuId: 'sku-gone', qty: 2.5, reservedQty: 0, shortfallQty: 2.5, status: 'backordered' })],
+      }),
+      skuOf,
+    );
+    expect(outcome.reason).toBe(
+      '0 units of 2.5 units reserved; 1 of 1 lines backordered — sku-gone short 2.5 units.',
     );
   });
 
   test('a single line reads in the singular', () => {
-    expect(createOutcome(order(), SKU_LABEL).reason).toBe('1 line, 10 units reserved in full.');
+    expect(createOutcome(order(), skuOf).reason).toBe('1 line, 10 each reserved in full.');
   });
 
   test('the named short lines are capped — 200 lines must not become a paragraph', () => {
     const lines = Array.from({ length: MAX_NAMED_SHORT_LINES + 3 }, (_, i) =>
       line({ id: `line-${i}`, skuId: `sku-${i}`, qty: 2, reservedQty: 0, shortfallQty: 2, status: 'backordered' }),
     );
-    const reason = createOutcome(order({ lines }), (skuId) => skuId).reason;
+    const reason = createOutcome(order({ lines }), (skuId) => ({
+      code: skuId,
+      uom: 'each',
+      uomPrecision: 0,
+    })).reason;
     expect(reason).toContain('…and 3 more');
-    expect(reason.match(/short 2/g)).toHaveLength(MAX_NAMED_SHORT_LINES);
+    expect(reason.match(/short 2 each/g)).toHaveLength(MAX_NAMED_SHORT_LINES);
   });
 
   test('cancelling reports the released lines', () => {
@@ -397,18 +487,50 @@ describe('parseDraftLines (nothing is sent that the backend would only 400)', ()
     expect(parseDraftLines(draft).problem).toBe('An order carries at most 200 lines.');
   });
 
-  test('a non-positive or fractional quantity is refused before any request', () => {
-    const expected = 'Every quantity is a whole number of 1 or more.';
+  test('a decimal quantity is accepted — the order form no longer refuses what the backend accepts', () => {
+    // Story 10.5: quantities are fractional now. A decimal literal is in the
+    // grammar, the backend's floor is `@Min(0.001)`, and the precision is
+    // never clamped here.
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '2.5' }])).toEqual({
+      lines: [{ skuId: 'sku-1', quantity: 2.5 }],
+      problem: null,
+    });
+    // Sub-1 fractional lines are accepted server-side (`@Min(0.001)`), so the
+    // parser passes them — refusing 0.5 would refuse a body the backend takes.
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0.5' }])).toEqual({
+      lines: [{ skuId: 'sku-1', quantity: 0.5 }],
+      problem: null,
+    });
+  });
+
+  test('a value finer than any unit declares passes through for the server to refuse', () => {
+    // The client validates shape, never precision — 0.0004 is a decimal
+    // literal the parser must not round or clamp.
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0.0004' }])).toEqual({
+      lines: [{ skuId: 'sku-1', quantity: 0.0004 }],
+      problem: null,
+    });
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '2.5004' }])).toEqual({
+      lines: [{ skuId: 'sku-1', quantity: 2.5004 }],
+      problem: null,
+    });
+  });
+
+  test('zero and non-shape quantities are refused before any request', () => {
+    // Zero is the backend's own refusal (`@Min(0.001)`), so the parser keeps
+    // it off the wire; the magnitude floor is zero, not one.
+    const expected = 'Every quantity is a decimal greater than zero.';
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0' }]).problem).toBe(expected);
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0.000' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '-3' }]).problem).toBe(expected);
-    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '1.5' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: 'abc' }]).problem).toBe(expected);
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '2.' }]).problem).toBe(expected);
   });
 
   test('numeric notations Number() accepts but the field and backend do not are refused', () => {
     // `Number('1e3')` is 1000 and `Number('0x10')` is 16 — neither can come
     // out of a type="number" field, and both are silent quantity changes.
-    const expected = 'Every quantity is a whole number of 1 or more.';
+    const expected = 'Every quantity is a decimal greater than zero.';
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '1e3' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0x10' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '+4' }]).problem).toBe(expected);
