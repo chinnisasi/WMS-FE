@@ -59,9 +59,29 @@ export type SignInResponse = {
     user: UserResponse;
 };
 
+export type AddressDto = {
+    contactName: string;
+    phone: string;
+    line1: string;
+    /**
+     * Second address line — omit when there is none
+     */
+    line2?: string;
+    city: string;
+    state: string;
+    /**
+     * Six-digit Indian pincode, as TEXT — leading zeros are significant, never an integer
+     */
+    pincode: string;
+};
+
 export type CreateWarehouseDto = {
     code: string;
     name: string;
+    /**
+     * The origin address — where shipments leave from (story 11-1). Required at create; carriers rate and label from it. There is no update endpoint (story 4-6d owns that decision).
+     */
+    origin: AddressDto;
 };
 
 export type WarehouseResponse = {
@@ -69,6 +89,10 @@ export type WarehouseResponse = {
     tenantId: string;
     code: string;
     name: string;
+    /**
+     * The origin address (story 11-1); null on a pre-11.1 warehouse row
+     */
+    origin: AddressDto | null;
     createdAt: string;
 };
 
@@ -1066,6 +1090,10 @@ export type CreateOrderDto = {
      */
     externalEventId?: string;
     lines: Array<OrderLineInputDto>;
+    /**
+     * Where the shipment goes (story 11-1). REQUIRED at create — manual and ingested alike; carriers rate, label and manifest from it. Atomic: every field is required except line2. The command re-validates everything behind its replay lookup (the adapter path bypasses this DTO).
+     */
+    destination: AddressDto;
 };
 
 export type OrderLineDto = {
@@ -1122,6 +1150,10 @@ export type OrderDto = {
      * Channel external event id (null on a manual order)
      */
     externalEventId: string | null;
+    /**
+     * Where the shipment goes (story 11-1); null on a pre-11.1 order row
+     */
+    destination: AddressDto | null;
     /**
      * ISO-8601 UTC creation time
      */
@@ -1331,6 +1363,10 @@ export type OrderEntryDto = {
     source: 'manual' | 'ingested';
     integrationId: string | null;
     externalEventId: string | null;
+    /**
+     * Where the shipment goes (story 11-1); null on a pre-11.1 order row
+     */
+    destination: AddressDto | null;
     /**
      * ISO-8601 UTC creation time
      */
@@ -1693,6 +1729,21 @@ export type PickResponse = {
     pick: PickDto;
 };
 
+export type DevicePackDto = {
+    /**
+     * What the operator scanned into the parcel. May be empty only when the order picked nothing at all (every stop reported an empty bin).
+     */
+    scanned: Array<PackScanLineDto>;
+    /**
+     * Optional parcel weight in grams. Absence is never an error; a non-positive value is a 400.
+     */
+    weightGrams?: number | null;
+    /**
+     * The fully-picked order being packed
+     */
+    orderId: string;
+};
+
 export type WaveEntryDto = {
     id: string;
     tenantId: string;
@@ -1961,6 +2012,35 @@ export type PickTaskDto = {
     binStateEpoch: number | null;
 };
 
+export type CatalogPackTaskDto = {
+    /**
+     * The fully-picked, still-accepted order
+     */
+    orderId: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * What the order actually had PICKED of this SKU, in base units — from the same grouped-picks read the pack command verifies against. The bench scans to EXACTLY this; a whole count at the bench.
+     */
+    pickedQty: number;
+    /**
+     * Story 10.3: the SKU is handled by unit — the bench must scan each case's handling-unit label (count == pickedQty), never a typed quantity.
+     */
+    catchWeightTracked: boolean;
+};
+
+export type CatalogHandlingUnitDto = {
+    /**
+     * The unit label the bench scans
+     */
+    id: string;
+    /**
+     * The SKU the unit belongs to
+     */
+    skuId: string;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -1984,6 +2064,14 @@ export type CatalogSnapshotResponse = {
      * Story 4.3 (additive): the pick tasks of every ready picklist on a released wave, in walk order (the bin/batch each names is advisory — the server re-derives both at pick time)
      */
     pickTasks: Array<PickTaskDto>;
+    /**
+     * Story 10.7 (additive): the packable orders' per-SKU picked totals — the dataset the bench pre-verifies its scan against, offline. Mirrors the pack command's own verification query (picks grouped by (order, sku)) and its completeness guards (accepted, ≥1 pick line, none planned, not all cancelled)
+     */
+    packTasks: Array<CatalogPackTaskDto>;
+    /**
+     * Story 10.7 (additive): every ACTIVE handling unit of the warehouse (id + skuId) — the labels a catch-weight bench scan resolves against, offline. Active-only self-prunes (units flip to packed at pack)
+     */
+    handlingUnits: Array<CatalogHandlingUnitDto>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -4930,6 +5018,62 @@ export type OutboundControllerRecordPickResponses = {
 };
 
 export type OutboundControllerRecordPickResponse = OutboundControllerRecordPickResponses[keyof OutboundControllerRecordPickResponses];
+
+export type OutboundControllerPackOrderFromDeviceData = {
+    body: DevicePackDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/packs';
+};
+
+export type OutboundControllerPackOrderFromDeviceErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed orderId, a malformed scan line, a non-positive weight, or a handling-unit id for a non-catch-weight SKU (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), unknown or revoked device (device-revoked), or the operator lacks pack.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order, or a scanned SKU, does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is already packed, is cancelled, was never waved, had its whole plan withdrawn by a wave cancel (re-wave it), still has a planned pick line, or a scanned handling unit is no longer active (conflict); or a concurrent idempotent request (conflict). Nothing is written
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The scanned contents differ from what was picked — a wrong quantity, a missing or extra SKU (pack-mismatch, naming every divergent SKU with both quantities), or a catch-weight count that does not equal the picked units; nothing written. Also: idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerPackOrderFromDeviceError = OutboundControllerPackOrderFromDeviceErrors[keyof OutboundControllerPackOrderFromDeviceErrors];
+
+export type OutboundControllerPackOrderFromDeviceResponses = {
+    /**
+     * Packed: the packing slip (the idempotency snapshot — a replay under the same key re-serves it, nothing re-packs)
+     */
+    201: PackResponse;
+};
+
+export type OutboundControllerPackOrderFromDeviceResponse = OutboundControllerPackOrderFromDeviceResponses[keyof OutboundControllerPackOrderFromDeviceResponses];
 
 export type OutboundControllerGetWaveData = {
     body?: never;
