@@ -5,6 +5,7 @@ import { useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiCreateWarehouse } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { emptyDestinationFields, parseDestinationFields, type DestinationFields } from '@/lib/outbound-orders';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
@@ -31,6 +32,10 @@ export function WarehouseCreateForm() {
   );
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
+  // Story 11-1: the origin — where shipments leave from — is REQUIRED at
+  // create; carriers rate and label from it. There is no update endpoint
+  // yet (story 4-6d owns that decision), so this is the one chance to set it.
+  const [origin, setOrigin] = useState<DestinationFields>(emptyDestinationFields());
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<
     { tone: 'accepted'; word: string; reason: string } | { tone: 'rejected'; word: string; reason: string } | null
@@ -63,17 +68,27 @@ export function WarehouseCreateForm() {
     event.preventDefault();
     const session = readSession();
     if (session === null) return;
-    setPending(true);
     setOutcome(null);
+    // Nothing is requested that the backend would only answer 400 to: the
+    // origin's shape is decided here first (the server re-checks it behind
+    // its replay lookup) — and BEFORE setPending(true), so a refused shape
+    // leaves the submit button enabled (the order form's order).
+    const address = parseDestinationFields(origin, 'origin');
+    if (address.problem !== null) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: address.problem });
+      return;
+    }
+    setPending(true);
     try {
       const warehouse = await fetchApiCreateWarehouse(
         session.tenant.id,
-        { code, name },
+        { code, name, origin: address.destination! },
         // Fresh key per submit: retries replay, new submissions don't.
         ulid(),
       );
       setCode('');
       setName('');
+      setOrigin(emptyDestinationFields());
       setOutcome({
         tone: 'accepted',
         word: 'Warehouse created',
@@ -117,6 +132,98 @@ export function WarehouseCreateForm() {
           />
         </label>
       </div>
+      <fieldset className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
+        <legend className="px-1 text-xs text-(--muted-foreground)">
+          Origin — where shipments leave from
+        </legend>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="flex flex-[2] flex-col gap-1">
+            <span className={labelClass}>Contact name</span>
+            <input
+              className={inputClass}
+              value={origin.contactName}
+              onChange={(e) => setOrigin({ ...origin, contactName: e.target.value })}
+              required
+              maxLength={120}
+              placeholder="Priya Sharma"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Phone</span>
+            <input
+              className={inputClass}
+              value={origin.phone}
+              onChange={(e) => setOrigin({ ...origin, phone: e.target.value })}
+              required
+              maxLength={20}
+              placeholder="+91 98450 12345"
+            />
+          </label>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="flex flex-[2] flex-col gap-1">
+            <span className={labelClass}>Address line 1</span>
+            <input
+              className={inputClass}
+              value={origin.line1}
+              onChange={(e) => setOrigin({ ...origin, line1: e.target.value })}
+              required
+              maxLength={200}
+              placeholder="12, Peenya Industrial Area"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Address line 2 (optional)</span>
+            <input
+              className={inputClass}
+              value={origin.line2}
+              onChange={(e) => setOrigin({ ...origin, line2: e.target.value })}
+              maxLength={200}
+              placeholder="Gate 3"
+            />
+          </label>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>City</span>
+            <input
+              className={inputClass}
+              value={origin.city}
+              onChange={(e) => setOrigin({ ...origin, city: e.target.value })}
+              required
+              maxLength={100}
+              placeholder="Bengaluru"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>State</span>
+            <input
+              className={inputClass}
+              value={origin.state}
+              onChange={(e) => setOrigin({ ...origin, state: e.target.value })}
+              required
+              maxLength={100}
+              placeholder="Karnataka"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Pincode</span>
+            <input
+              className={inputClass}
+              value={origin.pincode}
+              onChange={(e) => setOrigin({ ...origin, pincode: e.target.value })}
+              required
+              // Text, never a number input: the pincode keeps its leading
+              // zeros (`110001`), and `type="number"` would strip them.
+              type="text"
+              inputMode="numeric"
+              pattern="\d{6}"
+              maxLength={6}
+              placeholder="560066"
+            />
+          </label>
+        </div>
+      </fieldset>
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
       <button
         type="submit"

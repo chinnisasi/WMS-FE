@@ -65,6 +65,20 @@ afterEach(() => {
   lastRequest = undefined;
 });
 
+/**
+ * A full origin address (story 11-1) — warehouse creation REQUIRES it; the
+ * wrapper forwards it verbatim, so the pincode stays a string.
+ */
+const TEST_ORIGIN = {
+  contactName: 'Priya Sharma',
+  phone: '+91 98450 12345',
+  line1: '12, Peenya Industrial Area',
+  line2: 'Gate 3',
+  city: 'Bengaluru',
+  state: 'Karnataka',
+  pincode: '560066',
+};
+
 const SESSION: StoredSession = {
   token: 'header.payload.signature',
   tenant: { id: '0198f7a2-1b3c-7d4e-8f90-112233445566', name: 'Priya Spices' },
@@ -180,7 +194,7 @@ describe('bearer interceptor', () => {
     stubFetch(200, { id: 'w1', tenantId: SESSION.tenant.id, code: 'BLR-01', name: 'Whitefield', createdAt: '2026-09-08T00:00:00.000Z' });
     await fetchApiCreateWarehouse(
       SESSION.tenant.id,
-      { code: 'BLR-01', name: 'Whitefield' },
+      { code: 'BLR-01', name: 'Whitefield', origin: TEST_ORIGIN },
       '01ARZ3NDEKTSV4RRFFQ69G5FAV',
     );
     expect(lastRequest).toBeDefined();
@@ -278,7 +292,7 @@ describe('401 response interceptor', () => {
     try {
       await fetchApiCreateWarehouse(
         SESSION.tenant.id,
-        { code: 'BLR-01', name: 'Whitefield' },
+        { code: 'BLR-01', name: 'Whitefield', origin: TEST_ORIGIN },
         '01ARZ3NDEKTSV4RRFFQ69G5FAV',
       );
       expect.unreachable();
@@ -339,9 +353,18 @@ describe('outbound order wrappers (story 4.2b)', () => {
   test('create sends the body and the Idempotency-Key header', async () => {
     writeSession(SESSION);
     stubFetch(201, { order: { id: ORDER_ID, lines: [] } });
+    const destination = {
+      contactName: 'Priya Sharma',
+      phone: '+91 98450 12345',
+      line1: '12, Peenya Industrial Area',
+      line2: 'Gate 3',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      pincode: '560066',
+    };
     await fetchApiCreateOrder(
       SESSION.tenant.id,
-      { warehouseId: WAREHOUSE_ID, lines: [{ skuId: 'sku-1', quantity: 4 }] },
+      { warehouseId: WAREHOUSE_ID, lines: [{ skuId: 'sku-1', quantity: 4 }], destination },
       KEY,
     );
     expect(lastRequest!.method).toBe('POST');
@@ -349,6 +372,7 @@ describe('outbound order wrappers (story 4.2b)', () => {
     expect(await lastRequest!.json()).toEqual({
       warehouseId: WAREHOUSE_ID,
       lines: [{ skuId: 'sku-1', quantity: 4 }],
+      destination,
     });
     clearSession();
   });

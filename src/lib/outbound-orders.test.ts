@@ -23,7 +23,10 @@ import {
   orderSourceLabel,
   orderStatusLabel,
   pageFilterCount,
+  parseDestinationFields,
   parseDraftLines,
+  destinationSummary,
+  emptyDestinationFields,
   UNREACHABLE_REASON,
   type OrderStatus,
 } from './outbound-orders';
@@ -61,6 +64,15 @@ function order(over: Partial<OrderDto> = {}): OrderDto {
     source: 'manual',
     integrationId: null,
     externalEventId: null,
+    destination: {
+      contactName: 'Priya Sharma',
+      phone: '+91 98450 12345',
+      line1: '12, Peenya Industrial Area',
+      line2: 'Gate 3',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      pincode: '560066',
+    },
     createdAt: '2026-09-16T10:00:00.000Z',
     updatedAt: '2026-09-16T10:00:00.000Z',
     lines: [line()],
@@ -546,5 +558,79 @@ describe('parseDraftLines (nothing is sent that the backend would only 400)', ()
 
   test('a quantity without a SKU is refused before any request', () => {
     expect(parseDraftLines([{ skuId: '', quantity: '4' }]).problem).toBe('Every line needs a SKU.');
+  });
+});
+
+
+describe('parseDestinationFields (story 11-1 — nothing is sent that the backend would only 400)', () => {
+  const FULL = {
+    contactName: '  Priya Sharma  ',
+    phone: ' +91 98450 12345 ',
+    line1: ' 12, Peenya Industrial Area ',
+    line2: ' Gate 3 ',
+    city: ' Bengaluru ',
+    state: ' Karnataka ',
+    pincode: '560066',
+  };
+
+  test('a full destination parses, trimmed, with a blank second line dropped', () => {
+    expect(parseDestinationFields(FULL)).toEqual({
+      destination: {
+        contactName: 'Priya Sharma',
+        phone: '+91 98450 12345',
+        line1: '12, Peenya Industrial Area',
+        line2: 'Gate 3',
+        city: 'Bengaluru',
+        state: 'Karnataka',
+        pincode: '560066',
+      },
+      problem: null,
+    });
+    // A whitespace-only line2 is "no second line", not `''` — the two inputs
+    // must hash identically server-side (the blank would normalize to absent).
+    expect(parseDestinationFields({ ...FULL, line2: '   ' })).toEqual({
+      destination: { ...parseDestinationFields(FULL).destination!, line2: undefined },
+      problem: null,
+    });
+  });
+
+  test('a missing required field is refused by name, before any request', () => {
+    expect(parseDestinationFields({ ...FULL, contactName: '' }).problem).toBe(
+      'The destination needs a contact name.',
+    );
+    const two = parseDestinationFields({ ...FULL, city: '', state: '' });
+    expect(two.destination).toBeNull();
+    expect(two.problem).toContain('city');
+    expect(two.problem).toContain('state');
+    // The empty form (a fresh page's first submit) is refused, not sent.
+    expect(parseDestinationFields(emptyDestinationFields()).problem).toContain('destination needs');
+  });
+
+  test('an origin refusal names the origin — the warehouse form reuses the parser', () => {
+    expect(parseDestinationFields(emptyDestinationFields(), 'origin').problem).toBe(
+      'The origin needs a contact name, a phone, an address line 1, a city, a state and a pincode.',
+    );
+    expect(parseDestinationFields({ ...FULL, city: '' }, 'origin').problem).toBe(
+      'The origin needs a city.',
+    );
+  });
+
+  test('a pincode that is not six digits is refused, leading zeros included', () => {
+    // Six digits AS TEXT: the pincode never becomes a number.
+    expect(parseDestinationFields({ ...FULL, pincode: '110001' }).problem).toBeNull();
+    expect(parseDestinationFields({ ...FULL, pincode: '11001' }).problem).toBe(
+      'The pincode is six digits, as text — leading zeros are part of it.',
+    );
+    expect(parseDestinationFields({ ...FULL, pincode: '1100011' }).problem).toBe(
+      'The pincode is six digits, as text — leading zeros are part of it.',
+    );
+    expect(parseDestinationFields({ ...FULL, pincode: '56006A' }).problem).toContain('six digits');
+  });
+});
+
+describe('destinationSummary (the one address line the orders table shows)', () => {
+  test('city and pincode, space-joined; a pre-11.1 row renders a dash', () => {
+    expect(destinationSummary(order())).toBe('Bengaluru 560066');
+    expect(destinationSummary(order({ destination: null }))).toBe('—');
   });
 });
