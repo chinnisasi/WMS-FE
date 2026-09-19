@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
 import type { OrderEntryDto, SkuResponse } from '@/lib/api/generated';
-import { quantityInputLabel, quantityStep, sharedQuantityUom } from '@/lib/format-quantity';
+import { quantityInputLabel, sharedQuantityUom } from '@/lib/format-quantity';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import {
   canCancelOrder,
@@ -205,13 +205,14 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
                 className={inputClass}
                 type="number"
                 inputMode="decimal"
-                min={1}
-                // The SKU's own unit sets the input's precision: whole-unit
-                // vocabulary steps by 1, a measured unit reaches its last
-                // declared place. A too-fine value is never clamped here —
-                // the backend's precision refusal naming unit and precision
-                // is the authority, and it renders under the error contract.
-                step={quantityStep(skuMap?.[row.skuId]?.uomPrecision ?? 0)}
+                // The input constrains NOTHING: no `min` (the backend accepts
+                // sub-1 fractions down to 0.001) and `step="any"` (a step
+                // value would make the browser refuse a too-fine entry with
+                // its generic step-mismatch copy — the backend's precision
+                // refusal naming unit and precision is the authority, and it
+                // renders under the error contract). `parseDraftLines` and
+                // the server decide everything.
+                step="any"
                 value={row.quantity}
                 onChange={(e) =>
                   editDraft((rows) =>

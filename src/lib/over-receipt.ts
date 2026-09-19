@@ -1,5 +1,5 @@
 import { ApiProblem } from '@/lib/api/client';
-import { formatQuantity, type QuantityUom } from '@/lib/format-quantity';
+import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 
 /**
  * Pure copy decisions of the story 3.3 surfaces (Inbound + Conflicts &
@@ -14,10 +14,10 @@ import { formatQuantity, type QuantityUom } from '@/lib/format-quantity';
  * A PO line's open quantity for the table cells — negative means
  * over-received. The line's own SKU names the unit and its precision (the
  * PO-lines column mixes units, so each row states its own); an
- * unresolvable SKU falls back to the raw number.
+ * unresolvable SKU falls back to the unit-agnostic "`N` units".
  */
 export function openQtyLabel(openQty: number, uom?: QuantityUom | null): string {
-  const qty = uom ? `${formatQuantity(openQty, uom.uomPrecision)} ${uom.uom}` : String(openQty);
+  const qty = quantityLabel(openQty, uom ?? null);
   return openQty < 0 ? `${qty} (over-received)` : qty;
 }
 

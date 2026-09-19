@@ -6,7 +6,9 @@
  * at that precision, so `toFixed(precision)` at render absorbs float dust
  * rather than rounding anything the operator typed. The unit's precision comes
  * from the SKU payload (`SkuResponse.uomPrecision`); nothing here infers
- * precision from the unit string, and nothing here rounds an input.
+ * precision from the unit string, and nothing here rounds an input the server
+ * already holds at the precision it names — a caller passing a value finer
+ * than the precision it gives is misusing the helper (none exists).
  */
 
 /**
@@ -26,8 +28,9 @@ export interface QuantityUom {
  *
  * A 0-precision unit never grows a `.000` suffix, and the grouping applies to
  * the integer part only — the fraction stays a plain digit run. The clamp
- * keeps a malformed precision from throwing (`toFixed` bails past 100);
- * the server only ever sends 0-3.
+ * keeps a malformed precision from throwing (`toFixed` throws past 100);
+ * 20 is far above anything the vocabulary declares and the server only ever
+ * sends 0-3.
  */
 export function formatQuantity(qty: number, precision: number): string {
   const places = Math.min(Math.max(Math.trunc(precision), 0), 20);
@@ -52,13 +55,14 @@ export function quantityInputLabel(precision: number): string {
 }
 
 /**
- * The `step` a quantity input takes for a SKU at this precision — a 0-place
- * unit stays `step={1}`, a 3-place one accepts `0.001` per click. The browser
- * still refuses nothing the server would accept: the input is never clamped
- * to the step on the way out.
+ * One quantity label: `value` at the (unit, precision) the SKU payload
+ * carries, unit named; or, when the SKU does not resolve (or the set's units
+ * mix), the ONE unit-agnostic fallback — "`N` units" — everywhere. A bare
+ * number without "units" would read as a count, and a guessed unit or
+ * precision would fabricate a fact; the fallback does neither.
  */
-export function quantityStep(precision: number): number {
-  return precision <= 0 ? 1 : 10 ** -Math.trunc(precision);
+export function quantityLabel(value: number, uom: QuantityUom | null): string {
+  return uom === null ? `${value} units` : `${formatQuantity(value, uom.uomPrecision)} ${uom.uom}`;
 }
 
 /**

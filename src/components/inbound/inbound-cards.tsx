@@ -18,7 +18,7 @@ import {
   type PurchaseOrderHeader,
 } from '@/lib/use-inbound';
 import { openQtyLabel, qcReason } from '@/lib/over-receipt';
-import { formatQuantity } from '@/lib/format-quantity';
+import { quantityLabel } from '@/lib/format-quantity';
 import type {
   GoodsReceiptEntryDto,
   PurchaseOrderLineDto,
@@ -180,8 +180,7 @@ function PurchaseOrdersCard({
 /** One PO line: `SKU 2.500 kg ord · 1.000 kg rec · 1.500 kg open` (negative open = over-received). */
 function PoLineRow({ line, sku }: { line: PurchaseOrderLineDto; sku: SkuResponse | undefined }) {
   const open = openQtyLabel(line.openQty, sku);
-  const qty = (value: number) =>
-    sku ? `${formatQuantity(value, sku.uomPrecision)} ${sku.uom}` : String(value);
+  const qty = (value: number) => quantityLabel(value, sku ?? null);
   return (
     <div className="flex flex-wrap items-center gap-x-2 text-xs">
       <span className="font-mono">{sku?.code ?? '(unknown SKU)'}</span>
@@ -533,10 +532,9 @@ function PlaceQcHoldForm({
           <option value="">Pick an on-hand scope…</option>
           {offerable.map((row) => {
             // The scope's own SKU names the unit and its precision; an
-            // unresolvable SKU renders the raw number rather than letting
-            // a 0-place fallback round it.
+            // unresolvable SKU keeps the shared unit-agnostic fallback.
             const sku = skus?.[row.skuId];
-            const onHand = sku ? `${formatQuantity(row.quantity, sku.uomPrecision)} ${sku.uom}` : String(row.quantity);
+            const onHand = quantityLabel(row.quantity, sku ?? null);
             return (
               <option key={`${row.skuId}:${row.binId}`} value={`${row.skuId}:${row.binId}`}>
                 {sku?.code ?? '(unknown SKU)'} @ {bins?.[row.binId] ?? row.binId} · {onHand} on hand

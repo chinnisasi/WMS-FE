@@ -413,8 +413,8 @@ describe('the picklist and stop copy', () => {
   });
 
   test('a stop states its quantity, and its uncovered units when it has them', () => {
-    expect(pickLineQuantityLabel(line())).toBe('4 to pick');
-    expect(pickLineQuantityLabel(line({ qty: 4, shortfallQty: 2 }))).toBe('4 to pick · 2 uncovered');
+    expect(pickLineQuantityLabel(line())).toBe('4 units to pick');
+    expect(pickLineQuantityLabel(line({ qty: 4, shortfallQty: 2 }))).toBe('4 units to pick · 2 units uncovered');
   });
 
   test('a stop whose SKU resolves names its unit at the unit\'s declared precision', () => {
@@ -428,8 +428,8 @@ describe('the picklist and stop copy', () => {
     expect(pickLineQuantityLabel(line({ qty: 4 }), { uom: 'each', uomPrecision: 0 })).toBe(
       '4 each to pick',
     );
-    // An unresolvable SKU keeps the raw fallback, never a guessed precision.
-    expect(pickLineQuantityLabel(line({ qty: 2.5 }), null)).toBe('2.5 to pick');
+    // An unresolvable SKU keeps the unit-agnostic fallback, never a guessed precision.
+    expect(pickLineQuantityLabel(line({ qty: 2.5 }), null)).toBe('2.5 units to pick');
   });
 
   test('a wave whose stops share one unit renders its totals at that unit', () => {

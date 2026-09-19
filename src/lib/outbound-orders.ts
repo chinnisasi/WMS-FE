@@ -1,6 +1,6 @@
 import { ApiProblem } from '@/lib/api/client';
 import type { OrderDto, OrderEntryDto, OrderLineDto } from '@/lib/api/generated';
-import { formatQuantity, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
+import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 
 /**
  * Pure copy and derivation for the Outbound orders surface (story 4.2b) —
@@ -119,10 +119,10 @@ export function lineTotals(lines: readonly OrderLineDto[]): LineTotals {
  * The aggregate quantities in a totals sentence render at the shared unit's
  * precision with the unit named — when the order's lines all resolve to one
  * unit. A mixed-unit (or unresolvable-SKU) order has no precision to state,
- * so its totals keep the raw unit-agnostic fallback copy.
+ * so its totals keep the unit-agnostic "`N` units" fallback copy.
  */
 export function orderTotalsLabel(totals: LineTotals, uom?: QuantityUom | null): string {
-  const q = (value: number) => (uom ? `${formatQuantity(value, uom.uomPrecision)} ${uom.uom}` : String(value));
+  const q = (value: number) => quantityLabel(value, uom ?? null);
   const head = `${totals.lines} ${totals.lines === 1 ? 'line' : 'lines'} · ${q(totals.qty)} ordered · ${q(totals.reservedQty)} reserved`;
   if (totals.shortfallQty === 0) return head;
   const backordered = `${totals.backorderedLines} backordered ${totals.backorderedLines === 1 ? 'line' : 'lines'}`;
@@ -133,13 +133,14 @@ export function orderTotalsLabel(totals: LineTotals, uom?: QuantityUom | null): 
  * One line's quantities, as the expanded row states them. The line's OWN SKU
  * names the unit and its precision per row — a column mixing units has no
  * single alignment, so each row states its own. A line whose SKU cannot be
- * resolved falls back to the raw number rather than guessing a precision.
+ * resolved falls back to the unit-agnostic "`N` units" rather than guessing
+ * a precision.
  */
 export function lineQuantityLabel(
   line: Pick<OrderLineDto, 'qty' | 'reservedQty' | 'shortfallQty'>,
   uom?: QuantityUom | null,
 ): string {
-  const q = (value: number) => (uom ? `${formatQuantity(value, uom.uomPrecision)} ${uom.uom}` : String(value));
+  const q = (value: number) => quantityLabel(value, uom ?? null);
   const base = `${q(line.qty)} ordered · ${q(line.reservedQty)} reserved`;
   return line.shortfallQty > 0 ? `${base} · ${q(line.shortfallQty)} short` : base;
 }
@@ -156,7 +157,8 @@ export interface Outcome {
  * remainder is backordered. `skuOf` resolves the line's SKU because
  * `OrderLineDto` carries `skuId` alone (no code, no name) — and its unit, so
  * the short-fall quantities are named at the SKU's precision with its unit,
- * falling back to the raw id and the raw number when it cannot be resolved.
+ * falling back to the raw id and the unit-agnostic "`N` units" when it
+ * cannot be resolved.
  */
 export const MAX_NAMED_SHORT_LINES = 5;
 
@@ -167,8 +169,7 @@ export function createOutcome(
   const totals = lineTotals(order.lines);
   const code = (skuId: string) => skuOf(skuId)?.code ?? skuId;
   const shared = sharedQuantityUom(order.lines, skuOf);
-  const q = (value: number) =>
-    shared ? `${formatQuantity(value, shared.uomPrecision)} ${shared.uom}` : `${value} units`;
+  const q = (value: number) => quantityLabel(value, shared);
   if (totals.shortfallQty === 0) {
     return {
       tone: 'accepted',
@@ -183,10 +184,7 @@ export function createOutcome(
     // where the totals sentence had to stay unit-agnostic.
     .map((line) => {
       const sku = skuOf(line.skuId);
-      const qty = sku
-        ? `${formatQuantity(line.shortfallQty, sku.uomPrecision)} ${sku.uom}`
-        : String(line.shortfallQty);
-      return `${code(line.skuId)} short ${qty}`;
+      return `${code(line.skuId)} short ${quantityLabel(line.shortfallQty, sku ?? null)}`;
     })
     .join(', ');
   // An order carries up to 200 lines; naming them all would make the banner
@@ -396,24 +394,23 @@ export function parseDraftLines(draft: readonly DraftLine[]): ParsedLines {
     if (line.skuId === '') {
       return { lines: [], problem: 'Every line needs a SKU.' };
     }
-    // The STRING shape, not `Number()`: the parser accepts `1e3` (→ 1000) and
+    // The STRING shape, not `Number()`: `parseQuantityInput` is the one
+    // decimal-literal grammar (the bare `Number()` accepts `1e3` (→ 1000) and
     // `0x10` (→ 16), neither of which a `type="number"` field can produce and
-    // both of which the backend refuses. Quantities are fractional now
-    // (story 10.5) — a decimal literal is in the grammar, and the backend's
-    // floor is `@Min(0.001)`, so any POSITIVE decimal passes; only zero is
-    // refused here (the backend refuses it too — the parser's job is "nothing
-    // is sent that the backend would only 400"). A value finer than the SKU's
-    // unit allows is NEVER clamped or rounded here: the backend's precision
-    // refusal (naming the unit and its precision) is the authority, and this
-    // parser only decides shape.
-    const raw = line.quantity.trim();
-    if (!/^\d+(?:\.\d+)?$/.test(raw) || Number(raw) <= 0) {
+    // both of which the backend refuses). Quantities are fractional now
+    // (story 10.5), and the backend's floor is `@Min(0.001)`, so any POSITIVE
+    // decimal passes; only zero is refused here (the backend refuses it too —
+    // the parser's job is "nothing is sent that the backend would only 400").
+    // A value finer than the SKU's unit allows is NEVER clamped or rounded
+    // here: the backend's precision refusal (naming the unit and its
+    // precision) is the authority, and this parser only decides shape.
+    const quantity = parseQuantityInput(line.quantity);
+    if (quantity === null || quantity <= 0) {
       return {
         lines: [],
-        problem: "Every quantity is a decimal greater than zero, at the SKU's unit precision.",
+        problem: 'Every quantity is a decimal greater than zero.',
       };
     }
-    const quantity = Number(raw);
     if (quantity > MAX_LINE_QUANTITY) {
       return { lines: [], problem: `A line quantity is at most ${MAX_LINE_QUANTITY}.` };
     }

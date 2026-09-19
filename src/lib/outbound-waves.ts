@@ -1,6 +1,6 @@
 import { ApiProblem } from '@/lib/api/client';
 import type { PicklistDto, PicklistLineDto, WaveDto, WaveEntryDto, WavePolicyDto } from '@/lib/api/generated';
-import { formatQuantity, type QuantityUom } from '@/lib/format-quantity';
+import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON, verbatim, type Outcome } from '@/lib/outbound-orders';
 
 /**
@@ -380,8 +380,8 @@ export function waveTotals(picklists: readonly PicklistDto[]): WaveTotals {
 export function waveTotalsLabel(totals: WaveTotals, uom?: QuantityUom | null): string {
   // The unit figures render at the wave's SHARED unit's precision with the
   // unit named; a wave mixing units (or carrying an unresolvable SKU) has no
-  // precision to state and keeps the raw unit-agnostic fallback.
-  const q = (value: number) => (uom ? `${formatQuantity(value, uom.uomPrecision)} ${uom.uom}` : `${value} units`);
+  // precision to state and keeps the unit-agnostic "`N` units" fallback.
+  const q = (value: number) => quantityLabel(value, uom ?? null);
   const head = `${totals.orders} ${totals.orders === 1 ? 'order' : 'orders'} · ${totals.picklists} ${totals.picklists === 1 ? 'picklist' : 'picklists'} · ${totals.stops} ${totals.stops === 1 ? 'stop' : 'stops'} · ${totals.lines} ${totals.lines === 1 ? 'line' : 'lines'} · ${q(totals.qty)} to pick`;
   // Each half is emitted on its own count. A short line (story 4.4) carries
   // uncovered units WITHOUT being unfulfillable, so joining the two produced
@@ -408,13 +408,14 @@ export function picklistLabel(picklist: Pick<PicklistDto, 'orderId' | 'stopCount
  * One stop's quantities, as the expanded row states them. The line's OWN SKU
  * names the unit and its precision per row — a batch picklist walks many
  * SKUs' units in one walk, so the column mixes units and each row states its
- * own. An unresolvable SKU falls back to the raw number rather than guessing.
+ * own. An unresolvable SKU falls back to the shared unit-agnostic fallback —
+ * "`N` units" — rather than guessing.
  */
 export function pickLineQuantityLabel(
   line: Pick<PicklistLineDto, 'qty' | 'shortfallQty'>,
   uom?: QuantityUom | null,
 ): string {
-  const q = (value: number) => (uom ? `${formatQuantity(value, uom.uomPrecision)} ${uom.uom}` : String(value));
+  const q = (value: number) => quantityLabel(value, uom ?? null);
   const base = `${q(line.qty)} to pick`;
   return line.shortfallQty > 0 ? `${base} · ${q(line.shortfallQty)} uncovered` : base;
 }

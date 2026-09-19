@@ -9,7 +9,7 @@ import {
 import type { SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
-import { parseQuantityInput, quantityInputLabel, quantityStep } from '@/lib/format-quantity';
+import { parseQuantityInput, quantityInputLabel } from '@/lib/format-quantity';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkus } from '@/lib/use-catalog';
@@ -186,12 +186,12 @@ function SkuEditForm({
     // precision renders through `rejectionReason`.
     const point = parseQuantityInput(reorderPoint);
     if (point === null) {
-      onRejected(quantityInputLabel(sku.uomPrecision));
+      onRejected('Reorder point must be a decimal greater than zero.');
       return;
     }
     const qty = parseQuantityInput(reorderQty);
     if (qty === null) {
-      onRejected(quantityInputLabel(sku.uomPrecision));
+      onRejected('Reorder quantity must be a decimal greater than zero.');
       return;
     }
     setPending(true);
@@ -269,11 +269,12 @@ function SkuEditForm({
             className={inputClass}
             type="number"
             min={0}
-            // The SKU's own unit sets the input's precision: whole-unit
-            // vocabulary steps by 1, a measured unit reaches its last declared
-            // place. Never clamped to the step — the backend's precision
-            // refusal is the authority.
-            step={quantityStep(sku.uomPrecision)}
+            // The input constrains NOTHING beyond non-negativity (`min={0}`):
+            // `step="any"` — a step from the unit's precision would make the
+            // browser refuse a too-fine entry with its generic step-mismatch
+            // copy, while the backend's precision refusal naming unit and
+            // precision is the authority and renders through `rejectionReason`.
+            step="any"
             value={reorderPoint}
             onChange={(e) => setReorderPoint(e.target.value)}
             required
@@ -286,7 +287,7 @@ function SkuEditForm({
             className={inputClass}
             type="number"
             min={0}
-            step={quantityStep(sku.uomPrecision)}
+            step="any"
             value={reorderQty}
             onChange={(e) => setReorderQty(e.target.value)}
             required

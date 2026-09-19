@@ -4,7 +4,7 @@ import {
   formatQuantity,
   parseQuantityInput,
   quantityInputLabel,
-  quantityStep,
+  quantityLabel,
   sharedQuantityUom,
   type QuantityUom,
 } from './format-quantity';
@@ -62,14 +62,17 @@ describe('quantityInputLabel', () => {
   });
 });
 
-describe('quantityStep', () => {
-  test('a whole-unit unit steps by 1', () => {
-    expect(quantityStep(0)).toBe(1);
+describe('quantityLabel', () => {
+  test('a resolved SKU names its unit at declared precision', () => {
+    expect(quantityLabel(2.5, { uom: 'kg', uomPrecision: 3 })).toBe('2.500 kg');
+    expect(quantityLabel(3000, { uom: 'each', uomPrecision: 0 })).toBe('3,000 each');
   });
 
-  test('a measured unit steps by one unit of its last place', () => {
-    expect(quantityStep(3)).toBe(0.001);
-    expect(quantityStep(1)).toBe(0.1);
+  test('an unresolvable SKU keeps the ONE unit-agnostic fallback, everywhere', () => {
+    // The same sentence family on every surface — never a bare number, never
+    // a guessed unit or precision.
+    expect(quantityLabel(2.5, null)).toBe('2.5 units');
+    expect(quantityLabel(3000, null)).toBe('3000 units');
   });
 });
 

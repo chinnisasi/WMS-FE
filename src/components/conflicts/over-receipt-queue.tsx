@@ -8,7 +8,7 @@ import {
 } from '@/lib/api/client';
 import type { OverReceiptDto, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { formatQuantity } from '@/lib/format-quantity';
+import { quantityLabel } from '@/lib/format-quantity';
 import { decisionReason, openQtyLabel } from '@/lib/over-receipt';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -197,9 +197,8 @@ function OverReceiptCard({
   onDecide: (entry: OverReceiptDto, decision: 'approve' | 'reject') => void;
 }) {
   // The row's own SKU names the unit and its precision; an unresolvable SKU
-  // renders the raw numbers rather than letting a 0-place fallback round them.
-  const qty = (value: number) =>
-    sku ? `${formatQuantity(value, sku.uomPrecision)} ${sku.uom}` : String(value);
+  // keeps the shared unit-agnostic fallback rather than guessing a unit.
+  const qty = (value: number) => quantityLabel(value, sku ?? null);
   return (
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

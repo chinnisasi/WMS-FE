@@ -125,10 +125,10 @@ describe('line quantities', () => {
 
   test('a fully reserved line states two numbers, a short line three', () => {
     expect(lineQuantityLabel({ qty: 10, reservedQty: 10, shortfallQty: 0 })).toBe(
-      '10 ordered · 10 reserved',
+      '10 units ordered · 10 units reserved',
     );
     expect(lineQuantityLabel({ qty: 10, reservedQty: 4, shortfallQty: 6 })).toBe(
-      '10 ordered · 4 reserved · 6 short',
+      '10 units ordered · 4 units reserved · 6 units short',
     );
   });
 
@@ -146,10 +146,9 @@ describe('line quantities', () => {
     );
   });
 
-  test('a line whose SKU cannot resolve keeps the raw fallback, never a guessed precision', () => {
-    // `formatQuantity(2.5, 0)` would round to 3 — the fallback must not.
+  test('a line whose SKU cannot resolve keeps the unit-agnostic fallback, never a guessed precision', () => {
     expect(lineQuantityLabel({ qty: 2.5, reservedQty: 1.5, shortfallQty: 0 }, null)).toBe(
-      '2.5 ordered · 1.5 reserved',
+      '2.5 units ordered · 1.5 units reserved',
     );
   });
 
@@ -194,16 +193,16 @@ describe('line quantities', () => {
     // rather than left in JSX where deleting the clause would stay green.
     expect(
       orderTotalsLabel({ lines: 2, qty: 18, reservedQty: 18, shortfallQty: 0, backorderedLines: 0 }),
-    ).toBe('2 lines · 18 ordered · 18 reserved');
+    ).toBe('2 lines · 18 units ordered · 18 units reserved');
     expect(
       orderTotalsLabel({ lines: 2, qty: 18, reservedQty: 13, shortfallQty: 5, backorderedLines: 1 }),
-    ).toBe('2 lines · 18 ordered · 13 reserved · 5 short across 1 backordered line');
+    ).toBe('2 lines · 18 units ordered · 13 units reserved · 5 units short across 1 backordered line');
     expect(
       orderTotalsLabel({ lines: 4, qty: 40, reservedQty: 10, shortfallQty: 30, backorderedLines: 3 }),
-    ).toBe('4 lines · 40 ordered · 10 reserved · 30 short across 3 backordered lines');
+    ).toBe('4 lines · 40 units ordered · 10 units reserved · 30 units short across 3 backordered lines');
     expect(
       orderTotalsLabel({ lines: 1, qty: 10, reservedQty: 10, shortfallQty: 0, backorderedLines: 0 }),
-    ).toBe('1 line · 10 ordered · 10 reserved');
+    ).toBe('1 line · 10 units ordered · 10 units reserved');
   });
 });
 
@@ -268,7 +267,7 @@ describe('createOutcome (over-ATP is acceptance, not failure)', () => {
     );
   });
 
-  test('an unresolvable SKU falls back to the raw id and the raw number', () => {
+  test('an unresolvable SKU falls back to the raw id and the unit-agnostic fallback', () => {
     const outcome = createOutcome(
       order({
         lines: [line({ skuId: 'sku-gone', qty: 2.5, reservedQty: 0, shortfallQty: 2.5, status: 'backordered' })],
@@ -276,7 +275,7 @@ describe('createOutcome (over-ATP is acceptance, not failure)', () => {
       skuOf,
     );
     expect(outcome.reason).toBe(
-      '0 units of 2.5 units reserved; 1 of 1 lines backordered — sku-gone short 2.5.',
+      '0 units of 2.5 units reserved; 1 of 1 lines backordered — sku-gone short 2.5 units.',
     );
   });
 
@@ -520,7 +519,7 @@ describe('parseDraftLines (nothing is sent that the backend would only 400)', ()
   test('zero and non-shape quantities are refused before any request', () => {
     // Zero is the backend's own refusal (`@Min(0.001)`), so the parser keeps
     // it off the wire; the magnitude floor is zero, not one.
-    const expected = "Every quantity is a decimal greater than zero, at the SKU's unit precision.";
+    const expected = 'Every quantity is a decimal greater than zero.';
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0.000' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '-3' }]).problem).toBe(expected);
@@ -531,7 +530,7 @@ describe('parseDraftLines (nothing is sent that the backend would only 400)', ()
   test('numeric notations Number() accepts but the field and backend do not are refused', () => {
     // `Number('1e3')` is 1000 and `Number('0x10')` is 16 — neither can come
     // out of a type="number" field, and both are silent quantity changes.
-    const expected = "Every quantity is a decimal greater than zero, at the SKU's unit precision.";
+    const expected = 'Every quantity is a decimal greater than zero.';
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '1e3' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '0x10' }]).problem).toBe(expected);
     expect(parseDraftLines([{ skuId: 'sku-1', quantity: '+4' }]).problem).toBe(expected);
