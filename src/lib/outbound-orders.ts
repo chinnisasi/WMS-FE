@@ -1,5 +1,5 @@
 import { ApiProblem } from '@/lib/api/client';
-import type { OrderDto, OrderEntryDto, OrderLineDto } from '@/lib/api/generated';
+import type { AddressDto, OrderDto, OrderEntryDto, OrderLineDto } from '@/lib/api/generated';
 import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 
 /**
@@ -417,4 +417,103 @@ export function parseDraftLines(draft: readonly DraftLine[]): ParsedLines {
     lines.push({ skuId: line.skuId, quantity });
   }
   return { lines, problem: null };
+}
+
+/* ------------------------------------------------------------------ */
+/* The shipment destination (story 11-1)                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The address fields the create form collects. `line2` is the only optional
+ * field — the backend refuses an address that is missing any other one, so
+ * the parser refuses it first ("nothing is sent that the backend would only
+ * 400"). The pincode is TEXT, six digits, leading zeros significant.
+ */
+export interface DestinationFields {
+  readonly contactName: string;
+  readonly phone: string;
+  readonly line1: string;
+  readonly line2: string;
+  readonly city: string;
+  readonly state: string;
+  readonly pincode: string;
+}
+
+export function emptyDestinationFields(): DestinationFields {
+  return { contactName: '', phone: '', line1: '', line2: '', city: '', state: '', pincode: '' };
+}
+
+export interface ParsedDestination {
+  readonly destination: AddressDto | null;
+  /** Non-null when the destination cannot be sent — nothing is requested. */
+  readonly problem: string | null;
+}
+
+const PINCODE_RE = /^\d{6}$/;
+
+/**
+ * The destination form fields → the wire address. Trim every field, drop a
+ * blank `line2`, refuse a required field left empty (naming it) and a
+ * pincode that is not six digits. The backend re-checks all of this behind
+ * its replay lookup; this parser only decides shape, exactly as
+ * `parseDraftLines` does for lines.
+ */
+export function parseDestinationFields(fields: DestinationFields): ParsedDestination {
+  const trimmed = {
+    contactName: fields.contactName.trim(),
+    phone: fields.phone.trim(),
+    line1: fields.line1.trim(),
+    line2: fields.line2.trim(),
+    city: fields.city.trim(),
+    state: fields.state.trim(),
+    pincode: fields.pincode.trim(),
+  };
+  const missing = [
+    ['contactName', 'contact name'],
+    ['phone', 'phone'],
+    ['line1', 'address line 1'],
+    ['city', 'city'],
+    ['state', 'state'],
+    ['pincode', 'pincode'],
+  ].filter(([key]) => trimmed[key as keyof typeof trimmed] === '');
+  if (missing.length > 0) {
+    const labels = missing.map(([, label]) => label);
+    const list =
+      labels.length === 1
+        ? `a ${labels[0]}`
+        : `${labels.slice(0, -1).map((label) => `a ${label}`).join(', ')} and a ${labels[labels.length - 1]}`;
+    return {
+      destination: null,
+      problem: `The destination needs ${list}.`,
+    };
+  }
+  if (!PINCODE_RE.test(trimmed.pincode)) {
+    return {
+      destination: null,
+      problem: 'The pincode is six digits, as text — leading zeros are part of it.',
+    };
+  }
+  return {
+    destination: {
+      contactName: trimmed.contactName,
+      phone: trimmed.phone,
+      line1: trimmed.line1,
+      // A blank second line is "no second line" on the wire, not `''`.
+      ...(trimmed.line2 === '' ? {} : { line2: trimmed.line2 }),
+      city: trimmed.city,
+      state: trimmed.state,
+      pincode: trimmed.pincode,
+    },
+    problem: null,
+  };
+}
+
+/**
+ * The one line the orders table shows per row (story 11-1): city and
+ * pincode — what the dispatch surface works from first. A pre-11.1 order
+ * row reads `destination: null`; it renders as a dash, not empty space.
+ */
+export function destinationSummary(order: Pick<OrderEntryDto, 'destination'>): string {
+  if (order.destination === null) return '—';
+  return `${order.destination.city} ${order.destination.pincode}`;
 }

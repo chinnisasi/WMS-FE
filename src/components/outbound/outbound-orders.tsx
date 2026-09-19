@@ -13,6 +13,8 @@ import {
   channelRefLabel,
   createOutcome,
   createReason,
+  destinationSummary,
+  emptyDestinationFields,
   filterPage,
   holdStateLabel,
   lineQuantityLabel,
@@ -22,7 +24,9 @@ import {
   orderStatusLabel,
   orderTotalsLabel,
   pageFilterCount,
+  parseDestinationFields,
   parseDraftLines,
+  type DestinationFields,
   type DraftLine,
   type Outcome,
   type OrderStatus,
@@ -108,6 +112,9 @@ function emptyRow(): DraftRow {
 function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehouseId: string }) {
   const skus = useOutboundSkus();
   const [draft, setDraft] = useState<readonly DraftRow[]>([emptyRow()]);
+  // Story 11-1: the destination is required at create, so the form owns one
+  // fieldset shared by every line — one shipment, one address.
+  const [destination, setDestination] = useState<DestinationFields>(emptyDestinationFields());
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -122,11 +129,26 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     setDraft(next);
   }
 
+  /** The destination is part of the hashed payload — an address edit is a
+   * draft edit, and mints a fresh key the same way a line edit does. */
+  function editDestination(next: DestinationFields) {
+    setIdempotencyKey(null);
+    setDestination(next);
+  }
+
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const parsed = parseDraftLines(draft);
     if (parsed.problem !== null) {
       setOutcome({ tone: 'rejected', word: 'Not created', reason: parsed.problem });
+      return;
+    }
+    // Nothing is requested that the backend would only answer 400 to: the
+    // destination's shape is decided here first (the server re-checks it
+    // behind its replay lookup — the DTO's word is never trusted twice).
+    const address = parseDestinationFields(destination);
+    if (address.problem !== null) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: address.problem });
       return;
     }
     // Reused across retries of an unchanged draft; minted afresh otherwise.
@@ -137,10 +159,11 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     try {
       const { order } = await fetchApiCreateOrder(
         tenantId,
-        { warehouseId, source: 'manual', lines: [...parsed.lines] },
+        { warehouseId, source: 'manual', lines: [...parsed.lines], destination: address.destination! },
         key,
       );
       setDraft([emptyRow()]);
+      setDestination(emptyDestinationFields());
       setIdempotencyKey(null);
       setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId]));
       notifyOutboundChanged();
@@ -174,6 +197,96 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
         Raise an order — acceptance reserves each line against available stock. A line above what is
         available is accepted and backordered for the remainder.
       </div>
+      <fieldset className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
+        <legend className="px-1 text-xs text-(--muted-foreground)">Ship to</legend>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="flex flex-[2] flex-col gap-1">
+            <span className={labelClass}>Contact name</span>
+            <input
+              className={inputClass}
+              value={destination.contactName}
+              onChange={(e) => editDestination({ ...destination, contactName: e.target.value })}
+              required
+              maxLength={120}
+              placeholder="Priya Sharma"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Phone</span>
+            <input
+              className={inputClass}
+              value={destination.phone}
+              onChange={(e) => editDestination({ ...destination, phone: e.target.value })}
+              required
+              maxLength={20}
+              placeholder="+91 98450 12345"
+            />
+          </label>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="flex flex-[2] flex-col gap-1">
+            <span className={labelClass}>Address line 1</span>
+            <input
+              className={inputClass}
+              value={destination.line1}
+              onChange={(e) => editDestination({ ...destination, line1: e.target.value })}
+              required
+              maxLength={200}
+              placeholder="12, Peenya Industrial Area"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Address line 2 (optional)</span>
+            <input
+              className={inputClass}
+              value={destination.line2}
+              onChange={(e) => editDestination({ ...destination, line2: e.target.value })}
+              maxLength={200}
+              placeholder="Gate 3"
+            />
+          </label>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>City</span>
+            <input
+              className={inputClass}
+              value={destination.city}
+              onChange={(e) => editDestination({ ...destination, city: e.target.value })}
+              required
+              maxLength={100}
+              placeholder="Bengaluru"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>State</span>
+            <input
+              className={inputClass}
+              value={destination.state}
+              onChange={(e) => editDestination({ ...destination, state: e.target.value })}
+              required
+              maxLength={100}
+              placeholder="Karnataka"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Pincode</span>
+            <input
+              className={inputClass}
+              value={destination.pincode}
+              onChange={(e) => editDestination({ ...destination, pincode: e.target.value })}
+              required
+              // Text, never a number input: the pincode keeps its leading
+              // zeros (`110001`), and `type="number"` would strip them.
+              type="text"
+              inputMode="numeric"
+              pattern="\d{6}"
+              maxLength={6}
+              placeholder="560066"
+            />
+          </label>
+        </div>
+      </fieldset>
       <div className="flex flex-col gap-2">
         {draft.map((row, index) => (
           <div key={row.id} className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -343,6 +456,13 @@ function OrdersTable({
       ),
     },
     { key: 'source', header: 'Source', render: (order) => orderSourceLabel(order.source) },
+    {
+      // Story 11-1: the one address line the list works from first — city
+      // and pincode. Pre-11.1 rows read `destination: null` and render a dash.
+      key: 'destination',
+      header: 'Ship to',
+      render: (order) => destinationSummary(order),
+    },
     {
       key: 'channel',
       header: 'Channel refs',
