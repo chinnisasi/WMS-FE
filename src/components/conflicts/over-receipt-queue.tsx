@@ -6,8 +6,9 @@ import {
   fetchApiApproveOverReceipt,
   fetchApiRejectOverReceipt,
 } from '@/lib/api/client';
-import type { OverReceiptDto } from '@/lib/api/generated';
+import type { OverReceiptDto, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { formatQuantity } from '@/lib/format-quantity';
 import { decisionReason, openQtyLabel } from '@/lib/over-receipt';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -144,6 +145,7 @@ function OverReceiptQueueSessioned() {
               poCode={queue?.poCodes[entry.poId ?? ''] ?? null}
               line={entry.poLineId === null ? null : (queue?.poLines[entry.poLineId] ?? null)}
               skuLabel={skus?.[entry.skuId]?.code ?? null}
+              sku={skus?.[entry.skuId]}
               requestedBy={users?.[entry.requestedBy]?.email ?? null}
               canDecide={canDecide}
               deciding={decidingId === entry.id}
@@ -178,6 +180,7 @@ function OverReceiptCard({
   poCode,
   line,
   skuLabel,
+  sku,
   requestedBy,
   canDecide,
   deciding,
@@ -187,23 +190,28 @@ function OverReceiptCard({
   poCode: string | null;
   line: { orderedQty: number; receivedQty: number; openQty: number } | null;
   skuLabel: string | null;
+  sku: SkuResponse | undefined;
   requestedBy: string | null;
   canDecide: boolean;
   deciding: boolean;
   onDecide: (entry: OverReceiptDto, decision: 'approve' | 'reject') => void;
 }) {
+  // The row's own SKU names the unit and its precision; an unresolvable SKU
+  // renders the raw numbers rather than letting a 0-place fallback round them.
+  const qty = (value: number) =>
+    sku ? `${formatQuantity(value, sku.uomPrecision)} ${sku.uom}` : String(value);
   return (
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-mono text-xs">{poCode ?? '—'}</span>
         <span className="font-mono text-xs">{skuLabel ?? '(unknown SKU)'}</span>
-        <span className="font-medium">+{entry.excessQty} over open</span>
+        <span className="font-medium">+{qty(entry.excessQty)} over open</span>
         <span className="font-mono text-xs text-(--muted-foreground)">{entry.grnCode}</span>
       </div>
       {line !== null && (
         <div className="text-xs text-(--muted-foreground)">
-          Line: {line.orderedQty} ordered · {line.receivedQty} received-to-date ·{' '}
-          {openQtyLabel(line.openQty)} open
+          Line: {qty(line.orderedQty)} ordered · {qty(line.receivedQty)} received-to-date ·{' '}
+          {openQtyLabel(line.openQty, sku)} open
         </div>
       )}
       <div className="text-xs text-(--muted-foreground)">

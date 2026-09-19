@@ -1,4 +1,5 @@
 import { ApiProblem } from '@/lib/api/client';
+import { formatQuantity, type QuantityUom } from '@/lib/format-quantity';
 
 /**
  * Pure copy decisions of the story 3.3 surfaces (Inbound + Conflicts &
@@ -9,9 +10,15 @@ import { ApiProblem } from '@/lib/api/client';
  * never on prose.
  */
 
-/** A PO line's open quantity for the table cells — negative means over-received. */
-export function openQtyLabel(openQty: number): string {
-  return openQty < 0 ? `${openQty} (over-received)` : String(openQty);
+/**
+ * A PO line's open quantity for the table cells — negative means
+ * over-received. The line's own SKU names the unit and its precision (the
+ * PO-lines column mixes units, so each row states its own); an
+ * unresolvable SKU falls back to the raw number.
+ */
+export function openQtyLabel(openQty: number, uom?: QuantityUom | null): string {
+  const qty = uom ? `${formatQuantity(openQty, uom.uomPrecision)} ${uom.uom}` : String(openQty);
+  return openQty < 0 ? `${qty} (over-received)` : qty;
 }
 
 /** The decision outcome's reason: the problem code branches, in plain words. */

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
 import type { OrderEntryDto, SkuResponse } from '@/lib/api/generated';
+import { quantityInputLabel, quantityStep, sharedQuantityUom } from '@/lib/format-quantity';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import {
   canCancelOrder,
@@ -141,7 +142,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
       );
       setDraft([emptyRow()]);
       setIdempotencyKey(null);
-      setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId]?.code ?? skuId));
+      setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId]));
       notifyOutboundChanged();
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not created', reason: createReason(error) });
@@ -203,9 +204,14 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
               <input
                 className={inputClass}
                 type="number"
-                inputMode="numeric"
+                inputMode="decimal"
                 min={1}
-                step={1}
+                // The SKU's own unit sets the input's precision: whole-unit
+                // vocabulary steps by 1, a measured unit reaches its last
+                // declared place. A too-fine value is never clamped here —
+                // the backend's precision refusal naming unit and precision
+                // is the authority, and it renders under the error contract.
+                step={quantityStep(skuMap?.[row.skuId]?.uomPrecision ?? 0)}
                 value={row.quantity}
                 onChange={(e) =>
                   editDraft((rows) =>
@@ -214,6 +220,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
                 }
                 required
                 placeholder="1"
+                title={quantityInputLabel(skuMap?.[row.skuId]?.uomPrecision ?? 0)}
               />
             </label>
             <button
@@ -489,14 +496,19 @@ function OrderDetailPanel({ orderId }: { orderId: string }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="text-xs text-(--muted-foreground)">
-        {orderTotalsLabel(lineTotals(detail.data.lines))}
+        {orderTotalsLabel(
+          lineTotals(detail.data.lines),
+          sharedQuantityUom(detail.data.lines, (skuId) => skuMap?.[skuId]),
+        )}
       </div>
       <ul className="flex flex-col gap-1">
         {detail.data.lines.map((line) => (
           <li key={line.id} className="flex flex-wrap items-center gap-2 text-xs">
             <span className="font-mono">{skuMap?.[line.skuId]?.code ?? line.skuId}</span>
             <span className="text-(--muted-foreground)">{skuMap?.[line.skuId]?.name ?? ''}</span>
-            <span className="data">{lineQuantityLabel(line)}</span>
+            {/* The line's own SKU names the unit and its precision — a
+                column mixing units has no single one. */}
+            <span className="data">{lineQuantityLabel(line, skuMap?.[line.skuId])}</span>
             <span
               className={
                 line.status === 'backordered'

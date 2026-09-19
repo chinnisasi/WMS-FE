@@ -9,6 +9,7 @@ import {
 import type { SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
+import { parseQuantityInput, quantityInputLabel, quantityStep } from '@/lib/format-quantity';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkus } from '@/lib/use-catalog';
@@ -177,6 +178,22 @@ function SkuEditForm({
     event.preventDefault();
     const session = readSession();
     if (session === null) return;
+    // The decimal-literal shape, never a bare `Number()`: `1e3`, `0x10` and
+    // `Infinity` all coerce silently and none of them can come out of a
+    // `type="number"` field. The shape check also settles the non-negative
+    // rule (no minus sign in the grammar); precision refusals stay the
+    // SERVER's — a too-fine value is sent, and its refusal naming unit and
+    // precision renders through `rejectionReason`.
+    const point = parseQuantityInput(reorderPoint);
+    if (point === null) {
+      onRejected(quantityInputLabel(sku.uomPrecision));
+      return;
+    }
+    const qty = parseQuantityInput(reorderQty);
+    if (qty === null) {
+      onRejected(quantityInputLabel(sku.uomPrecision));
+      return;
+    }
     setPending(true);
     try {
       const trimmedName = name.trim();
@@ -191,8 +208,8 @@ function SkuEditForm({
           hsn: trimmedHsn === '' ? null : trimmedHsn,
           batchTracked,
           serialTracked,
-          reorderPoint: Number(reorderPoint),
-          reorderQty: Number(reorderQty),
+          reorderPoint: point,
+          reorderQty: qty,
           barcode: barcode.trim(),
         },
         ulid(),
@@ -252,9 +269,15 @@ function SkuEditForm({
             className={inputClass}
             type="number"
             min={0}
+            // The SKU's own unit sets the input's precision: whole-unit
+            // vocabulary steps by 1, a measured unit reaches its last declared
+            // place. Never clamped to the step — the backend's precision
+            // refusal is the authority.
+            step={quantityStep(sku.uomPrecision)}
             value={reorderPoint}
             onChange={(e) => setReorderPoint(e.target.value)}
             required
+            title={quantityInputLabel(sku.uomPrecision)}
           />
         </label>
         <label className="flex flex-1 flex-col gap-1">
@@ -263,9 +286,11 @@ function SkuEditForm({
             className={inputClass}
             type="number"
             min={0}
+            step={quantityStep(sku.uomPrecision)}
             value={reorderQty}
             onChange={(e) => setReorderQty(e.target.value)}
             required
+            title={quantityInputLabel(sku.uomPrecision)}
           />
         </label>
         <label className="flex flex-[2] flex-col gap-1">

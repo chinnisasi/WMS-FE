@@ -321,12 +321,20 @@ export type SkuResponse = {
     name: string;
     uom: 'each' | 'box' | 'case' | 'carton' | 'pack' | 'pallet' | 'bag' | 'drum' | 'roll' | 'crate' | 'bundle' | 'pair' | 'dozen' | 'bottle' | 'can' | 'tin' | 'jar' | 'tube' | 'tray' | 'sheet' | 'bar' | 'cylinder' | 'keg' | 'set' | 'g' | 'kg' | 'tonne' | 'ml' | 'litre' | 'kl' | 'mm' | 'cm' | 'm' | 'sqm' | 'sqft';
     /**
+     * The decimal places this SKU's base UoM declares (each = 0 places, kg = 3). Derived from the unit — never an input.
+     */
+    uomPrecision: number;
+    /**
      * GST in basis points (1800 = 18%)
      */
     gstRateBps: number;
     hsn: string | null;
     batchTracked: boolean;
     serialTracked: boolean;
+    /**
+     * Story 10.3: handled by unit, priced by weight — each physical unit received carries its own captured weight on a handling_units row. Mutually exclusive with serialTracked.
+     */
+    catchWeightTracked: boolean;
     reorderPoint: number;
     reorderQty: number;
     /**
@@ -354,6 +362,10 @@ export type PatchSkuDto = {
     hsn?: string | null;
     batchTracked?: boolean;
     serialTracked?: boolean;
+    /**
+     * Story 10.3: handled by unit, priced by weight. Turning it on for a serial-tracked SKU (or the reverse) is a 400 — two per-unit identity systems over one unit is unsupported.
+     */
+    catchWeightTracked?: boolean;
     /**
      * A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
@@ -549,6 +561,10 @@ export type StockAdjustmentDto = {
      * Serial arm (serial-tracked SKUs only): one serial number per unit — quantityDelta must equal the count
      */
     serials?: Array<string>;
+    /**
+     * Catch-weight arm (story 10.3, catch-weight-tracked SKUs only): the handling units this adjustment moves — one id per unit of quantity, so the count must equal |quantityDelta|. It is REQUIRED for a catch-weight SKU: a handling unit has no location, so nothing else can say which case was damaged, and a unit left active after a write-off still ships at pack.
+     */
+    handlingUnitIds?: Array<string>;
 };
 
 export type LedgerEventSnapshotDto = {
@@ -1134,6 +1150,10 @@ export type PackScanLineDto = {
      * Units of this SKU counted into the parcel, in base UoM. Two lines naming the same SKU sum — the bench scans items, not lines.
      */
     qty: number;
+    /**
+     * Catch weight (story 10.3): the handling units of this SKU counted into the parcel — supplied PER SKU, never per order line, because the bench cannot tell which line of a two-line order a case belongs to. The server derives that split from the picks. Required for a catch-weight-tracked SKU (one id per picked unit), refused for every other SKU.
+     */
+    handlingUnitIds?: Array<string>;
 };
 
 export type PackDimensionsDto = {
@@ -1718,6 +1738,10 @@ export type GrnLineInputDto = {
      * Physically received quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     qty: number;
+    /**
+     * Catch weight (story 10.3): one captured weight in whole GRAMS per physical unit on this line — required for a catch-weight-tracked SKU, refused for every other SKU, and exactly qty entries long. It is a per-unit actual weight, never a quantity and never the parcel weight pack records.
+     */
+    weightsGrams?: Array<number> | null;
 };
 
 export type SubmitGoodsReceiptDto = {
@@ -1762,6 +1786,10 @@ export type GrnLineDto = {
      * The excess pended for approval
      */
     excessQty: number;
+    /**
+     * Catch weight (story 10.3): the handling units this line produced, in the order their weights were supplied — present only on a catch-weight line. These ids are what a unit label carries and what the pack bench scans back.
+     */
+    handlingUnitIds?: Array<string>;
 };
 
 export type RejectedGrnLineDto = {
@@ -1822,6 +1850,10 @@ export type CatalogSnapshotSkuDto = {
     uomPrecision: number;
     batchTracked: boolean;
     serialTracked: boolean;
+    /**
+     * Story 10.3: the SKU is handled by unit and priced by weight. It rides the snapshot so the device can PROMPT for a per-unit weight at receipt while offline — a prompt only the server knows about never happens on the floor.
+     */
+    catchWeightTracked: boolean;
 };
 
 export type CatalogSnapshotPoDto = {
@@ -2017,7 +2049,7 @@ export type OverReceiptDto = {
     poLineId: string | null;
     skuId: string;
     /**
-     * The excess held for approval (positive integer)
+     * The excess held for approval. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     excessQty: number;
     status: 'pending' | 'approved' | 'rejected';
@@ -2159,7 +2191,7 @@ export type PutawayPlacementDto = {
      */
     batchCode: string | null;
     /**
-     * The placed quantity (positive integer)
+     * The placed quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     qty: number;
     /**

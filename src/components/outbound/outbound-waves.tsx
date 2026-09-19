@@ -9,6 +9,7 @@ import {
   fetchApiReleaseWave,
 } from '@/lib/api/client';
 import type { OrderEntryDto, PicklistDto, WaveEntryDto, WavePolicyDto } from '@/lib/api/generated';
+import { sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import { filterPage, pageFilterCount, type Outcome } from '@/lib/outbound-orders';
 import {
@@ -45,7 +46,7 @@ import {
   type PolicyDraft,
   type WaveStatus,
 } from '@/lib/outbound-waves';
-import { useOutboundOrders } from '@/lib/use-outbound-orders';
+import { useOutboundOrders, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { useOutboundWaves, useWaveDetail, useWavePolicies } from '@/lib/use-outbound-waves';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -965,6 +966,11 @@ function WavesTable({
  */
 function WaveDetailPanel({ waveId }: { waveId: string }) {
   const detail = useWaveDetail(waveId);
+  // The SKU map only decorates: it names each stop's unit and precision, and
+  // a stop falls back to the raw quantity when its SKU cannot be resolved —
+  // the walk order and the quantities are never blocked on it.
+  const skus = useOutboundSkus();
+  const skuOf = (skuId: string) => (skus.state === 'ready' ? skus.data[skuId] : undefined);
 
   if (detail.state === 'loading') {
     return <div className="text-xs text-(--muted-foreground)">Loading picklists…</div>;
@@ -986,19 +992,28 @@ function WaveDetailPanel({ waveId }: { waveId: string }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="text-xs text-(--muted-foreground)">
-        {waveTotalsLabel(waveTotals(picklists))}
+        {waveTotalsLabel(
+          waveTotals(picklists),
+          sharedQuantityUom(picklists.flatMap((picklist) => picklist.lines), skuOf),
+        )}
       </div>
       {picklists.length === 0 ? (
         <div className="text-xs text-(--muted-foreground)">This wave has no picklists.</div>
       ) : (
-        picklists.map((picklist) => <PicklistPanel key={picklist.id} picklist={picklist} />)
+        picklists.map((picklist) => <PicklistPanel key={picklist.id} picklist={picklist} skuOf={skuOf} />)
       )}
     </div>
   );
 }
 
 /** One picklist: its heading, and every stop on the walk in walk order. */
-function PicklistPanel({ picklist }: { picklist: PicklistDto }) {
+function PicklistPanel({
+  picklist,
+  skuOf,
+}: {
+  picklist: PicklistDto;
+  skuOf: (skuId: string) => QuantityUom | undefined;
+}) {
   return (
     <div className="flex flex-col gap-1 rounded-sm border border-(--border) p-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1017,7 +1032,9 @@ function PicklistPanel({ picklist }: { picklist: PicklistDto }) {
               <span className="data w-6 text-(--muted-foreground)">{line.walkSeq + 1}.</span>
               <span className="font-mono">{stopBinLabel(line)}</span>
               <span className="font-mono text-(--muted-foreground)">{line.skuId}</span>
-              <span className="data">{pickLineQuantityLabel(line)}</span>
+              {/* The stop's own SKU names the unit and its precision — a
+                  batch walk mixes units, so each row states its own. */}
+              <span className="data">{pickLineQuantityLabel(line, skuOf(line.skuId))}</span>
               <span
                 className={
                   line.status === 'unfulfillable' || line.status === 'short'

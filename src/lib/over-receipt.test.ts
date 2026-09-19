@@ -19,6 +19,17 @@ describe('openQtyLabel (the negative-open callout)', () => {
     expect(openQtyLabel(0)).toBe('0');
     expect(openQtyLabel(60)).toBe('60');
   });
+
+  test('a line whose SKU resolves names its unit at the unit\'s declared precision', () => {
+    // Story 10.5: the PO-lines column mixes units, so each row states its
+    // own — declared precision, unit named, and the negative callout intact.
+    const kg = { uom: 'kg', uomPrecision: 3 };
+    expect(openQtyLabel(1.5, kg)).toBe('1.500 kg');
+    expect(openQtyLabel(-0.5, kg)).toBe('-0.500 kg (over-received)');
+    // An unresolvable SKU keeps the raw fallback, never a guessed precision.
+    expect(openQtyLabel(1.5, null)).toBe('1.5');
+    expect(openQtyLabel(-1.5, null)).toBe('-1.5 (over-received)');
+  });
 });
 
 describe('decisionReason (the decision problem-code strings)', () => {

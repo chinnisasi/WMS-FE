@@ -18,7 +18,13 @@ import {
   type PurchaseOrderHeader,
 } from '@/lib/use-inbound';
 import { openQtyLabel, qcReason } from '@/lib/over-receipt';
-import type { GoodsReceiptEntryDto, PurchaseOrderLineDto, QcHoldDto } from '@/lib/api/generated';
+import { formatQuantity } from '@/lib/format-quantity';
+import type {
+  GoodsReceiptEntryDto,
+  PurchaseOrderLineDto,
+  QcHoldDto,
+  SkuResponse,
+} from '@/lib/api/generated';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
@@ -117,7 +123,9 @@ function PurchaseOrdersCard({
         return (
           <div className="flex flex-col gap-1 py-1">
             {lines.map((line) => (
-              <PoLineRow key={line.id} line={line} skuCode={skus?.[line.skuId]?.code ?? null} />
+              // The line's own SKU names the unit and its precision — a PO
+              // mixes units across its lines, so each row states its own.
+              <PoLineRow key={line.id} line={line} sku={skus?.[line.skuId]} />
             ))}
           </div>
         );
@@ -169,14 +177,16 @@ function PurchaseOrdersCard({
   );
 }
 
-/** One PO line: `SKU 100 ord · 40 rec · 60 open` (negative open = over-received). */
-function PoLineRow({ line, skuCode }: { line: PurchaseOrderLineDto; skuCode: string | null }) {
-  const open = openQtyLabel(line.openQty);
+/** One PO line: `SKU 2.500 kg ord · 1.000 kg rec · 1.500 kg open` (negative open = over-received). */
+function PoLineRow({ line, sku }: { line: PurchaseOrderLineDto; sku: SkuResponse | undefined }) {
+  const open = openQtyLabel(line.openQty, sku);
+  const qty = (value: number) =>
+    sku ? `${formatQuantity(value, sku.uomPrecision)} ${sku.uom}` : String(value);
   return (
     <div className="flex flex-wrap items-center gap-x-2 text-xs">
-      <span className="font-mono">{skuCode ?? '(unknown SKU)'}</span>
+      <span className="font-mono">{sku?.code ?? '(unknown SKU)'}</span>
       <span className="text-(--muted-foreground)">
-        {line.orderedQty} ord · {line.receivedQty} rec · {open} open
+        {qty(line.orderedQty)} ord · {qty(line.receivedQty)} rec · {open} open
       </span>
       {line.status !== 'open' && <span className="text-(--muted-foreground)">[{line.status}]</span>}
     </div>
@@ -521,12 +531,18 @@ function PlaceQcHoldForm({
           className="rounded-sm border border-(--border) bg-(--background) px-2 py-1 text-xs"
         >
           <option value="">Pick an on-hand scope…</option>
-          {offerable.map((row) => (
-            <option key={`${row.skuId}:${row.binId}`} value={`${row.skuId}:${row.binId}`}>
-              {skus?.[row.skuId]?.code ?? '(unknown SKU)'} @ {bins?.[row.binId] ?? row.binId} ·{' '}
-              {row.quantity} on hand
-            </option>
-          ))}
+          {offerable.map((row) => {
+            // The scope's own SKU names the unit and its precision; an
+            // unresolvable SKU renders the raw number rather than letting
+            // a 0-place fallback round it.
+            const sku = skus?.[row.skuId];
+            const onHand = sku ? `${formatQuantity(row.quantity, sku.uomPrecision)} ${sku.uom}` : String(row.quantity);
+            return (
+              <option key={`${row.skuId}:${row.binId}`} value={`${row.skuId}:${row.binId}`}>
+                {sku?.code ?? '(unknown SKU)'} @ {bins?.[row.binId] ?? row.binId} · {onHand} on hand
+              </option>
+            );
+          })}
         </select>
         <input
           type="text"
