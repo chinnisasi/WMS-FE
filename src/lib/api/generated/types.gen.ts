@@ -382,6 +382,16 @@ export type SkuResponse = {
     reorderPoint: number;
     reorderQty: number;
     /**
+     * The product this SKU is a variant of, or null when unattached.
+     */
+    productId: string | null;
+    /**
+     * This SKU's values on the product's declared axes, present iff productId is set.
+     */
+    variantValues: {
+        [key: string]: unknown;
+    } | null;
+    /**
      * Generated server-side (uuidv7) unless provided
      */
     barcode: string;
@@ -395,6 +405,42 @@ export type SkuListResponse = {
      * Opaque keyset cursor
      */
     nextCursor: string | null;
+};
+
+export type CreateProductDto = {
+    name: string;
+    /**
+     * The declared variant axes, 1–3 short names. Immutable while variants are attached.
+     */
+    axes: Array<string>;
+};
+
+export type ProductResponse = {
+    id: string;
+    tenantId: string;
+    name: string;
+    axes: Array<string>;
+    /**
+     * How many SKUs in this tenant are attached to this product (derived, never stored)
+     */
+    skuCount: number;
+    createdAt: string;
+};
+
+export type ProductListResponse = {
+    items: Array<ProductResponse>;
+    /**
+     * Opaque keyset cursor
+     */
+    nextCursor: string | null;
+};
+
+export type PatchProductDto = {
+    name?: string;
+    /**
+     * The declared axes. Refused 409 `product-has-variants` while any SKU is attached.
+     */
+    axes?: Array<string>;
 };
 
 export type PatchSkuDto = {
@@ -439,6 +485,16 @@ export type PatchSkuDto = {
      */
     reorderQty?: number;
     barcode?: string;
+    /**
+     * Attach the SKU to this product (variantValues is then required), or null to detach it — variantValues are cleared with the detach.
+     */
+    productId?: string | null;
+    /**
+     * The SKU's values on the product's declared axes. Must cover EXACTLY the product's axes — a missing key, an unknown key or a blank value is a 400 naming the axis. Cannot ride a detach.
+     */
+    variantValues?: {
+        [key: string]: unknown;
+    } | null;
 };
 
 export type HealthResponse = {
@@ -3358,6 +3414,10 @@ export type CatalogControllerListSkusData = {
          */
         cursor?: string;
         limit?: number;
+        /**
+         * List only the SKUs attached to this product
+         */
+        productId?: string;
     };
     url: '/tenants/{tenantId}/catalog/skus';
 };
@@ -3385,6 +3445,153 @@ export type CatalogControllerListSkusResponses = {
 
 export type CatalogControllerListSkusResponse = CatalogControllerListSkusResponses[keyof CatalogControllerListSkusResponses];
 
+export type CatalogControllerListProductsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/catalog/products';
+};
+
+export type CatalogControllerListProductsErrors = {
+    /**
+     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type CatalogControllerListProductsError = CatalogControllerListProductsErrors[keyof CatalogControllerListProductsErrors];
+
+export type CatalogControllerListProductsResponses = {
+    200: ProductListResponse;
+};
+
+export type CatalogControllerListProductsResponse = CatalogControllerListProductsResponses[keyof CatalogControllerListProductsResponses];
+
+export type CatalogControllerCreateProductData = {
+    body: CreateProductDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/products';
+};
+
+export type CatalogControllerCreateProductErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid name/axes (validation-failed / empty-product-edit)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks sku.edit (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Product name already exists in this tenant (duplicate-product-name)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerCreateProductError = CatalogControllerCreateProductErrors[keyof CatalogControllerCreateProductErrors];
+
+export type CatalogControllerCreateProductResponses = {
+    /**
+     * The created product (a matching Idempotency-Key replays it)
+     */
+    200: ProductResponse;
+};
+
+export type CatalogControllerCreateProductResponse = CatalogControllerCreateProductResponses[keyof CatalogControllerCreateProductResponses];
+
+export type CatalogControllerEditProductData = {
+    body: PatchProductDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        productId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/products/{productId}';
+};
+
+export type CatalogControllerEditProductErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an empty body (empty-product-edit)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks sku.edit (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Product does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Axes change with variants attached (product-has-variants), or the new name is taken (duplicate-product-name)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerEditProductError = CatalogControllerEditProductErrors[keyof CatalogControllerEditProductErrors];
+
+export type CatalogControllerEditProductResponses = {
+    200: ProductResponse;
+};
+
+export type CatalogControllerEditProductResponse = CatalogControllerEditProductResponses[keyof CatalogControllerEditProductResponses];
+
 export type CatalogControllerEditSkuData = {
     body: PatchSkuDto;
     headers: {
@@ -3406,7 +3613,7 @@ export type CatalogControllerEditSkuData = {
 
 export type CatalogControllerEditSkuErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or invalid/empty body
+     * Missing or malformed Idempotency-Key, or invalid/empty body, or variantValues not covering the product's axes (names the axis)
      */
     400: ProblemDetailsDto;
     /**
@@ -3418,11 +3625,11 @@ export type CatalogControllerEditSkuErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * SKU does not exist in this tenant (not-found)
+     * SKU (or, on attach, the product) does not exist in this tenant (not-found)
      */
     404: ProblemDetailsDto;
     /**
-     * Barcode already belongs to another SKU (duplicate-barcode names it)
+     * Barcode already belongs to another SKU (duplicate-barcode names it), or another SKU of this product already carries identical variantValues (duplicate-variant-values)
      */
     409: ProblemDetailsDto;
     /**
