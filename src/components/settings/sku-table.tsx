@@ -10,6 +10,7 @@ import type { SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
 import { parseQuantityInput, quantityInputLabel } from '@/lib/format-quantity';
+import { skuPhysicalLabel } from '@/lib/sku-attributes';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkus } from '@/lib/use-catalog';
@@ -26,6 +27,30 @@ type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } |
 /** GST is stored in basis points; the UI edits plain percent (18% ↔ 1800). */
 function gstPercent(bps: number): string {
   return String(bps / 100);
+}
+
+/**
+ * One physical-attribute input (story 11.2), parsed through the
+ * `parseQuantityInput` grammar (never a bare `Number()`). A blank field means
+ * CLEAR (`null` — the `hsn` template); a malformed spelling refuses
+ * client-side (`false`), naming the field and its unit; anything well-formed
+ * but out of the backend's bounds (fractional, over-cap) is SENT, so the
+ * server's own refusal naming the field renders through `rejectionReason`.
+ */
+function attributeInput(
+  raw: string,
+  label: string,
+  unit: string,
+  onRejected: (reason: string) => void,
+): number | null | false {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const parsed = parseQuantityInput(trimmed);
+  if (parsed === null) {
+    onRejected(`${label} must be a whole number of ${unit}.`);
+    return false;
+  }
+  return parsed;
 }
 
 /**
@@ -82,6 +107,10 @@ function SkuTableCardSessioned() {
     },
     { key: 'gstRateBps', header: 'GST %', numeric: true, render: (sku) => `${sku.gstRateBps / 100}%` },
     { key: 'hsn', header: 'HSN', render: (sku) => sku.hsn ?? '—' },
+    // Story 11.2 — the static physical attributes, WYSIWYG grams/millimetres;
+    // the derivation lives in `src/lib/sku-attributes.ts` so a sentence stays
+    // out of JSX and pinned by test.
+    { key: 'physical', header: 'Weight · dims', render: (sku) => skuPhysicalLabel(sku) },
     {
       key: 'flags',
       header: 'Tracking',
@@ -169,6 +198,13 @@ function SkuEditForm({
   const [hsn, setHsn] = useState(sku.hsn ?? '');
   const [batchTracked, setBatchTracked] = useState(sku.batchTracked);
   const [serialTracked, setSerialTracked] = useState(sku.serialTracked);
+  // Story 11.2 — the static physical attributes, edited WYSIWYG in grams and
+  // millimetres; a blank field sends null (clear), following the hsn template.
+  const [weightGrams, setWeightGrams] = useState(sku.weightGrams === null ? '' : String(sku.weightGrams));
+  const [lengthMm, setLengthMm] = useState(sku.lengthMm === null ? '' : String(sku.lengthMm));
+  const [widthMm, setWidthMm] = useState(sku.widthMm === null ? '' : String(sku.widthMm));
+  const [heightMm, setHeightMm] = useState(sku.heightMm === null ? '' : String(sku.heightMm));
+  const [countryOfOrigin, setCountryOfOrigin] = useState(sku.countryOfOrigin ?? '');
   const [reorderPoint, setReorderPoint] = useState(String(sku.reorderPoint));
   const [reorderQty, setReorderQty] = useState(String(sku.reorderQty));
   const [barcode, setBarcode] = useState(sku.barcode);
@@ -194,11 +230,23 @@ function SkuEditForm({
       onRejected('Reorder quantity must be a decimal greater than zero.');
       return;
     }
+    // Story 11.2 — the attribute fields go through the same grammar. A blank
+    // field clears (null); a fractional or over-cap value is SENT, and the
+    // backend's refusal naming the field renders through `rejectionReason`.
+    const weight = attributeInput(weightGrams, 'Weight', 'grams', onRejected);
+    if (weight === false) return;
+    const length = attributeInput(lengthMm, 'Length', 'millimetres', onRejected);
+    if (length === false) return;
+    const width = attributeInput(widthMm, 'Width', 'millimetres', onRejected);
+    if (width === false) return;
+    const height = attributeInput(heightMm, 'Height', 'millimetres', onRejected);
+    if (height === false) return;
     setPending(true);
     try {
       const trimmedName = name.trim();
       const gstBps = Math.round(Number(gst) * 100);
       const trimmedHsn = hsn.trim();
+      const trimmedOrigin = countryOfOrigin.trim();
       const updated = await fetchApiEditSku(
         session.tenant.id,
         sku.id,
@@ -208,6 +256,11 @@ function SkuEditForm({
           hsn: trimmedHsn === '' ? null : trimmedHsn,
           batchTracked,
           serialTracked,
+          weightGrams: weight,
+          lengthMm: length,
+          widthMm: width,
+          heightMm: height,
+          countryOfOrigin: trimmedOrigin === '' ? null : trimmedOrigin,
           reorderPoint: point,
           reorderQty: qty,
           barcode: barcode.trim(),
@@ -259,6 +312,71 @@ function SkuEditForm({
             onChange={(e) => setHsn(e.target.value)}
             maxLength={32}
             placeholder="—"
+          />
+        </label>
+      </div>
+      {/* Story 11.2 — physical attributes, WYSIWYG grams/millimetres. Text
+          inputs with inputMode="numeric" — the reorder fields' precedent
+          (and 11-1's pincode): a type="number" field's native step/min/max
+          validation would block submit with generic copy ahead of the
+          DESIGNED named refusals, and its paste sanitization silently
+          empties a field, which this form would read as a CLEAR. The
+          grammar (`parseQuantityInput`) and the server's decorators are
+          the only authorities; a fractional or over-cap entry is SENT and
+          the server's named refusal renders. */}
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <label className="flex flex-1 flex-col gap-1">
+          <span className={labelClass}>Weight (g)</span>
+          <input
+            className={inputClass}
+            type="text"
+            inputMode="numeric"
+            value={weightGrams}
+            onChange={(e) => setWeightGrams(e.target.value)}
+            placeholder="—"
+          />
+        </label>
+        <label className="flex flex-1 flex-col gap-1">
+          <span className={labelClass}>Length (mm)</span>
+          <input
+            className={inputClass}
+            type="text"
+            inputMode="numeric"
+            value={lengthMm}
+            onChange={(e) => setLengthMm(e.target.value)}
+            placeholder="—"
+          />
+        </label>
+        <label className="flex flex-1 flex-col gap-1">
+          <span className={labelClass}>Width (mm)</span>
+          <input
+            className={inputClass}
+            type="text"
+            inputMode="numeric"
+            value={widthMm}
+            onChange={(e) => setWidthMm(e.target.value)}
+            placeholder="—"
+          />
+        </label>
+        <label className="flex flex-1 flex-col gap-1">
+          <span className={labelClass}>Height (mm)</span>
+          <input
+            className={inputClass}
+            type="text"
+            inputMode="numeric"
+            value={heightMm}
+            onChange={(e) => setHeightMm(e.target.value)}
+            placeholder="—"
+          />
+        </label>
+        <label className="flex flex-1 flex-col gap-1">
+          <span className={labelClass}>Origin</span>
+          <input
+            className={inputClass}
+            value={countryOfOrigin}
+            onChange={(e) => setCountryOfOrigin(e.target.value)}
+            maxLength={2}
+            placeholder="IN"
           />
         </label>
       </div>

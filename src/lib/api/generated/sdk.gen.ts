@@ -245,7 +245,7 @@ export const catalogControllerListSkus = <ThrowOnError extends boolean = false>(
 });
 
 /**
- * Edits a SKU (name, GST, HSN, flags, reorder defaults, barcode — the SKU code is immutable)
+ * Edits a SKU (name, GST, HSN, flags, physical attributes, reorder defaults, barcode — the SKU code is immutable)
  */
 export const catalogControllerEditSku = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerEditSkuData, ThrowOnError>): RequestResult<CatalogControllerEditSkuResponses, CatalogControllerEditSkuErrors, ThrowOnError> => (options.client ?? client).patch<CatalogControllerEditSkuResponses, CatalogControllerEditSkuErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
