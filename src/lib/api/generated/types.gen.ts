@@ -497,6 +497,53 @@ export type PatchSkuDto = {
     } | null;
 };
 
+export type KitComponentDto = {
+    /**
+     * The component SKU's id
+     */
+    skuId: string;
+    /**
+     * Per ONE kit, in the component's own base UoM. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    quantity: number;
+};
+
+export type PutKitDto = {
+    /**
+     * The flat BOM — at least one component, at most 50, no repeats, no kit-of-kit.
+     */
+    components: Array<KitComponentDto>;
+};
+
+export type KitComponentResponse = {
+    skuId: string;
+    code: string;
+    /**
+     * Per ONE kit, in the component's base UoM
+     */
+    qty: number;
+};
+
+export type KitResponse = {
+    /**
+     * The kit SKU's id — a kit IS a SKU
+     */
+    skuId: string;
+    tenantId: string;
+    code: string;
+    name: string;
+    components: Array<KitComponentResponse>;
+    createdAt: string;
+};
+
+export type KitListResponse = {
+    items: Array<KitResponse>;
+    /**
+     * Opaque keyset cursor
+     */
+    nextCursor: string | null;
+};
+
 export type HealthResponse = {
     status: string;
     service: string;
@@ -1220,6 +1267,10 @@ export type OrderLineDto = {
      * The hold’s live journal state (held / released / committed / expired)
      */
     reservationState: string | null;
+    /**
+     * Story 11.4 — the kit line this component line exploded from at acceptance (null on ordinary lines and kit parents; a parent is any line another line names here)
+     */
+    parentLineId: string | null;
     /**
      * ISO-8601 UTC creation time
      */
@@ -3646,6 +3697,164 @@ export type CatalogControllerEditSkuResponses = {
 
 export type CatalogControllerEditSkuResponse = CatalogControllerEditSkuResponses[keyof CatalogControllerEditSkuResponses];
 
+export type CatalogControllerCreateKitData = {
+    body: PutKitDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The SKU that becomes a kit
+         */
+        skuId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/skus/{skuId}/kit';
+};
+
+export type CatalogControllerCreateKitErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid/empty component array (empty-kit-composition, validation-failed), or the kit naming itself (kit-self-reference)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks sku.edit (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The kit SKU (or a component SKU) does not exist in this tenant (not-found / kit-component-not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The SKU is already a kit (kit-already-composed), a component appears twice (duplicate-kit-component), a component is itself a kit (kit-component-is-kit — flat BOM), or the SKU already holds stock or a live reservation — making it a kit would strand that stock (kit-sku-holds-stock)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerCreateKitError = CatalogControllerCreateKitErrors[keyof CatalogControllerCreateKitErrors];
+
+export type CatalogControllerCreateKitResponses = {
+    /**
+     * The kit with its composition (a matching Idempotency-Key replays it)
+     */
+    201: KitResponse;
+};
+
+export type CatalogControllerCreateKitResponse = CatalogControllerCreateKitResponses[keyof CatalogControllerCreateKitResponses];
+
+export type CatalogControllerReplaceKitData = {
+    body: PutKitDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The kit SKU whose composition is replaced
+         */
+        skuId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/skus/{skuId}/kit';
+};
+
+export type CatalogControllerReplaceKitErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid/empty component array (empty-kit-composition, validation-failed), or the kit naming itself (kit-self-reference)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks sku.edit (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The SKU does not exist — or is not a kit (replace never creates kit-ness) — or a component SKU is unknown (not-found / kit-component-not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A component appears twice (duplicate-kit-component), or a component is itself a kit (kit-component-is-kit — flat BOM)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerReplaceKitError = CatalogControllerReplaceKitErrors[keyof CatalogControllerReplaceKitErrors];
+
+export type CatalogControllerReplaceKitResponses = {
+    200: KitResponse;
+};
+
+export type CatalogControllerReplaceKitResponse = CatalogControllerReplaceKitResponses[keyof CatalogControllerReplaceKitResponses];
+
+export type CatalogControllerListKitsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/catalog/kits';
+};
+
+export type CatalogControllerListKitsErrors = {
+    /**
+     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type CatalogControllerListKitsError = CatalogControllerListKitsErrors[keyof CatalogControllerListKitsErrors];
+
+export type CatalogControllerListKitsResponses = {
+    200: KitListResponse;
+};
+
+export type CatalogControllerListKitsResponse = CatalogControllerListKitsResponses[keyof CatalogControllerListKitsResponses];
+
 export type HealthControllerHealthData = {
     body?: never;
     path?: never;
@@ -3989,7 +4198,7 @@ export type InventoryControllerAdjustStockErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Concurrent request on the same Idempotency-Key (conflict); or a serial-tracked movement scans a serial that already lives in a bin (duplicate-serial, naming it) or draws a serial the ledger last saw in another bin (serial-elsewhere, naming the last-known bin)
+     * Concurrent request on the same Idempotency-Key (conflict); a kit SKU can never hold stock (kit-cannot-hold-stock, naming it); or a serial-tracked movement scans a serial that already lives in a bin (duplicate-serial, naming it) or draws a serial the ledger last saw in another bin (serial-elsewhere, naming the last-known bin)
      */
     409: ProblemDetailsDto;
     /**
@@ -5502,7 +5711,7 @@ export type ReceivingControllerSubmitGoodsReceiptErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The PO is not open (po-not-open, naming the status), or a concurrent idempotent request (conflict)
+     * The PO is not open (po-not-open, naming the status), a GRN line names a kit SKU — a kit never receives stock (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -5648,7 +5857,7 @@ export type ReceivingControllerApproveOverReceiptErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Already approved/rejected (over-receipt-decided), or a concurrent idempotent request (conflict)
+     * Already approved/rejected (over-receipt-decided), the SKU became a kit since the GRN — the excess can never apply to it (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
