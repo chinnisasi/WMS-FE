@@ -50,6 +50,8 @@ function line(over: Partial<OrderLineDto> = {}): OrderLineDto {
     status: 'open',
     reservationId: 'res-1',
     reservationState: 'held',
+    // Story 11-4: kit explosion — null on ordinary lines and kit parents.
+    parentLineId: null,
     createdAt: '2026-09-16T10:00:00.000Z',
     ...over,
   };
