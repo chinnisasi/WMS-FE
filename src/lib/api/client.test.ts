@@ -6,20 +6,27 @@ import {
   ApiProblem,
   fetchApiCancelOrder,
   fetchApiCancelWave,
+  fetchApiCreateKit,
   fetchApiCreateOrder,
+  fetchApiCreateProduct,
   fetchApiCreateWarehouse,
   fetchApiCreateWavePolicy,
+  fetchApiEditProduct,
   fetchApiEditSku,
   fetchApiGenerateWave,
   fetchApiGetOrder,
   fetchApiGetWave,
   fetchApiInviteUser,
+  fetchApiListKits,
   fetchApiListOrders,
+  fetchApiListProducts,
+  fetchApiListSkus,
   fetchApiListWarehouses,
   fetchApiListWavePolicies,
   fetchApiListWaves,
   fetchApiRegisterTenant,
   fetchApiReleaseWave,
+  fetchApiReplaceKit,
   refreshSessionUser,
 } from './client';
 import { SESSION_STORAGE_KEY, writeSession, clearSession } from '../auth';
@@ -658,6 +665,133 @@ describe('outbound wave wrappers (story 4.2c)', () => {
       const problem = error as ApiProblem;
       expect(problem.code).toBe('no-eligible-orders');
       expect(problem.status).toBe(422);
+    }
+    clearSession();
+  });
+});
+
+describe('catalog product and kit wrappers (story 11-6)', () => {
+  const PRODUCT_ID = '0198f7a2-1b3c-7d4e-8f90-5566778899aa';
+  const SKU_ID = '0198f7a2-1b3c-7d4e-8f90-aabb00112233';
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+
+  test('the product list is tenant-scoped and sends no query on the first page', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListProducts(SESSION.tenant.id);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/catalog/products`);
+    expect(url.search).toBe('');
+    expect(lastRequest!.method).toBe('GET');
+    clearSession();
+  });
+
+  test('a product cursor is passed through as the keyset query', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListProducts(SESSION.tenant.id, { cursor: 'opaque-cursor' });
+    expect(new URL(lastRequest!.url).searchParams.get('cursor')).toBe('opaque-cursor');
+    clearSession();
+  });
+
+  test('create product sends the body and the Idempotency-Key header', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { id: PRODUCT_ID, name: 'Shirts', axes: ['size'], skuCount: 0 });
+    await fetchApiCreateProduct(
+      SESSION.tenant.id,
+      { name: 'Shirts', axes: ['size', 'colour'] },
+      KEY,
+    );
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/catalog/products`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ name: 'Shirts', axes: ['size', 'colour'] });
+    clearSession();
+  });
+
+  test('edit product PATCHes the tenant-scoped product path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { id: PRODUCT_ID, name: 'Shirts', axes: ['size'], skuCount: 0 });
+    await fetchApiEditProduct(SESSION.tenant.id, PRODUCT_ID, { name: 'Shirts' }, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/catalog/products/${PRODUCT_ID}`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ name: 'Shirts' });
+    clearSession();
+  });
+
+  test('the SKU list passes a productId filter through as the query', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListSkus(SESSION.tenant.id, { productId: PRODUCT_ID });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/catalog/skus`);
+    expect(url.searchParams.get('productId')).toBe(PRODUCT_ID);
+    clearSession();
+  });
+
+  test('create kit POSTs the component array and the Idempotency-Key header', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { skuId: SKU_ID, components: [] });
+    await fetchApiCreateKit(
+      SESSION.tenant.id,
+      SKU_ID,
+      { components: [{ skuId: 'comp-1', quantity: 2.5 }] },
+      KEY,
+    );
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/catalog/skus/${SKU_ID}/kit`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    // Quantities cross the edge as base-UoM decimals — never raw milli.
+    expect(await lastRequest!.json()).toEqual({ components: [{ skuId: 'comp-1', quantity: 2.5 }] });
+    clearSession();
+  });
+
+  test('replace kit PUTs the whole replacement BOM', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { skuId: SKU_ID, components: [] });
+    await fetchApiReplaceKit(
+      SESSION.tenant.id,
+      SKU_ID,
+      { components: [{ skuId: 'comp-2', quantity: 1 }] },
+      KEY,
+    );
+    expect(lastRequest!.method).toBe('PUT');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/catalog/skus/${SKU_ID}/kit`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ components: [{ skuId: 'comp-2', quantity: 1 }] });
+    clearSession();
+  });
+
+  test('the kit list is tenant-scoped and sends no query on the first page', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListKits(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/catalog/kits`,
+    );
+    expect(new URL(lastRequest!.url).search).toBe('');
+    clearSession();
+  });
+
+  test('a 409 kit-already-composed refusal unwraps with the machine-readable code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { code: 'kit-already-composed', title: 'Already a kit', status: 409, detail: 'x' });
+    try {
+      await fetchApiCreateKit(SESSION.tenant.id, SKU_ID, { components: [] }, KEY);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiProblem);
+      expect((error as ApiProblem).code).toBe('kit-already-composed');
+      expect((error as ApiProblem).status).toBe(409);
     }
     clearSession();
   });

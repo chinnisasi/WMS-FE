@@ -145,6 +145,53 @@ export function lineQuantityLabel(
   return line.shortfallQty > 0 ? `${base} · ${q(line.shortfallQty)} short` : base;
 }
 
+/* ------------------------------------------------------------------ */
+/* Kit parent/child rendering (story 11-6)                             */
+/* ------------------------------------------------------------------ */
+
+export interface OrderLineGroup {
+  readonly line: OrderLineDto;
+  /** The exploded component lines this line spawned, in document order. */
+  readonly children: readonly OrderLineDto[];
+}
+
+/**
+ * The exploded order's lines → display groups (story 11-6): a kit line's
+ * component children (`parentLineId`) nest under their parent in the flat
+ * line list. Parents render in document order and carry their children;
+ * every other line is its own group. A child whose parent line is missing
+ * from the payload (a defensive arm — acceptance always inserts children
+ * beside their parent) renders as its own top-level line rather than
+ * vanishing, and a parent with no children renders as an ordinary line.
+ */
+export function groupKitLines(lines: readonly OrderLineDto[]): readonly OrderLineGroup[] {
+  const ids = new Set(lines.map((line) => line.id));
+  const childrenByParent = new Map<string, OrderLineDto[]>();
+  for (const line of lines) {
+    if (line.parentLineId !== null && ids.has(line.parentLineId)) {
+      const siblings = childrenByParent.get(line.parentLineId);
+      if (siblings === undefined) {
+        childrenByParent.set(line.parentLineId, [line]);
+      } else {
+        siblings.push(line);
+      }
+    }
+  }
+  return lines
+    .filter((line) => !(line.parentLineId !== null && ids.has(line.parentLineId)))
+    .map((line) => ({ line, children: childrenByParent.get(line.id) ?? [] }));
+}
+
+/**
+ * The hold span on a kit PARENT row. A parent's `reservationId` is always
+ * null — the reservation the kit earns belongs to its child component lines
+ * — so the ordinary `holdStateLabel` would read "No hold", which wrongly
+ * implies the kit got nothing. The parent shows the truth instead: its
+ * components hold the stock. Its backorder state still shows on the status
+ * chip, as on every line.
+ */
+export const KIT_PARENT_HOLDS_LABEL = 'Kit — stock held on its components';
+
 export interface Outcome {
   readonly tone: 'accepted' | 'rejected';
   readonly word: string;

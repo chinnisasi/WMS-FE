@@ -16,7 +16,9 @@ import {
   destinationSummary,
   emptyDestinationFields,
   filterPage,
+  groupKitLines,
   holdStateLabel,
+  KIT_PARENT_HOLDS_LABEL,
   lineQuantityLabel,
   lineTotals,
   ORDER_STATUSES,
@@ -590,8 +592,12 @@ function OrdersTable({
  * One order's lines, fetched when the row expands. A failure is reported on
  * this row alone — the list around it is untouched, and an empty line list
  * would read as "this order has no lines", which is never true.
+ *
+ * Exported for the story 11-6 component test, which pins the kit
+ * parent/child grouping on this panel alone rather than driving the whole
+ * surface (its list, filter and warehouse picker are out of scope there).
  */
-function OrderDetailPanel({ orderId }: { orderId: string }) {
+export function OrderDetailPanel({ orderId }: { orderId: string }) {
   const detail = useOrderDetail(orderId);
   const skus = useOutboundSkus();
   // The SKU map only decorates: a line falls back to its raw `skuId` rather
@@ -622,24 +628,60 @@ function OrderDetailPanel({ orderId }: { orderId: string }) {
           sharedQuantityUom(detail.data.lines, (skuId) => skuMap?.[skuId]),
         )}
       </div>
+      {/* Story 11-6 — an exploded kit renders as its parent line with the
+          component children grouped beneath it, not as a flat line list.
+          Plain orders group into single-line groups and render exactly as
+          before; waves/pick/pack already see the child lines and are not
+          touched. */}
       <ul className="flex flex-col gap-1">
-        {detail.data.lines.map((line) => (
-          <li key={line.id} className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-mono">{skuMap?.[line.skuId]?.code ?? line.skuId}</span>
-            <span className="text-(--muted-foreground)">{skuMap?.[line.skuId]?.name ?? ''}</span>
-            {/* The line's own SKU names the unit and its precision — a
-                column mixing units has no single one. */}
-            <span className="data">{lineQuantityLabel(line, skuMap?.[line.skuId])}</span>
-            <span
-              className={
-                line.status === 'backordered'
-                  ? 'rounded-full border border-(--destructive) px-2 py-0.5 text-(--destructive)'
-                  : 'rounded-full border border-(--border) px-2 py-0.5 text-(--muted-foreground)'
-              }
-            >
-              {line.status === 'backordered' ? 'Backordered' : 'Open'}
-            </span>
-            <span className="text-(--muted-foreground)">Hold: {holdStateLabel(line)}</span>
+        {groupKitLines(detail.data.lines).map(({ line, children }) => (
+          <li key={line.id} className="flex flex-col gap-1 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono">{skuMap?.[line.skuId]?.code ?? line.skuId}</span>
+              <span className="text-(--muted-foreground)">{skuMap?.[line.skuId]?.name ?? ''}</span>
+              {/* The line's own SKU names the unit and its precision — a
+                  column mixing units has no single one. */}
+              <span className="data">{lineQuantityLabel(line, skuMap?.[line.skuId])}</span>
+              <span
+                className={
+                  line.status === 'backordered'
+                    ? 'rounded-full border border-(--destructive) px-2 py-0.5 text-(--destructive)'
+                    : 'rounded-full border border-(--border) px-2 py-0.5 text-(--muted-foreground)'
+                }
+              >
+                {line.status === 'backordered' ? 'Backordered' : 'Open'}
+              </span>
+              {/* A kit parent's reservationId is always null — the holds it
+                  earns belong to its children — so the ordinary hold label
+                  would read "No hold" and imply it got nothing. */}
+              <span className="text-(--muted-foreground)">
+                {children.length > 0 ? KIT_PARENT_HOLDS_LABEL : `Hold: ${holdStateLabel(line)}`}
+              </span>
+            </div>
+            {children.length > 0 ? (
+              <ul className="flex flex-col gap-1 border-l border-(--border) pl-3">
+                {children.map((child) => (
+                  <li key={child.id} className="flex flex-wrap items-center gap-2 text-xs">
+                    <span aria-hidden className="text-(--muted-foreground)">
+                      └
+                    </span>
+                    <span className="font-mono">{skuMap?.[child.skuId]?.code ?? child.skuId}</span>
+                    <span className="text-(--muted-foreground)">{skuMap?.[child.skuId]?.name ?? ''}</span>
+                    <span className="data">{lineQuantityLabel(child, skuMap?.[child.skuId])}</span>
+                    <span
+                      className={
+                        child.status === 'backordered'
+                          ? 'rounded-full border border-(--destructive) px-2 py-0.5 text-(--destructive)'
+                          : 'rounded-full border border-(--border) px-2 py-0.5 text-(--muted-foreground)'
+                      }
+                    >
+                      {child.status === 'backordered' ? 'Backordered' : 'Open'}
+                    </span>
+                    <span className="text-(--muted-foreground)">Hold: {holdStateLabel(child)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </li>
         ))}
       </ul>

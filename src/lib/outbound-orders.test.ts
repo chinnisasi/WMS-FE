@@ -16,6 +16,7 @@ import {
   createReason,
   detailReason,
   filterPage,
+  groupKitLines,
   holdStateLabel,
   lineQuantityLabel,
   lineTotals,
@@ -634,5 +635,46 @@ describe('destinationSummary (the one address line the orders table shows)', () 
   test('city and pincode, space-joined; a pre-11.1 row renders a dash', () => {
     expect(destinationSummary(order())).toBe('Bengaluru 560066');
     expect(destinationSummary(order({ destination: null }))).toBe('—');
+  });
+});
+
+describe('groupKitLines (story 11-6 — exploded kit rendering)', () => {
+  test('children nest under their parent; plain orders render unchanged', () => {
+    const parent = line({ id: 'parent' });
+    const child1 = line({ id: 'child-1', skuId: 'sku-2', parentLineId: 'parent', qty: 20 });
+    const child2 = line({ id: 'child-2', skuId: 'sku-3', parentLineId: 'parent', qty: 4 });
+    const plain = line({ id: 'plain', skuId: 'sku-3', qty: 2 });
+    const groups = groupKitLines([parent, child1, child2, plain]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]!.line.id).toBe('parent');
+    expect(groups[0]!.children.map((c) => c.id)).toEqual(['child-1', 'child-2']);
+    expect(groups[1]!.line.id).toBe('plain');
+    expect(groups[1]!.children).toHaveLength(0);
+  });
+
+  test('a kit parent carries zero reserved and keeps its shortfall on its own row', () => {
+    const parent = line({ id: 'parent', reservationId: null, reservedQty: 0, shortfallQty: 0 });
+    const child = line({ id: 'child', skuId: 'sku-2', parentLineId: 'parent', qty: 20 });
+    const groups = groupKitLines([parent, child]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.line.reservedQty).toBe(0);
+    expect(groups[0]!.children).toHaveLength(1);
+  });
+
+  test('a child whose parent line is missing renders as its own top-level line', () => {
+    const orphan = line({ id: 'orphan', parentLineId: 'gone' });
+    const groups = groupKitLines([orphan]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.line.id).toBe('orphan');
+    expect(groups[0]!.children).toHaveLength(0);
+  });
+
+  test('children appearing before their parent in the flat list still group under it', () => {
+    const child = line({ id: 'child', parentLineId: 'parent' });
+    const parent = line({ id: 'parent' });
+    const groups = groupKitLines([child, parent]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.line.id).toBe('parent');
+    expect(groups[0]!.children.map((c) => c.id)).toEqual(['child']);
   });
 });

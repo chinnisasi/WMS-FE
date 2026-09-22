@@ -1,6 +1,7 @@
 import { WarehouseCreateForm, WarehouseList } from '@/components/settings/warehouse-create-form';
 import { DevicesCard } from '@/components/settings/devices-card';
 import { ImportCatalogCard } from '@/components/settings/import-catalog';
+import { ProductsCard } from '@/components/settings/products-card';
 import { SetupChecklistCard } from '@/components/settings/setup-checklist-card';
 import { SkuTableCard } from '@/components/settings/sku-table';
 import { UsersCard } from '@/components/settings/users-card';
@@ -20,6 +21,7 @@ export default function SettingsPage() {
       <WarehouseCreateForm />
       <ZonesBinsSetup />
       <ImportCatalogCard />
+      <ProductsCard />
       <SkuTableCard />
       <UsersCard />
       <WarehouseList />
