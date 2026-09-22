@@ -192,6 +192,24 @@ export function groupKitLines(lines: readonly OrderLineDto[]): readonly OrderLin
  */
 export const KIT_PARENT_HOLDS_LABEL = 'Kit — stock held on its components';
 
+/**
+ * The kit PARENT's hold span, honest about the holds' actual state: the
+ * static `KIT_PARENT_HOLDS_LABEL` is only true while the order is live and
+ * the kit accepted — a backordered kit holds nothing (all-or-nothing per
+ * kit), and a dispatched or cancelled order's holds are retired. A
+ * `ready_to_dispatch` order still carries its children's committed holds,
+ * so it keeps the plain label.
+ */
+export function kitParentHoldLabel(
+  line: Pick<OrderLineDto, 'status'>,
+  orderStatus: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled',
+): string {
+  if (orderStatus === 'dispatched') return 'Kit — dispatched in its components; holds retired';
+  if (orderStatus === 'cancelled') return 'Kit — order cancelled; holds released';
+  if (line.status === 'backordered') return 'Kit — nothing held; a component is short';
+  return KIT_PARENT_HOLDS_LABEL;
+}
+
 export interface Outcome {
   readonly tone: 'accepted' | 'rejected';
   readonly word: string;

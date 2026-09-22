@@ -18,6 +18,7 @@ import {
   filterPage,
   groupKitLines,
   holdStateLabel,
+  kitParentHoldLabel,
   lineQuantityLabel,
   lineTotals,
   MAX_ORDER_LINES,
@@ -676,5 +677,24 @@ describe('groupKitLines (story 11-6 — exploded kit rendering)', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]!.line.id).toBe('parent');
     expect(groups[0]!.children.map((c) => c.id)).toEqual(['child']);
+  });
+});
+
+describe('kitParentHoldLabel (story 11-6 — the parent hold span stays honest)', () => {
+  test('an accepted order keeps the holds label; a ready_to_dispatch order too', () => {
+    const parent = line({ id: 'parent', reservationId: null, reservedQty: 0 });
+    expect(kitParentHoldLabel(parent, 'accepted')).toBe('Kit — stock held on its components');
+    expect(kitParentHoldLabel(parent, 'ready_to_dispatch')).toBe('Kit — stock held on its components');
+  });
+
+  test('a backordered kit holds nothing — the label says so, not "stock held"', () => {
+    const parent = line({ id: 'parent', reservationId: null, reservedQty: 0, status: 'backordered' });
+    expect(kitParentHoldLabel(parent, 'accepted')).toBe('Kit — nothing held; a component is short');
+  });
+
+  test('a dispatched (or cancelled) order has no live holds — the label stops asserting them', () => {
+    const parent = line({ id: 'parent', reservationId: null, reservedQty: 0 });
+    expect(kitParentHoldLabel(parent, 'dispatched')).toBe('Kit — dispatched in its components; holds retired');
+    expect(kitParentHoldLabel(parent, 'cancelled')).toBe('Kit — order cancelled; holds released');
   });
 });

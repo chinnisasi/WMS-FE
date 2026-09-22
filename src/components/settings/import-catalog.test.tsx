@@ -81,4 +81,32 @@ describe('ImportResult: the per-row error table', () => {
     expect(banner).toContain('3 committed · 2 failed');
     expect(banner).toContain('fix the rows below and re-import them as a fix run');
   });
+
+  test('the kit-pass overlap renders honestly: a row can be in BOTH counts, and its remedy is the kit editor', () => {
+    // The kits.spec.ts fixture's shape: a row whose kit cell was refused is
+    // both committed (its SKU row) and failed — the counts no longer sum to
+    // the file's row count, and the fix-run remedy cannot retry the cell.
+    const kitRefused = error({
+      rowNumber: 3,
+      skuCode: 'KIT-IMP-GHOST',
+      code: 'kit-component-not-found',
+      detail: 'kit_components names component "NO-SUCH-CODE" — no SKU with that code exists in this tenant or in this file.',
+    });
+    view = render(
+      <ImportResult
+        result={{
+          importId: '0198f7a2-1b3c-7d4e-8f90-import00002',
+          mode: 'initial',
+          committedRows: 13,
+          failedRows: 10,
+          skippedRows: 0,
+          errors: [kitRefused],
+        }}
+      />,
+    );
+
+    const banner = view.container.textContent ?? '';
+    expect(banner).toContain('13 committed · 10 failed');
+    expect(banner).toContain('compose it with the Kit action on the SKUs table');
+  });
 });

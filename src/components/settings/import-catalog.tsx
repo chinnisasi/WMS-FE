@@ -98,9 +98,14 @@ function ImportCatalogCardSessioned() {
           CSV or XLSX, at most 10,000 rows and 5 MB. Valid rows commit; invalid rows are listed
           below — never an all-or-nothing rejection. Columns (fixed header):
           sku_code, name, uom, uom_conversions, gst_rate, hsn, batch_tracked, serial_tracked,
-          reorder_point, reorder_qty, barcode — sku_code, name, uom and gst_rate are required
-          (gst_rate in basis points, 18% = 1800). UoM conversions look like{' '}
-          <span className="font-mono">box:12;case:144</span>.
+          reorder_point, reorder_qty, barcode, product, variant_values, kit_components —
+          sku_code, name, uom and gst_rate are required (gst_rate in basis points, 18% = 1800).
+          UoM conversions look like <span className="font-mono">box:12;case:144</span>; variant
+          values like <span className="font-mono">size=M;colour=Red</span>; a kit composition
+          like <span className="font-mono">pad:2;tape:1</span> (quantities in each component's
+          own base UoM — a kit cell is resolved after every SKU row, so it may name an earlier
+          row of the same file). A row whose kit cell is refused keeps its SKU — compose it
+          with the Kit action on the SKUs table below; a fix run cannot retry it.
         </div>
       </div>
 
@@ -170,7 +175,12 @@ export function ImportResult({ result }: { result: CatalogImportResponse }) {
         reason={
           allClean
             ? 'The catalog is live.'
-            : 'Valid rows are committed; fix the rows below and re-import them as a fix run.'
+            : 'Valid rows are committed; fix the rows below and re-import them as a fix run.' +
+              // Story 11-6 — a row whose kit cell was refused keeps its SKU
+              // (the row is in BOTH counts), and no fix run can retry the
+              // composition (the committed SKU is refused
+              // duplicate-sku-code on resubmit): the kit editor is the door.
+              ' A row whose kit cell was refused keeps its SKU — compose it with the Kit action on the SKUs table.'
         }
       />
       {result.errors.length > 0 && (

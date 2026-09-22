@@ -41,6 +41,8 @@ let skuRows: unknown[] = [];
 let kitRows: Record<string, unknown>[] = [];
 /** Forces the next kit create to 409 `kit-already-composed` (the race arm). */
 let forceKitConflict = false;
+/** Makes every kits-list GET answer 500 (the join's failed arm). */
+let kitsFail = false;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -113,6 +115,9 @@ function stubRouter(): void {
       return json(200, { items: skuRows, nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith('/catalog/kits')) {
+      if (kitsFail) {
+        return json(500, { code: 'internal-error', title: 'Kits unavailable', status: 500, detail: 'The kits list is unavailable.' });
+      }
       return json(200, { items: kitRows, nextCursor: null });
     }
     if (
@@ -159,6 +164,7 @@ let view: Rendered | undefined;
 beforeEach(() => {
   requests = [];
   forceKitConflict = false;
+  kitsFail = false;
   skuRows = [
     sku(),
     sku({
@@ -480,5 +486,57 @@ describe('SkuTable: the kit marker and kit forms (story 11-6)', () => {
     // Guaranteed refusals are filtered out of the picker, not validated late.
     expect(options.join(' ')).not.toContain('GIFT-BOX');
     expect(options.join(' ')).not.toContain('BOX-2');
+  });
+
+  test('an edit that lands on one component still says "kit updated" — the sentence branches on mode, not count', async () => {
+    kitRows = [kit({ skuId: 'sku-6', code: 'BOX-2', components: [{ skuId: 'sku-3', code: 'PAD-01', qty: 2 }] })];
+    view = await mount();
+    await openKitForm(view.container, 'BOX-2');
+
+    submitForm(view.container);
+    await settle();
+
+    const put = requests.find((r) => r.method === 'PUT');
+    expect(put).toBeDefined();
+    expect(view.container.textContent).toContain('kit updated');
+    expect(view.container.textContent).not.toContain('is now a kit');
+  });
+
+  test('the kits join failing surfaces a banner with a working Retry, not silent unmarking', async () => {
+    kitsFail = true;
+    view = await mount();
+
+    // The failed join must not read as "no kits": the banner names the
+    // outage instead of letting every kit render as a plain SKU.
+    expect(view.container.textContent).toContain('Kit markers unavailable');
+    expect(view.container.textContent).toContain('The kits list is unavailable.');
+
+    kitsFail = false;
+    const retry = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Retry');
+    act(() => retry!.click());
+    await settle();
+    expect(view.container.textContent).not.toContain('Kit markers unavailable');
+    const kitRow = [...view.container.querySelectorAll('tbody tr')].find((r) =>
+      r.textContent!.includes('GIFT-BOX'),
+    )!;
+    expect(kitRow.textContent).toContain('Kit · 2 components');
+  });
+
+  test('a kit-already-composed recovery whose refetch fails still gives the user feedback', async () => {
+    kitsFail = true;
+    forceKitConflict = true;
+    view = await mount();
+    await openKitForm(view.container, 'SPICE-01');
+
+    const { select, quantity } = kitFormInputs(view.container);
+    setSelect(select, 'sku-3');
+    setInput(quantity, '2');
+    submitForm(view.container);
+    await settle();
+
+    // The fresh-list fetch inside the recovery fails — the refusal STILL
+    // renders (mapped from the original 409), the submission never vanishes.
+    expect(view.container.textContent).toContain('Not saved');
+    expect(view.container.textContent).toContain('This SKU is already a kit.');
   });
 });

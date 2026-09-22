@@ -18,7 +18,7 @@ import {
   filterPage,
   groupKitLines,
   holdStateLabel,
-  KIT_PARENT_HOLDS_LABEL,
+  kitParentHoldLabel,
   lineQuantityLabel,
   lineTotals,
   ORDER_STATUSES,
@@ -620,11 +620,16 @@ export function OrderDetailPanel({ orderId }: { orderId: string }) {
     );
   }
 
+  // The totals count the TOP-LEVEL lines only — a kit's children share their
+  // parent's quantity, so summing the exploded flat list would double-count
+  // every kit order's contents. The same groups feed the line list.
+  const groups = groupKitLines(detail.data.lines);
+
   return (
     <div className="flex flex-col gap-2">
       <div className="text-xs text-(--muted-foreground)">
         {orderTotalsLabel(
-          lineTotals(detail.data.lines),
+          lineTotals(groups.map(({ line }) => line)),
           sharedQuantityUom(detail.data.lines, (skuId) => skuMap?.[skuId]),
         )}
       </div>
@@ -634,7 +639,7 @@ export function OrderDetailPanel({ orderId }: { orderId: string }) {
           before; waves/pick/pack already see the child lines and are not
           touched. */}
       <ul className="flex flex-col gap-1">
-        {groupKitLines(detail.data.lines).map(({ line, children }) => (
+        {groups.map(({ line, children }) => (
           <li key={line.id} className="flex flex-col gap-1 text-xs">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono">{skuMap?.[line.skuId]?.code ?? line.skuId}</span>
@@ -653,9 +658,14 @@ export function OrderDetailPanel({ orderId }: { orderId: string }) {
               </span>
               {/* A kit parent's reservationId is always null — the holds it
                   earns belong to its children — so the ordinary hold label
-                  would read "No hold" and imply it got nothing. */}
+                  would read "No hold" and imply it got nothing. The label
+                  stays honest about the holds' state: a dispatched or
+                  cancelled order's holds are retired, a backordered kit
+                  holds nothing. */}
               <span className="text-(--muted-foreground)">
-                {children.length > 0 ? KIT_PARENT_HOLDS_LABEL : `Hold: ${holdStateLabel(line)}`}
+                {children.length > 0
+                  ? kitParentHoldLabel(line, detail.data.status)
+                  : `Hold: ${holdStateLabel(line)}`}
               </span>
             </div>
             {children.length > 0 ? (

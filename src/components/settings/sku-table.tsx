@@ -180,6 +180,23 @@ function SkuTableCardSessioned() {
         </div>
       </div>
 
+      {/* Story 11-6 — the kits join's failed state has an arm. Without it a
+          kits-endpoint outage silently unmarks every kit (the join's
+          non-ready states read as not-a-kit), in the surface whose headline
+          feature is that marker. */}
+      {kits.state === 'failed' ? (
+        <div className="flex flex-col items-start gap-2">
+          <FeedbackBanner tone="rejected" word="Kit markers unavailable" reason={kits.reason} />
+          <button
+            type="button"
+            onClick={kits.reload}
+            className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
       <DataTable<SkuResponse>
         columns={columns}
         rows={skus?.items ?? []}
@@ -195,11 +212,15 @@ function SkuTableCardSessioned() {
           kitOf={kitOf}
           onReloadKits={kits.reload}
           onClose={() => setKitEditing(null)}
-          onSaved={(saved) => {
+          onSaved={(saved, mode) => {
             setKitEditing(null);
             setOutcome({
               tone: 'accepted',
-              word: `${saved.code} ${saved.components.length === 1 ? 'is now a kit' : 'kit updated'}`,
+              // The sentence answers WHAT JUST HAPPENED, so it branches on
+              // the form's mode — a create is "is now a kit", an edit (even
+              // down to one component) is an update. The component count is
+              // the response's business, not the verb's.
+              word: `${saved.code} ${mode === 'create' ? 'is now a kit' : 'kit updated'}`,
               reason: kitBomSentence(saved),
             });
             notifyCatalogChanged();
@@ -570,7 +591,7 @@ function KitForm({
   kitOf: (skuId: string) => KitResponse | undefined;
   onReloadKits: () => void;
   onClose: () => void;
-  onSaved: (kit: KitResponse) => void;
+  onSaved: (kit: KitResponse, mode: 'create' | 'edit') => void;
   onRejected: (reason: string) => void;
 }) {
   const existing = kitOf(sku.id);
@@ -627,29 +648,36 @@ function KitForm({
         mode === 'create'
           ? await fetchApiCreateKit(session.tenant.id, sku.id, body, ulid())
           : await fetchApiReplaceKit(session.tenant.id, sku.id, body, ulid());
-      onSaved(kit);
+      onSaved(kit, mode);
     } catch (error) {
       if (error instanceof ApiProblem && error.code === 'kit-already-composed') {
         // The create lost a race: the SKU is a kit now. Switch to the edit
         // form, prefilled from a fresh join — the map the form opened with
         // predates the winning composition, and the parent's reload is a
         // state reset that lands too late to read here, so the form walks
-        // the fresh kit list itself and keeps the parent's map in step.
-        const freshList = await fetchAllPages<KitResponse>((options) =>
-          fetchApiListKits(session.tenant.id, options),
-        );
-        const fresh = freshList.find((k) => k.skuId === sku.id);
-        onReloadKits();
-        setMode('edit');
-        setRows(
-          fresh === undefined
-            ? [emptyKitComponent()]
-            : fresh.components.map((component) => ({
-                id: ulid(),
-                skuId: component.skuId,
-                quantity: String(component.qty),
-              })),
-        );
+        // the fresh kit list itself and keeps the parent's map in step. A
+        // fetch that fails here still owes the user feedback — the refusal
+        // falls through to the ordinary mapping, and the next submit
+        // retries against the parent's reloaded map.
+        try {
+          const freshList = await fetchAllPages<KitResponse>((options) =>
+            fetchApiListKits(session.tenant.id, options),
+          );
+          const fresh = freshList.find((k) => k.skuId === sku.id);
+          onReloadKits();
+          setMode('edit');
+          setRows(
+            fresh === undefined
+              ? [emptyKitComponent()]
+              : fresh.components.map((component) => ({
+                  id: ulid(),
+                  skuId: component.skuId,
+                  quantity: String(component.qty),
+                })),
+          );
+        } catch {
+          onReloadKits();
+        }
         onRejected(kitReason(error));
       } else {
         onRejected(kitReason(error));

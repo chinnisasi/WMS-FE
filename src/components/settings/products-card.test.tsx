@@ -42,6 +42,8 @@ interface Recorded {
 let requests: Recorded[] = [];
 let productRows: Record<string, unknown>[] = [];
 let skuRows: Record<string, unknown>[] = [];
+/** The products list's nextCursor, so a test can offer a second page. */
+let productsNextCursor: unknown = null;
 /** The next PATCH answer, so a test can force a refusal or an echo. */
 let nextSkuPatchStatus = 200;
 let nextSkuPatchBody: unknown = null;
@@ -108,7 +110,7 @@ function stubRouter(role: string = 'owner'): void {
     }
     requests.push({ method, pathname, query: url.search, body });
     if (method === 'GET' && pathname.endsWith('/catalog/products')) {
-      return json(200, { items: productRows, nextCursor: null });
+      return json(200, { items: productRows, nextCursor: productsNextCursor });
     }
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       const productId = url.searchParams.get('productId');
@@ -136,6 +138,7 @@ beforeEach(() => {
   requests = [];
   nextSkuPatchStatus = 200;
   nextSkuPatchBody = null;
+  productsNextCursor = null;
   productRows = [
     product(),
     product({ id: 'prod-empty', name: 'Mugs', axes: ['size'], skuCount: 0 }),
@@ -347,6 +350,55 @@ describe('ProductsCard: the variant matrix (story 11-6)', () => {
     // The read side still renders.
     expect(view.container.textContent).toContain('TEE-M-RED');
     expect(view.container.textContent).toContain('size: M · colour: Red');
+  });
+
+  test('the attach picker offers UNATTACHED SKUs only — a SKU of another product is not silently moved', async () => {
+    skuRows = [
+      ...skuRows,
+      // Attached to a DIFFERENT product: offering it would let the PATCH
+      // move it off that product silently (the server's attach arm has no
+      // current-attachment guard).
+      sku({ id: 'sku-7', code: 'TEE-OTHER', name: 'Attached elsewhere', productId: 'prod-other', variantValues: { size: 'S' }, barcode: 'BC-7' }),
+    ];
+    view = await mount();
+    await expandProduct(view.container, 'Mugs');
+
+    const region = view.container.querySelector('[role="region"][aria-label="Variants for Mugs"]')!;
+    const attach = [...region.querySelectorAll('button')].find((b) => b.textContent === 'Attach variant');
+    act(() => attach!.click());
+    await settle();
+
+    const options = [...region.querySelectorAll('select option')].map((o) => o.textContent);
+    // The unattached SKU is pickable; the SKU belonging to another product
+    // is filtered out, not offered as a silent move.
+    expect(options.join(' ')).toContain('UNATT-01');
+    expect(options.join(' ')).not.toContain('TEE-OTHER');
+  });
+
+  test('a zero-SKU catalog says so at the attach CTA, not "Every SKU already carries a variant"', async () => {
+    skuRows = [];
+    view = await mount();
+    await expandProduct(view.container, 'Mugs');
+
+    const region = view.container.querySelector('[role="region"][aria-label="Variants for Mugs"]')!;
+    expect(region.textContent).toContain('No SKUs yet');
+    expect(region.textContent).not.toContain('Every SKU already carries');
+  });
+
+  test('a non-null nextCursor wires the Next button to a refetch carrying the cursor', async () => {
+    productsNextCursor = 'cur-2';
+    view = await mount();
+
+    const next = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Next')!;
+    expect(next.disabled).toBe(false);
+    act(() => next.click());
+    await settle();
+    productsNextCursor = null;
+    await settle();
+
+    const productGets = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/catalog/products'));
+    expect(productGets.length).toBeGreaterThanOrEqual(2);
+    expect(productGets[1]!.query).toContain('cursor=cur-2');
   });
 });
 

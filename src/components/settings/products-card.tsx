@@ -237,13 +237,16 @@ function VariantMatrix({
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
 
-  // The whole catalog as the picker's option set, minus what this product
-  // already holds — a guaranteed refusal is filtered out of the options, not
-  // validated at submit.
+  // The whole catalog as the picker's option set — UNATTACHED SKUs only. The
+  // server's attach arm has no current-attachment guard, so offering a SKU
+  // that belongs to another product would move it off that product silently
+  // (its matrix would lose the variant); the frozen matrix says "choose an
+  // unattached SKU". A guaranteed refusal is filtered out of the options,
+  // not validated at submit.
   const attachCandidates: readonly SkuResponse[] =
     allSkus.state === 'ready'
       ? Object.values(allSkus.data)
-          .filter((sku) => sku.productId !== product.id)
+          .filter((sku) => sku.productId === null)
           .sort((a, b) => a.code.localeCompare(b.code))
       : [];
 
@@ -325,7 +328,9 @@ function VariantMatrix({
               </button>
               {attachCandidates.length === 0 && allSkus.state === 'ready' ? (
                 <span className="text-xs text-(--muted-foreground)">
-                  Every SKU already carries a variant on this product.
+                  {Object.keys(allSkus.data).length === 0
+                    ? 'No SKUs yet — import your catalog first.'
+                    : 'Every SKU is already attached to a product — detach one first, then attach it here.'}
                 </span>
               ) : null}
             </div>

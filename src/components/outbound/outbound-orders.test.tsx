@@ -212,6 +212,15 @@ describe('OrderDetailPanel: kit parent/child rendering (story 11-6)', () => {
     expect(children[1]!.textContent).toContain('TAPE-01');
     // The child glyph marks each nested line.
     expect(children.every((child) => child.querySelector('[aria-hidden]') !== null)).toBe(true);
+
+    // The totals count TOP-LEVEL lines only — the kit's children share their
+    // parent's quantity, so summing the flat list would double-count (12
+    // ordered, not 17.5; 2 lines, not 4).
+    const totals = view.container.querySelector(':scope > div > div')!.textContent;
+    expect(totals).toContain('2 lines');
+    expect(totals).toContain('12');
+    expect(totals).not.toContain('17.5');
+    expect(totals).not.toContain('4 lines');
   });
 
   test('the kit parent’s hold span reads the kit sentence, never "No hold"', async () => {
@@ -247,6 +256,41 @@ describe('OrderDetailPanel: kit parent/child rendering (story 11-6)', () => {
     expect(spans).not.toContain('Hold: No hold');
     // The child still renders its own hold.
     expect(parent.querySelector('ul')!.textContent).toContain('Hold: Held');
+  });
+
+  test('a dispatched order’s parent stops asserting live holds', async () => {
+    order = {
+      id: 'order-1',
+      tenantId: TENANT_ID,
+      warehouseId: 'wh-1',
+      status: 'dispatched',
+      source: 'manual',
+      integrationId: null,
+      externalEventId: null,
+      destination: null,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+      lines: [
+        line({ id: 'line-parent', skuId: 'kit-sku', qty: 2, reservedQty: 0, reservationId: null, reservationState: null }),
+        line({
+          id: 'line-child-1',
+          skuId: 'pad-sku',
+          qty: 4,
+          reservedQty: 4,
+          reservationId: 'res-1',
+          reservationState: 'held',
+          parentLineId: 'line-parent',
+        }),
+      ],
+    };
+    view = await mount('order-1');
+
+    const parent = view.container.querySelector(':scope > div > ul > li')!;
+    const spans = [...parent.querySelectorAll(':scope > div > span')].map((s) => s.textContent);
+    // The holds were retired at dispatch — the span must not claim stock is
+    // held on the components.
+    expect(spans).toContain('Kit — dispatched in its components; holds retired');
+    expect(spans).not.toContain(KIT_PARENT_HOLDS_LABEL);
   });
 
   test('a backordered child keeps its chip and its shortfall in the nested line', async () => {
