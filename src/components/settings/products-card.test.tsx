@@ -21,7 +21,8 @@ import { ProductsCard } from './products-card';
  *   6. an edit save with the axes field untouched round-trips the product's
  *      existing axes verbatim — the prefill speaks the comma-separated entry
  *      grammar, never the display join (fix A1: the "size · colour" axis
- *      corruption on save), and
+ *      corruption on save) — and the save resolves: the form closes, the row
+ *      refreshes, and no error banner renders, and
  *   7. the products table's axes cell still renders the display join.
  *
  * The surface is driven through a stubbed global `fetch` — the generated
@@ -130,10 +131,14 @@ function stubRouter(role: string = 'owner'): void {
       return json(201, product({ id: 'prod-2', name: 'Mugs', axes: ['size'], skuCount: 0 }));
     }
     if (method === 'PATCH' && /\/catalog\/products\/[^/]+$/.test(pathname)) {
-      // The product edit PATCH echoes the accepted fields over the fixture —
-      // without this handler an edit save falls through to the 404
-      // 'Unrouted in this test' arm and fails for the wrong reason.
+      // The product edit PATCH echoes the accepted fields over the fixture and
+      // writes them into `productRows`, so an edit save RESOLVES — the
+      // response-handling assertions (form closed, row refreshed, no error
+      // banner) exercise the success path, not a 404 fall-through.
       const over = (body !== null && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+      const id = pathname.split('/').pop()!;
+      const row = productRows.find((p) => (p as { id?: string }).id === id);
+      if (row !== undefined) Object.assign(row, over);
       return json(200, product({ skuCount: 0, ...over }));
     }
     if (method === 'PATCH' && /\/catalog\/skus\/[^/]+$/.test(pathname)) {
@@ -382,6 +387,19 @@ describe('ProductsCard: the variant matrix (story 11-6)', () => {
     // The display grammar must never ride the PATCH — one axis literally
     // named "size · colour" passes every backend check.
     expect(JSON.stringify(patch!.body)).not.toContain('size · colour');
+
+    // The save SUCCEEDED, not just left the wire: the form closed, the
+    // accepted banner (role="status", never "alert") names the rename, and
+    // the refetched list shows it — pinning the PATCH response handling.
+    expect(view.container.querySelector('form')).toBeNull();
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    expect(view.container.querySelector('[role="status"]')!.textContent).toContain(
+      'Caps renamed updated',
+    );
+    const refreshedRow = [...view.container.querySelectorAll('tr')].find((tr) =>
+      tr.textContent!.includes('Caps renamed'),
+    );
+    expect(refreshedRow).toBeDefined();
   });
 
   test('the products table axes cell still renders the display join (fix A1 touches only the input prefill)', async () => {
