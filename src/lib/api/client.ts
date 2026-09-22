@@ -1,8 +1,14 @@
 import { client } from './generated/client.gen';
 import {
+  catalogControllerCreateKit,
+  catalogControllerCreateProduct,
+  catalogControllerEditProduct,
   catalogControllerEditSku,
   catalogControllerImportCatalog,
+  catalogControllerListKits,
+  catalogControllerListProducts,
   catalogControllerListSkus,
+  catalogControllerReplaceKit,
   devicesControllerListDevices,
   devicesControllerMintEnrollmentCode,
   devicesControllerRevokeDevice,
@@ -58,6 +64,7 @@ import type {
   BinResponse,
   CatalogImportResponse,
   CreateBinDto,
+  CreateProductDto,
   CreateWarehouseDto,
   CreateZoneDto,
   DeviceListResponse,
@@ -68,6 +75,8 @@ import type {
   MergeBinDto,
   InviteUserDto,
   InviteUserResponse,
+  KitListResponse,
+  KitResponse,
   MeResponse,
   MintEnrollmentCodeResponse,
   CreateOrderDto,
@@ -81,8 +90,12 @@ import type {
   QcHoldListResponse,
   QcHoldResponse,
   StockListResponse,
+  PutKitDto,
   PatchBinDto,
+  PatchProductDto,
   PatchSkuDto,
+  ProductListResponse,
+  ProductResponse,
   PurchaseOrderListResponse,
   PurchaseOrderResponse,
   RegisterTenantDto,
@@ -445,11 +458,17 @@ export async function fetchApiImportCatalog(
 
 export async function fetchApiListSkus(
   tenantId: string,
-  options?: { cursor?: string; signal?: AbortSignal },
+  options?: { cursor?: string; productId?: string; signal?: AbortSignal },
 ): Promise<SkuListResponse> {
   const { data, error } = await catalogControllerListSkus({
     path: { tenantId },
-    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    query:
+      options?.cursor === undefined && options?.productId === undefined
+        ? undefined
+        : {
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+            ...(options.productId === undefined ? {} : { productId: options.productId }),
+          },
     signal: options?.signal,
   });
   if (error || !data) {
@@ -468,6 +487,121 @@ export async function fetchApiEditSku(
   idempotencyKey: string,
 ): Promise<SkuResponse> {
   const { data, error } = await catalogControllerEditSku({
+    path: { tenantId, skuId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Products and kits (story 11-6) — the web variant/kit surfaces ride  */
+/* the read endpoints the 11-3/11-4 stories shipped; only the writers  */
+/* below are new to this app.                                          */
+/* ------------------------------------------------------------------ */
+
+/** The tenant's products — a read, open to any tenant member (11-3). */
+export async function fetchApiListProducts(
+  tenantId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<ProductListResponse> {
+  const { data, error } = await catalogControllerListProducts({
+    path: { tenantId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Create a product — identity only (name + declared axes), gated `sku.edit`. */
+export async function fetchApiCreateProduct(
+  tenantId: string,
+  body: CreateProductDto,
+  idempotencyKey: string,
+): Promise<ProductResponse> {
+  const { data, error } = await catalogControllerCreateProduct({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Edit a product — the name is always editable; the axes only while no SKU
+ * is attached (409 `product-has-variants`).
+ */
+export async function fetchApiEditProduct(
+  tenantId: string,
+  productId: string,
+  body: PatchProductDto,
+  idempotencyKey: string,
+): Promise<ProductResponse> {
+  const { data, error } = await catalogControllerEditProduct({
+    path: { tenantId, productId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** The tenant's kits — SKUs carrying composition rows, with their BOMs (11-4). */
+export async function fetchApiListKits(
+  tenantId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<KitListResponse> {
+  const { data, error } = await catalogControllerListKits({
+    path: { tenantId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Make an existing SKU a kit — the only door into kit-ness. Quantities are
+ * base-UoM decimals per component (the API converts to milli at the edge).
+ */
+export async function fetchApiCreateKit(
+  tenantId: string,
+  skuId: string,
+  body: PutKitDto,
+  idempotencyKey: string,
+): Promise<KitResponse> {
+  const { data, error } = await catalogControllerCreateKit({
+    path: { tenantId, skuId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Replace an existing kit's whole composition (PUT — the BOM is a set). */
+export async function fetchApiReplaceKit(
+  tenantId: string,
+  skuId: string,
+  body: PutKitDto,
+  idempotencyKey: string,
+): Promise<KitResponse> {
+  const { data, error } = await catalogControllerReplaceKit({
     path: { tenantId, skuId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },

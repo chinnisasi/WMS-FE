@@ -4,16 +4,21 @@ import { useState, useSyncExternalStore } from 'react';
 
 import {
   ApiProblem,
+  fetchApiCreateKit,
   fetchApiEditSku,
+  fetchApiListKits,
+  fetchApiReplaceKit,
 } from '@/lib/api/client';
-import type { SkuResponse } from '@/lib/api/generated';
+import type { KitResponse, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
+import { kitBomLabel, kitMarkerLabel, kitReason, parseKitComponents } from '@/lib/catalog-kits';
+import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { parseQuantityInput, quantityInputLabel } from '@/lib/format-quantity';
 import { skuPhysicalLabel } from '@/lib/sku-attributes';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
-import { useSkus } from '@/lib/use-catalog';
+import { useCatalogSkus, useKits, useSkus } from '@/lib/use-catalog';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
@@ -80,7 +85,11 @@ export function SkuTableCard() {
 
 function SkuTableCardSessioned() {
   const skus = useSkus();
+  // Story 11-6 — kit-ness is DERIVED, never a flag on the SKU: the marker and
+  // the edit-kit affordance come from this kits-list join.
+  const kits = useKits();
   const [editing, setEditing] = useState<SkuResponse | null>(null);
+  const [kitEditing, setKitEditing] = useState<SkuResponse | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
   // Story 1.5 gating: the table is a read (open to every member); the Edit
   // actions column renders only for roles holding `sku.edit`. The role is
@@ -94,9 +103,15 @@ function SkuTableCardSessioned() {
   );
   const canEditSku = roleHasCapability(role, 'sku.edit');
 
+  const kitOf = (skuId: string): KitResponse | undefined =>
+    kits.state === 'ready' ? kits.data[skuId] : undefined;
+
   const columns: readonly DataTableColumn<SkuResponse>[] = [
     { key: 'code', header: 'SKU code', render: (sku) => <span className="font-mono text-xs">{sku.code}</span> },
     { key: 'name', header: 'Name' },
+    // Story 11-6 — the kit marker, derived from the kits-list join (the
+    // 11-4 no-flag decision: no `isKit` field ever rides the SKU).
+    { key: 'kit', header: 'Kit', render: (sku) => kitMarkerLabel(kitOf(sku.id)) },
     {
       key: 'uom',
       header: 'UoM',
@@ -126,16 +141,30 @@ function SkuTableCardSessioned() {
             key: 'actions',
             header: '',
             render: (sku: SkuResponse) => (
-              <button
-                type="button"
-                onClick={() => {
-                  setEditing(sku);
-                  setOutcome(null);
-                }}
-                className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
-              >
-                Edit
-              </button>
+              <div className="flex justify-end gap-2">
+                {/* A kit-marked row edits its composition (PUT); a plain SKU
+                    row offers create — the only door into kit-ness. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setKitEditing(sku);
+                    setOutcome(null);
+                  }}
+                  className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+                >
+                  {kitOf(sku.id) === undefined ? 'Kit' : 'Edit kit'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(sku);
+                    setOutcome(null);
+                  }}
+                  className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+                >
+                  Edit
+                </button>
+              </div>
             ),
           } satisfies DataTableColumn<SkuResponse>,
         ]
@@ -151,6 +180,23 @@ function SkuTableCardSessioned() {
         </div>
       </div>
 
+      {/* Story 11-6 — the kits join's failed state has an arm. Without it a
+          kits-endpoint outage silently unmarks every kit (the join's
+          non-ready states read as not-a-kit), in the surface whose headline
+          feature is that marker. */}
+      {kits.state === 'failed' ? (
+        <div className="flex flex-col items-start gap-2">
+          <FeedbackBanner tone="rejected" word="Kit markers unavailable" reason={kits.reason} />
+          <button
+            type="button"
+            onClick={kits.reload}
+            className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
       <DataTable<SkuResponse>
         columns={columns}
         rows={skus?.items ?? []}
@@ -159,6 +205,29 @@ function SkuTableCardSessioned() {
         emptyMessage="No SKUs yet — import your catalog above."
       />
 
+      {kitEditing !== null && (
+        <KitForm
+          key={kitEditing.id}
+          sku={kitEditing}
+          kitOf={kitOf}
+          onReloadKits={kits.reload}
+          onClose={() => setKitEditing(null)}
+          onSaved={(saved, mode) => {
+            setKitEditing(null);
+            setOutcome({
+              tone: 'accepted',
+              // The sentence answers WHAT JUST HAPPENED, so it branches on
+              // the form's mode — a create is "is now a kit", an edit (even
+              // down to one component) is an update. The component count is
+              // the response's business, not the verb's.
+              word: `${saved.code} ${mode === 'create' ? 'is now a kit' : 'kit updated'}`,
+              reason: kitBomSentence(saved),
+            });
+            notifyCatalogChanged();
+          }}
+          onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Not saved', reason })}
+        />
+      )}
       {editing !== null && (
         <SkuEditForm
           sku={editing}
@@ -179,6 +248,12 @@ function SkuTableCardSessioned() {
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
     </section>
   );
+}
+
+/** The saved kit's one-sentence confirmation, built from the RESPONSE. */
+function kitBomSentence(kit: KitResponse): string {
+  const n = kit.components.length;
+  return `${n} ${n === 1 ? 'component makes' : 'components make'} one kit.`;
 }
 
 /** The inline edit row form: prefilled from the picked SKU, PATCH on save. */
@@ -476,4 +551,240 @@ function rejectionReason(error: unknown, attemptedBarcode?: string): string {
     }
   }
   return 'The API is unreachable — is wms-be running?';
+}
+
+/* ------------------------------------------------------------------ */
+/* The kit editor (story 11-6)                                         */
+/* ------------------------------------------------------------------ */
+
+interface KitComponentRow {
+  /** Stable across removals — an index key would move focus and IME state. */
+  readonly id: string;
+  readonly skuId: string;
+  readonly quantity: string;
+}
+
+function emptyKitComponent(): KitComponentRow {
+  return { id: ulid(), skuId: '', quantity: '' };
+}
+
+/**
+ * The kit create/edit form below the table (the `SkuEditForm` pattern): a
+ * component picker plus a per-component decimal quantity in that component's
+ * base UoM — never raw milli; the API takes decimals and returns them.
+ *
+ * Create is POST (the only door into kit-ness); edit is PUT with the WHOLE
+ * replacement BOM (replace semantics — the BOM is a set, not a partial
+ * body). A create refused 409 `kit-already-composed` switches the form to
+ * edit mode: another actor composed this SKU between opening the form and
+ * submitting, and editing the existing kit is the move that refusal names.
+ */
+function KitForm({
+  sku,
+  kitOf,
+  onReloadKits,
+  onClose,
+  onSaved,
+  onRejected,
+}: {
+  sku: SkuResponse;
+  kitOf: (skuId: string) => KitResponse | undefined;
+  onReloadKits: () => void;
+  onClose: () => void;
+  onSaved: (kit: KitResponse, mode: 'create' | 'edit') => void;
+  onRejected: (reason: string) => void;
+}) {
+  const existing = kitOf(sku.id);
+  // The mode starts from the marker join, but a create that hits
+  // `kit-already-composed` flips to edit in place.
+  const [mode, setMode] = useState<'create' | 'edit'>(existing === undefined ? 'create' : 'edit');
+  const [rows, setRows] = useState<readonly KitComponentRow[]>(
+    existing === undefined
+      ? [emptyKitComponent()]
+      : existing.components.map((component) => ({
+          id: ulid(),
+          skuId: component.skuId,
+          quantity: String(component.qty),
+        })),
+  );
+  const [pending, setPending] = useState(false);
+  const allSkus = useCatalogSkus();
+
+  const skuMap = allSkus.state === 'ready' ? allSkus.data : null;
+  // A kit's components are ordinary SKUs: the kit itself (self-reference) and
+  // every existing kit (flat BOM) are guaranteed refusals, so the picker
+  // filters them instead of validating at submit.
+  const pickerOptions: readonly SkuResponse[] =
+    skuMap === null
+      ? []
+      : Object.values(skuMap)
+          .filter((candidate) => {
+            if (candidate.id === sku.id) return false;
+            return kitOf(candidate.id) === undefined;
+          })
+          .sort((a, b) => a.code.localeCompare(b.code));
+
+  function editRow(id: string, next: (row: KitComponentRow) => KitComponentRow) {
+    setRows((current) => current.map((row) => (row.id === id ? next(row) : row)));
+  }
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const session = readSession();
+    if (session === null) return;
+    // Shape only: rows complete, quantities positive decimals in the
+    // component's base UoM, no component named twice (the BOM is a set) and
+    // at least one component — every one a guaranteed refusal the client can
+    // cheaply avoid. The state guards stay the server's.
+    const parsed = parseKitComponents(rows);
+    if (parsed.problem !== null) {
+      onRejected(parsed.problem);
+      return;
+    }
+    setPending(true);
+    try {
+      const body = { components: [...parsed.components] };
+      const kit =
+        mode === 'create'
+          ? await fetchApiCreateKit(session.tenant.id, sku.id, body, ulid())
+          : await fetchApiReplaceKit(session.tenant.id, sku.id, body, ulid());
+      onSaved(kit, mode);
+    } catch (error) {
+      if (error instanceof ApiProblem && error.code === 'kit-already-composed') {
+        // The create lost a race: the SKU is a kit now. Switch to the edit
+        // form, prefilled from a fresh join — the map the form opened with
+        // predates the winning composition, and the parent's reload is a
+        // state reset that lands too late to read here, so the form walks
+        // the fresh kit list itself and keeps the parent's map in step. A
+        // fetch that fails here still owes the user feedback — the refusal
+        // falls through to the ordinary mapping, and the next submit
+        // retries against the parent's reloaded map.
+        try {
+          const freshList = await fetchAllPages<KitResponse>((options) =>
+            fetchApiListKits(session.tenant.id, options),
+          );
+          const fresh = freshList.find((k) => k.skuId === sku.id);
+          onReloadKits();
+          setMode('edit');
+          setRows(
+            fresh === undefined
+              ? [emptyKitComponent()]
+              : fresh.components.map((component) => ({
+                  id: ulid(),
+                  skuId: component.skuId,
+                  quantity: String(component.qty),
+                })),
+          );
+        } catch {
+          onReloadKits();
+        }
+        onRejected(kitReason(error));
+      } else {
+        onRejected(kitReason(error));
+      }
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-sm border border-(--border) p-3">
+      <div className="text-xs text-(--muted-foreground)">
+        {mode === 'create' ? (
+          <>
+            Making <span className="font-mono">{sku.code}</span> a kit — it sells as a bundle of
+            other SKUs and holds no stock of its own. Quantities are per one kit, in each
+            component's own base UoM.
+          </>
+        ) : (
+          <>
+            Editing the kit <span className="font-mono">{sku.code}</span>
+            {existing !== undefined ? ` — ${kitBomLabel(existing, (skuId) => skuMap?.[skuId])}` : ''} —
+            save replaces the whole composition.
+          </>
+        )}
+      </div>
+      <div className="flex flex-col gap-2">
+        {rows.map((row) => {
+          const component = skuMap?.[row.skuId];
+          return (
+            <div key={row.id} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <label className="flex flex-[3] flex-col gap-1">
+                <span className={labelClass}>Component SKU</span>
+                <select
+                  className={inputClass}
+                  value={row.skuId}
+                  onChange={(e) => editRow(row.id, (row) => ({ ...row, skuId: e.target.value }))}
+                  required
+                >
+                  <option value="" disabled>
+                    Pick a component…
+                  </option>
+                  {/* A row's own pick stays selectable so its edit does not
+                      reset; the options exclude kits and the kit itself. */}
+                  {row.skuId !== '' && !pickerOptions.some((o) => o.id === row.skuId) ? (
+                    <option value={row.skuId}>{component?.code ?? row.skuId}</option>
+                  ) : null}
+                  {pickerOptions.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.code} {candidate.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-1 flex-col gap-1">
+                <span className={labelClass}>Quantity per kit</span>
+                <input
+                  className={inputClass}
+                  type="number"
+                  inputMode="decimal"
+                  // Constrains nothing: the backend's precision refusal naming
+                  // the component's unit is the authority (§6 rule 5).
+                  min={0}
+                  step="any"
+                  value={row.quantity}
+                  onChange={(e) => editRow(row.id, (row) => ({ ...row, quantity: e.target.value }))}
+                  required
+                  placeholder="1"
+                  title={quantityInputLabel(component?.uomPrecision ?? 0)}
+                />
+              </label>
+              <button
+                type="button"
+                aria-label={`Remove component ${component?.code ?? ''}`}
+                disabled={rows.length === 1}
+                onClick={() => setRows((current) => current.filter((r) => r.id !== row.id))}
+                className="rounded-sm border border-(--border) px-3 py-2 text-xs hover:bg-(--muted) disabled:opacity-40"
+              >
+                Remove
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex flex-1 justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setRows((current) => [...current, emptyKitComponent()])}
+          className="rounded-sm border border-(--border) px-3 py-2 text-sm hover:bg-(--muted)"
+        >
+          Add component
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-sm border border-(--border) px-3 py-2 text-sm hover:bg-(--muted)"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
+        >
+          {pending ? 'Saving…' : mode === 'create' ? 'Create kit' : 'Replace composition'}
+        </button>
+      </div>
+    </form>
+  );
 }
