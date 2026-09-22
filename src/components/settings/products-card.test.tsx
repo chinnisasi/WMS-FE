@@ -17,7 +17,12 @@ import { ProductsCard } from './products-card';
  *   3. an empty product renders "no variants" and offers the attach CTA,
  *   4. a role without `sku.edit` reads everything and is offered no
  *      mutating affordance at all,
- *   5. pressing Save on the create form sends the POST with the parsed axes.
+ *   5. pressing Save on the create form sends the POST with the parsed axes,
+ *   6. an edit save with the axes field untouched round-trips the product's
+ *      existing axes verbatim — the prefill speaks the comma-separated entry
+ *      grammar, never the display join (fix A1: the "size · colour" axis
+ *      corruption on save), and
+ *   7. the products table's axes cell still renders the display join.
  *
  * The surface is driven through a stubbed global `fetch` — the generated
  * client is a fetch wrapper — so the wiring under test is the one that ships.
@@ -124,6 +129,13 @@ function stubRouter(role: string = 'owner'): void {
     if (method === 'POST' && pathname.endsWith('/catalog/products')) {
       return json(201, product({ id: 'prod-2', name: 'Mugs', axes: ['size'], skuCount: 0 }));
     }
+    if (method === 'PATCH' && /\/catalog\/products\/[^/]+$/.test(pathname)) {
+      // The product edit PATCH echoes the accepted fields over the fixture —
+      // without this handler an edit save falls through to the 404
+      // 'Unrouted in this test' arm and fails for the wrong reason.
+      const over = (body !== null && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+      return json(200, product({ skuCount: 0, ...over }));
+    }
     if (method === 'PATCH' && /\/catalog\/skus\/[^/]+$/.test(pathname)) {
       return json(nextSkuPatchStatus, nextSkuPatchBody ?? sku());
     }
@@ -142,6 +154,11 @@ beforeEach(() => {
   productRows = [
     product(),
     product({ id: 'prod-empty', name: 'Mugs', axes: ['size'], skuCount: 0 }),
+    // The edit round-trip fixture (fix A1): unattached (skuCount 0, so the
+    // PATCH carries the axes) AND declaring two axes — prod-1 is the only
+    // ['size','colour'] product but is attached, so its PATCH carries the
+    // name alone and an axes assertion fails confusingly.
+    product({ id: 'prod-axes', name: 'Caps', axes: ['size', 'colour'], skuCount: 0 }),
   ];
   skuRows = [
     sku(),
@@ -335,6 +352,46 @@ describe('ProductsCard: the variant matrix (story 11-6)', () => {
     expect(post).toBeDefined();
     expect(post!.body).toEqual({ name: 'Mugs', axes: ['size', 'colour'] });
     expect(post!.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/catalog/products`);
+  });
+
+  test('an edit save with the axes field untouched round-trips them verbatim (fix A1: the corruption is closed)', async () => {
+    view = await mount();
+    const row = [...view.container.querySelectorAll('tr')].find((tr) =>
+      tr.textContent!.includes('Caps'),
+    )!;
+    const edit = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Edit')!;
+    act(() => edit.click());
+    await settle();
+
+    const form = view.container.querySelector('form')!;
+    const inputs = [...form.querySelectorAll<HTMLInputElement>('input')];
+    // The prefill is the comma-separated ENTRY grammar — not the table cell's
+    // display join, which `parseProductAxes` would keep as ONE axis.
+    expect(inputs[1]!.value).toBe('size, colour');
+
+    // Change only the name; the axes field is left exactly as prefilled.
+    setInput(inputs[0]!, 'Caps renamed');
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+
+    const patch = requests.find(
+      (r) => r.method === 'PATCH' && r.pathname.includes('/catalog/products/'),
+    );
+    expect(patch).toBeDefined();
+    expect(patch!.body).toEqual({ name: 'Caps renamed', axes: ['size', 'colour'] });
+    // The display grammar must never ride the PATCH — one axis literally
+    // named "size · colour" passes every backend check.
+    expect(JSON.stringify(patch!.body)).not.toContain('size · colour');
+  });
+
+  test('the products table axes cell still renders the display join (fix A1 touches only the input prefill)', async () => {
+    view = await mount();
+    const cells = [...view.container.querySelectorAll('td')]
+      .map((td) => td.textContent)
+      .filter((text) => text === 'size · colour');
+    // Both two-axis rows (T-Shirts and Caps) render the `productAxesLabel`
+    // join in the table; the single-axis Mugs row reads 'size' alone.
+    expect(cells.length).toBe(2);
   });
 
   test('a role without sku.edit reads everything and is offered no mutating affordance', async () => {

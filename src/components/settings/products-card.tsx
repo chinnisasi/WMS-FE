@@ -505,7 +505,12 @@ function ProductForm({
 }) {
   const created = product === null;
   const [name, setName] = useState(product?.name ?? '');
-  const [axes, setAxes] = useState(product ? productAxesLabel(product.axes) : '');
+  // The prefill speaks the INPUT grammar (comma-separated — what
+  // `parseProductAxes` splits on), not the table cell's display join
+  // (`productAxesLabel`'s "size · colour"): a saved edit round-trips the
+  // product's existing axes verbatim. Display and entry are different
+  // grammars and live at different sites.
+  const [axes, setAxes] = useState(product ? product.axes.join(', ') : '');
   const [pending, setPending] = useState(false);
   const axesLocked = !created && (product?.skuCount ?? 0) > 0;
 
