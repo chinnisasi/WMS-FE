@@ -132,6 +132,22 @@ export type CreateBinDto = {
      * Bin capacity. A bin's shared space across every SKU it holds — the one quantity with no unit of its own, so it counts WHOLE units, at least one. A fractional or zero capacity is refused.
      */
     capacity: number;
+    /**
+     * Internal length in millimetres. Omit to leave the bin unconstrained; null to clear. At most 100000.
+     */
+    lengthMm?: number | null;
+    /**
+     * Internal width in millimetres. Omit to leave the bin unconstrained; null to clear. At most 100000.
+     */
+    widthMm?: number | null;
+    /**
+     * Internal height in millimetres. Omit to leave the bin unconstrained; null to clear. At most 100000.
+     */
+    heightMm?: number | null;
+    /**
+     * Max weight in grams. Omit to leave the bin unconstrained; null to clear. At most 100000000.
+     */
+    maxWeightGrams?: number | null;
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
 };
 
@@ -145,6 +161,22 @@ export type BinResponse = {
      * Base-UoM units
      */
     capacity: number;
+    /**
+     * Internal length in millimetres (null = unconstrained)
+     */
+    lengthMm: number | null;
+    /**
+     * Internal width in millimetres (null = unconstrained)
+     */
+    widthMm: number | null;
+    /**
+     * Internal height in millimetres (null = unconstrained)
+     */
+    heightMm: number | null;
+    /**
+     * Max weight in grams (null = unconstrained)
+     */
+    maxWeightGrams: number | null;
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
     blocked: boolean;
     /**
@@ -177,6 +209,22 @@ export type GenerateBinsDto = {
      * Capacity per bin. A bin's shared space across every SKU it holds — the one quantity with no unit of its own, so it counts WHOLE units, at least one. A fractional or zero capacity is refused.
      */
     capacity: number;
+    /**
+     * Internal length in millimetres, per bin. Omit for unconstrained bins. At most 100000.
+     */
+    lengthMm?: number | null;
+    /**
+     * Internal width in millimetres, per bin. Omit for unconstrained bins. At most 100000.
+     */
+    widthMm?: number | null;
+    /**
+     * Internal height in millimetres, per bin. Omit for unconstrained bins. At most 100000.
+     */
+    heightMm?: number | null;
+    /**
+     * Max weight in grams, per bin. Omit for unconstrained bins. At most 100000000.
+     */
+    maxWeightGrams?: number | null;
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
 };
 
@@ -201,9 +249,25 @@ export type BinListResponse = {
 
 export type PatchBinDto = {
     /**
-     * true blocks the bin (broken); false unblocks
+     * true blocks the bin (broken); false unblocks. Mutually exclusive with the capacity attributes.
      */
-    blocked: boolean;
+    blocked?: boolean;
+    /**
+     * Internal length in millimetres. Omit to leave unchanged; null to clear. Mutually exclusive with blocked.
+     */
+    lengthMm?: number | null;
+    /**
+     * Internal width in millimetres. Omit to leave unchanged; null to clear. Mutually exclusive with blocked.
+     */
+    widthMm?: number | null;
+    /**
+     * Internal height in millimetres. Omit to leave unchanged; null to clear. Mutually exclusive with blocked.
+     */
+    heightMm?: number | null;
+    /**
+     * Max weight in grams. Omit to leave unchanged; null to clear. Mutually exclusive with blocked.
+     */
+    maxWeightGrams?: number | null;
 };
 
 export type MergeBinDto = {
@@ -3001,7 +3065,7 @@ export type TenancyControllerSetBinBlockedData = {
 
 export type TenancyControllerSetBinBlockedErrors = {
     /**
-     * Missing or malformed Idempotency-Key, invalid body, or a system bin (validation-failed names the bin)
+     * Missing or malformed Idempotency-Key, invalid body, a system bin on the blocked arm (validation-failed names the bin — the capacity arm deliberately permits system bins), a body mixing blocked with capacity attributes, a body carrying neither (validation-failed), or a non-boolean blocked (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -3009,7 +3073,7 @@ export type TenancyControllerSetBinBlockedErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied), or the caller lacks bin.block (role-denied)
+     * Session belongs to another tenant (permission-denied), or the caller lacks bin.block (role-denied) or bin.create (role-denied)
      */
     403: ProblemDetailsDto;
     /**
@@ -3059,7 +3123,7 @@ export type TenancyControllerMergeBinData = {
 
 export type TenancyControllerMergeBinErrors = {
     /**
-     * Missing or malformed Idempotency-Key, a structural guard (validation-failed / bin-retired / bin-blocked — a blocked SOURCE is allowed, the only way to empty a blocked bin; only the target must be live), or a target overflow (bin-full names capacity and occupancy — nothing committed)
+     * Missing or malformed Idempotency-Key, a structural guard (validation-failed / bin-retired / bin-blocked — a blocked SOURCE is allowed, the only way to empty a blocked bin; only the target must be live), a target overflow (bin-full names capacity and occupancy), or the target over its physical limits (bin-overweight / bin-volume-exceeded / bin-item-oversize, story 11-5 — nothing committed in any arm)
      */
     400: ProblemDetailsDto;
     /**
@@ -6166,7 +6230,7 @@ export type PutawayControllerPlacePutawayData = {
 
 export type PutawayControllerPlacePutawayErrors = {
     /**
-     * Missing or malformed Idempotency-Key, an invalid body, a system target bin (validation-failed naming the bin), a blocked bin (bin-blocked naming the bin), a full bin (bin-full naming the bin, its capacity and occupancy), an over-place (validation-failed naming the remaining quantity), a missing/malformed mismatch reason, or a serial-arm violation (validation-failed)
+     * Missing or malformed Idempotency-Key, an invalid body, a system target bin (validation-failed naming the bin), a blocked bin (bin-blocked naming the bin), a full bin (bin-full naming the bin, its capacity and occupancy), over its physical limits (bin-overweight / bin-volume-exceeded naming the bin, the limit and the load; bin-item-oversize naming the bin, the dimension and both sizes — story 11-5), an over-place (validation-failed naming the remaining quantity), a missing/malformed mismatch reason, or a serial-arm violation (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
