@@ -2116,6 +2116,16 @@ export type CatalogSnapshotSkuDto = {
      * Story 10.3: the SKU is handled by unit and priced by weight. It rides the snapshot so the device can PROMPT for a per-unit weight at receipt while offline — a prompt only the server knows about never happens on the floor.
      */
     catchWeightTracked: boolean;
+    /**
+     * Story 11.7: this SKU's values on its product's declared variant axes, null when the SKU is unattached. Rides the snapshot so the device can SAY which variant a pick scan holds, offline (UX-DR28).
+     */
+    variantValues: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Story 11.7: the attached product's declared variant axes, in declaration order — the order a variant label is read in. Null when the SKU is unattached.
+     */
+    axes: Array<string> | null;
 };
 
 export type CatalogSnapshotPoDto = {
@@ -2221,6 +2231,10 @@ export type PickTaskDto = {
      * Story 4.3b (AD-14): the stop bin’s state_epoch at snapshot time — opaque, compared only for equality. The device carries it back on the queued pick so the server can classify a conflict instead of rejecting blindly. Null when the bin has no epoch row yet (no movement has ever touched it).
      */
     binStateEpoch: number | null;
+    /**
+     * Story 11.7: the parent kit SKU's code when this task's order line is a kit component (order_lines.parent_line_id), null on an ordinary line. Display-only — the device renders "from kit {code}" in the task header; no pick logic reads kit-ness.
+     */
+    kitParentSkuCode: string | null;
 };
 
 export type CatalogPackTaskDto = {
