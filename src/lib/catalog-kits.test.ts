@@ -55,6 +55,15 @@ function sku(over: Partial<SkuResponse> = {}): SkuResponse {
     variantValues: null,
     barcode: 'BC-1',
     uomConversions: [],
+    // The 12-1 storage-class vocabulary — every SKU carries a class (ambient
+    // by default), required on SkuResponse since the 12-1 schema landed.
+    storageClass: 'ambient',
+    // KNOWN-BAD generated type: the BE marks hazardClass `nullable: true`
+    // (a plain SKU carries none), but @hey-api/openapi-ts 0.99.0 drops
+    // `| null` on enum+nullable fields — hsn renders nullable, hazardClass
+    // does not. The fixture satisfies the generated type while the runtime
+    // truth is "null carries no rule" (12-2). Tracked in PENDING.
+    hazardClass: 'toxic',
     createdAt: '2026-09-01T00:00:00.000Z',
     ...over,
   };
