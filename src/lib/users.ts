@@ -63,6 +63,12 @@ export const CAPABILITIES = [
   // + Ops Manager + Operator, mirroring `pack.execute`: the person who hands
   // the parcel to the courier is the one who packed it.
   'dispatch.execute',
+  // Story 12-3 — FR-42's authority gate: every ledger movement that touches a
+  // secure/cage-class bin additionally requires `secure.move` (owner + Ops
+  // Manager only, the backend's decided matrix). No web surface consumes it
+  // yet — the mirror stays in step with the backend so the drift guard keeps
+  // passing and the 12-7 admin surface lands with the gate ready.
+  'secure.move',
   // Story 4.6b — the carrier credential vault (connect a carrier account,
   // rotate its material, disconnect it). A settings capability like
   // `device.manage`: Owner and Ops Manager only — an API key is not a floor
@@ -87,7 +93,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
   // Every operational mutation, no user management.
   ops_manager: CAPABILITIES.filter((capability) => !OWNER_ONLY_CAPABILITIES.includes(capability)),
   // The floor verbs only: place, pick, pack, dispatch. Notably **not**
-  // `orders.manage` — an Operator never creates or cancels an order.
+  // `orders.manage` — an Operator never creates or cancels an order — and
+  // **not** `secure.move` (story 12-3): the cage is off-limits to floor
+  // staff.
   operator: ['putaway.execute', 'picks.execute', 'pack.execute', 'dispatch.execute'],
   accountant: [],
 };

@@ -31,7 +31,7 @@ afterEach(() => {
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
-    expect(ROLE_CAPABILITIES.owner.length).toBe(22);
+    expect(ROLE_CAPABILITIES.owner.length).toBe(23);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -54,6 +54,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'pack.execute')).toBe(true);
     expect(roleHasCapability('owner', 'dispatch.execute')).toBe(true);
     expect(roleHasCapability('owner', 'carrier.manage')).toBe(true);
+    expect(roleHasCapability('owner', 'secure.move')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -79,6 +80,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'pack.execute')).toBe(true);
     expect(roleHasCapability('ops_manager', 'dispatch.execute')).toBe(true);
     expect(roleHasCapability('ops_manager', 'carrier.manage')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'secure.move')).toBe(true);
     // Membership, spelled out — a length check passes a list of the right
     // size with the wrong member in it, which is the drift this file exists
     // to catch. The expected set is written here rather than derived from
@@ -105,6 +107,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'pack.execute',
         'dispatch.execute',
         'carrier.manage',
+        'secure.move',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -193,6 +196,18 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         roleHasCapability(role, 'bin.retire'),
       ),
     ).toEqual(['owner', 'ops_manager']);
+  });
+
+  // Story 12-3 — FR-42: the secure/cage authority gate. Owner and Ops Manager
+  // only — the cage is off-limits to floor staff, so the operator column
+  // stays at four.
+  test('secure.move belongs to owner and ops_manager — never the floor', () => {
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'secure.move'),
+      ),
+    ).toEqual(['owner', 'ops_manager']);
+    expect(roleHasCapability('operator', 'secure.move')).toBe(false);
   });
 
   // Stories 2.1 / 3.1 — the three capabilities the mirror had simply never
