@@ -148,6 +148,10 @@ export type CreateBinDto = {
      * Max weight in grams. Omit to leave the bin unconstrained; null to clear. At most 100000000.
      */
     maxWeightGrams?: number | null;
+    /**
+     * The bin's storage class (FR-40): ambient, chilled, frozen, controlled, hazardous or secure. Omit for ambient.
+     */
+    storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
 };
 
@@ -177,6 +181,7 @@ export type BinResponse = {
      * Max weight in grams (null = unconstrained)
      */
     maxWeightGrams: number | null;
+    storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
     blocked: boolean;
     /**
@@ -225,6 +230,10 @@ export type GenerateBinsDto = {
      * Max weight in grams, per bin. Omit for unconstrained bins. At most 100000000.
      */
     maxWeightGrams?: number | null;
+    /**
+     * The storage class, per bin (FR-40). Omit for ambient.
+     */
+    storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
     type: 'shelf' | 'pallet' | 'floor' | 'staging';
 };
 
@@ -268,6 +277,10 @@ export type PatchBinDto = {
      * Max weight in grams. Omit to leave unchanged; null to clear. Mutually exclusive with blocked.
      */
     maxWeightGrams?: number | null;
+    /**
+     * The bin's storage class (FR-40). Omit to leave unchanged. Mutually exclusive with blocked.
+     */
+    storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
 };
 
 export type MergeBinDto = {
@@ -455,6 +468,11 @@ export type SkuResponse = {
     variantValues: {
         [key: string]: unknown;
     } | null;
+    storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    /**
+     * The SKU's hazard class (FR-41), or null when it carries none. Null carries no rule in either direction of the segregation matrix.
+     */
+    hazardClass: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
     /**
      * Generated server-side (uuidv7) unless provided
      */
@@ -559,6 +577,14 @@ export type PatchSkuDto = {
     variantValues?: {
         [key: string]: unknown;
     } | null;
+    /**
+     * The SKU's storage class (FR-40): ambient, chilled, frozen, controlled, hazardous or secure. Omit to leave unchanged.
+     */
+    storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    /**
+     * The SKU's hazard class (FR-41): explosive, oxidizer, flammable, corrosive-acid, corrosive-base, toxic or gas. Omit to leave unchanged; null clears the class (always succeeds — null carries no rule).
+     */
+    hazardClass?: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
 };
 
 export type KitComponentDto = {
@@ -3137,7 +3163,7 @@ export type TenancyControllerMergeBinData = {
 
 export type TenancyControllerMergeBinErrors = {
     /**
-     * Missing or malformed Idempotency-Key, a structural guard (validation-failed / bin-retired / bin-blocked — a blocked SOURCE is allowed, the only way to empty a blocked bin; only the target must be live), a target overflow (bin-full names capacity and occupancy), or the target over its physical limits (bin-overweight / bin-volume-exceeded / bin-item-oversize, story 11-5 — nothing committed in any arm)
+     * Missing or malformed Idempotency-Key, a structural guard (validation-failed / bin-retired / bin-blocked — a blocked SOURCE is allowed, the only way to empty a blocked bin; only the target must be live), a target overflow (bin-full names capacity and occupancy), the target over its physical limits (bin-overweight / bin-volume-exceeded / bin-item-oversize, story 11-5), a source SKU the target bin's class cannot satisfy (bin-storage-mismatch naming both classes — story 12-1), or an incompatible co-located pair (bin-segregation-conflict naming both SKUs and both classes — story 12-2; nothing committed in any arm)
      */
     400: ProblemDetailsDto;
     /**
@@ -3758,7 +3784,7 @@ export type CatalogControllerEditSkuErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Barcode already belongs to another SKU (duplicate-barcode names it), or another SKU of this product already carries identical variantValues (duplicate-variant-values)
+     * Barcode already belongs to another SKU (duplicate-barcode names it), another SKU of this product already carries identical variantValues (duplicate-variant-values), or a hazard-class change would strand stock co-located with an incompatible binmate (hazard-segregation-conflict names the bins and the parties)
      */
     409: ProblemDetailsDto;
     /**
@@ -6244,7 +6270,7 @@ export type PutawayControllerPlacePutawayData = {
 
 export type PutawayControllerPlacePutawayErrors = {
     /**
-     * Missing or malformed Idempotency-Key, an invalid body, a system target bin (validation-failed naming the bin), a blocked bin (bin-blocked naming the bin), a full bin (bin-full naming the bin, its capacity and occupancy), over its physical limits (bin-overweight / bin-volume-exceeded naming the bin, the limit and the load; bin-item-oversize naming the bin, the dimension and both sizes — story 11-5), an over-place (validation-failed naming the remaining quantity), a missing/malformed mismatch reason, or a serial-arm violation (validation-failed)
+     * Missing or malformed Idempotency-Key, an invalid body, a system target bin (validation-failed naming the bin), a blocked bin (bin-blocked naming the bin), a full bin (bin-full naming the bin, its capacity and occupancy), over its physical limits (bin-overweight / bin-volume-exceeded naming the bin, the limit and the load; bin-item-oversize naming the bin, the dimension and both sizes — story 11-5), a bin whose class cannot satisfy the SKU (bin-storage-mismatch naming both classes — story 12-1), an incompatible co-located pair (bin-segregation-conflict naming both SKUs and both classes — story 12-2), an over-place (validation-failed naming the remaining quantity), a missing/malformed mismatch reason, or a serial-arm violation (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
