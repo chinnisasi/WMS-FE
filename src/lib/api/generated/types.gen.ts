@@ -6743,7 +6743,7 @@ export type ComplianceControllerRecordExcursionErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied), or the caller lacks excursion.record (role-denied)
+     * Session belongs to another tenant (permission-denied), the caller lacks excursion.record (role-denied), or the bin is secure/cage-class and the caller — an operator recording from the floor — lacks secure.move (role-denied from the hold core; held units leave the origin bin, FR-42)
      */
     403: ProblemDetailsDto;
     /**
