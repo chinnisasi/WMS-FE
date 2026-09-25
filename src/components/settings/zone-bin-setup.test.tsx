@@ -12,10 +12,13 @@ import { ZonesBinsSetup } from './zone-bin-setup';
  * conditional payload and the picker filtering live in the JSX):
  *   1. the grid generator's type picker offers only the six grid-able
  *      types — a bulk asset (tank, silo) is never gridded, so the picker
- *      never offers one,
+ *      never offers one, and the manual create picker offers the FULL
+ *      eight-type vocabulary in the server's tuple order (review 2, triage
+ *      #32 — a dropped type would otherwise pass every test),
  *   2. the manual create payload carries `maxWeightGrams` exactly when a
  *      bulk type is picked (the server refuses a bulk asset without one)
- *      and omits it otherwise (an ordinary bin stays unconstrained), and
+ *      and omits it otherwise (an ordinary bin stays unconstrained) —
+ *      driven for BOTH bulk types so a per-type typo cannot hide, and
  *   3. a merge refused with `bin-occupancy-conflict` renders the surface's
  *      copy for the single-SKU rule (the switch case, not the default).
  *
@@ -183,6 +186,17 @@ describe('ZonesBinsSetup: the 12-4 location types', () => {
     expect(options).toEqual(['shelf', 'pallet', 'floor', 'staging', 'floor-stack', 'yard']);
   });
 
+  // Review 2 (triage #32): the create picker is the vocabulary's FE mirror —
+  // pinned here the way the mobile mirror is pinned in its draft test
+  // (hardcoded, in the server's tuple order), so a BE vocabulary growth or a
+  // local drop fails this suite instead of surfacing as a runtime 400.
+  test("the manual create picker offers the full vocabulary — all eight types in the server's tuple order", async () => {
+    view = await mount();
+    const manualForm = formFor(view.container, 'Create bin');
+    const options = [...typeSelect(manualForm).querySelectorAll('option')].map((o) => o.value);
+    expect(options).toEqual(['shelf', 'pallet', 'floor', 'staging', 'floor-stack', 'yard', 'tank', 'silo']);
+  });
+
   test('the manual create payload carries maxWeightGrams exactly when a bulk type is picked, and omits it otherwise', async () => {
     view = await mount();
     const manualForm = formFor(view.container, 'Create bin');
@@ -211,6 +225,20 @@ describe('ZonesBinsSetup: the 12-4 location types', () => {
     await settle();
     const tankPost = requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/bins')).at(-1)!;
     expect(tankPost.body).toEqual({ code: 'A-01-04', capacity: 120, type: 'tank', maxWeightGrams: 5000 });
+
+    // The second bulk type (review 2, triage #32): the conditional spread is
+    // keyed on the whole bulk set, so `silo` rides the wire the same way — a
+    // per-type typo in the usage would otherwise pass this suite.
+    setSelect(typePicker, 'silo');
+    const siloWeightInput = [...manualForm.querySelectorAll<HTMLInputElement>('input')]
+      .find((i) => i.type === 'number' && [...(i.closest('label')?.querySelectorAll('span') ?? [])].some((s) => s.textContent === 'Max weight (grams)'));
+    expect(siloWeightInput).toBeDefined();
+    setInput(codeInput, 'A-01-05');
+    setInput(siloWeightInput!, '8000');
+    act(() => manualForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    const siloPost = requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/bins')).at(-1)!;
+    expect(siloPost.body).toEqual({ code: 'A-01-05', capacity: 120, type: 'silo', maxWeightGrams: 8000 });
   });
 
   test('a merge refused with bin-occupancy-conflict renders the surface copy', async () => {
