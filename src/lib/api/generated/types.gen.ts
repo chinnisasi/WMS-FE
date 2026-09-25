@@ -152,7 +152,10 @@ export type CreateBinDto = {
      * The bin's storage class (FR-40): ambient, chilled, frozen, controlled, hazardous or secure. Omit for ambient.
      */
     storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
-    type: 'shelf' | 'pallet' | 'floor' | 'staging';
+    /**
+     * The bin's location type (12-4 vocabulary). A bulk asset (tank, silo) is weight-defined: maxWeightGrams is REQUIRED at create and can never be cleared; a bulk asset is never gridded.
+     */
+    type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard' | 'tank' | 'silo';
 };
 
 export type BinResponse = {
@@ -182,7 +185,7 @@ export type BinResponse = {
      */
     maxWeightGrams: number | null;
     storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
-    type: 'shelf' | 'pallet' | 'floor' | 'staging';
+    type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard' | 'tank' | 'silo';
     blocked: boolean;
     /**
      * The one-way retirement instant (null while the bin is live) — Story 3.6
@@ -234,7 +237,10 @@ export type GenerateBinsDto = {
      * The storage class, per bin (FR-40). Omit for ambient.
      */
     storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
-    type: 'shelf' | 'pallet' | 'floor' | 'staging';
+    /**
+     * The location type, per bin (12-4 vocabulary). A bulk asset (tank, silo) is never gridded — the grid mints only the six conventional storage types.
+     */
+    type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard';
 };
 
 export type BinGridResponse = {
@@ -2171,7 +2177,7 @@ export type PutawayBinDto = {
     zoneId: string;
     zoneCode: string;
     /**
-     * The fixed bin type (shelf/pallet/floor/staging)
+     * The fixed location type (12-4 vocabulary): shelf, pallet, floor, staging, floor-stack, yard, tank or silo
      */
     type: string;
     /**
@@ -2498,7 +2504,7 @@ export type PlacePutawayDto = {
     /**
      * The mismatch reason (required when the target bin differs from the suggested bin)
      */
-    reasonCode?: 'pallet-too-heavy' | 'suggested-bin-occupied' | 'consolidation-with-existing-stock' | 'operator-preference' | 'other';
+    reasonCode?: 'pallet-too-heavy' | 'suggested-bin-occupied' | 'consolidation-with-existing-stock' | 'operator-preference' | 'bulk-asset' | 'other';
     /**
      * Device time of the placement (ISO-8601 UTC, Z-suffixed)
      */
@@ -2556,7 +2562,7 @@ export type PutawayPlacementDto = {
     /**
      * The recorded mismatch reason; null when the suggestion was followed
      */
-    reasonCode: 'pallet-too-heavy' | 'suggested-bin-occupied' | 'consolidation-with-existing-stock' | 'operator-preference' | 'other';
+    reasonCode: 'pallet-too-heavy' | 'suggested-bin-occupied' | 'consolidation-with-existing-stock' | 'operator-preference' | 'bulk-asset' | 'other';
     placedBy: string;
     /**
      * Device time of the placement (AD-1), ISO-8601 UTC

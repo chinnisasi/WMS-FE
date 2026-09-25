@@ -13,7 +13,7 @@ import {
   fetchApiRetireBin,
   fetchApiSetBinBlocked,
 } from '@/lib/api/client';
-import type { BinResponse, ZoneResponse } from '@/lib/api/generated';
+import type { BinResponse, GenerateBinsDto, ZoneResponse } from '@/lib/api/generated';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { roleHasCapability } from '@/lib/users';
@@ -32,8 +32,22 @@ const inputClass =
 const labelClass = 'text-sm font-medium';
 const selectClass = `${inputClass} appearance-none`;
 
-/** Bin types are a fixed backend set (spec 1.3) — surfaced verbatim. */
-const BIN_TYPES = ['shelf', 'pallet', 'floor', 'staging'] as const;
+/** Bin types are the fixed backend location-type vocabulary (story 12-4) —
+ * surfaced verbatim, the original four first. Tank and silo are BULK ASSETS:
+ * single-SKU, weight-defined stores that an operator directs into place. */
+const BIN_TYPES = ['shelf', 'pallet', 'floor', 'staging', 'floor-stack', 'yard', 'tank', 'silo'] as const;
+type BinType = (typeof BIN_TYPES)[number];
+/** The generated grid body's type — the server contract already excludes the
+ * bulk assets, so the grid picker's options and cast derive from IT (the
+ * backend narrows the DTO; the FE mirrors). */
+type GridBinType = GenerateBinsDto['type'];
+const BULK_ASSET_TYPES: readonly BinType[] = ['tank', 'silo'];
+/** The grid generator only mints conventional storage — the backend refuses
+ * to grid a bulk asset, so the picker never offers one. */
+const GRID_TYPES = BIN_TYPES.filter((type): type is GridBinType => !BULK_ASSET_TYPES.includes(type));
+const isBulkAssetType = (type: string): boolean => BULK_ASSET_TYPES.includes(type as BinType);
+/** Same cap as the backend's `MAX_BIN_WEIGHT_GRAMS` (bin-capacity.ts). */
+const MAX_BIN_WEIGHT_GRAMS = 100_000_000;
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
 
@@ -288,12 +302,22 @@ function ZonePicker({
   );
 }
 
-function BinTypePicker({ value, onChange }: { value: string; onChange: (type: string) => void }) {
+function BinTypePicker({
+  value,
+  onChange,
+  options = BIN_TYPES,
+}: {
+  value: string;
+  onChange: (type: string) => void;
+  /** Defaults to the full vocabulary; the grid form passes the subset the
+   * backend accepts (bulk assets are never gridded). */
+  options?: readonly string[];
+}) {
   return (
     <label className="flex flex-1 flex-col gap-1">
       <span className={labelClass}>Type</span>
       <select className={selectClass} value={value} onChange={(e) => onChange(e.target.value)}>
-        {BIN_TYPES.map((type) => (
+        {options.map((type) => (
           <option key={type} value={type}>
             {type}
           </option>
@@ -357,7 +381,7 @@ function GridGeneratorForm({
           baysPerAisle: Number(bays),
           levelsPerBay: Number(levels),
           capacity: Number(capacity),
-          type: type as 'shelf' | 'pallet' | 'floor' | 'staging',
+          type: type as GridBinType,
         },
         ulid(),
       );
@@ -443,7 +467,7 @@ function GridGeneratorForm({
           />
         </label>
         <div className="flex flex-1 flex-col justify-end">
-          <BinTypePicker value={type} onChange={setType} />
+          <BinTypePicker value={type} onChange={setType} options={GRID_TYPES} />
         </div>
         <button
           type="submit"
@@ -471,6 +495,10 @@ function ManualBinForm({
   const [code, setCode] = useState('');
   const [capacity, setCapacity] = useState('120');
   const [type, setType] = useState<string>('shelf');
+  // Story 12-4: a bulk asset (tank, silo) is a weight-defined store — the
+  // backend refuses to create one without a max weight, so the form asks
+  // for it whenever a bulk type is picked.
+  const [maxWeightGrams, setMaxWeightGrams] = useState('');
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
 
@@ -488,11 +516,13 @@ function ManualBinForm({
         {
           code,
           capacity: Number(capacity),
-          type: type as 'shelf' | 'pallet' | 'floor' | 'staging',
+          type: type as BinType,
+          ...(isBulkAssetType(type) ? { maxWeightGrams: Number(maxWeightGrams) } : {}),
         },
         ulid(),
       );
       setCode('');
+      setMaxWeightGrams('');
       setOutcome({
         tone: 'accepted',
         word: 'Bin created',
@@ -536,6 +566,21 @@ function ManualBinForm({
         <div className="flex flex-1 flex-col justify-end">
           <BinTypePicker value={type} onChange={setType} />
         </div>
+        {isBulkAssetType(type) && (
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Max weight (grams)</span>
+            <input
+              className={inputClass}
+              type="number"
+              min={1}
+              max={MAX_BIN_WEIGHT_GRAMS}
+              value={maxWeightGrams}
+              onChange={(e) => setMaxWeightGrams(e.target.value)}
+              required
+              title="A bulk asset holds exactly one SKU and is bounded by weight, not units."
+            />
+          </label>
+        )}
         <button
           type="submit"
           disabled={pending}
@@ -873,6 +918,10 @@ function rejectionReason(error: unknown, attemptedCode?: string): string {
         return error.detail ?? 'That bin is retired — retirement is terminal.';
       case 'bin-merge-hold-open':
         return error.detail ?? 'Release the QC hold before merging.';
+      // Story 12-4 — a bulk asset (tank, silo) holds exactly ONE SKU; the
+      // backend's detail names the bin, its type and the clashing SKUs.
+      case 'bin-occupancy-conflict':
+        return error.detail ?? 'A bulk asset holds exactly one SKU — the target tank or silo already holds another.';
       case 'bin-full':
         return error.detail ?? 'The target bin is full — pick one with room.';
       case 'bin-blocked':
