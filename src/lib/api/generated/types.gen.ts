@@ -2746,6 +2746,136 @@ export type ExcursionListResponse = {
     nextCursor?: string | null;
 };
 
+export type ColdChainOrderDto = {
+    id: string;
+    /**
+     * The order's current status ('dispatched' on a traced order)
+     */
+    status: string;
+    /**
+     * The carrier the dispatch recorded; null when none was named
+     */
+    carrierName: string | null;
+    /**
+     * The tracking reference the dispatch recorded; null when none was given
+     */
+    trackingNumber: string | null;
+    /**
+     * ISO-8601 UTC — the dispatch business time (the dispatch event occurredAt)
+     */
+    dispatchedAt: string;
+};
+
+export type ColdChainBinDto = {
+    id: string;
+    /**
+     * The bin code
+     */
+    code: string;
+    /**
+     * The bin's CURRENT storage class (12-1 guard makes annotating it honest)
+     */
+    storageClass: string;
+};
+
+export type ColdChainEventDto = {
+    /**
+     * The gap-free per-warehouse ledger sequence number
+     */
+    seq: number;
+    /**
+     * The ledger event type (grn.received, putaway.placed, pick.picked, qc.held, …)
+     */
+    type: string;
+    skuId: string;
+    /**
+     * Signed quantity in base units (raw row is signed milli-units)
+     */
+    quantityDelta: number;
+    fromBinId: string | null;
+    /**
+     * The from-bin’s CURRENT storage class; null when the bin row is gone
+     */
+    fromBinStorageClass: string | null;
+    toBinId: string | null;
+    /**
+     * The to-bin’s CURRENT storage class; null when the bin row is gone
+     */
+    toBinStorageClass: string | null;
+    batchRef: string | null;
+    serialRef: string | null;
+    /**
+     * ISO-8601 UTC — the event’s business time
+     */
+    occurredAt: string;
+    /**
+     * The typed reference doc verbatim — the ledger context (UX-DR30)
+     */
+    referenceDoc: {
+        [key: string]: unknown;
+    };
+};
+
+export type ColdChainScopeDto = {
+    /**
+     * The batch the scope picked (null for a serial scope)
+     */
+    batchRef: string | null;
+    /**
+     * The serial the scope picked (null for a batch scope)
+     */
+    serialRef: string | null;
+    /**
+     * The scope’s COMPLETE batch/serial ledger history, chronological by seq
+     */
+    chain: Array<ColdChainEventDto>;
+};
+
+export type ColdChainExcursionDto = {
+    /**
+     * The temperature_excursions row the ledger event names
+     */
+    excursionId: string;
+    /**
+     * The bin the reading was recorded against (a chain bin, inside the dwell window)
+     */
+    binId: string;
+    /**
+     * The operator-captured reading, °C
+     */
+    readingC: number;
+    /**
+     * ISO-8601 UTC — when the reading was observed
+     */
+    occurredAt: string;
+};
+
+export type ColdChainLineDto = {
+    orderLineId: string;
+    skuId: string;
+    /**
+     * Units shipped for this line (base units — the dispatch reference doc)
+     */
+    dispatchedQty: number;
+    /**
+     * One chain per picked batch/serial scope
+     */
+    scopes: Array<ColdChainScopeDto>;
+    /**
+     * Excursions whose reading fell inside a scope dwell window at a chain bin; empty when the chain is clean
+     */
+    excursions: Array<ColdChainExcursionDto>;
+};
+
+export type ColdChainTraceResponse = {
+    order: ColdChainOrderDto;
+    /**
+     * Every bin on any chain event, by id → code + storage class
+     */
+    bins: Array<ColdChainBinDto>;
+    lines: Array<ColdChainLineDto>;
+};
+
 export type TenancyControllerRegisterData = {
     body: RegisterTenantDto;
     headers: {
@@ -6827,3 +6957,54 @@ export type ComplianceControllerResolveExcursionResponses = {
 };
 
 export type ComplianceControllerResolveExcursionResponse = ComplianceControllerResolveExcursionResponses[keyof ComplianceControllerResolveExcursionResponses];
+
+export type ComplianceControllerGetOrderColdChainTraceData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The warehouse the order dispatched from
+         */
+        warehouseId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/cold-chain/orders/{orderId}';
+};
+
+export type ComplianceControllerGetOrderColdChainTraceErrors = {
+    /**
+     * A malformed warehouseId or orderId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse or the order does not exist in this tenant/warehouse — an order in another warehouse of the same tenant is as invisible here as a missing one (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order has no dispatch events in the ledger — a cold-chain trace is defined only for dispatched orders (order-not-dispatched)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type ComplianceControllerGetOrderColdChainTraceError = ComplianceControllerGetOrderColdChainTraceErrors[keyof ComplianceControllerGetOrderColdChainTraceErrors];
+
+export type ComplianceControllerGetOrderColdChainTraceResponses = {
+    /**
+     * The reconstructed trace: order facts, the bins dictionary, and per line the scopes and their dwell-window excursions
+     */
+    200: ColdChainTraceResponse;
+};
+
+export type ComplianceControllerGetOrderColdChainTraceResponse = ComplianceControllerGetOrderColdChainTraceResponses[keyof ComplianceControllerGetOrderColdChainTraceResponses];
