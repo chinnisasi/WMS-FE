@@ -145,7 +145,7 @@ export type CreateBinDto = {
      */
     heightMm?: number | null;
     /**
-     * Max weight in grams. Omit to leave the bin unconstrained; null to clear. At most 100000000.
+     * Max weight in grams. Omit to leave the bin unconstrained; null to clear. At most 100000000. On a bulk asset (tank, silo) the field is REQUIRED and neither the omission nor a null clear is accepted.
      */
     maxWeightGrams?: number | null;
     /**
@@ -230,7 +230,7 @@ export type GenerateBinsDto = {
      */
     heightMm?: number | null;
     /**
-     * Max weight in grams, per bin. Omit for unconstrained bins. At most 100000000.
+     * Max weight in grams, per bin. Omit for unconstrained bins. At most 100000000. On a bulk asset (tank, silo) the field is REQUIRED at create and cannot be cleared.
      */
     maxWeightGrams?: number | null;
     /**
@@ -280,7 +280,7 @@ export type PatchBinDto = {
      */
     heightMm?: number | null;
     /**
-     * Max weight in grams. Omit to leave unchanged; null to clear. Mutually exclusive with blocked.
+     * Max weight in grams. Omit to leave unchanged; null to clear. Mutually exclusive with blocked. On a bulk asset (tank, silo) the field cannot be cleared, and a re-value below the mass the asset already holds is refused.
      */
     maxWeightGrams?: number | null;
     /**
@@ -2678,6 +2678,72 @@ export type RotateCarrierCredentialDto = {
     credential: {
         [key: string]: string;
     };
+};
+
+export type RecordExcursionDto = {
+    /**
+     * Warehouse holding the affected stock
+     */
+    warehouseId: string;
+    /**
+     * The bin the reading was taken against — the excursion's origin bin and its holds' origin
+     */
+    binId: string;
+    /**
+     * The operator-captured reading, °C (−100..200, at most two decimal places)
+     */
+    readingC: number;
+    /**
+     * The operator's free-text context (at most 200 characters)
+     */
+    note?: string | null;
+    /**
+     * When the reading was observed (Z-suffixed ISO-8601 UTC); the server clock when absent
+     */
+    occurredAt?: string;
+};
+
+export type ExcursionDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * The origin bin the reading was taken against
+     */
+    binId: string;
+    /**
+     * The operator-captured reading, °C
+     */
+    readingC: number;
+    note: string | null;
+    /**
+     * The QC holds the excursion quarantined its scopes with
+     */
+    holdIds: Array<string>;
+    status: 'open' | 'resolved';
+    recordedBy: string;
+    /**
+     * ISO-8601 UTC — when the reading was observed
+     */
+    occurredAt: string;
+    resolvedBy: string | null;
+    /**
+     * ISO-8601 UTC instant when resolved; null while the excursion is open
+     */
+    resolvedAt: string | null;
+    /**
+     * Row creation time (the keyset cursor field), ISO-8601 UTC
+     */
+    createdAt: string;
+};
+
+export type ExcursionResponse = {
+    excursion: ExcursionDto;
+};
+
+export type ExcursionListResponse = {
+    items: Array<ExcursionDto>;
+    nextCursor?: string | null;
 };
 
 export type TenancyControllerRegisterData = {
@@ -6595,3 +6661,169 @@ export type CarriersControllerDisconnectResponses = {
 };
 
 export type CarriersControllerDisconnectResponse = CarriersControllerDisconnectResponses[keyof CarriersControllerDisconnectResponses];
+
+export type ComplianceControllerListExcursionsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Filter by warehouse
+         */
+        warehouseId?: string;
+        status?: 'open' | 'resolved';
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/excursions';
+};
+
+export type ComplianceControllerListExcursionsErrors = {
+    /**
+     * Malformed status, cursor, warehouseId, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouseId filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ComplianceControllerListExcursionsError = ComplianceControllerListExcursionsErrors[keyof ComplianceControllerListExcursionsErrors];
+
+export type ComplianceControllerListExcursionsResponses = {
+    /**
+     * The excursion page (newest first — the Conflicts & Reviews queue read)
+     */
+    200: ExcursionListResponse;
+};
+
+export type ComplianceControllerListExcursionsResponse = ComplianceControllerListExcursionsResponses[keyof ComplianceControllerListExcursionsResponses];
+
+export type ComplianceControllerRecordExcursionData = {
+    body: RecordExcursionDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/excursions';
+};
+
+export type ComplianceControllerRecordExcursionErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, an out-of-bounds readingC, an empty or system-owned bin, a bin with no on-hand stock, or serial-tracked / catch-weight stock in the bin — the whole excursion is refused naming the offenders (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks excursion.record (role-denied), or the bin is secure/cage-class and the caller — an operator recording from the floor — lacks secure.move (role-denied from the hold core; held units leave the origin bin, FR-42)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse or bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ComplianceControllerRecordExcursionError = ComplianceControllerRecordExcursionErrors[keyof ComplianceControllerRecordExcursionErrors];
+
+export type ComplianceControllerRecordExcursionResponses = {
+    /**
+     * Excursion recorded: the open row with the hold ids it created (the idempotency snapshot)
+     */
+    201: ExcursionResponse;
+};
+
+export type ComplianceControllerRecordExcursionResponse = ComplianceControllerRecordExcursionResponses[keyof ComplianceControllerRecordExcursionResponses];
+
+export type ComplianceControllerResolveExcursionData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        excursionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/excursions/{excursionId}/resolve';
+};
+
+export type ComplianceControllerResolveExcursionErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed excursionId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks review.decide (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No excursion with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Already resolved (excursion-resolved), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ComplianceControllerResolveExcursionError = ComplianceControllerResolveExcursionErrors[keyof ComplianceControllerResolveExcursionErrors];
+
+export type ComplianceControllerResolveExcursionResponses = {
+    /**
+     * Excursion resolved: the resolved row with resolvedBy/resolvedAt (the idempotency snapshot)
+     */
+    200: ExcursionResponse;
+};
+
+export type ComplianceControllerResolveExcursionResponse = ComplianceControllerResolveExcursionResponses[keyof ComplianceControllerResolveExcursionResponses];

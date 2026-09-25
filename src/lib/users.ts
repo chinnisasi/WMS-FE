@@ -76,6 +76,13 @@ export const CAPABILITIES = [
   // backend so the drift guard keeps passing and the surface that lands next
   // has the gate ready.
   'carrier.manage',
+  // Story 12-5 — the temperature-excursion record (FR-44): Owner + Ops
+  // Manager + Operator, mirroring `putaway.execute`'s rationale — recording
+  // what the floor observes is a floor verb. It does NOT gate a resolve
+  // (that is `review.decide`'s, unchanged). No web surface consumes it yet;
+  // the mirror stays in step with the backend so the drift guard keeps
+  // passing and the 12-7 review queue lands with the gate ready.
+  'excursion.record',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -92,11 +99,11 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
   owner: CAPABILITIES,
   // Every operational mutation, no user management.
   ops_manager: CAPABILITIES.filter((capability) => !OWNER_ONLY_CAPABILITIES.includes(capability)),
-  // The floor verbs only: place, pick, pack, dispatch. Notably **not**
-  // `orders.manage` — an Operator never creates or cancels an order — and
-  // **not** `secure.move` (story 12-3): the cage is off-limits to floor
+  // The floor verbs only: place, pick, pack, dispatch, record. Notably
+  // **not** `orders.manage` — an Operator never creates or cancels an order —
+  // and **not** `secure.move` (story 12-3): the cage is off-limits to floor
   // staff.
-  operator: ['putaway.execute', 'picks.execute', 'pack.execute', 'dispatch.execute'],
+  operator: ['putaway.execute', 'picks.execute', 'pack.execute', 'dispatch.execute', 'excursion.record'],
   accountant: [],
 };
 
