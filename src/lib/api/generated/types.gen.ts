@@ -152,6 +152,9 @@ export type CreateBinDto = {
      * The bin's storage class (FR-40): ambient, chilled, frozen, controlled, hazardous or secure. Omit for ambient.
      */
     storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    /**
+     * The bin's location type (12-4 vocabulary). A bulk asset (tank, silo) is weight-defined: maxWeightGrams is REQUIRED at create and can never be cleared; a bulk asset is never gridded.
+     */
     type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard' | 'tank' | 'silo';
 };
 
@@ -234,7 +237,10 @@ export type GenerateBinsDto = {
      * The storage class, per bin (FR-40). Omit for ambient.
      */
     storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
-    type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard' | 'tank' | 'silo';
+    /**
+     * The location type, per bin (12-4 vocabulary). A bulk asset (tank, silo) is never gridded — the grid mints only the six conventional storage types.
+     */
+    type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard';
 };
 
 export type BinGridResponse = {
@@ -2171,7 +2177,7 @@ export type PutawayBinDto = {
     zoneId: string;
     zoneCode: string;
     /**
-     * The fixed bin type (shelf/pallet/floor/staging)
+     * The fixed location type (12-4 vocabulary): shelf, pallet, floor, staging, floor-stack, yard, tank or silo
      */
     type: string;
     /**

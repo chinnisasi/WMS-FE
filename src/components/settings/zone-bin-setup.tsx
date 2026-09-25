@@ -13,7 +13,7 @@ import {
   fetchApiRetireBin,
   fetchApiSetBinBlocked,
 } from '@/lib/api/client';
-import type { BinResponse, ZoneResponse } from '@/lib/api/generated';
+import type { BinResponse, GenerateBinsDto, ZoneResponse } from '@/lib/api/generated';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { roleHasCapability } from '@/lib/users';
@@ -37,10 +37,14 @@ const selectClass = `${inputClass} appearance-none`;
  * single-SKU, weight-defined stores that an operator directs into place. */
 const BIN_TYPES = ['shelf', 'pallet', 'floor', 'staging', 'floor-stack', 'yard', 'tank', 'silo'] as const;
 type BinType = (typeof BIN_TYPES)[number];
+/** The generated grid body's type — the server contract already excludes the
+ * bulk assets, so the grid picker's options and cast derive from IT (the
+ * backend narrows the DTO; the FE mirrors). */
+type GridBinType = GenerateBinsDto['type'];
 const BULK_ASSET_TYPES: readonly BinType[] = ['tank', 'silo'];
 /** The grid generator only mints conventional storage — the backend refuses
  * to grid a bulk asset, so the picker never offers one. */
-const GRID_TYPES = BIN_TYPES.filter((type) => !BULK_ASSET_TYPES.includes(type));
+const GRID_TYPES = BIN_TYPES.filter((type): type is GridBinType => !BULK_ASSET_TYPES.includes(type));
 const isBulkAssetType = (type: string): boolean => BULK_ASSET_TYPES.includes(type as BinType);
 /** Same cap as the backend's `MAX_BIN_WEIGHT_GRAMS` (bin-capacity.ts). */
 const MAX_BIN_WEIGHT_GRAMS = 100_000_000;
@@ -377,7 +381,7 @@ function GridGeneratorForm({
           baysPerAisle: Number(bays),
           levelsPerBay: Number(levels),
           capacity: Number(capacity),
-          type: type as BinType,
+          type: type as GridBinType,
         },
         ulid(),
       );
@@ -518,6 +522,7 @@ function ManualBinForm({
         ulid(),
       );
       setCode('');
+      setMaxWeightGrams('');
       setOutcome({
         tone: 'accepted',
         word: 'Bin created',
