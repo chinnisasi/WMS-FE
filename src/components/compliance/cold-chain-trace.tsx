@@ -5,7 +5,7 @@ import { useState, useSyncExternalStore } from 'react';
 import type { ColdChainBinDto, ColdChainEventDto, ColdChainTraceResponse } from '@/lib/api/generated';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { isUlid } from '@/lib/cold-chain';
+import { isUuid } from '@/lib/cold-chain';
 import { useColdChainTrace } from '@/lib/use-cold-chain';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { useSkuMap } from '@/lib/use-inbound';
@@ -57,10 +57,26 @@ function ColdChainTraceSessioned() {
       : (warehouses[0]?.id ?? null);
 
   const skus = useSkuMap();
-  const [orderInput, setOrderInput] = useState('');
-  const [orderId, setOrderId] = useState<string | null>(null);
-  // The inline shape refusal — a malformed order id never spends a request.
-  const [inputProblem, setInputProblem] = useState<string | null>(null);
+  // The loaded order is keyed by the warehouse it was loaded under: a trace
+  // belongs to ONE warehouse, and switching warehouses — through this
+  // surface's picker OR the shell's global one (both write the same active
+  // warehouse store) — invalidates it in the SAME render (a keyed state, not
+  // a reset effect, whose ordering would let the trace hook see the old
+  // orderId under the new warehouse for one effect pass and fire a false
+  // 404 re-request; triage row 8).
+  const [loadedOrder, setLoadedOrder] = useState<{ warehouseId: string; orderId: string } | null>(null);
+  const orderId = loadedOrder !== null && loadedOrder.warehouseId === warehouseId ? loadedOrder.orderId : null;
+  // The pasted id and its inline shape refusal are display state about the
+  // OLD warehouse's form — keyed by the warehouse they were typed under, so
+  // a switch (either switcher) clears both in the same render, the same
+  // keyed mechanism as the loaded order above (no setState-in-effect).
+  const [draft, setDraft] = useState<{ warehouseId: string | null; value: string; problem: string | null }>({
+    warehouseId: null,
+    value: '',
+    problem: null,
+  });
+  const orderInput = draft.warehouseId === warehouseId ? draft.value : '';
+  const inputProblem = draft.warehouseId === warehouseId ? draft.problem : null;
 
   const trace = useColdChainTrace(warehouseId, orderId);
 
@@ -68,14 +84,17 @@ function ColdChainTraceSessioned() {
 
   function lookup(event: React.FormEvent) {
     event.preventDefault();
-    const trimmed = orderInput.trim();
-    if (!isUlid(trimmed)) {
-      setInputProblem('An order id is a 26-character code (letters and digits, no I, L, O or U) — check the paste.');
-      setOrderId(null);
+    // Trim + lowercase before the shape check: a copy out of some tooling
+    // arrives uppercase or with stray whitespace, and every BE entity id is
+    // a dashed lowercase UUIDv7 (ULIDs are Idempotency-Keys only).
+    const trimmed = orderInput.trim().toLowerCase();
+    if (warehouseId === null || !isUuid(trimmed)) {
+      setDraft({ warehouseId, value: orderInput, problem: 'An order id is a 36-character UUID (8-4-4-4-12, hex, dashes) — check the paste.' });
+      setLoadedOrder(null);
       return;
     }
-    setInputProblem(null);
-    setOrderId(trimmed);
+    setDraft({ warehouseId, value: orderInput, problem: null });
+    setLoadedOrder({ warehouseId, orderId: trimmed });
   }
 
   return (
@@ -97,7 +116,9 @@ function ColdChainTraceSessioned() {
               className={selectClass}
               value={warehouseId}
               onChange={(e) => {
-                setOrderId(null);
+                // The keyed states above reset the loaded order and the form
+                // — one mechanism for both this picker and the shell's
+                // switcher.
                 writeActiveWarehouseId(tenantId, e.target.value);
               }}
             >
@@ -114,9 +135,9 @@ function ColdChainTraceSessioned() {
               <input
                 className="w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)"
                 value={orderInput}
-                onChange={(e) => setOrderInput(e.target.value)}
-                placeholder="01ARZ3NDEKTSV4RRFFQ69G5FAV"
-                maxLength={26}
+                onChange={(e) => setDraft({ warehouseId, value: e.target.value, problem: inputProblem })}
+                placeholder="0198f7a2-1b3c-7d4e-8f90-0011223344ff"
+                maxLength={36}
                 spellCheck={false}
               />
               <button
@@ -195,7 +216,7 @@ function TraceView({
                 <div className="font-medium">Excursions during the chain</div>
                 {line.excursions.map((excursion) => (
                   <div key={`${excursion.excursionId}-${excursion.binId}`} className="text-xs">
-                    {excursion.readingC} °C at {binById.get(excursion.binId)?.code ?? excursion.binId} ·{' '}
+                    {excursion.readingC} °C at {binById.get(excursion.binId)?.code ?? '(unknown bin)'} ·{' '}
                     <time dateTime={excursion.occurredAt}>{new Date(excursion.occurredAt).toLocaleString()}</time>
                   </div>
                 ))}

@@ -51,6 +51,14 @@ let requests: Recorded[] = [];
 let excursionRows: Record<string, unknown>[] = [];
 /** The next resolve answer, so a test can force the 409 race arm. */
 let nextResolveStatus = 200;
+/** Makes every qc-holds GET answer 500 (the join-failure arm). */
+let holdsFail = false;
+/**
+ * Makes the qc-holds walk a synthetic chain: page n returns hold-<n> with a
+ * nextCursor every time — the walk rides it to the hop cap (the truncation
+ * arm). Cursor pages start at 'h-1'.
+ */
+let holdsEndless = false;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -138,9 +146,25 @@ function stubRouter(): void {
       return json(200, { items: [{ id: BIN_ID, code: 'CH-01', zoneId: ZONE_ID }], nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith('/excursions')) {
-      return json(200, { items: excursionRows, nextCursor: null });
+      // The invalid-cursor arm: any cursor-bearing request fails 400 — the
+      // Retry-restarts-from-first-page pin's refusal.
+      if (url.searchParams.get('cursor') !== null) {
+        return json(400, { code: 'invalid-cursor', title: 'Stale page reference', status: 400 });
+      }
+      const cursor = url.searchParams.get('cursor');
+      return json(200, { items: excursionRows, nextCursor: cursor === null ? 'exc-1' : null });
     }
     if (method === 'GET' && pathname.endsWith('/qc-holds')) {
+      if (holdsFail) {
+        return json(500, { code: 'internal-error', title: 'Holds unavailable', status: 500 });
+      }
+      if (holdsEndless) {
+        // Page n returns hold-<n> and a cursor every time — a chain that
+        // never ends, so the walk rides it to MAX_PAGE_HOPS and the
+        // truncation flag must fire.
+        const page = Number(url.searchParams.get('cursor')?.slice(2) ?? '1');
+        return json(200, { items: [hold({ id: `hold-${page}` })], nextCursor: `h-${page + 1}` });
+      }
       return json(200, { items: [hold()], nextCursor: null });
     }
     if (method === 'POST' && pathname.endsWith('/resolve')) {
@@ -169,6 +193,8 @@ let view: Rendered | undefined;
 beforeEach(() => {
   requests = [];
   nextResolveStatus = 200;
+  holdsFail = false;
+  holdsEndless = false;
   excursionRows = [excursion()];
   stubRouter();
   writeSession(SESSION);
@@ -276,5 +302,136 @@ describe('ExcursionQueue: the resolve flow (story 12-7)', () => {
     expect(card).not.toBeNull();
     expect(card!.textContent).toContain('8.5 °C');
     expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Resolve')).toBe(false);
+  });
+});
+/** Switch the queue's status tab (the tablist buttons). */
+function clickTab(container: HTMLElement, label: 'Open' | 'Resolved'): void {
+  const tab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+    (b) => b.textContent === label,
+  );
+  expect(tab).toBeDefined();
+  act(() => tab!.click());
+}
+
+describe('ExcursionQueue: status tabs and cursor scoping (triage row 12)', () => {
+  test('each tab requests its own status param', async () => {
+    view = await mount();
+    const firstOpen = requests.find((r) => r.pathname.endsWith('/excursions'))!;
+    expect(firstOpen.query).toContain('status=open');
+
+    clickTab(view.container, 'Resolved');
+    await settle();
+    const resolved = requests.filter((r) => r.pathname.endsWith('/excursions')).at(-1)!;
+    expect(resolved.query).toContain('status=resolved');
+  });
+
+  test('a cursor paged on one tab re-requests as a first page on the other (tab-scoped cursor)', async () => {
+    view = await mount();
+    await settle();
+    // The first page advertises a cursor — page forward on the OPEN tab.
+    const next = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Next');
+    expect(next).toBeDefined();
+    act(() => next!.click());
+    await settle();
+    const paged = requests.filter((r) => r.pathname.endsWith('/excursions')).at(-1)!;
+    expect(paged.query).toContain('cursor=exc-1');
+    expect(paged.query).toContain('status=open');
+
+    // The same cursor must NOT ride the resolved tab's request.
+    clickTab(view.container, 'Resolved');
+    await settle();
+    const resolved = requests.filter((r) => r.pathname.endsWith('/excursions')).at(-1)!;
+    expect(resolved.query).toContain('status=resolved');
+    expect(resolved.query).not.toContain('cursor=');
+  });
+
+  test('the resolved tab renders resolved chips and no resolve affordance', async () => {
+    excursionRows = [excursion({ status: 'resolved', resolvedBy: 'u-1', resolvedAt: '2026-09-21T09:00:00.000Z' })];
+    view = await mount();
+    clickTab(view.container, 'Resolved');
+    await settle();
+
+    const card = view.container.querySelector('article')!;
+    expect(card.textContent).toContain('resolved');
+    expect(card.textContent).toContain('resolved by');
+    expect(card.textContent).toContain('priya@example.com');
+    expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Resolve')).toBe(false);
+  });
+});
+
+describe('ExcursionQueue: the hold join (triage rows 2, 13)', () => {
+  test('a failed hold join still renders the page with the explicit unavailable line', async () => {
+    holdsFail = true;
+    view = await mount();
+
+    // The excursion page landed — the queue is NOT failed…
+    const card = view.container.querySelector('article')!;
+    expect(card.textContent).toContain('8.5 °C');
+    expect(view.container.textContent).not.toContain('Excursion queue unavailable');
+    // …and the affected units say UNAVAILABLE, never "disposed" (an outage
+    // is not a disposition).
+    expect(card.textContent).toContain('Affected units unavailable — the hold list could not be read.');
+    expect(card.textContent).not.toContain('SPICE-01 — held');
+    expect(card.textContent).not.toContain('disposed');
+  });
+
+  test('the join walks multi-page hold chains (both statuses) and flags truncation at the hop cap', async () => {
+    holdsEndless = true;
+    excursionRows = [excursion({ holdIds: ['hold-1', 'hold-2', 'hold-25'] })];
+    view = await mount();
+
+    // The walk asked BOTH statuses (no status filter on the qc-holds reads).
+    const holdGets = requests.filter((r) => r.pathname.endsWith('/qc-holds'));
+    expect(holdGets.length).toBeGreaterThanOrEqual(20); // rode to MAX_PAGE_HOPS
+    expect(holdGets[0]!.query).not.toContain('status=');
+
+    const card = view.container.querySelector('article')!;
+    // Holds joined from the walked pages label normally…
+    expect(card.textContent).toContain('SPICE-01 — held');
+    // …an id beyond the cap labels disposed, and the truncation flag says
+    // the list may be incomplete instead of silently re-labeling.
+    expect(card.textContent).toContain('unknown SKU — disposed');
+    expect(card.textContent).toContain('(the hold list may be incomplete)');
+  });
+});
+
+describe('ExcursionQueue: the resolve re-entry guard (triage row 14)', () => {
+  test('two synchronous Resolve clicks send exactly one POST with one Idempotency-Key', async () => {
+    view = await mount();
+    const resolve = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Resolve');
+    expect(resolve).toBeDefined();
+    // Two clicks before any re-render between them — the pre-render
+    // double-click the synchronous ref guard exists for.
+    act(() => resolve!.click());
+    act(() => resolve!.click());
+    await settle();
+
+    const posts = requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/resolve'));
+    expect(posts.length).toBe(1);
+    const keys = Object.keys(posts[0]!.headers).filter((k) => k.toLowerCase() === 'idempotency-key');
+    expect(keys.length).toBe(1);
+  });
+});
+
+describe('ExcursionQueue: invalid-cursor Retry (triage row 3)', () => {
+  test('Retry after an invalid-cursor failure re-fires from the FIRST page — no cursor rides the refetch', async () => {
+    view = await mount();
+    await settle();
+    // Page forward; the stub refuses every cursor-bearing request.
+    const next = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Next');
+    act(() => next!.click());
+    await settle();
+    expect(view.container.textContent).toContain('That page reference is stale');
+
+    const retry = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Retry')!;
+    act(() => retry.click());
+    await settle();
+
+    const refetch = requests.filter((r) => r.pathname.endsWith('/excursions')).at(-1)!;
+    expect(refetch.query).toContain('status=open');
+    expect(refetch.query).not.toContain('cursor=');
+    // The recovery is real: the queue renders the page again.
+    expect(view.container.textContent).not.toContain('That page reference is stale');
+    expect(view.container.querySelector('article')).not.toBeNull();
   });
 });

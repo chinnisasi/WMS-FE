@@ -6,19 +6,26 @@ import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
  * (the `over-receipt.ts` pattern): the orderId shape check and the
  * machine-problem reason strings of the trace read. Clients branch on the
  * problem `code`, never on prose.
+ *
+ * The id vocabulary: every BE entity id — orders included — is a dashed
+ * lowercase UUIDv7 (`wms-be/src/shared/primitives/ids.ts`: "Every entity id
+ * in the system is a UUIDv7… Idempotency keys are ULIDs"). ULIDs are the
+ * Idempotency-Key vocabulary ONLY, never an entity id — the trace gate
+ * checks the UUID shape, not a ULID.
  */
 
 /**
- * The Crockford base32 ULID shape (26 chars), matching `src/lib/ulid.ts`'s
- * generator: 10-char ms timestamp + 16 random chars. The client-side shape
- * check before fetch — the BE's 400 names a malformed orderId, but a
- * pasted order id with a stray space or a lowercase `i`/`l` (outside the
- * Crockford alphabet) is refused inline without spending the request.
+ * The dashed UUID shape (36 chars), case-insensitive hex — the same shape
+ * the BE's `UUID_RE` guards the trace route with. The client-side shape
+ * check before fetch: the BE's 400 names a malformed orderId, but a pasted
+ * order id with a stray space or a missing dash group is refused inline
+ * without spending the request. Case-insensitive because a copy out of
+ * some tooling arrives uppercase; the component lowercases before fetch.
  */
-const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function isUlid(value: string): boolean {
-  return ULID_PATTERN.test(value);
+export function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
 }
 
 /**
@@ -41,7 +48,7 @@ export function traceReason(error: unknown): string {
       case 'unauthenticated':
         return 'Your session expired — sign in again.';
       case 'validation-failed':
-        return error.detail ?? 'That order id is malformed — it must be a 26-character ULID.';
+        return error.detail ?? 'That order id is malformed — it must be a 36-character UUID (8-4-4-4-12, dashes).';
       default:
         return error.detail ?? 'Could not load the cold-chain trace.';
     }

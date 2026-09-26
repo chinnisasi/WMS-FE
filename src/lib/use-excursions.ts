@@ -31,6 +31,15 @@ export interface ExcursionHolds {
    * list may be incomplete instead.
    */
   truncated: boolean;
+  /**
+   * The hold join itself failed (the qc-holds endpoint is down while the
+   * excursion list fetched fine). The join is ENRICHMENT — its failure must
+   * not render the whole queue failed — so the page lands `ready` with an
+   * empty join and this explicit flag; the cards then render an explicit
+   * "affected units unavailable" line instead of labelling every hold
+   * disposed (an outage must not read as "everything was released").
+   */
+  joinFailed: boolean;
 }
 
 export interface ExcursionsPage {
@@ -101,27 +110,42 @@ export function useExcursions(
         );
         // The hold join: the warehouse's whole hold chain (both statuses),
         // walked to the hop cap with the truncation flagged like the wave
-        // policies walk.
-        const joined: Record<string, QcHoldDto> = {};
-        let truncated = false;
-        let holdCursor: string | undefined;
-        for (let hops = 0; hops < MAX_PAGE_HOPS; hops++) {
-          const holdPage = await fetchApiListQcHolds(
-            tenantId,
-            warehouseId === null && holdCursor === undefined
-              ? undefined
-              : {
-                  ...(warehouseId === null ? {} : { warehouseId }),
-                  ...(holdCursor === undefined ? {} : { cursor: holdCursor }),
-                },
-          );
-          for (const hold of holdPage.items) {
-            joined[hold.id] = hold;
+        // policies walk. The walk has its OWN catch — the join is
+        // enrichment, and a qc-holds outage must not render the excursion
+        // page (which fetched fine) as a failed read through the LIST
+        // mapper's arms.
+        let holds: ExcursionHolds = { holds: {}, truncated: false, joinFailed: false };
+        try {
+          const joined: Record<string, QcHoldDto> = {};
+          let truncated = false;
+          let holdCursor: string | undefined;
+          for (let hops = 0; hops < MAX_PAGE_HOPS; hops++) {
+            const holdPage = await fetchApiListQcHolds(
+              tenantId,
+              warehouseId === null && holdCursor === undefined
+                ? undefined
+                : {
+                    ...(warehouseId === null ? {} : { warehouseId }),
+                    ...(holdCursor === undefined ? {} : { cursor: holdCursor }),
+                  },
+            );
+            // Mid-walk cancellation: a tab/warehouse switch supersedes this
+            // walk — further pages are skipped and nothing lands in state.
+            if (cancelled) return;
+            for (const hold of holdPage.items) {
+              joined[hold.id] = hold;
+            }
+            const next = holdPage.nextCursor ?? null;
+            if (next === null) break;
+            holdCursor = next;
+            truncated = hops === MAX_PAGE_HOPS - 1;
           }
-          const next = holdPage.nextCursor ?? null;
-          if (next === null) break;
-          holdCursor = next;
-          truncated = hops === MAX_PAGE_HOPS - 1;
+          holds = { holds: joined, truncated, joinFailed: false };
+        } catch {
+          // The join's failure is the envelope's, not the queue's: the page
+          // still lands ready, the cards say the affected units are
+          // unavailable (never "disposed" — an outage is not a disposition).
+          holds = { holds: {}, truncated: false, joinFailed: true };
         }
         if (!cancelled) {
           setResult({
@@ -134,7 +158,7 @@ export function useExcursions(
               data: {
                 items: page.items,
                 nextCursor: page.nextCursor ?? null,
-                holds: { holds: joined, truncated },
+                holds,
               },
             },
           });
@@ -165,8 +189,12 @@ export function useExcursions(
   );
   // Clearing the result first is what makes Retry visible: leaving the old
   // `failed` state in place while the refetch is in flight renders a second
-  // identical failure as an inert button.
+  // identical failure as an inert button. `requested` resets too — the
+  // classic failure here is an invalid-cursor page whose Retry re-requests
+  // the SAME stale cursor forever; the copy promises a first-page restart,
+  // so Retry must actually restart.
   const reload = useCallback(() => {
+    setRequested(null);
     setResult(null);
     setRevision((r) => r + 1);
   }, []);

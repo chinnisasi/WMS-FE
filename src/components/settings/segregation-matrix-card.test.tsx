@@ -29,17 +29,29 @@ const SESSION: StoredSession = {
 const CLASSES = ['explosive', 'oxidizer', 'flammable', 'corrosive-acid', 'corrosive-base', 'toxic', 'gas'] as const;
 
 /**
- * The server's fully expanded set: explosive's universal rule enumerated as
- * pairs (incl. the self-pair), plus the symmetric cross-class pairs.
+ * The server's fully expanded set, in the wire shape the endpoint actually
+ * emits: the predicate's own sorted-key convention (`{a, b}` with `a < b`
+ * lexicographically), explosive's universal rule enumerated as pairs
+ * including the self-pair, plus the four explicit pairs — the exact 11 the
+ * BE e2e (`test/segregation-matrix.spec.ts`) asserts. A fixture in an
+ * orientation the endpoint never produces would verify a directional change
+ * against a lie.
  */
-const EXPLOSIVE = CLASSES.map((cls) => ({ a: 'explosive', b: cls }));
-const CROSS_PAIRS = [
-  { a: 'oxidizer', b: 'flammable' },
+const INCOMPATIBLE: readonly { a: string; b: string }[] = [
+  // explosive × every class, self included (7 — the universal rule).
+  { a: 'corrosive-acid', b: 'explosive' },
+  { a: 'corrosive-base', b: 'explosive' },
+  { a: 'explosive', b: 'explosive' },
+  { a: 'explosive', b: 'flammable' },
+  { a: 'explosive', b: 'gas' },
+  { a: 'explosive', b: 'oxidizer' },
+  { a: 'explosive', b: 'toxic' },
+  // the explicit INCOMPATIBLE_PAIRS (4).
   { a: 'corrosive-acid', b: 'corrosive-base' },
-  { a: 'toxic', b: 'gas' },
-  { a: 'oxidizer', b: 'corrosive-acid' },
+  { a: 'corrosive-acid', b: 'toxic' },
+  { a: 'flammable', b: 'oxidizer' },
+  { a: 'gas', b: 'oxidizer' },
 ];
-const INCOMPATIBLE = [...EXPLOSIVE, ...CROSS_PAIRS];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -118,9 +130,11 @@ describe('SegregationMatrixCard: the grid equals the endpoint (story 12-7)', () 
     const explosiveRow = rows[0]!;
     expect([...explosiveRow.querySelectorAll('td')][0]!.textContent).toBe('NO');
 
-    // A null hazard class is NOT a class — the grid carries no null row or
-    // column (the SKU/Hazard columns are where null renders).
-    expect([...table.querySelectorAll('th')].map((th) => th.textContent)).not.toContain(null);
+    // A null hazard class is NOT a class — the grid is exactly the
+    // 7-class vocabulary square: no null row, no null column (the SKU
+    // table's Hazard column is where a null renders, never the grid).
+    expect(rows.length).toBe(CLASSES.length);
+    expect(headers.length - 1).toBe(CLASSES.length);
     view.unmount();
   });
 

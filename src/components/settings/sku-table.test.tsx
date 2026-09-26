@@ -684,3 +684,84 @@ describe('SkuTable: the class columns and class edit (story 12-7)', () => {
     expect((requests.find((r) => r.method === 'PATCH')!.body as Record<string, unknown>).storageClass).toBe('frozen');
   });
 });
+
+/**
+ * The class pickers' vocabulary and the hazard refusal (triage row 18 /
+ * finding 18): the storage picker carries NO clear verb (every SKU has a
+ * class since 12-1 — there is no unclassify), the hazard picker's empty
+ * option is the "No rule" clear verb, and a 409 `hazard-segregation-conflict`
+ * renders the server's detail verbatim at component level (the mapper arm
+ * the lib test pins, proven to be the one the form actually renders).
+ */
+describe('SkuTable: the class pickers and the segregation refusal (triage row 18)', () => {
+  function setSelect(select: HTMLSelectElement, value: string): void {
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+      setter.call(select, value);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  function classSelect(container: HTMLElement, label: string): HTMLSelectElement {
+    const labelEl = [...container.querySelectorAll('form label')].find((l) =>
+      l.textContent!.includes(label),
+    )!;
+    expect(labelEl).toBeDefined();
+    return labelEl.querySelector('select')!;
+  }
+
+  test('the storage picker is exactly the six classes — no clear verb; the hazard picker opens with "No rule"', async () => {
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit');
+    act(() => edit!.click());
+    await settle();
+
+    const storageOptions = [...classSelect(view.container, 'Storage class').querySelectorAll('option')].map(
+      (o) => o.value,
+    );
+    expect(storageOptions).toEqual(['ambient', 'chilled', 'frozen', 'controlled', 'hazardous', 'secure']);
+    // No blank/clear option hides among the classes.
+    expect(storageOptions).not.toContain('');
+
+    const hazardSelect = classSelect(view.container, 'Hazard class');
+    const hazardOptions = [...hazardSelect.querySelectorAll('option')].map((o) => o.value);
+    expect(hazardOptions[0]).toBe('');
+    expect([...hazardSelect.querySelectorAll('option')][0]!.textContent).toBe('No rule');
+    expect(hazardOptions.slice(1)).toEqual([
+      'explosive',
+      'oxidizer',
+      'flammable',
+      'corrosive-acid',
+      'corrosive-base',
+      'toxic',
+      'gas',
+    ]);
+  });
+
+  test('a hazard change refused with hazard-segregation-conflict renders the server detail verbatim', async () => {
+    skuRows = [sku({ hazardClass: 'flammable' })];
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit');
+    act(() => edit!.click());
+    await settle();
+
+    nextPatchStatus = 409;
+    nextPatchBody = {
+      code: 'hazard-segregation-conflict',
+      title: 'Hazard class change would strand stock',
+      status: 409,
+      detail: 'SKU SPICE-01 (oxidizer) cannot sit in bin CH-01 with CLASS-01 (flammable) — relocate one first.',
+    };
+    const hazard = classSelect(view.container, 'Hazard class');
+    setSelect(hazard, 'oxidizer');
+    submitForm(view.container);
+    await settle();
+
+    expect(view.container.textContent).toContain('Not updated');
+    expect(view.container.textContent).toContain(
+      'SKU SPICE-01 (oxidizer) cannot sit in bin CH-01 with CLASS-01 (flammable)',
+    );
+    // The PATCH went out with the new hazard (the refusal is the server's).
+    expect((requests.find((r) => r.method === 'PATCH')!.body as Record<string, unknown>).hazardClass).toBe('oxidizer');
+  });
+});

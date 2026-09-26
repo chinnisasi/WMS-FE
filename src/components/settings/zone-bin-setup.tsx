@@ -646,6 +646,12 @@ function ZoneBinsTable({
   // ONLY (the structure arm; dimensions/maxWeight are not this story's).
   const [classEditingBin, setClassEditingBin] = useState<BinResponse | null>(null);
   const [classDraft, setClassDraft] = useState<string>(STORAGE_CLASSES[0]);
+  // A pre-render double-click fires both handlers before the disabled state
+  // renders — this synchronous re-entry guard makes the second click a
+  // no-op instead of a NEW command whose fresh Idempotency-Key would append
+  // a second audit row for one intent (the inbound-cards pattern, checked
+  // in both arms).
+  const classEditInFlight = useRef<Set<string>>(new Set());
   // The merge flow: the picked source bin (null = closed). The target picker
   // offers the WAREHOUSE's live bins (any zone), excluding system bins,
   // already-retired bins, and the source itself.
@@ -664,6 +670,8 @@ function ZoneBinsTable({
   async function applyClassEdit() {
     const session = readSession();
     if (session === null || classEditingBin === null) return;
+    if (classEditInFlight.current.has(classEditingBin.id)) return;
+    classEditInFlight.current.add(classEditingBin.id);
     setBusyBinId(classEditingBin.id);
     setOutcome(null);
     try {
@@ -684,6 +692,7 @@ function ZoneBinsTable({
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not updated', reason: binClassReason(error) });
     } finally {
+      classEditInFlight.current.delete(classEditingBin.id);
       setBusyBinId(null);
     }
   }

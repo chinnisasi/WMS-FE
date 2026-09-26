@@ -3,14 +3,14 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiResolveExcursion } from '@/lib/api/client';
-import type { ExcursionDto, QcHoldDto } from '@/lib/api/generated';
+import type { ExcursionDto } from '@/lib/api/generated';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { excursionResolveReason, holdLabel } from '@/lib/excursion';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useBinCodeMap, useSkuMap, useUserMap } from '@/lib/use-inbound';
-import { useExcursions } from '@/lib/use-excursions';
+import { useExcursions, type ExcursionHolds } from '@/lib/use-excursions';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -91,8 +91,24 @@ function ExcursionQueueSessioned() {
   );
   const canDecide = roleHasCapability(role, 'review.decide');
 
-  const [outcome, setOutcome] = useState<Outcome>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  // The outcome banner belongs to the entries it spoke about: a tab or a
+  // warehouse switch shows DIFFERENT entries, and a stale "Excursion
+  // resolved" invites the misread that the newly displayed ones were just
+  // resolved. Keyed state (triage row 7): the banner derives to null on
+  // either switch in the SAME render — not a reset effect, whose
+  // setState-in-effect ordering the house lint forbids — and resolve
+  // re-shows it against the entries it ran on.
+  const [outcomeFor, setOutcomeFor] = useState<{
+    tab: StatusTab;
+    warehouseId: string | null;
+    outcome: Exclude<Outcome, null>;
+  } | null>(null);
+  const outcome: Outcome =
+    outcomeFor?.tab === tab && outcomeFor?.warehouseId === warehouseId ? outcomeFor.outcome : null;
+  function showOutcome(next: Exclude<Outcome, null> | null) {
+    setOutcomeFor(next === null ? null : { tab, warehouseId, outcome: next });
+  }
   // A pre-render double-click fires both handlers before the disabled state
   // renders — this synchronous re-entry guard makes the second click a
   // no-op instead of a NEW command whose fresh Idempotency-Key would 409
@@ -105,10 +121,10 @@ function ExcursionQueueSessioned() {
     if (session === null || resolveInFlight.current.has(entry.id)) return;
     resolveInFlight.current.add(entry.id);
     setResolvingId(entry.id);
-    setOutcome(null);
+    showOutcome(null);
     try {
       await fetchApiResolveExcursion(session.tenant.id, entry.id, ulid());
-      setOutcome({
+      showOutcome({
         tone: 'accepted',
         word: 'Excursion resolved',
         reason:
@@ -120,7 +136,7 @@ function ExcursionQueueSessioned() {
       // excursion-resolved means another reviewer moved first — the queue
       // re-reads (the reload IS the recovery the mapper's copy names).
       const alreadyResolved = error instanceof ApiProblem && error.code === 'excursion-resolved';
-      setOutcome({ tone: 'rejected', word: 'Not resolved', reason: excursionResolveReason(error) });
+      showOutcome({ tone: 'rejected', word: 'Not resolved', reason: excursionResolveReason(error) });
       if (alreadyResolved) queue?.reload();
     } finally {
       resolveInFlight.current.delete(entry.id);
@@ -246,7 +262,7 @@ function ExcursionCard({
   skuLabel: (skuId: string) => string | null;
   recordedBy: string | null;
   resolvedBy: string | null;
-  holds: { holds: Readonly<Record<string, QcHoldDto>>; truncated: boolean };
+  holds: ExcursionHolds;
   canDecide: boolean;
   resolving: boolean;
   onResolve: (entry: ExcursionDto) => void;
@@ -262,7 +278,14 @@ function ExcursionCard({
         {entry.status !== 'open' && <span className="text-xs">resolved</span>}
       </div>
       {entry.note !== null && <div className="text-xs">{entry.note}</div>}
-      {entry.holdIds.length > 0 && (
+      {entry.holdIds.length > 0 && holds.joinFailed && (
+        // The join is enrichment — its failure must not read as a
+        // disposition: an outage labelling every hold "disposed" would lie.
+        <div className="text-xs text-(--destructive)">
+          Affected units unavailable — the hold list could not be read.
+        </div>
+      )}
+      {entry.holdIds.length > 0 && !holds.joinFailed && (
         <div className="text-xs text-(--muted-foreground)">
           Affected units:{' '}
           {entry.holdIds

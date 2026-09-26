@@ -380,3 +380,42 @@ describe('ZonesBinsSetup: the storage-class edit (story 12-7)', () => {
     expect(view.container.textContent).toContain('Editing the storage class of');
   });
 });
+
+/**
+ * The Edit-class affordance's gating and the post-save reload (triage row
+ * 15 / finding 15): the BE gates the structure arm on `bin.create`, the FE
+ * mirrors that decision by HIDING the affordance from roles without it
+ * (hide surfaces, never "blocked" screens), and a successful save reloads
+ * the bins list so the table shows the server's answer.
+ */
+describe('ZonesBinsSetup: the Edit-class gating and reload (triage row 15)', () => {
+  test('an operator (no bin.create) sees the rows and NO Edit-class affordance', async () => {
+    writeSession({ ...SESSION, user: { id: 'u-1', email: 'priya@example.com', role: 'operator', status: 'active' } });
+    view = await mount();
+
+    const row = [...view.container.querySelectorAll('tbody tr')].find((tr) => tr.textContent!.includes('A-01-01'))!;
+    expect(row).toBeDefined();
+    expect([...row.querySelectorAll('button')].some((b) => b.textContent === 'Edit class')).toBe(false);
+    // No editor can open — there is no Save-class button anywhere either.
+    expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Save class')).toBe(false);
+  });
+
+  test('a successful class save reloads the bins list — the table shows the server answer', async () => {
+    view = await mount();
+    const binsGetsBefore = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/bins')).length;
+
+    const row = [...view.container.querySelectorAll('tbody tr')].find((tr) => tr.textContent!.includes('A-01-01'))!;
+    const edit = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Edit class')!;
+    act(() => edit.click());
+    await settle();
+    const save = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Save class')!;
+    act(() => save.click());
+    await settle();
+
+    expect(requests.find((r) => r.method === 'PATCH' && /\/bins\/[^/]+$/.test(r.pathname))).toBeDefined();
+    const binsGetsAfter = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/bins')).length;
+    expect(binsGetsAfter).toBeGreaterThan(binsGetsBefore);
+    // The editor closed on success.
+    expect(view.container.textContent).not.toContain('Editing the storage class of');
+  });
+});
