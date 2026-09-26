@@ -1,12 +1,7 @@
-import { SurfacePlaceholder } from '@/components/shell/surface-placeholder';
+import { ColdChainTrace } from '@/components/compliance/cold-chain-trace';
 
 export const metadata = { title: 'Compliance' };
 
 export default function CompliancePage() {
-  return (
-    <SurfacePlaceholder
-      title="Compliance"
-      description="IA skeleton surface — functionality lands in a later story."
-    />
-  );
+  return <ColdChainTrace />;
 }

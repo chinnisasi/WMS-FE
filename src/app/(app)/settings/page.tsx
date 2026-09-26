@@ -3,6 +3,7 @@ import { DevicesCard } from '@/components/settings/devices-card';
 import { ImportCatalogCard } from '@/components/settings/import-catalog';
 import { ProductsCard } from '@/components/settings/products-card';
 import { SetupChecklistCard } from '@/components/settings/setup-checklist-card';
+import { SegregationMatrixCard } from '@/components/settings/segregation-matrix-card';
 import { SkuTableCard } from '@/components/settings/sku-table';
 import { UsersCard } from '@/components/settings/users-card';
 import { ZonesBinsSetup } from '@/components/settings/zone-bin-setup';
@@ -23,6 +24,7 @@ export default function SettingsPage() {
       <ImportCatalogCard />
       <ProductsCard />
       <SkuTableCard />
+      <SegregationMatrixCard />
       <UsersCard />
       <WarehouseList />
       <DevicesCard />

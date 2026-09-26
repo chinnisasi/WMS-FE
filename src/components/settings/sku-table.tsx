@@ -15,6 +15,7 @@ import { notifyCatalogChanged } from '@/lib/catalog';
 import { kitBomLabel, kitMarkerLabel, kitReason, parseKitComponents } from '@/lib/catalog-kits';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { parseQuantityInput, quantityInputLabel } from '@/lib/format-quantity';
+import { hazardClassLabel, HAZARD_CLASSES, skuClassReason, STORAGE_CLASSES, storageClassLabel } from '@/lib/sku-admin';
 import { skuPhysicalLabel } from '@/lib/sku-attributes';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -134,6 +135,11 @@ function SkuTableCardSessioned() {
           .filter((flag) => flag !== null)
           .join(' + ') || '—',
     },
+    // Story 12-7 — the 12-1/12-2 class columns, finally visible on the web:
+    // the labels are lib derivations (null hazard renders the no-rule dash),
+    // not inline JSX, so the null rendering is pinned by test.
+    { key: 'storage', header: 'Storage', render: (sku) => storageClassLabel(sku) },
+    { key: 'hazard', header: 'Hazard', render: (sku) => hazardClassLabel(sku) },
     { key: 'barcode', header: 'Barcode', render: (sku) => <span className="font-mono text-xs">{sku.barcode}</span> },
     ...(canEditSku
       ? [
@@ -283,6 +289,12 @@ function SkuEditForm({
   const [reorderPoint, setReorderPoint] = useState(String(sku.reorderPoint));
   const [reorderQty, setReorderQty] = useState(String(sku.reorderQty));
   const [barcode, setBarcode] = useState(sku.barcode);
+  // Story 12-7 — the class pickers. storageClass is required on every SKU
+  // (12-1), so its picker has no clear verb; hazardClass is nullable (12-2)
+  // and the empty option IS the clear verb — "No rule" (null carries no
+  // rule in either direction of the segregation matrix).
+  const [storageClass, setStorageClass] = useState<string>(sku.storageClass);
+  const [hazardClass, setHazardClass] = useState<string>((sku.hazardClass as string | null) ?? '');
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: React.FormEvent) {
@@ -322,6 +334,29 @@ function SkuEditForm({
       const gstBps = Math.round(Number(gst) * 100);
       const trimmedHsn = hsn.trim();
       const trimmedOrigin = countryOfOrigin.trim();
+      // Story 12-7 — the class fields ride the same PATCH carrying ONLY the
+      // changed values (undefined keys drop out of the JSON body, so an
+      // untouched class never moves the idempotency hash). A hazard pick of
+      // "" against a classed SKU is the clear verb and sends null; "" against
+      // an already-null SKU sends nothing. The two casts answer the KNOWN-BAD
+      // generated types: `PatchSkuDto.hazardClass` drops `| null` (the BE
+      // contract is "null clears, always succeeds") and the pickers hold
+      // `string` state until submit.
+      const changedStorage =
+        storageClass !== sku.storageClass ? (storageClass as SkuResponse['storageClass']) : undefined;
+      const nextHazard = hazardClass === '' ? null : (hazardClass as SkuResponse['hazardClass']);
+      // Both sides normalize the same way — the picker's null (the "No rule"
+      // pick) and the row's null compare through the '' shape, or an
+      // untouched picker on an already-null SKU would read as a change and
+      // send a pointless `hazardClass: null`.
+      const changedHazard =
+        (nextHazard ?? '') === ((sku.hazardClass as string | null) ?? '')
+          ? undefined
+          : // The KNOWN-BAD generated `PatchSkuDto` drops `| null` on the clear
+            // verb (hsn renders nullable, hazardClass does not — vendor bug,
+            // tracked in PENDING); the BE contract is "null clears, always
+            // succeeds" (12-2), so the clear rides as null through the cast.
+            (nextHazard as SkuResponse['hazardClass'] | null);
       const updated = await fetchApiEditSku(
         session.tenant.id,
         sku.id,
@@ -339,6 +374,10 @@ function SkuEditForm({
           reorderPoint: point,
           reorderQty: qty,
           barcode: barcode.trim(),
+          ...(changedStorage === undefined ? {} : { storageClass: changedStorage }),
+          ...(changedHazard === undefined
+            ? {}
+            : { hazardClass: changedHazard as SkuResponse['hazardClass'] }),
         },
         ulid(),
       );
@@ -497,6 +536,44 @@ function SkuEditForm({
           />
         </label>
       </div>
+      {/* Story 12-7 — the class pickers. The storage picker carries no clear
+          verb (every SKU has a class since 12-1); the hazard picker's empty
+          option IS the clear verb, labelled "No rule" (null carries no rule
+          in either matrix direction). A refused class change (a stranding
+          storage-class or a segregation conflict) renders the server's
+          detail naming the stranded parties verbatim through the mapper. */}
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <label className="flex flex-1 flex-col gap-1">
+          <span className={labelClass}>Storage class</span>
+          <select
+            className={inputClass}
+            value={storageClass}
+            onChange={(e) => setStorageClass(e.target.value)}
+          >
+            {STORAGE_CLASSES.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-1 flex-col gap-1">
+          <span className={labelClass}>Hazard class</span>
+          <select
+            className={inputClass}
+            value={hazardClass}
+            onChange={(e) => setHazardClass(e.target.value)}
+          >
+            <option value="">No rule</option>
+            {HAZARD_CLASSES.map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex-1" />
+      </div>
       <div className="flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={batchTracked} onChange={(e) => setBatchTracked(e.target.checked)} />
@@ -535,6 +612,11 @@ function SkuEditForm({
 function rejectionReason(error: unknown, attemptedBarcode?: string): string {
   if (error instanceof ApiProblem) {
     switch (error.code) {
+      // Story 12-7 — the class-refusal codes map through the lib mapper
+      // (its sentences are pinned by test); the form's own codes stay here.
+      case 'storage-class-conflict':
+      case 'hazard-segregation-conflict':
+        return skuClassReason(error);
       case 'duplicate-barcode':
         // The API names the conflicting SKU in the problem detail.
         return error.detail ?? `Barcode ${attemptedBarcode ?? ''} already belongs to another SKU in this tenant.`;
