@@ -46,7 +46,11 @@ export const tenancyControllerSignIn = <ThrowOnError extends boolean = false>(op
  * Lists warehouses (keyset cursor pagination)
  */
 export const tenancyControllerListWarehouses = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerListWarehousesData, ThrowOnError>): RequestResult<TenancyControllerListWarehousesResponses, TenancyControllerListWarehousesErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerListWarehousesResponses, TenancyControllerListWarehousesErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses',
     ...options
 });
@@ -55,7 +59,11 @@ export const tenancyControllerListWarehouses = <ThrowOnError extends boolean = f
  * Creates a warehouse (code unique per tenant)
  */
 export const tenancyControllerCreateWarehouse = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerCreateWarehouseData, ThrowOnError>): RequestResult<TenancyControllerCreateWarehouseResponses, TenancyControllerCreateWarehouseErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerCreateWarehouseResponses, TenancyControllerCreateWarehouseErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses',
     ...options,
     headers: {
@@ -68,7 +76,11 @@ export const tenancyControllerCreateWarehouse = <ThrowOnError extends boolean = 
  * Lists the zones of one warehouse (keyset cursor pagination)
  */
 export const tenancyControllerListZones = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerListZonesData, ThrowOnError>): RequestResult<TenancyControllerListZonesResponses, TenancyControllerListZonesErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerListZonesResponses, TenancyControllerListZonesErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones',
     ...options
 });
@@ -77,7 +89,11 @@ export const tenancyControllerListZones = <ThrowOnError extends boolean = false>
  * Creates a zone in a warehouse (code unique per warehouse)
  */
 export const tenancyControllerCreateZone = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerCreateZoneData, ThrowOnError>): RequestResult<TenancyControllerCreateZoneResponses, TenancyControllerCreateZoneErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerCreateZoneResponses, TenancyControllerCreateZoneErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones',
     ...options,
     headers: {
@@ -90,7 +106,11 @@ export const tenancyControllerCreateZone = <ThrowOnError extends boolean = false
  * Lists the bins of one zone (keyset cursor pagination)
  */
 export const tenancyControllerListBins = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerListBinsData, ThrowOnError>): RequestResult<TenancyControllerListBinsResponses, TenancyControllerListBinsErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerListBinsResponses, TenancyControllerListBinsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones/{zoneId}/bins',
     ...options
 });
@@ -99,7 +119,11 @@ export const tenancyControllerListBins = <ThrowOnError extends boolean = false>(
  * Creates a bin in a zone (code unique per warehouse; immediately usable)
  */
 export const tenancyControllerCreateBin = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerCreateBinData, ThrowOnError>): RequestResult<TenancyControllerCreateBinResponses, TenancyControllerCreateBinErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerCreateBinResponses, TenancyControllerCreateBinErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones/{zoneId}/bins',
     ...options,
     headers: {
@@ -112,7 +136,11 @@ export const tenancyControllerCreateBin = <ThrowOnError extends boolean = false>
  * Mass-creates bins in one zone from an aisle/bay/level grid (≤ 500, one transaction)
  */
 export const tenancyControllerGenerateBinGrid = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerGenerateBinGridData, ThrowOnError>): RequestResult<TenancyControllerGenerateBinGridResponses, TenancyControllerGenerateBinGridErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerGenerateBinGridResponses, TenancyControllerGenerateBinGridErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/zones/{zoneId}/bins/grid',
     ...options,
     headers: {
@@ -125,7 +153,11 @@ export const tenancyControllerGenerateBinGrid = <ThrowOnError extends boolean = 
  * Blocks or unblocks a bin (Story 3.6: never a system or retired bin), or edits its capacity attributes (Story 11-5: dimensions and max weight — tenancy owns the structure)
  */
 export const tenancyControllerSetBinBlocked = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerSetBinBlockedData, ThrowOnError>): RequestResult<TenancyControllerSetBinBlockedResponses, TenancyControllerSetBinBlockedErrors, ThrowOnError> => (options.client ?? client).patch<TenancyControllerSetBinBlockedResponses, TenancyControllerSetBinBlockedErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}',
     ...options,
     headers: {
@@ -138,7 +170,11 @@ export const tenancyControllerSetBinBlocked = <ThrowOnError extends boolean = fa
  * Merges this bin into the target bin (all on-hand moves through real ledger movements; the source retires in the same commit)
  */
 export const tenancyControllerMergeBin = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerMergeBinData, ThrowOnError>): RequestResult<TenancyControllerMergeBinResponses, TenancyControllerMergeBinErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerMergeBinResponses, TenancyControllerMergeBinErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}/merge',
     ...options,
     headers: {
@@ -151,7 +187,11 @@ export const tenancyControllerMergeBin = <ThrowOnError extends boolean = false>(
  * Retires this bin — one-way, only an EMPTY bin can retire (the row stays; the code stays reserved)
  */
 export const tenancyControllerRetireBin = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerRetireBinData, ThrowOnError>): RequestResult<TenancyControllerRetireBinResponses, TenancyControllerRetireBinErrors, ThrowOnError> => (options.client ?? client).post<TenancyControllerRetireBinResponses, TenancyControllerRetireBinErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}/retire',
     ...options
 });
@@ -160,7 +200,11 @@ export const tenancyControllerRetireBin = <ThrowOnError extends boolean = false>
  * Computed onboarding checklist (warehouse, bins, catalog, users — all four wired)
  */
 export const tenancyControllerSetupChecklist = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerSetupChecklistData, ThrowOnError>): RequestResult<TenancyControllerSetupChecklistResponses, TenancyControllerSetupChecklistErrors, ThrowOnError> => (options.client ?? client).get<TenancyControllerSetupChecklistResponses, TenancyControllerSetupChecklistErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/setup-checklist',
     ...options
 });
@@ -169,7 +213,11 @@ export const tenancyControllerSetupChecklist = <ThrowOnError extends boolean = f
  * Lists the tenant’s users (keyset cursor pagination — open to any member)
  */
 export const usersControllerListUsers = <ThrowOnError extends boolean = false>(options: Options<UsersControllerListUsersData, ThrowOnError>): RequestResult<UsersControllerListUsersResponses, UsersControllerListUsersErrors, ThrowOnError> => (options.client ?? client).get<UsersControllerListUsersResponses, UsersControllerListUsersErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/users',
     ...options
 });
@@ -178,7 +226,11 @@ export const usersControllerListUsers = <ThrowOnError extends boolean = false>(o
  * Invites a user (Owner only) — returns the one-time invite token
  */
 export const usersControllerInviteUser = <ThrowOnError extends boolean = false>(options: Options<UsersControllerInviteUserData, ThrowOnError>): RequestResult<UsersControllerInviteUserResponses, UsersControllerInviteUserErrors, ThrowOnError> => (options.client ?? client).post<UsersControllerInviteUserResponses, UsersControllerInviteUserErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/users',
     ...options,
     headers: {
@@ -191,7 +243,11 @@ export const usersControllerInviteUser = <ThrowOnError extends boolean = false>(
  * Changes a user’s role (Owner capability users.role_change; effective on the user’s next command)
  */
 export const usersControllerSetUserRole = <ThrowOnError extends boolean = false>(options: Options<UsersControllerSetUserRoleData, ThrowOnError>): RequestResult<UsersControllerSetUserRoleResponses, UsersControllerSetUserRoleErrors, ThrowOnError> => (options.client ?? client).patch<UsersControllerSetUserRoleResponses, UsersControllerSetUserRoleErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/users/{userId}',
     ...options,
     headers: {
@@ -216,7 +272,11 @@ export const usersControllerAcceptInvite = <ThrowOnError extends boolean = false
  * The signed-in user’s own row (id, email, role, status)
  */
 export const usersControllerMe = <ThrowOnError extends boolean = false>(options: Options<UsersControllerMeData, ThrowOnError>): RequestResult<UsersControllerMeResponses, UsersControllerMeErrors, ThrowOnError> => (options.client ?? client).get<UsersControllerMeResponses, UsersControllerMeErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/me',
     ...options
 });
@@ -226,7 +286,11 @@ export const usersControllerMe = <ThrowOnError extends boolean = false>(options:
  */
 export const catalogControllerImportCatalog = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerImportCatalogData, ThrowOnError>): RequestResult<CatalogControllerImportCatalogResponses, CatalogControllerImportCatalogErrors, ThrowOnError> => (options.client ?? client).post<CatalogControllerImportCatalogResponses, CatalogControllerImportCatalogErrors, ThrowOnError>({
     ...formDataBodySerializer,
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/imports',
     ...options,
     headers: {
@@ -239,7 +303,11 @@ export const catalogControllerImportCatalog = <ThrowOnError extends boolean = fa
  * Lists SKUs (keyset cursor pagination)
  */
 export const catalogControllerListSkus = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerListSkusData, ThrowOnError>): RequestResult<CatalogControllerListSkusResponses, CatalogControllerListSkusErrors, ThrowOnError> => (options.client ?? client).get<CatalogControllerListSkusResponses, CatalogControllerListSkusErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/skus',
     ...options
 });
@@ -248,7 +316,11 @@ export const catalogControllerListSkus = <ThrowOnError extends boolean = false>(
  * Returns the hazard segregation matrix — the vocabulary plus every incompatible unordered pair, fully expanded from the server's own predicate
  */
 export const catalogControllerGetSegregationMatrix = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerGetSegregationMatrixData, ThrowOnError>): RequestResult<CatalogControllerGetSegregationMatrixResponses, CatalogControllerGetSegregationMatrixErrors, ThrowOnError> => (options.client ?? client).get<CatalogControllerGetSegregationMatrixResponses, CatalogControllerGetSegregationMatrixErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/segregation-matrix',
     ...options
 });
@@ -257,7 +329,11 @@ export const catalogControllerGetSegregationMatrix = <ThrowOnError extends boole
  * Lists products (keyset cursor pagination) — items carry the derived skuCount
  */
 export const catalogControllerListProducts = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerListProductsData, ThrowOnError>): RequestResult<CatalogControllerListProductsResponses, CatalogControllerListProductsErrors, ThrowOnError> => (options.client ?? client).get<CatalogControllerListProductsResponses, CatalogControllerListProductsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/products',
     ...options
 });
@@ -266,7 +342,11 @@ export const catalogControllerListProducts = <ThrowOnError extends boolean = fal
  * Creates a product — identity only (name + declared axes); SKUs attach to it through the SKU edit PATCH
  */
 export const catalogControllerCreateProduct = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerCreateProductData, ThrowOnError>): RequestResult<CatalogControllerCreateProductResponses, CatalogControllerCreateProductErrors, ThrowOnError> => (options.client ?? client).post<CatalogControllerCreateProductResponses, CatalogControllerCreateProductErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/products',
     ...options,
     headers: {
@@ -279,7 +359,11 @@ export const catalogControllerCreateProduct = <ThrowOnError extends boolean = fa
  * Edits a product (name always; axes only while no SKU is attached)
  */
 export const catalogControllerEditProduct = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerEditProductData, ThrowOnError>): RequestResult<CatalogControllerEditProductResponses, CatalogControllerEditProductErrors, ThrowOnError> => (options.client ?? client).patch<CatalogControllerEditProductResponses, CatalogControllerEditProductErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/products/{productId}',
     ...options,
     headers: {
@@ -292,7 +376,11 @@ export const catalogControllerEditProduct = <ThrowOnError extends boolean = fals
  * Edits a SKU (name, GST, HSN, flags, physical attributes, reorder defaults, barcode, product attach/detach — the SKU code is immutable)
  */
 export const catalogControllerEditSku = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerEditSkuData, ThrowOnError>): RequestResult<CatalogControllerEditSkuResponses, CatalogControllerEditSkuErrors, ThrowOnError> => (options.client ?? client).patch<CatalogControllerEditSkuResponses, CatalogControllerEditSkuErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/skus/{skuId}',
     ...options,
     headers: {
@@ -305,7 +393,11 @@ export const catalogControllerEditSku = <ThrowOnError extends boolean = false>(o
  * Makes an existing SKU a kit — attaches its flat composition (the only door into kit-ness; PUT replaces an existing kit's BOM)
  */
 export const catalogControllerCreateKit = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerCreateKitData, ThrowOnError>): RequestResult<CatalogControllerCreateKitResponses, CatalogControllerCreateKitErrors, ThrowOnError> => (options.client ?? client).post<CatalogControllerCreateKitResponses, CatalogControllerCreateKitErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/skus/{skuId}/kit',
     ...options,
     headers: {
@@ -318,7 +410,11 @@ export const catalogControllerCreateKit = <ThrowOnError extends boolean = false>
  * Replaces an existing kit's whole composition (PUT semantics — the BOM is a set, not a partial body)
  */
 export const catalogControllerReplaceKit = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerReplaceKitData, ThrowOnError>): RequestResult<CatalogControllerReplaceKitResponses, CatalogControllerReplaceKitErrors, ThrowOnError> => (options.client ?? client).put<CatalogControllerReplaceKitResponses, CatalogControllerReplaceKitErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/skus/{skuId}/kit',
     ...options,
     headers: {
@@ -331,7 +427,11 @@ export const catalogControllerReplaceKit = <ThrowOnError extends boolean = false
  * Lists kits — SKUs carrying composition rows, with their flat BOMs (keyset cursor pagination)
  */
 export const catalogControllerListKits = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerListKitsData, ThrowOnError>): RequestResult<CatalogControllerListKitsResponses, CatalogControllerListKitsErrors, ThrowOnError> => (options.client ?? client).get<CatalogControllerListKitsResponses, CatalogControllerListKitsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/catalog/kits',
     ...options
 });
@@ -357,7 +457,11 @@ export const echoControllerEcho = <ThrowOnError extends boolean = false>(options
  * Mints a one-time device enrollment code (device.manage) — 15-minute TTL, single redemption
  */
 export const devicesControllerMintEnrollmentCode = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerMintEnrollmentCodeData, ThrowOnError>): RequestResult<DevicesControllerMintEnrollmentCodeResponses, DevicesControllerMintEnrollmentCodeErrors, ThrowOnError> => (options.client ?? client).post<DevicesControllerMintEnrollmentCodeResponses, DevicesControllerMintEnrollmentCodeErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/devices/enrollment-codes',
     ...options,
     headers: {
@@ -382,7 +486,11 @@ export const devicesControllerEnroll = <ThrowOnError extends boolean = false>(op
  * Badge-in: the device credential + operator PIN mint the revocable operator-bound device session
  */
 export const devicesControllerBadgeIn = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerBadgeInData, ThrowOnError>): RequestResult<DevicesControllerBadgeInResponses, DevicesControllerBadgeInErrors, ThrowOnError> => (options.client ?? client).post<DevicesControllerBadgeInResponses, DevicesControllerBadgeInErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/devices/badge-in',
     ...options,
     headers: {
@@ -395,7 +503,11 @@ export const devicesControllerBadgeIn = <ThrowOnError extends boolean = false>(o
  * Lists the tenant's enrolled devices (keyset cursor pagination — open to any member)
  */
 export const devicesControllerListDevices = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerListDevicesData, ThrowOnError>): RequestResult<DevicesControllerListDevicesResponses, DevicesControllerListDevicesErrors, ThrowOnError> => (options.client ?? client).get<DevicesControllerListDevicesResponses, DevicesControllerListDevicesErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/devices',
     ...options
 });
@@ -404,7 +516,11 @@ export const devicesControllerListDevices = <ThrowOnError extends boolean = fals
  * Revokes a device (device.manage) — wipe-flagged, audited, effective on the device’s next request; re-revoke idempotent
  */
 export const devicesControllerRevokeDevice = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerRevokeDeviceData, ThrowOnError>): RequestResult<DevicesControllerRevokeDeviceResponses, DevicesControllerRevokeDeviceErrors, ThrowOnError> => (options.client ?? client).post<DevicesControllerRevokeDeviceResponses, DevicesControllerRevokeDeviceErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/devices/{deviceId}/revoke',
     ...options
 });
@@ -413,7 +529,11 @@ export const devicesControllerRevokeDevice = <ThrowOnError extends boolean = fal
  * Device self-test echo (badge-in session required): the substrate replay target — re-authorizes device status + operator role per call
  */
 export const devicesControllerSelfTestEcho = <ThrowOnError extends boolean = false>(options: Options<DevicesControllerSelfTestEchoData, ThrowOnError>): RequestResult<DevicesControllerSelfTestEchoResponses, DevicesControllerSelfTestEchoErrors, ThrowOnError> => (options.client ?? client).post<DevicesControllerSelfTestEchoResponses, DevicesControllerSelfTestEchoErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/devices/self-test/echo',
     ...options,
     headers: {
@@ -426,7 +546,11 @@ export const devicesControllerSelfTestEcho = <ThrowOnError extends boolean = fal
  * Records a manual stock adjustment (one ledger event + on-hand projection in one commit)
  */
 export const inventoryControllerAdjustStock = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerAdjustStockData, ThrowOnError>): RequestResult<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError> => (options.client ?? client).post<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/inventory/adjustments',
     ...options,
     headers: {
@@ -439,7 +563,11 @@ export const inventoryControllerAdjustStock = <ThrowOnError extends boolean = fa
  * Lists one warehouse's ledger event timeline (keyset cursor pagination, newest first)
  */
 export const inventoryControllerListEvents = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerListEventsData, ThrowOnError>): RequestResult<InventoryControllerListEventsResponses, InventoryControllerListEventsErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerListEventsResponses, InventoryControllerListEventsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/events',
     ...options
 });
@@ -448,7 +576,11 @@ export const inventoryControllerListEvents = <ThrowOnError extends boolean = fal
  * Lists one warehouse's on-hand projection, SKU/bin filterable (keyset cursor pagination)
  */
 export const inventoryControllerListStock = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerListStockData, ThrowOnError>): RequestResult<InventoryControllerListStockResponses, InventoryControllerListStockErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerListStockResponses, InventoryControllerListStockErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/stock',
     ...options
 });
@@ -457,7 +589,11 @@ export const inventoryControllerListStock = <ThrowOnError extends boolean = fals
  * Lists a SKU's batches of one warehouse joined with on-hand (FEFO order — expiry ASC nulls last; expired batches are still listed)
  */
 export const inventoryControllerListBatches = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerListBatchesData, ThrowOnError>): RequestResult<InventoryControllerListBatchesResponses, InventoryControllerListBatchesErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerListBatchesResponses, InventoryControllerListBatchesErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/batches',
     ...options
 });
@@ -466,7 +602,11 @@ export const inventoryControllerListBatches = <ThrowOnError extends boolean = fa
  * One batch's detail — catalog identity, per-bin on-hand across the tenant, and its full movement history (one query)
  */
 export const inventoryControllerGetBatch = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerGetBatchData, ThrowOnError>): RequestResult<InventoryControllerGetBatchResponses, InventoryControllerGetBatchErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerGetBatchResponses, InventoryControllerGetBatchErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/inventory/batches/{batchId}',
     ...options
 });
@@ -475,7 +615,11 @@ export const inventoryControllerGetBatch = <ThrowOnError extends boolean = false
  * One serial's detail — catalog identity, its derived tenant-wide location, and its full movement history (one query)
  */
 export const inventoryControllerGetSerial = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerGetSerialData, ThrowOnError>): RequestResult<InventoryControllerGetSerialResponses, InventoryControllerGetSerialErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerGetSerialResponses, InventoryControllerGetSerialErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/inventory/serials/{serialId}',
     ...options
 });
@@ -484,7 +628,11 @@ export const inventoryControllerGetSerial = <ThrowOnError extends boolean = fals
  * Lists the tenant's vendors (keyset cursor pagination — open to any member)
  */
 export const inboundControllerListVendors = <ThrowOnError extends boolean = false>(options: Options<InboundControllerListVendorsData, ThrowOnError>): RequestResult<InboundControllerListVendorsResponses, InboundControllerListVendorsErrors, ThrowOnError> => (options.client ?? client).get<InboundControllerListVendorsResponses, InboundControllerListVendorsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/vendors',
     ...options
 });
@@ -493,7 +641,11 @@ export const inboundControllerListVendors = <ThrowOnError extends boolean = fals
  * Creates a vendor (vendor.manage) — code unique per tenant
  */
 export const inboundControllerCreateVendor = <ThrowOnError extends boolean = false>(options: Options<InboundControllerCreateVendorData, ThrowOnError>): RequestResult<InboundControllerCreateVendorResponses, InboundControllerCreateVendorErrors, ThrowOnError> => (options.client ?? client).post<InboundControllerCreateVendorResponses, InboundControllerCreateVendorErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/vendors',
     ...options,
     headers: {
@@ -506,7 +658,11 @@ export const inboundControllerCreateVendor = <ThrowOnError extends boolean = fal
  * Creates a purchase order (po.manage) — warehouse-scoped, ≥1 line, code unique per tenant
  */
 export const inboundControllerCreatePurchaseOrder = <ThrowOnError extends boolean = false>(options: Options<InboundControllerCreatePurchaseOrderData, ThrowOnError>): RequestResult<InboundControllerCreatePurchaseOrderResponses, InboundControllerCreatePurchaseOrderErrors, ThrowOnError> => (options.client ?? client).post<InboundControllerCreatePurchaseOrderResponses, InboundControllerCreatePurchaseOrderErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/inbound/purchase-orders',
     ...options,
     headers: {
@@ -519,7 +675,11 @@ export const inboundControllerCreatePurchaseOrder = <ThrowOnError extends boolea
  * Lists one warehouse's purchase orders, status-filterable (keyset cursor pagination)
  */
 export const inboundControllerListPurchaseOrders = <ThrowOnError extends boolean = false>(options: Options<InboundControllerListPurchaseOrdersData, ThrowOnError>): RequestResult<InboundControllerListPurchaseOrdersResponses, InboundControllerListPurchaseOrdersErrors, ThrowOnError> => (options.client ?? client).get<InboundControllerListPurchaseOrdersResponses, InboundControllerListPurchaseOrdersErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/inbound/purchase-orders',
     ...options
 });
@@ -528,7 +688,11 @@ export const inboundControllerListPurchaseOrders = <ThrowOnError extends boolean
  * One purchase order's detail — per line the ordered / received-to-date / open quantities at all times
  */
 export const inboundControllerGetPurchaseOrder = <ThrowOnError extends boolean = false>(options: Options<InboundControllerGetPurchaseOrderData, ThrowOnError>): RequestResult<InboundControllerGetPurchaseOrderResponses, InboundControllerGetPurchaseOrderErrors, ThrowOnError> => (options.client ?? client).get<InboundControllerGetPurchaseOrderResponses, InboundControllerGetPurchaseOrderErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/inbound/purchase-orders/{poId}',
     ...options
 });
@@ -537,7 +701,11 @@ export const inboundControllerGetPurchaseOrder = <ThrowOnError extends boolean =
  * Amends an open purchase order (po.manage) — the full line set: update by id, add without id, remove by absence
  */
 export const inboundControllerAmendPurchaseOrder = <ThrowOnError extends boolean = false>(options: Options<InboundControllerAmendPurchaseOrderData, ThrowOnError>): RequestResult<InboundControllerAmendPurchaseOrderResponses, InboundControllerAmendPurchaseOrderErrors, ThrowOnError> => (options.client ?? client).patch<InboundControllerAmendPurchaseOrderResponses, InboundControllerAmendPurchaseOrderErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/inbound/purchase-orders/{poId}',
     ...options,
     headers: {
@@ -550,7 +718,11 @@ export const inboundControllerAmendPurchaseOrder = <ThrowOnError extends boolean
  * Closes a purchase order (po.manage) with a per-line disposition — carried open quantities auto-create one successor open PO
  */
 export const inboundControllerClosePurchaseOrder = <ThrowOnError extends boolean = false>(options: Options<InboundControllerClosePurchaseOrderData, ThrowOnError>): RequestResult<InboundControllerClosePurchaseOrderResponses, InboundControllerClosePurchaseOrderErrors, ThrowOnError> => (options.client ?? client).post<InboundControllerClosePurchaseOrderResponses, InboundControllerClosePurchaseOrderErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/inbound/purchase-orders/{poId}/close',
     ...options,
     headers: {
@@ -563,7 +735,11 @@ export const inboundControllerClosePurchaseOrder = <ThrowOnError extends boolean
  * Creates an order (orders.manage) — manual entry or an ingested channel payload; acceptance reserves ATP per line (shortfall lines go backordered)
  */
 export const outboundControllerCreateOrder = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerCreateOrderData, ThrowOnError>): RequestResult<OutboundControllerCreateOrderResponses, OutboundControllerCreateOrderErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerCreateOrderResponses, OutboundControllerCreateOrderErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/orders',
     ...options,
     headers: {
@@ -576,7 +752,11 @@ export const outboundControllerCreateOrder = <ThrowOnError extends boolean = fal
  * Cancels an accepted order (orders.manage) — every open per-line reservation is released; idempotent on replay and on an already-cancelled order
  */
 export const outboundControllerCancelOrder = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerCancelOrderData, ThrowOnError>): RequestResult<OutboundControllerCancelOrderResponses, OutboundControllerCancelOrderErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerCancelOrderResponses, OutboundControllerCancelOrderErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/orders/{orderId}/cancel',
     ...options,
     headers: {
@@ -589,7 +769,11 @@ export const outboundControllerCancelOrder = <ThrowOnError extends boolean = fal
  * pack.execute — verifies a fully-picked order’s parcel at the bench and moves it to Ready-to-Dispatch. The scan is compared against what was actually PICKED (never against what was ordered — after story 4.4 a short-picked order legitimately carries fewer units), and a discrepancy is refused naming the SKU, the picked quantity and the scanned quantity before anything is written. On a match, one zero-quantity pack.packed ledger event per order line, the accepted → ready_to_dispatch flip, the outbox event, the audit row and the idempotency key all commit in ONE transaction, and the packing-slip payload is returned. Weight and dimensions are optional.
  */
 export const outboundControllerPackOrder = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerPackOrderData, ThrowOnError>): RequestResult<OutboundControllerPackOrderResponses, OutboundControllerPackOrderErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerPackOrderResponses, OutboundControllerPackOrderErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/orders/{orderId}/pack',
     ...options,
     headers: {
@@ -602,7 +786,11 @@ export const outboundControllerPackOrder = <ThrowOnError extends boolean = false
  * dispatch.execute — closes a packed order: the TERMINAL transition of the order state machine. One zero-quantity dispatch.dispatched ledger event per order line records the shipment (the units left stock at pick, so nothing moves), the order flips ready_to_dispatch → dispatched, and every committed reservation the order still owns is retired to released — the transition that finally restores the reserved counter and corrects ATP. The flip, the events, the retirements, the outbox event, the audit row and the idempotency key all commit in ONE transaction; the Valkey counter mirror follows the commit. Carrier and tracking number are optional free text. There is no un-dispatch: the arm is terminal.
  */
 export const outboundControllerDispatchOrder = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerDispatchOrderData, ThrowOnError>): RequestResult<OutboundControllerDispatchOrderResponses, OutboundControllerDispatchOrderErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerDispatchOrderResponses, OutboundControllerDispatchOrderErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/orders/{orderId}/dispatch',
     ...options,
     headers: {
@@ -615,7 +803,11 @@ export const outboundControllerDispatchOrder = <ThrowOnError extends boolean = f
  * One order's detail — per line the ordered / reserved / shortfall quantities and the hold's live state
  */
 export const outboundControllerGetOrder = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerGetOrderData, ThrowOnError>): RequestResult<OutboundControllerGetOrderResponses, OutboundControllerGetOrderErrors, ThrowOnError> => (options.client ?? client).get<OutboundControllerGetOrderResponses, OutboundControllerGetOrderErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/orders/{orderId}',
     ...options
 });
@@ -624,7 +816,11 @@ export const outboundControllerGetOrder = <ThrowOnError extends boolean = false>
  * Lists one warehouse's orders, newest first (keyset cursor pagination)
  */
 export const outboundControllerListOrders = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerListOrdersData, ThrowOnError>): RequestResult<OutboundControllerListOrdersResponses, OutboundControllerListOrdersErrors, ThrowOnError> => (options.client ?? client).get<OutboundControllerListOrdersResponses, OutboundControllerListOrdersErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/orders',
     ...options
 });
@@ -633,7 +829,11 @@ export const outboundControllerListOrders = <ThrowOnError extends boolean = fals
  * Creates a wave policy (waves.manage) — the grouping rule a wave is generated under; its cutoff gates release, never generation
  */
 export const outboundControllerCreateWavePolicy = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerCreateWavePolicyData, ThrowOnError>): RequestResult<OutboundControllerCreateWavePolicyResponses, OutboundControllerCreateWavePolicyErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerCreateWavePolicyResponses, OutboundControllerCreateWavePolicyErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/wave-policies',
     ...options,
     headers: {
@@ -646,7 +846,11 @@ export const outboundControllerCreateWavePolicy = <ThrowOnError extends boolean 
  * Lists one warehouse's wave policies, newest first (keyset cursor pagination)
  */
 export const outboundControllerListWavePolicies = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerListWavePoliciesData, ThrowOnError>): RequestResult<OutboundControllerListWavePoliciesResponses, OutboundControllerListWavePoliciesErrors, ThrowOnError> => (options.client ?? client).get<OutboundControllerListWavePoliciesResponses, OutboundControllerListWavePoliciesErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/wave-policies',
     ...options
 });
@@ -655,7 +859,11 @@ export const outboundControllerListWavePolicies = <ThrowOnError extends boolean 
  * Generates a wave (waves.manage) — gathers accepted orders by policy into picklists (one per order, or one batched across orders) with the pick path in bins.code order
  */
 export const outboundControllerGenerateWave = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerGenerateWaveData, ThrowOnError>): RequestResult<OutboundControllerGenerateWaveResponses, OutboundControllerGenerateWaveErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerGenerateWaveResponses, OutboundControllerGenerateWaveErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/waves',
     ...options,
     headers: {
@@ -668,7 +876,11 @@ export const outboundControllerGenerateWave = <ThrowOnError extends boolean = fa
  * Releases a wave to the floor (waves.manage) — picklists go ready and a cancelled order's pick lines drop; refused once the policy cutoff has passed in Asia/Kolkata
  */
 export const outboundControllerReleaseWave = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerReleaseWaveData, ThrowOnError>): RequestResult<OutboundControllerReleaseWaveResponses, OutboundControllerReleaseWaveErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerReleaseWaveResponses, OutboundControllerReleaseWaveErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/waves/{waveId}/release',
     ...options
 });
@@ -677,7 +889,11 @@ export const outboundControllerReleaseWave = <ThrowOnError extends boolean = fal
  * Cancels a wave (waves.manage) — its picklists and pick lines go cancelled and its orders become eligible for waving again; no reservation and no stock moves
  */
 export const outboundControllerCancelWave = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerCancelWaveData, ThrowOnError>): RequestResult<OutboundControllerCancelWaveResponses, OutboundControllerCancelWaveErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerCancelWaveResponses, OutboundControllerCancelWaveErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/waves/{waveId}/cancel',
     ...options
 });
@@ -686,7 +902,11 @@ export const outboundControllerCancelWave = <ThrowOnError extends boolean = fals
  * pick.record — records one scan-verified pick exactly once (badge-in session required): the pick.picked ledger draw empties the scanned bin and the order line’s reservation settles held → committed in the SAME transaction; the line flips to picked. Story 4.3b: the optional binStateEpoch is compared under the bin’s row lock before any write and classifies a conflict by the AD-14 taxonomy — apply/settle answer 201, pick-bin-short is re-plannable, pick-unresolvable is terminal. Story 4.4: a qty BELOW the line’s plan is a short pick and needs a reasonCode — the draw, the whole hold’s release, the re-grant of the remainder, the line’s flip to short and the re-planned slice all commit together; a zero-unit short pick reports an empty bin and writes no ledger event and no picks row
  */
 export const outboundControllerRecordPick = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerRecordPickData, ThrowOnError>): RequestResult<OutboundControllerRecordPickResponses, OutboundControllerRecordPickErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerRecordPickResponses, OutboundControllerRecordPickErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/picks',
     ...options,
     headers: {
@@ -699,7 +919,11 @@ export const outboundControllerRecordPick = <ThrowOnError extends boolean = fals
  * pack.execute — the DEVICE bench route (badge-in session required): the same packOrder command the tenant route delegates to, with the order id in the body. The scan is compared against what the order actually had PICKED; a discrepancy is refused (422 pack-mismatch) naming the SKU and both quantities before anything is written. On a match, the accepted → ready_to_dispatch flip, the zero-quantity pack.packed events, the outbox, the audit and the idempotency key commit in ONE transaction and the packing slip is returned. Parcel weight is optional; dimensions are NOT part of the device payload (the web surface keeps that arm)
  */
 export const outboundControllerPackOrderFromDevice = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerPackOrderFromDeviceData, ThrowOnError>): RequestResult<OutboundControllerPackOrderFromDeviceResponses, OutboundControllerPackOrderFromDeviceErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerPackOrderFromDeviceResponses, OutboundControllerPackOrderFromDeviceErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/packs',
     ...options,
     headers: {
@@ -712,7 +936,11 @@ export const outboundControllerPackOrderFromDevice = <ThrowOnError extends boole
  * One wave's detail — its picklists and every pick line in walk order (bins.code ascending)
  */
 export const outboundControllerGetWave = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerGetWaveData, ThrowOnError>): RequestResult<OutboundControllerGetWaveResponses, OutboundControllerGetWaveErrors, ThrowOnError> => (options.client ?? client).get<OutboundControllerGetWaveResponses, OutboundControllerGetWaveErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/outbound/waves/{waveId}',
     ...options
 });
@@ -721,7 +949,11 @@ export const outboundControllerGetWave = <ThrowOnError extends boolean = false>(
  * Lists one warehouse's waves, newest first (keyset cursor pagination)
  */
 export const outboundControllerListWaves = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerListWavesData, ThrowOnError>): RequestResult<OutboundControllerListWavesResponses, OutboundControllerListWavesErrors, ThrowOnError> => (options.client ?? client).get<OutboundControllerListWavesResponses, OutboundControllerListWavesErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/waves',
     ...options
 });
@@ -730,7 +962,11 @@ export const outboundControllerListWaves = <ThrowOnError extends boolean = false
  * Lists goods receipt notes (keyset cursor pagination, warehouse-filterable — open to any member)
  */
 export const receivingControllerListGoodsReceipts = <ThrowOnError extends boolean = false>(options: Options<ReceivingControllerListGoodsReceiptsData, ThrowOnError>): RequestResult<ReceivingControllerListGoodsReceiptsResponses, ReceivingControllerListGoodsReceiptsErrors, ThrowOnError> => (options.client ?? client).get<ReceivingControllerListGoodsReceiptsResponses, ReceivingControllerListGoodsReceiptsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/receiving/goods-receipts',
     ...options
 });
@@ -739,7 +975,11 @@ export const receivingControllerListGoodsReceipts = <ThrowOnError extends boolea
  * grn.submit — records a whole goods receipt exactly once (badge-in session required); the excess over a line's open quantity pends for Ops Manager approval
  */
 export const receivingControllerSubmitGoodsReceipt = <ThrowOnError extends boolean = false>(options: Options<ReceivingControllerSubmitGoodsReceiptData, ThrowOnError>): RequestResult<ReceivingControllerSubmitGoodsReceiptResponses, ReceivingControllerSubmitGoodsReceiptErrors, ThrowOnError> => (options.client ?? client).post<ReceivingControllerSubmitGoodsReceiptResponses, ReceivingControllerSubmitGoodsReceiptErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/receiving/goods-receipts',
     ...options,
     headers: {
@@ -752,7 +992,11 @@ export const receivingControllerSubmitGoodsReceipt = <ThrowOnError extends boole
  * The device catalog snapshot (badge-in session required): SKU barcode map + open PO lines for the offline decision mirror (AD-4)
  */
 export const receivingControllerGetCatalogSnapshot = <ThrowOnError extends boolean = false>(options: Options<ReceivingControllerGetCatalogSnapshotData, ThrowOnError>): RequestResult<ReceivingControllerGetCatalogSnapshotResponses, ReceivingControllerGetCatalogSnapshotErrors, ThrowOnError> => (options.client ?? client).get<ReceivingControllerGetCatalogSnapshotResponses, ReceivingControllerGetCatalogSnapshotErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/devices/catalog-snapshot',
     ...options
 });
@@ -761,7 +1005,11 @@ export const receivingControllerGetCatalogSnapshot = <ThrowOnError extends boole
  * Lists over-receipts (keyset cursor pagination, status-filterable — the Conflicts & Reviews queue read)
  */
 export const receivingControllerListOverReceipts = <ThrowOnError extends boolean = false>(options: Options<ReceivingControllerListOverReceiptsData, ThrowOnError>): RequestResult<ReceivingControllerListOverReceiptsResponses, ReceivingControllerListOverReceiptsErrors, ThrowOnError> => (options.client ?? client).get<ReceivingControllerListOverReceiptsResponses, ReceivingControllerListOverReceiptsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/receiving/over-receipts',
     ...options
 });
@@ -770,7 +1018,11 @@ export const receivingControllerListOverReceipts = <ThrowOnError extends boolean
  * Approves an over-receipt (review.decide) — a grn.received ledger event applies the excess and received_qty bumps; audited
  */
 export const receivingControllerApproveOverReceipt = <ThrowOnError extends boolean = false>(options: Options<ReceivingControllerApproveOverReceiptData, ThrowOnError>): RequestResult<ReceivingControllerApproveOverReceiptResponses, ReceivingControllerApproveOverReceiptErrors, ThrowOnError> => (options.client ?? client).post<ReceivingControllerApproveOverReceiptResponses, ReceivingControllerApproveOverReceiptErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/receiving/over-receipts/{overReceiptId}/approve',
     ...options
 });
@@ -779,7 +1031,11 @@ export const receivingControllerApproveOverReceipt = <ThrowOnError extends boole
  * Rejects an over-receipt (review.decide) — the excess stays unapplied; audited
  */
 export const receivingControllerRejectOverReceipt = <ThrowOnError extends boolean = false>(options: Options<ReceivingControllerRejectOverReceiptData, ThrowOnError>): RequestResult<ReceivingControllerRejectOverReceiptResponses, ReceivingControllerRejectOverReceiptErrors, ThrowOnError> => (options.client ?? client).post<ReceivingControllerRejectOverReceiptResponses, ReceivingControllerRejectOverReceiptErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/receiving/over-receipts/{overReceiptId}/reject',
     ...options
 });
@@ -788,7 +1044,11 @@ export const receivingControllerRejectOverReceipt = <ThrowOnError extends boolea
  * Lists QC holds (keyset cursor pagination, warehouse- and status-filterable — open to any member)
  */
 export const receivingControllerListQcHolds = <ThrowOnError extends boolean = false>(options: Options<ReceivingControllerListQcHoldsData, ThrowOnError>): RequestResult<ReceivingControllerListQcHoldsResponses, ReceivingControllerListQcHoldsErrors, ThrowOnError> => (options.client ?? client).get<ReceivingControllerListQcHoldsResponses, ReceivingControllerListQcHoldsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/receiving/qc-holds',
     ...options
 });
@@ -797,7 +1057,11 @@ export const receivingControllerListQcHolds = <ThrowOnError extends boolean = fa
  * qc-holds.place — quarantines a (sku, bin) scope: qc.held ledger movements move the stock into the warehouse's system QC-hold bin; ATP drops by the moved quantity (qc.manage)
  */
 export const receivingControllerPlaceQcHold = <ThrowOnError extends boolean = false>(options: Options<ReceivingControllerPlaceQcHoldData, ThrowOnError>): RequestResult<ReceivingControllerPlaceQcHoldResponses, ReceivingControllerPlaceQcHoldErrors, ThrowOnError> => (options.client ?? client).post<ReceivingControllerPlaceQcHoldResponses, ReceivingControllerPlaceQcHoldErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/receiving/qc-holds',
     ...options,
     headers: {
@@ -810,7 +1074,11 @@ export const receivingControllerPlaceQcHold = <ThrowOnError extends boolean = fa
  * Releases a QC hold (qc.manage) — qc.released movements return exactly the held units (the hold's own ledger arms) to its recorded origin bin; audited
  */
 export const receivingControllerReleaseQcHold = <ThrowOnError extends boolean = false>(options: Options<ReceivingControllerReleaseQcHoldData, ThrowOnError>): RequestResult<ReceivingControllerReleaseQcHoldResponses, ReceivingControllerReleaseQcHoldErrors, ThrowOnError> => (options.client ?? client).post<ReceivingControllerReleaseQcHoldResponses, ReceivingControllerReleaseQcHoldErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/receiving/qc-holds/{holdId}/release',
     ...options
 });
@@ -819,7 +1087,11 @@ export const receivingControllerReleaseQcHold = <ThrowOnError extends boolean = 
  * Lists putaway placements (keyset cursor pagination, warehouse-filterable — the read-only web surface)
  */
 export const putawayControllerListPlacements = <ThrowOnError extends boolean = false>(options: Options<PutawayControllerListPlacementsData, ThrowOnError>): RequestResult<PutawayControllerListPlacementsResponses, PutawayControllerListPlacementsErrors, ThrowOnError> => (options.client ?? client).get<PutawayControllerListPlacementsResponses, PutawayControllerListPlacementsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/putaway/placements',
     ...options
 });
@@ -828,7 +1100,11 @@ export const putawayControllerListPlacements = <ThrowOnError extends boolean = f
  * putaway.place — records a directed placement exactly once (badge-in session required): a putaway.placed ledger movement moves the stock from the system Receiving bin into the target bin; the suggestion is re-derived server-side and a mismatch reason is required when the operator placed elsewhere
  */
 export const putawayControllerPlacePutaway = <ThrowOnError extends boolean = false>(options: Options<PutawayControllerPlacePutawayData, ThrowOnError>): RequestResult<PutawayControllerPlacePutawayResponses, PutawayControllerPlacePutawayErrors, ThrowOnError> => (options.client ?? client).post<PutawayControllerPlacePutawayResponses, PutawayControllerPlacePutawayErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/putaway/placements',
     ...options,
     headers: {
@@ -841,7 +1117,11 @@ export const putawayControllerPlacePutaway = <ThrowOnError extends boolean = fal
  * The derived putaway tasks: one per GRN line whose applied stock still sits in the warehouse's system Receiving bin, each with the capacity-only suggested bin (derived on read — no task store)
  */
 export const putawayControllerListPutawayTasks = <ThrowOnError extends boolean = false>(options: Options<PutawayControllerListPutawayTasksData, ThrowOnError>): RequestResult<PutawayControllerListPutawayTasksResponses, PutawayControllerListPutawayTasksErrors, ThrowOnError> => (options.client ?? client).get<PutawayControllerListPutawayTasksResponses, PutawayControllerListPutawayTasksErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/putaway/tasks',
     ...options
 });
@@ -850,7 +1130,11 @@ export const putawayControllerListPutawayTasks = <ThrowOnError extends boolean =
  * The carrier adapter catalogue: supported carrier codes, display names and the credential fields each one requires (open to any member)
  */
 export const carriersControllerCatalogue = <ThrowOnError extends boolean = false>(options: Options<CarriersControllerCatalogueData, ThrowOnError>): RequestResult<CarriersControllerCatalogueResponses, CarriersControllerCatalogueErrors, ThrowOnError> => (options.client ?? client).get<CarriersControllerCatalogueResponses, CarriersControllerCatalogueErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/carriers',
     ...options
 });
@@ -859,7 +1143,11 @@ export const carriersControllerCatalogue = <ThrowOnError extends boolean = false
  * Lists the tenant's configured carrier accounts (keyset cursor pagination — public faces only, never credential material)
  */
 export const carriersControllerListConnections = <ThrowOnError extends boolean = false>(options: Options<CarriersControllerListConnectionsData, ThrowOnError>): RequestResult<CarriersControllerListConnectionsResponses, CarriersControllerListConnectionsErrors, ThrowOnError> => (options.client ?? client).get<CarriersControllerListConnectionsResponses, CarriersControllerListConnectionsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/carriers/connections',
     ...options
 });
@@ -868,7 +1156,11 @@ export const carriersControllerListConnections = <ThrowOnError extends boolean =
  * Connects a carrier account (carrier.manage) — the credential is sealed under CARRIER_ENCRYPTION_KEY and never returned; one connection per carrier per tenant
  */
 export const carriersControllerConnect = <ThrowOnError extends boolean = false>(options: Options<CarriersControllerConnectData, ThrowOnError>): RequestResult<CarriersControllerConnectResponses, CarriersControllerConnectErrors, ThrowOnError> => (options.client ?? client).post<CarriersControllerConnectResponses, CarriersControllerConnectErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/carriers/connections',
     ...options,
     headers: {
@@ -881,7 +1173,11 @@ export const carriersControllerConnect = <ThrowOnError extends boolean = false>(
  * Rotates a connection’s credential (carrier.manage) — same id, credentialVersion + 1, rotatedAt/rotatedBy stamped; the old material is overwritten
  */
 export const carriersControllerRotate = <ThrowOnError extends boolean = false>(options: Options<CarriersControllerRotateData, ThrowOnError>): RequestResult<CarriersControllerRotateResponses, CarriersControllerRotateErrors, ThrowOnError> => (options.client ?? client).post<CarriersControllerRotateResponses, CarriersControllerRotateErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/carriers/connections/{connectionId}/rotate',
     ...options,
     headers: {
@@ -894,7 +1190,11 @@ export const carriersControllerRotate = <ThrowOnError extends boolean = false>(o
  * Disconnects a carrier account (carrier.manage) — a hard delete (AD-15): the row and its sealed material are gone, the audit row records it; a repeat is 404
  */
 export const carriersControllerDisconnect = <ThrowOnError extends boolean = false>(options: Options<CarriersControllerDisconnectData, ThrowOnError>): RequestResult<CarriersControllerDisconnectResponses, CarriersControllerDisconnectErrors, ThrowOnError> => (options.client ?? client).post<CarriersControllerDisconnectResponses, CarriersControllerDisconnectErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/carriers/connections/{connectionId}/disconnect',
     ...options
 });
@@ -903,16 +1203,30 @@ export const carriersControllerDisconnect = <ThrowOnError extends boolean = fals
  * Lists temperature excursions (keyset cursor pagination, warehouse- and status-filterable — the review queue read, open to any member)
  */
 export const complianceControllerListExcursions = <ThrowOnError extends boolean = false>(options: Options<ComplianceControllerListExcursionsData, ThrowOnError>): RequestResult<ComplianceControllerListExcursionsResponses, ComplianceControllerListExcursionsErrors, ThrowOnError> => (options.client ?? client).get<ComplianceControllerListExcursionsResponses, ComplianceControllerListExcursionsErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/excursions',
     ...options
 });
 
 /**
  * excursion record — records a temperature excursion against a bin (excursion.record): quarantines every affected (sku, bin) scope through ordinary QC holds and appends one zero-quantity excursion.recorded ledger event per scope
+ *
+ * Accepts EITHER session family on the one route (Story 12-8, UX-DR30): a web session (the 12-5 surface, unchanged) or a device badge-in session (the floor's arm). The family is chosen by the `device_id` claim's presence. The device arm re-resolves the device row inside the command's tenant transaction — a revoked or unbadged device is refused there (403 device-revoked / 401 unauthenticated), so revocation bites.
  */
 export const complianceControllerRecordExcursion = <ThrowOnError extends boolean = false>(options: Options<ComplianceControllerRecordExcursionData, ThrowOnError>): RequestResult<ComplianceControllerRecordExcursionResponses, ComplianceControllerRecordExcursionErrors, ThrowOnError> => (options.client ?? client).post<ComplianceControllerRecordExcursionResponses, ComplianceControllerRecordExcursionErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'device',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/excursions',
     ...options,
     headers: {
@@ -925,7 +1239,11 @@ export const complianceControllerRecordExcursion = <ThrowOnError extends boolean
  * Resolves an excursion (review.decide) — the review-status flip only; the created QC holds are untouched and stock disposition stays the qc.manage release / stock.adjust verbs
  */
 export const complianceControllerResolveExcursion = <ThrowOnError extends boolean = false>(options: Options<ComplianceControllerResolveExcursionData, ThrowOnError>): RequestResult<ComplianceControllerResolveExcursionResponses, ComplianceControllerResolveExcursionErrors, ThrowOnError> => (options.client ?? client).post<ComplianceControllerResolveExcursionResponses, ComplianceControllerResolveExcursionErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/excursions/{excursionId}/resolve',
     ...options
 });
@@ -936,7 +1254,11 @@ export const complianceControllerResolveExcursion = <ThrowOnError extends boolea
  * READ-ONLY reconstruction from `ledger_events` alone — never from projections, never from the temperature_excursions rows. The join chain: the dispatch events whose reference doc names the order → the pick events with the same orderId → those picks’ batch/serial scopes → each scope’s complete chain (other orders’ picks included — the batch’s history is the batch’s history). STORAGE-CLASS CAVEAT: every chain event is annotated with the bins’ CURRENT storage class. The report never fabricates historical classes it cannot prove; the annotation is honest because the class-edit guards refuse a change that would strand stock (temperature classes may only have moved colder for bins that held stock). Excursion correlation is dwell-window based, from the ledger alone: an excursion.recorded event attaches to a scope when its skuId matches the line, its reference doc’s binId is a bin on that scope’s chain, and its business time falls inside that bin’s dwell window — [first arrival, last departure], open-ended when the scope was still there at pick time. An excursion recorded before arrival or after departure does not appear.
  */
 export const complianceControllerGetOrderColdChainTrace = <ThrowOnError extends boolean = false>(options: Options<ComplianceControllerGetOrderColdChainTraceData, ThrowOnError>): RequestResult<ComplianceControllerGetOrderColdChainTraceResponses, ComplianceControllerGetOrderColdChainTraceErrors, ThrowOnError> => (options.client ?? client).get<ComplianceControllerGetOrderColdChainTraceResponses, ComplianceControllerGetOrderColdChainTraceErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/cold-chain/orders/{orderId}',
     ...options
 });

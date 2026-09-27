@@ -2171,6 +2171,10 @@ export type CatalogSnapshotSkuDto = {
      * Story 11.7: the attached product's declared variant axes, in declaration order — the order a variant label is read in. Null when the SKU is unattached.
      */
     axes: Array<string> | null;
+    /**
+     * Story 12.8 (UX-DR29): the SKU's storage class (defaults to `ambient`). It rides the snapshot beside the bin arm's class so the device's offline conformance mirror can refuse a non-conforming placement or draw in the Rejected banner — a refusal only the server knew about would queue in a dead zone and come back hours later as a rejection the operator can no longer act on.
+     */
+    storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
 };
 
 export type CatalogSnapshotPoDto = {
@@ -2205,6 +2209,10 @@ export type PutawayBinDto = {
      * System bins (Receiving/QC-hold) are never placement targets
      */
     systemOwned: boolean;
+    /**
+     * Story 12.8 (UX-DR29): the bin's storage class (defaults to `ambient`). It rides the snapshot beside the SKU arm's class (the catalog snapshot) so the device's offline conformance mirror can refuse a non-conforming placement in the Rejected banner — before anything queues.
+     */
+    storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
 };
 
 export type SuggestedBinDto = {
@@ -6913,11 +6921,11 @@ export type ComplianceControllerRecordExcursionErrors = {
      */
     400: ProblemDetailsDto;
     /**
-     * Missing or invalid session token
+     * Missing or invalid session token of either family (unauthenticated), or a device token without a badge-in session — the device arm is badge-in required (unauthenticated)
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied), the caller lacks excursion.record (role-denied), or the bin is secure/cage-class and the caller — an operator recording from the floor — lacks secure.move (role-denied from the hold core; held units leave the origin bin, FR-42)
+     * Session belongs to another tenant (permission-denied), the caller lacks excursion.record (role-denied), an unknown or revoked device on the device arm (device-revoked), or the bin is secure/cage-class and the caller — an operator recording from the floor — lacks secure.move (role-denied from the hold core; held units leave the origin bin, FR-42)
      */
     403: ProblemDetailsDto;
     /**
