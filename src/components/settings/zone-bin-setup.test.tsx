@@ -44,12 +44,16 @@ interface Recorded {
   readonly method: string;
   readonly pathname: string;
   readonly body: unknown;
+  readonly headers: Record<string, string>;
 }
 
 let requests: Recorded[] = [];
 /** The next merge answer, so a test can force the occupancy refusal. */
 let nextMergeStatus = 200;
 let nextMergeBody: unknown = null;
+/** The next bin-PATCH answer, so a class test can force the 409 refusal. */
+let nextPatchStatus = 200;
+let nextPatchBody: unknown = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -81,13 +85,26 @@ function stubRouter(): void {
     const url = new URL(request.url);
     const { pathname } = url;
     const method = request.method.toUpperCase();
+    const headers = Object.fromEntries(request.headers.entries());
     let body: unknown = null;
     try {
       body = await request.json();
     } catch {
       body = null;
     }
-    requests.push({ method, pathname, body });
+    requests.push({ method, pathname, body, headers });
+    if (method === 'PATCH' && /\/bins\/[^/]+$/.test(pathname)) {
+      if (nextPatchStatus !== 200) {
+        const refusal = nextPatchBody;
+        nextPatchStatus = 200;
+        nextPatchBody = null;
+        return json(409, refusal);
+      }
+      // The echo carries the SAVED class — the reload must show the bin as
+      // the server now stores it.
+      const over = (body !== null && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+      return json(200, bin(over));
+    }
     if (method === 'GET' && pathname.endsWith('/warehouses')) {
       return json(200, {
         items: [{ id: WAREHOUSE_ID, code: 'W1', name: 'Main', origin: {}, createdAt: '2026-09-01T00:00:00.000Z' }],
@@ -123,6 +140,8 @@ beforeEach(() => {
   requests = [];
   nextMergeStatus = 200;
   nextMergeBody = null;
+  nextPatchStatus = 200;
+  nextPatchBody = null;
   stubRouter();
   writeSession(SESSION);
 });
@@ -269,5 +288,134 @@ describe('ZonesBinsSetup: the 12-4 location types', () => {
     const alert = view.container.querySelector('[role="alert"]');
     expect(alert).not.toBeNull();
     expect(alert!.textContent).toContain('A bulk asset holds exactly one SKU');
+  });
+});
+
+/**
+ * The bin storage-class edit (story 12-7). The claims a `src/lib` test
+ * cannot make:
+ *   1. the Edit-class affordance on a live bin PATCHes the structure arm
+ *      with `{ storageClass }` ONLY (mutually exclusive with `blocked`) and
+ *      carries its per-click ULID Idempotency-Key,
+ *   2. the saved banner speaks from the RESPONSE ("A-01-01 storage class set
+ *      to chilled") and the editor closes,
+ *   3. a stranding change refused 409 `storage-class-conflict` renders the
+ *      server's detail VERBATIM and the editor STAYS OPEN so another class
+ *      can be picked.
+ */
+describe('ZonesBinsSetup: the storage-class edit (story 12-7)', () => {
+  function setSelect(select: HTMLSelectElement, value: string): void {
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+      setter.call(select, value);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  async function openClassEditor(): Promise<void> {
+    const row = [...view!.container.querySelectorAll('tbody tr')].find((tr) =>
+      tr.textContent!.includes('A-01-01'),
+    )!;
+    const edit = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Edit class');
+    expect(edit).toBeDefined();
+    act(() => edit!.click());
+    await settle();
+  }
+
+  function editorSelect(container: HTMLElement): HTMLSelectElement {
+    // Anchor on the Save button, then the panel div that owns it — matching
+    // on the panel's prose alone also matches the outer wrapper.
+    const save = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Save class');
+    expect(save).toBeDefined();
+    return save!.closest('div')!.querySelector('select')!;
+  }
+
+  test('the edit PATCHes the structure arm with the class only, and the saved banner names the response', async () => {
+    view = await mount();
+    await openClassEditor();
+
+    // The editor opens prefilled from the row's current class.
+    const select = editorSelect(view.container);
+    expect(select.value).toBe('ambient');
+    setSelect(select, 'chilled');
+
+    const save = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Save class')!;
+    act(() => save.click());
+    await settle();
+
+    const patch = requests.find((r) => r.method === 'PATCH' && /\/bins\/[^/]+$/.test(r.pathname));
+    expect(patch).toBeDefined();
+    expect(patch!.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/warehouses/${WAREHOUSE_ID}/bins/${SHELF_ID}`);
+    // The structure arm carries the class ONLY — never blocked alongside.
+    expect(patch!.body).toEqual({ storageClass: 'chilled' });
+    const headerKeys = Object.keys(patch!.headers).map((k) => k.toLowerCase());
+    expect(headerKeys).toContain('idempotency-key');
+    // The banner speaks from the RESPONSE, and the editor closed.
+    expect(view.container.textContent).toContain('A-01-01 storage class set to chilled');
+    expect(view.container.textContent).not.toContain('Editing the storage class of');
+  });
+
+  test('a stranding class change renders the server detail verbatim and the editor stays open', async () => {
+    view = await mount();
+    await openClassEditor();
+
+    nextPatchStatus = 409;
+    nextPatchBody = {
+      code: 'storage-class-conflict',
+      title: 'Storage class change would strand stock',
+      status: 409,
+      detail: 'Bin A-01-01 holds 3 units of SPICE-01 whose SKU is not chilled-compatible — relocate them first.',
+    };
+    const select = editorSelect(view.container);
+    setSelect(select, 'chilled');
+    const save = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Save class')!;
+    act(() => save.click());
+    await settle();
+
+    const alert = view.container.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert!.textContent).toContain('Not updated');
+    expect(alert!.textContent).toContain('Bin A-01-01 holds 3 units of SPICE-01');
+    // The editor STAYS open — the viewer picks another class or cancels.
+    expect(view.container.textContent).toContain('Editing the storage class of');
+  });
+});
+
+/**
+ * The Edit-class affordance's gating and the post-save reload (triage row
+ * 15 / finding 15): the BE gates the structure arm on `bin.create`, the FE
+ * mirrors that decision by HIDING the affordance from roles without it
+ * (hide surfaces, never "blocked" screens), and a successful save reloads
+ * the bins list so the table shows the server's answer.
+ */
+describe('ZonesBinsSetup: the Edit-class gating and reload (triage row 15)', () => {
+  test('an operator (no bin.create) sees the rows and NO Edit-class affordance', async () => {
+    writeSession({ ...SESSION, user: { id: 'u-1', email: 'priya@example.com', role: 'operator', status: 'active' } });
+    view = await mount();
+
+    const row = [...view.container.querySelectorAll('tbody tr')].find((tr) => tr.textContent!.includes('A-01-01'))!;
+    expect(row).toBeDefined();
+    expect([...row.querySelectorAll('button')].some((b) => b.textContent === 'Edit class')).toBe(false);
+    // No editor can open — there is no Save-class button anywhere either.
+    expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Save class')).toBe(false);
+  });
+
+  test('a successful class save reloads the bins list — the table shows the server answer', async () => {
+    view = await mount();
+    const binsGetsBefore = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/bins')).length;
+
+    const row = [...view.container.querySelectorAll('tbody tr')].find((tr) => tr.textContent!.includes('A-01-01'))!;
+    const edit = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Edit class')!;
+    act(() => edit.click());
+    await settle();
+    const save = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Save class')!;
+    act(() => save.click());
+    await settle();
+
+    expect(requests.find((r) => r.method === 'PATCH' && /\/bins\/[^/]+$/.test(r.pathname))).toBeDefined();
+    const binsGetsAfter = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/bins')).length;
+    expect(binsGetsAfter).toBeGreaterThan(binsGetsBefore);
+    // The editor closed on success.
+    expect(view.container.textContent).not.toContain('Editing the storage class of');
   });
 });

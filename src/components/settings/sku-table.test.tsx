@@ -33,10 +33,14 @@ interface Recorded {
   readonly method: string;
   readonly pathname: string;
   readonly body: unknown;
+  readonly headers: Record<string, string>;
 }
 
 let requests: Recorded[] = [];
 let skuRows: unknown[] = [];
+/** The next SKU PATCH answer, so a class test can force the 409 refusal. */
+let nextPatchStatus = 200;
+let nextPatchBody: unknown = null;
 /** The kits-list join — keyed by `skuId` on the wire, list-shaped here. */
 let kitRows: Record<string, unknown>[] = [];
 /** Forces the next kit create to 409 `kit-already-composed` (the race arm). */
@@ -74,6 +78,10 @@ function sku(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     reorderQty: 100,
     barcode: 'BC-SPICE-01',
     uomConversions: [],
+    // Story 12-7 — the class fields every response carries (storage required
+    // since 12-1, hazard nullable since 12-2).
+    storageClass: 'ambient',
+    hazardClass: null,
     createdAt: '2026-09-01T00:00:00.000Z',
     ...overrides,
   };
@@ -101,15 +109,25 @@ function stubRouter(): void {
     const url = new URL(request.url);
     const { pathname } = url;
     const method = request.method.toUpperCase();
+    const headers = Object.fromEntries(request.headers.entries());
     let body: unknown = null;
     try {
       body = await request.json();
     } catch {
       body = null;
     }
-    requests.push({ method, pathname, body });
+    requests.push({ method, pathname, body, headers });
     if (method === 'PATCH' && /\/catalog\/skus\/[^/]+$/.test(pathname)) {
-      return json(200, sku());
+      if (nextPatchStatus !== 200) {
+        const refusal = nextPatchBody;
+        nextPatchStatus = 200;
+        nextPatchBody = null;
+        return json(409, refusal);
+      }
+      // The echo carries the SAVED class fields — the reload must show the
+      // row as the server now stores it, not the pre-edit fixture.
+      const over = (body !== null && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+      return json(200, sku(over));
     }
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       return json(200, { items: skuRows, nextCursor: null });
@@ -165,6 +183,8 @@ beforeEach(() => {
   requests = [];
   forceKitConflict = false;
   kitsFail = false;
+  nextPatchStatus = 200;
+  nextPatchBody = null;
   skuRows = [
     sku(),
     sku({
@@ -538,5 +558,210 @@ describe('SkuTable: the kit marker and kit forms (story 11-6)', () => {
     // renders (mapped from the original 409), the submission never vanishes.
     expect(view.container.textContent).toContain('Not saved');
     expect(view.container.textContent).toContain('This SKU is already a kit.');
+  });
+});
+
+/**
+ * The class admin surface (story 12-7). The claims a `src/lib` test cannot
+ * make:
+ *   1. the Storage and Hazard columns render between Tracking and Barcode,
+ *      the null hazard as the no-rule dash,
+ *   2. the edit form's class pickers ride the SAME PATCH carrying ONLY the
+ *      changed class — an untouched class never appears in the body (the
+ *      idempotency-hash concern), and the hazard picker's "No rule" pick is
+ *      the clear verb (null on the wire),
+ *   3. a class change refused 409 `storage-class-conflict` renders the
+ *      server's detail naming the stranded parties VERBATIM.
+ */
+describe('SkuTable: the class columns and class edit (story 12-7)', () => {
+  function setSelect(select: HTMLSelectElement, value: string): void {
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+      setter.call(select, value);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  /** The edit form's class select, resolved through its label text. */
+  function classSelect(container: HTMLElement, label: string): HTMLSelectElement {
+    const labelEl = [...container.querySelectorAll('form label')].find((l) =>
+      l.textContent!.includes(label),
+    )!;
+    expect(labelEl).toBeDefined();
+    return labelEl.querySelector('select')!;
+  }
+
+  test('the Storage and Hazard columns render between Tracking and Barcode, null hazard as the dash', async () => {
+    skuRows = [
+      sku(),
+      sku({ id: 'sku-2', code: 'CLASS-01', name: 'Cold & flammable', storageClass: 'chilled', hazardClass: 'flammable' }),
+    ];
+    view = await mount();
+
+    const headers = [...view.container.querySelectorAll('thead th')].map((th) => th.textContent);
+    expect(headers.indexOf('Storage')).toBe(headers.indexOf('Tracking') + 1);
+    expect(headers.indexOf('Hazard')).toBe(headers.indexOf('Storage') + 1);
+    expect(headers.indexOf('Barcode')).toBe(headers.indexOf('Hazard') + 1);
+
+    const classed = [...view.container.querySelectorAll('tbody tr')].find((r) =>
+      r.textContent!.includes('CLASS-01'),
+    )!;
+    expect(classed.textContent).toContain('chilled');
+    expect(classed.textContent).toContain('flammable');
+    // The plain row's null hazard is the no-rule dash — never an empty cell.
+    const plain = [...view.container.querySelectorAll('tbody tr')].find((r) =>
+      r.textContent!.includes('SPICE-01'),
+    )!;
+    expect(plain.textContent).toContain('ambient');
+    expect(plain.textContent).toContain('—');
+  });
+
+  test('changing only the storage class sends storageClass and no hazardClass key', async () => {
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit');
+    act(() => edit!.click());
+    await settle();
+
+    const storage = classSelect(view.container, 'Storage class');
+    setSelect(storage, 'chilled');
+    submitForm(view.container);
+    await settle();
+
+    const patch = requests.find((r) => r.method === 'PATCH');
+    expect(patch).toBeDefined();
+    expect((patch!.body as Record<string, unknown>).storageClass).toBe('chilled');
+    // An untouched class never rides the PATCH — the idempotency hash of a
+    // name-only edit must not move because a picker rendered.
+    expect(patch!.body).not.toHaveProperty('hazardClass');
+    // The per-click ULID Idempotency-Key rides the header (happy-dom keeps
+    // the header's original case, unlike undici's lowercasing).
+    const headerKeys = Object.keys(patch!.headers).map((k) => k.toLowerCase());
+    expect(headerKeys).toContain('idempotency-key');
+  });
+
+  test('picking "No rule" on a classed SKU sends hazardClass null (the clear verb)', async () => {
+    skuRows = [sku({ hazardClass: 'flammable' })];
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit');
+    act(() => edit!.click());
+    await settle();
+
+    const hazard = classSelect(view.container, 'Hazard class');
+    setSelect(hazard, '');
+    submitForm(view.container);
+    await settle();
+
+    const patch = requests.find((r) => r.method === 'PATCH');
+    expect(patch).toBeDefined();
+    expect((patch!.body as Record<string, unknown>).hazardClass).toBeNull();
+    expect(patch!.body).not.toHaveProperty('storageClass');
+    expect(view.container.textContent).toContain('updated');
+  });
+
+  test('a storage-class change refused with a stranding conflict renders the detail verbatim', async () => {
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit');
+    act(() => edit!.click());
+    await settle();
+
+    nextPatchStatus = 409;
+    nextPatchBody = {
+      code: 'storage-class-conflict',
+      title: 'Storage class change would strand stock',
+      status: 409,
+      detail: 'Bin A-01-01 still holds 5 units of SPICE-01 — relocate or release the stock first.',
+    };
+    const storage = classSelect(view.container, 'Storage class');
+    setSelect(storage, 'frozen');
+    submitForm(view.container);
+    await settle();
+
+    // The refusal names the stranded parties VERBATIM — paraphrasing a list
+    // of stock that must move first would be guessing.
+    expect(view.container.textContent).toContain('Not updated');
+    expect(view.container.textContent).toContain('Bin A-01-01 still holds 5 units of SPICE-01');
+    // The PATCH went out with the new class (the refusal is the server's).
+    expect((requests.find((r) => r.method === 'PATCH')!.body as Record<string, unknown>).storageClass).toBe('frozen');
+  });
+});
+
+/**
+ * The class pickers' vocabulary and the hazard refusal (triage row 18 /
+ * finding 18): the storage picker carries NO clear verb (every SKU has a
+ * class since 12-1 — there is no unclassify), the hazard picker's empty
+ * option is the "No rule" clear verb, and a 409 `hazard-segregation-conflict`
+ * renders the server's detail verbatim at component level (the mapper arm
+ * the lib test pins, proven to be the one the form actually renders).
+ */
+describe('SkuTable: the class pickers and the segregation refusal (triage row 18)', () => {
+  function setSelect(select: HTMLSelectElement, value: string): void {
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+      setter.call(select, value);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  function classSelect(container: HTMLElement, label: string): HTMLSelectElement {
+    const labelEl = [...container.querySelectorAll('form label')].find((l) =>
+      l.textContent!.includes(label),
+    )!;
+    expect(labelEl).toBeDefined();
+    return labelEl.querySelector('select')!;
+  }
+
+  test('the storage picker is exactly the six classes — no clear verb; the hazard picker opens with "No rule"', async () => {
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit');
+    act(() => edit!.click());
+    await settle();
+
+    const storageOptions = [...classSelect(view.container, 'Storage class').querySelectorAll('option')].map(
+      (o) => o.value,
+    );
+    expect(storageOptions).toEqual(['ambient', 'chilled', 'frozen', 'controlled', 'hazardous', 'secure']);
+    // No blank/clear option hides among the classes.
+    expect(storageOptions).not.toContain('');
+
+    const hazardSelect = classSelect(view.container, 'Hazard class');
+    const hazardOptions = [...hazardSelect.querySelectorAll('option')].map((o) => o.value);
+    expect(hazardOptions[0]).toBe('');
+    expect([...hazardSelect.querySelectorAll('option')][0]!.textContent).toBe('No rule');
+    expect(hazardOptions.slice(1)).toEqual([
+      'explosive',
+      'oxidizer',
+      'flammable',
+      'corrosive-acid',
+      'corrosive-base',
+      'toxic',
+      'gas',
+    ]);
+  });
+
+  test('a hazard change refused with hazard-segregation-conflict renders the server detail verbatim', async () => {
+    skuRows = [sku({ hazardClass: 'flammable' })];
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit');
+    act(() => edit!.click());
+    await settle();
+
+    nextPatchStatus = 409;
+    nextPatchBody = {
+      code: 'hazard-segregation-conflict',
+      title: 'Hazard class change would strand stock',
+      status: 409,
+      detail: 'SKU SPICE-01 (oxidizer) cannot sit in bin CH-01 with CLASS-01 (flammable) — relocate one first.',
+    };
+    const hazard = classSelect(view.container, 'Hazard class');
+    setSelect(hazard, 'oxidizer');
+    submitForm(view.container);
+    await settle();
+
+    expect(view.container.textContent).toContain('Not updated');
+    expect(view.container.textContent).toContain(
+      'SKU SPICE-01 (oxidizer) cannot sit in bin CH-01 with CLASS-01 (flammable)',
+    );
+    // The PATCH went out with the new hazard (the refusal is the server's).
+    expect((requests.find((r) => r.method === 'PATCH')!.body as Record<string, unknown>).hazardClass).toBe('oxidizer');
   });
 });

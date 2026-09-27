@@ -65,9 +65,11 @@ export const CAPABILITIES = [
   'dispatch.execute',
   // Story 12-3 — FR-42's authority gate: every ledger movement that touches a
   // secure/cage-class bin additionally requires `secure.move` (owner + Ops
-  // Manager only, the backend's decided matrix). No web surface consumes it
-  // yet — the mirror stays in step with the backend so the drift guard keeps
-  // passing and the 12-7 admin surface lands with the gate ready.
+  // Manager only, the backend's decided matrix). Story 12-7 made the class
+  // itself visible on the web (the bin Edit-class affordance and the
+  // cold-chain trace's per-hop class annotation), but the movement gate still
+  // has no web surface — moves run through the API and mobile. The mirror
+  // stays in step with the backend so the drift guard keeps passing.
   'secure.move',
   // Story 4.6b — the carrier credential vault (connect a carrier account,
   // rotate its material, disconnect it). A settings capability like
@@ -79,9 +81,10 @@ export const CAPABILITIES = [
   // Story 12-5 — the temperature-excursion record (FR-44): Owner + Ops
   // Manager + Operator, mirroring `putaway.execute`'s rationale — recording
   // what the floor observes is a floor verb. It does NOT gate a resolve
-  // (that is `review.decide`'s, unchanged). No web surface consumes it yet;
-  // the mirror stays in step with the backend so the drift guard keeps
-  // passing and the 12-7 review queue lands with the gate ready.
+  // (that is `review.decide`'s, unchanged — the review queue 12-7 added to
+  // /conflicts gates resolve exactly so). Recording itself still has no web
+  // surface — 12-8 owns the mobile capture; the mirror stays in step with the
+  // backend so the drift guard keeps passing.
   'excursion.record',
 ] as const;
 

@@ -1,7 +1,7 @@
-import { OverReceiptQueue } from '@/components/conflicts/over-receipt-queue';
+import { ConflictsQueues } from '@/components/conflicts/queues';
 
 export const metadata = { title: 'Conflicts & Reviews' };
 
 export default function ConflictsPage() {
-  return <OverReceiptQueue />;
+  return <ConflictsQueues />;
 }

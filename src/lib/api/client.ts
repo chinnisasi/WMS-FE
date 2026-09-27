@@ -4,11 +4,15 @@ import {
   catalogControllerCreateProduct,
   catalogControllerEditProduct,
   catalogControllerEditSku,
+  catalogControllerGetSegregationMatrix,
   catalogControllerImportCatalog,
   catalogControllerListKits,
   catalogControllerListProducts,
   catalogControllerListSkus,
   catalogControllerReplaceKit,
+  complianceControllerGetOrderColdChainTrace,
+  complianceControllerListExcursions,
+  complianceControllerResolveExcursion,
   devicesControllerListDevices,
   devicesControllerMintEnrollmentCode,
   devicesControllerRevokeDevice,
@@ -63,12 +67,15 @@ import type {
   BinMergeResponse,
   BinResponse,
   CatalogImportResponse,
+  ColdChainTraceResponse,
   CreateBinDto,
   CreateProductDto,
   CreateWarehouseDto,
   CreateZoneDto,
   DeviceListResponse,
   DeviceResponse,
+  ExcursionListResponse,
+  ExcursionResponse,
   GenerateBinsDto,
   GoodsReceiptListResponse,
   HealthResponse,
@@ -99,6 +106,7 @@ import type {
   PurchaseOrderListResponse,
   PurchaseOrderResponse,
   RegisterTenantDto,
+  SegregationMatrixResponse,
   SetUserRoleDto,
   SetupChecklistResponse,
   SignInDto,
@@ -605,6 +613,23 @@ export async function fetchApiReplaceKit(
     path: { tenantId, skuId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The hazard segregation matrix (story 12-7) — an ungated read (any member)
+ * returning the server's own predicate as data: the class vocabulary plus
+ * every incompatible unordered pair, fully expanded, so the FE renders
+ * `compatible(a, b) = !incompatible.includes(pair)` with zero logic of its
+ * own and nothing hardcoded to drift.
+ */
+export async function fetchApiGetSegregationMatrix(tenantId: string): Promise<SegregationMatrixResponse> {
+  const { data, error } = await catalogControllerGetSegregationMatrix({
+    path: { tenantId },
   });
   if (error || !data) {
     throw unwrapError(error, 400);
@@ -1235,6 +1260,76 @@ export async function fetchApiCancelWave(
   const { data, error } = await outboundControllerCancelWave({
     path: { tenantId, waveId },
     headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The temperature excursion review queue (story 12-5, surfaced by 12-7) —
+ * warehouse- and status-filterable, open to any member. Same query-shape as
+ * the over-receipt queue read: a first page with no filters sends no query.
+ */
+export async function fetchApiListExcursions(
+  tenantId: string,
+  options?: {
+    warehouseId?: string;
+    status?: 'open' | 'resolved';
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<ExcursionListResponse> {
+  const { data, error } = await complianceControllerListExcursions({
+    path: { tenantId },
+    query:
+      options?.warehouseId === undefined &&
+      options?.status === undefined &&
+      options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
+            ...(options.status === undefined ? {} : { status: options.status }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Resolves an excursion (capability `review.decide`) — the review-status flip only. */
+export async function fetchApiResolveExcursion(
+  tenantId: string,
+  excursionId: string,
+  idempotencyKey: string,
+): Promise<ExcursionResponse> {
+  const { data, error } = await complianceControllerResolveExcursion({
+    path: { tenantId, excursionId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * One dispatched order's cold-chain trace (FR-45, story 12-6) — reconstructed
+ * from the ledger alone: per order line, every picked scope's complete
+ * batch/serial chain annotated with each bin's CURRENT storage class, plus
+ * the dwell-window-correlated excursions.
+ */
+export async function fetchApiGetOrderColdChainTrace(
+  tenantId: string,
+  warehouseId: string,
+  orderId: string,
+): Promise<ColdChainTraceResponse> {
+  const { data, error } = await complianceControllerGetOrderColdChainTrace({
+    path: { tenantId, warehouseId, orderId },
   });
   if (error || !data) {
     throw unwrapError(error, 400);

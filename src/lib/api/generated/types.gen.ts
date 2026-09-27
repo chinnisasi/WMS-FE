@@ -495,6 +495,19 @@ export type SkuListResponse = {
     nextCursor: string | null;
 };
 
+export type SegregationPairResponse = {
+    a: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
+    b: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
+};
+
+export type SegregationMatrixResponse = {
+    classes: Array<'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas'>;
+    /**
+     * Every incompatible unordered pair, fully expanded (11 today: the 7 explosive pairs incl. self + the 4 explicit ones)
+     */
+    incompatible: Array<SegregationPairResponse>;
+};
+
 export type CreateProductDto = {
     name: string;
     /**
@@ -3801,6 +3814,37 @@ export type CatalogControllerListSkusResponses = {
 };
 
 export type CatalogControllerListSkusResponse = CatalogControllerListSkusResponses[keyof CatalogControllerListSkusResponses];
+
+export type CatalogControllerGetSegregationMatrixData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/segregation-matrix';
+};
+
+export type CatalogControllerGetSegregationMatrixErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type CatalogControllerGetSegregationMatrixError = CatalogControllerGetSegregationMatrixErrors[keyof CatalogControllerGetSegregationMatrixErrors];
+
+export type CatalogControllerGetSegregationMatrixResponses = {
+    200: SegregationMatrixResponse;
+};
+
+export type CatalogControllerGetSegregationMatrixResponse = CatalogControllerGetSegregationMatrixResponses[keyof CatalogControllerGetSegregationMatrixResponses];
 
 export type CatalogControllerListProductsData = {
     body?: never;

@@ -13,9 +13,10 @@ import {
   fetchApiRetireBin,
   fetchApiSetBinBlocked,
 } from '@/lib/api/client';
-import type { BinResponse, GenerateBinsDto, ZoneResponse } from '@/lib/api/generated';
+import type { BinResponse, GenerateBinsDto, PatchBinDto, ZoneResponse } from '@/lib/api/generated';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { binClassReason, STORAGE_CLASSES } from '@/lib/sku-admin';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
@@ -598,9 +599,13 @@ const binColumns: readonly DataTableColumn<BinResponse>[] = [
   { key: 'code', header: 'Code' },
   { key: 'capacity', header: 'Capacity', numeric: true },
   { key: 'type', header: 'Type' },
+  // Story 12-7 — the bin's storage class (FR-40) becomes a column; the
+  // Edit-class affordance below is its write path (the structure arm).
+  { key: 'storage', header: 'Storage', render: (bin) => bin.storageClass ?? '—' },
 ];
 
-/** The zone→bins table with the block toggle (1.3) and merge/retire (3.6). */
+/** The zone→bins table with the block toggle (1.3), merge/retire (3.6) and
+ * the Edit-class affordance (story 12-7). */
 function ZoneBinsTable({
   tenantId,
   warehouseId,
@@ -624,6 +629,29 @@ function ZoneBinsTable({
 }) {
   const [busyBinId, setBusyBinId] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  // Story 12-7 gating — the Edit-class affordance reads the role SUBSCRIBED
+  // (the sku-table.tsx pattern, not this Settings card's bare readSession()
+  // above): a /me bootstrap role rewrite re-renders the affordance. The
+  // backend per-command role read remains the authority.
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  // The BE gates the structure arm on `bin.create` itself (story 11-5's
+  // OpenAPI 403 arm) — the FE mirrors the server's decision.
+  const canEditClass = roleHasCapability(role, 'bin.create');
+  // The Edit-class flow: the picked bin (null = closed), its picker state,
+  // and a fetch-free inline editor — the PATCH carries `{ storageClass }`
+  // ONLY (the structure arm; dimensions/maxWeight are not this story's).
+  const [classEditingBin, setClassEditingBin] = useState<BinResponse | null>(null);
+  const [classDraft, setClassDraft] = useState<string>(STORAGE_CLASSES[0]);
+  // A pre-render double-click fires both handlers before the disabled state
+  // renders — this synchronous re-entry guard makes the second click a
+  // no-op instead of a NEW command whose fresh Idempotency-Key would append
+  // a second audit row for one intent (the inbound-cards pattern, checked
+  // in both arms).
+  const classEditInFlight = useRef<Set<string>>(new Set());
   // The merge flow: the picked source bin (null = closed). The target picker
   // offers the WAREHOUSE's live bins (any zone), excluding system bins,
   // already-retired bins, and the source itself.
@@ -633,6 +661,41 @@ function ZoneBinsTable({
   // The picker's fetch sequence — a rapid second pick supersedes the first
   // fetch, so a stale response must never win the race into state.
   const mergeFetchSeq = useRef(0);
+
+  /** Story 12-7 — the Edit-class PATCH: the structure arm carries
+   * `{ storageClass }` ONLY. A stranding change is refused 409
+   * `storage-class-conflict` naming the conflicting stock verbatim — the
+   * refusal renders through the lib mapper, and the editor stays open so
+   * the viewer can pick another class (or cancel). */
+  async function applyClassEdit() {
+    const session = readSession();
+    if (session === null || classEditingBin === null) return;
+    if (classEditInFlight.current.has(classEditingBin.id)) return;
+    classEditInFlight.current.add(classEditingBin.id);
+    setBusyBinId(classEditingBin.id);
+    setOutcome(null);
+    try {
+      const updated = await fetchApiSetBinBlocked(
+        tenantId,
+        warehouseId,
+        classEditingBin.id,
+        { storageClass: classDraft as PatchBinDto['storageClass'] },
+        ulid(),
+      );
+      setOutcome({
+        tone: 'accepted',
+        word: `${updated.code} storage class set to ${updated.storageClass}`,
+        reason: 'The class gates putaway suggestions immediately; stock already inside stays put.',
+      });
+      setClassEditingBin(null);
+      bins?.reload();
+    } catch (error) {
+      setOutcome({ tone: 'rejected', word: 'Not updated', reason: binClassReason(error) });
+    } finally {
+      classEditInFlight.current.delete(classEditingBin.id);
+      setBusyBinId(null);
+    }
+  }
 
   async function toggleBlocked(bin: BinResponse) {
     const session = readSession();
@@ -751,7 +814,7 @@ function ZoneBinsTable({
     })();
   }
 
-  const canOperate = canBlockBin || canRetireBin;
+  const canOperate = canBlockBin || canRetireBin || canEditClass;
   const columns: readonly DataTableColumn<BinResponse>[] = [
     ...binColumns,
     {
@@ -814,6 +877,23 @@ function ZoneBinsTable({
                       </button>
                     </>
                   )}
+                  {/* Story 12-7 — the class admin's bin write path. Live,
+                      non-system bins only (the same `inert` rule as the
+                      sibling actions; the backend refuses anyway). */}
+                  {canEditClass && (
+                    <button
+                      type="button"
+                      disabled={inert || busyBinId === bin.id}
+                      onClick={() => {
+                        setClassEditingBin(bin);
+                        setClassDraft(bin.storageClass);
+                        setOutcome(null);
+                      }}
+                      className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
+                    >
+                      Edit class
+                    </button>
+                  )}
                 </div>
               );
             },
@@ -825,6 +905,43 @@ function ZoneBinsTable({
   return (
     <div className="flex flex-col gap-2">
       <ZonePicker zones={zones} value={selectedZoneId} onChange={(id) => onSelectZone(id)} label="Zone bins" />
+      {classEditingBin !== null && (
+        <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
+          <div className="text-xs text-(--muted-foreground)">
+            Editing the storage class of <span className="font-mono">{classEditingBin.code}</span> —
+            the class gates what putaway will suggest here. A change that would strand stock
+            already inside is refused and names it.
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <select
+              className={selectClass}
+              value={classDraft}
+              onChange={(e) => setClassDraft(e.target.value)}
+            >
+              {STORAGE_CLASSES.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={busyBinId === classEditingBin.id}
+              onClick={() => applyClassEdit()}
+              className="self-end rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
+            >
+              {busyBinId === classEditingBin.id ? 'Saving…' : 'Save class'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setClassEditingBin(null)}
+              className="self-end rounded-sm border border-(--border) px-3 py-2 text-sm hover:bg-(--muted)"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {mergeSource !== null && (
         <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
           <div className="text-xs text-(--muted-foreground)">

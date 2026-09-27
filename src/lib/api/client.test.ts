@@ -15,8 +15,11 @@ import {
   fetchApiEditSku,
   fetchApiGenerateWave,
   fetchApiGetOrder,
+  fetchApiGetOrderColdChainTrace,
+  fetchApiGetSegregationMatrix,
   fetchApiGetWave,
   fetchApiInviteUser,
+  fetchApiListExcursions,
   fetchApiListKits,
   fetchApiListOrders,
   fetchApiListProducts,
@@ -27,6 +30,7 @@ import {
   fetchApiRegisterTenant,
   fetchApiReleaseWave,
   fetchApiReplaceKit,
+  fetchApiResolveExcursion,
   refreshSessionUser,
 } from './client';
 import { SESSION_STORAGE_KEY, writeSession, clearSession } from '../auth';
@@ -792,6 +796,128 @@ describe('catalog product and kit wrappers (story 11-6)', () => {
       expect(error).toBeInstanceOf(ApiProblem);
       expect((error as ApiProblem).code).toBe('kit-already-composed');
       expect((error as ApiProblem).status).toBe(409);
+    }
+    clearSession();
+  });
+});
+
+/**
+ * Story 12-7 — the storage/segregation admin and cold-chain trace wrappers.
+ * The assertions a component can never make: the exact paths (the matrix is
+ * catalog-scoped, the trace is warehouse-scoped under compliance), the
+ * excursion list's filter query (and the empty first page that sends no
+ * query at all), the resolve POST's required header and its NO-body contract,
+ * and that a read wrapper stays a GET with no Idempotency-Key.
+ */
+describe('compliance and segregation wrappers (story 12-7)', () => {
+  const WAREHOUSE_ID = '0198f7a2-1b3c-7d4e-8f90-99aabbccddee';
+  const EXCURSION_ID = '0198f7a2-1b3c-7d4e-8f90-3344556677aa';
+  const ORDER_ID = '0198f7a2-1b3c-7d4e-8f90-0011223344ff';
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+
+  test('the segregation matrix read hits the tenant-scoped catalog path with no query', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { classes: ['explosive'], incompatible: [] });
+    const matrix = await fetchApiGetSegregationMatrix(SESSION.tenant.id);
+    expect(matrix).toEqual({ classes: ['explosive'], incompatible: [] });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/catalog/segregation-matrix`);
+    expect(url.search).toBe('');
+    expect(lastRequest!.method).toBe('GET');
+    // An ungated read — no idempotency key rides a GET.
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    clearSession();
+  });
+
+  test('the excursion list sends its warehouse/status/cursor filters as the query', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListExcursions(SESSION.tenant.id, {
+      warehouseId: WAREHOUSE_ID,
+      status: 'open',
+      cursor: 'opaque-cursor',
+    });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/excursions`);
+    expect(url.searchParams.get('warehouseId')).toBe(WAREHOUSE_ID);
+    expect(url.searchParams.get('status')).toBe('open');
+    expect(url.searchParams.get('cursor')).toBe('opaque-cursor');
+    expect(lastRequest!.method).toBe('GET');
+    clearSession();
+  });
+
+  test('the excursion list sends no query on a first page with no filters', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListExcursions(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    clearSession();
+  });
+
+  test('resolve POSTs the excursion-scoped path with the Idempotency-Key and no body', async () => {
+    writeSession(SESSION);
+    stubFetch(200, {
+      excursion: {
+        id: EXCURSION_ID,
+        tenantId: SESSION.tenant.id,
+        warehouseId: WAREHOUSE_ID,
+        binId: 'bin-1',
+        readingC: 9.5,
+        note: null,
+        holdIds: [],
+        status: 'resolved',
+        recordedBy: 'user-1',
+        occurredAt: '2026-09-20T00:00:00.000Z',
+        resolvedBy: 'user-2',
+        resolvedAt: '2026-09-21T00:00:00.000Z',
+        createdAt: '2026-09-20T00:00:00.000Z',
+      },
+    });
+    const resolved = await fetchApiResolveExcursion(SESSION.tenant.id, EXCURSION_ID, KEY);
+    expect(resolved.excursion.status).toBe('resolved');
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/excursions/${EXCURSION_ID}/resolve`,
+    );
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    // The endpoint declares no body — sending one would be a contract drift
+    // (the release-wave precedent).
+    expect(await lastRequest!.text()).toBe('');
+    clearSession();
+  });
+
+  test('the cold-chain trace read hits the warehouse-scoped compliance path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { order: { id: ORDER_ID, status: 'dispatched', carrierName: null, trackingNumber: null, dispatchedAt: '2026-09-20T00:00:00.000Z' }, bins: [], lines: [] });
+    const trace = await fetchApiGetOrderColdChainTrace(SESSION.tenant.id, WAREHOUSE_ID, ORDER_ID);
+    expect(trace.order.id).toBe(ORDER_ID);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/warehouses/${WAREHOUSE_ID}/cold-chain/orders/${ORDER_ID}`,
+    );
+    expect(url.search).toBe('');
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    clearSession();
+  });
+
+  test('a 409 excursion-resolved refusal keeps the machine-readable code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, {
+      code: 'excursion-resolved',
+      title: 'Already resolved',
+      status: 409,
+      detail: 'This excursion was resolved at 2026-09-21T00:00:00.000Z.',
+    });
+    try {
+      await fetchApiResolveExcursion(SESSION.tenant.id, EXCURSION_ID, KEY);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiProblem);
+      expect((error as ApiProblem).code).toBe('excursion-resolved');
+      expect((error as ApiProblem).status).toBe(409);
+      expect((error as ApiProblem).detail).toContain('resolved');
     }
     clearSession();
   });
