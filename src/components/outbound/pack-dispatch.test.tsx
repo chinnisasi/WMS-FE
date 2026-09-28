@@ -551,6 +551,46 @@ describe('the pack bench', () => {
     );
   });
 
+  test('a pack whose first attempt dies mid-flight replays the SAME key and renders the slip', async () => {
+    // The request never answered — the server may or may not have committed.
+    let packAttempt = 0;
+    packResponder = () => {
+      packAttempt += 1;
+      if (packAttempt === 1) throw new Error('Failed to fetch');
+      orderStatuses['order-1'] = 'ready_to_dispatch';
+      return { status: 201, body: { pack: packedFixture('order-1') } };
+    };
+    view = await mount('operator');
+    await expand(view, 'order-1');
+
+    await pressButton(view, 'Pack this order');
+    await settle();
+
+    // The transport-shaped refusal renders, and nothing optimistic happened:
+    // the row still reads accepted and no slip exists.
+    expect(text(view)).toContain('The API is unreachable — is wms-be running?');
+    expect(text(view)).toContain('Accepted');
+    expect(text(view)).not.toContain('Packing slip');
+
+    // The retry of the UNEDITED draft re-sends the same body — the server
+    // answers 201 with the committed pack, and the slip renders from that
+    // replay's response.
+    await pressButton(view, 'Pack this order');
+    await settle();
+
+    const posts = mutations();
+    expect(posts).toHaveLength(2);
+    expect(posts[0]!.idempotencyKey).not.toBeNull();
+    expect(posts[1]!.idempotencyKey).toBe(posts[0]!.idempotencyKey);
+    expect(posts[1]!.body).toEqual(posts[0]!.body);
+
+    const body = text(view);
+    expect(body).toContain('Packing slip');
+    expect(body).toContain('7.000 kg in the parcel');
+    expect(body).toContain('Order packed');
+    expect(body).toContain('Ready to dispatch');
+  });
+
   test('an edited draft mints a fresh idempotency key', async () => {
     packResponder = () => ({
       status: 422,
