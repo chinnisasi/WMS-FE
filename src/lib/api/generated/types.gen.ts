@@ -1611,6 +1611,76 @@ export type DispatchResponse = {
     dispatch: DispatchDto;
 };
 
+export type LabelOrderDto = {
+    /**
+     * The carrier connection (this tenant’s) the label generates through. A foreign tenant’s connection id is a 404.
+     */
+    carrierConnectionId: string;
+    /**
+     * Optional parcel weight in grams, same bounds as pack. Absence is never an error.
+     */
+    weightGrams?: number | null;
+    /**
+     * Optional parcel dimensions in millimetres — all three sides together, or the object omitted.
+     */
+    dimensionsMm?: PackDimensionsDto | null;
+};
+
+export type ShipmentDto = {
+    id: string;
+    orderId: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * labelled or manifested
+     */
+    status: 'labelled' | 'manifested';
+    /**
+     * The connection the label generated through
+     */
+    carrierConnectionId: string;
+    /**
+     * The adapter code at label time
+     */
+    carrierCode: string;
+    /**
+     * The registry display name resolved at label time
+     */
+    carrierName: string;
+    /**
+     * The adapter-issued tracking number — what dispatch auto-stamps
+     */
+    trackingNumber: string;
+    /**
+     * The adapter’s opaque handle for the label document — never the bytes
+     */
+    labelDocumentRef: string;
+    /**
+     * Parcel weight in grams; null when unmeasured
+     */
+    weightGrams: number | null;
+    /**
+     * Parcel dimensions; null when unmeasured
+     */
+    dimensionsMm: PackDimensionsDto | null;
+    /**
+     * The operator who labelled it
+     */
+    labelledBy: string;
+    /**
+     * ISO-8601 UTC label time
+     */
+    labelledAt: string;
+    /**
+     * The manifest the shipment closed onto; null while labelled
+     */
+    manifestId: string | null;
+};
+
+export type ShipmentResponse = {
+    shipment: ShipmentDto;
+};
+
 export type OrderEntryDto = {
     id: string;
     tenantId: string;
@@ -1636,6 +1706,55 @@ export type OrderEntryDto = {
 export type OrderListResponse = {
     items: Array<OrderEntryDto>;
     nextCursor?: string | null;
+};
+
+export type CreateManifestDto = {
+    /**
+     * The labelled shipments to close (≥ 1, at most 500; duplicates collapse).
+     */
+    shipmentIds: Array<string>;
+};
+
+export type ManifestDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * The ONE connection every closed shipment labelled through
+     */
+    carrierConnectionId: string;
+    /**
+     * The adapter code at manifest time
+     */
+    carrierCode: string;
+    /**
+     * How many shipments the manifest closed
+     */
+    shipmentCount: number;
+    /**
+     * The operator who created it
+     */
+    createdBy: string;
+    /**
+     * ISO-8601 UTC manifest time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC manifest time
+     */
+    updatedAt: string;
+};
+
+export type ManifestResponse = {
+    manifest: ManifestDto;
+};
+
+export type ManifestListResponse = {
+    items: Array<ManifestDto>;
+    /**
+     * Opaque keyset cursor; null when exhausted
+     */
+    nextCursor: string | null;
 };
 
 export type CreateWavePolicyDto = {
@@ -5410,6 +5529,114 @@ export type OutboundControllerDispatchOrderResponses = {
 
 export type OutboundControllerDispatchOrderResponse = OutboundControllerDispatchOrderResponses[keyof OutboundControllerDispatchOrderResponses];
 
+export type OutboundControllerLabelOrderData = {
+    body: LabelOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/label';
+};
+
+export type OutboundControllerLabelOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter, a non-uuid connection id, or an out-of-bounds weight/dimension (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order, or the carrier connection, does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not packable-state (it does not read ready_to_dispatch — conflict naming the status), or it already has a labelled or manifested shipment (conflict), or a concurrent idempotent request (conflict). Nothing is written
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The connection’s carrier has no label transport on this deployment — the DIRECT carriers’ typed, retryable refusal (carrier-transport-unconfigured). Nothing is written
+     */
+    501: ProblemDetailsDto;
+    /**
+     * CARRIER_ENCRYPTION_KEY is missing (carrier-encryption-unavailable) or the stored credential does not open under it (carrier-credential-unreadable — rotate the connection). Nothing is written
+     */
+    503: ProblemDetailsDto;
+};
+
+export type OutboundControllerLabelOrderError = OutboundControllerLabelOrderErrors[keyof OutboundControllerLabelOrderErrors];
+
+export type OutboundControllerLabelOrderResponses = {
+    /**
+     * The shipment: the adapter tracking number and label document reference with the connection it generated through and the optional parcel measurements (the idempotency snapshot — a replay re-serves it, nothing re-labels)
+     */
+    201: ShipmentResponse;
+};
+
+export type OutboundControllerLabelOrderResponse = OutboundControllerLabelOrderResponses[keyof OutboundControllerLabelOrderResponses];
+
+export type OutboundControllerGetShipmentData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/shipment';
+};
+
+export type OutboundControllerGetShipmentErrors = {
+    /**
+     * Malformed orderId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No order with this id — or no shipment for it — exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerGetShipmentError = OutboundControllerGetShipmentErrors[keyof OutboundControllerGetShipmentErrors];
+
+export type OutboundControllerGetShipmentResponses = {
+    /**
+     * The order’s shipment record
+     */
+    200: ShipmentResponse;
+};
+
+export type OutboundControllerGetShipmentResponse = OutboundControllerGetShipmentResponses[keyof OutboundControllerGetShipmentResponses];
+
 export type OutboundControllerGetOrderData = {
     body?: never;
     path: {
@@ -5501,6 +5728,112 @@ export type OutboundControllerListOrdersResponses = {
 };
 
 export type OutboundControllerListOrdersResponse = OutboundControllerListOrdersResponses[keyof OutboundControllerListOrdersResponses];
+
+export type OutboundControllerListManifestsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/manifests';
+};
+
+export type OutboundControllerListManifestsErrors = {
+    /**
+     * Malformed cursor or out-of-range limit (invalid-cursor / validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerListManifestsError = OutboundControllerListManifestsErrors[keyof OutboundControllerListManifestsErrors];
+
+export type OutboundControllerListManifestsResponses = {
+    /**
+     * The warehouse's manifest page (header rows — the shipments point back through their manifestId)
+     */
+    200: ManifestListResponse;
+};
+
+export type OutboundControllerListManifestsResponse = OutboundControllerListManifestsResponses[keyof OutboundControllerListManifestsResponses];
+
+export type OutboundControllerCreateManifestData = {
+    body: CreateManifestDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/manifests';
+};
+
+export type OutboundControllerCreateManifestErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter, or an invalid shipmentIds array (empty, over 500, or a non-uuid member) (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The named shipments do not exist in this tenant, belong to another warehouse, are not in the labelled state, or span carrier connections — the problem names the offender(s) (conflict). Nothing is written. Also: a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerCreateManifestError = OutboundControllerCreateManifestErrors[keyof OutboundControllerCreateManifestErrors];
+
+export type OutboundControllerCreateManifestResponses = {
+    /**
+     * The manifest: the connection it closed shipments for and the count (the idempotency snapshot — a replay re-serves it)
+     */
+    201: ManifestResponse;
+};
+
+export type OutboundControllerCreateManifestResponse = OutboundControllerCreateManifestResponses[keyof OutboundControllerCreateManifestResponses];
 
 export type OutboundControllerCreateWavePolicyData = {
     body: CreateWavePolicyDto;

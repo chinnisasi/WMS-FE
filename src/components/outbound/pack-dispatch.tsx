@@ -1,12 +1,28 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { fetchApiDispatchOrder, fetchApiPackOrder } from '@/lib/api/client';
-import type { DispatchDto, OrderEntryDto, OrderLineDto, PackDto, SkuResponse } from '@/lib/api/generated';
-import { quantityInputLabel, quantityLabel, sharedQuantityUom } from '@/lib/format-quantity';
-import { notifyOutboundChanged } from '@/lib/outbound';
 import {
+  fetchApiCreateManifest,
+  fetchApiDispatchOrder,
+  fetchApiGetShipment,
+  fetchApiLabelOrder,
+  fetchApiPackOrder,
+} from '@/lib/api/client';
+import type {
+  DispatchDto,
+  ManifestDto,
+  OrderEntryDto,
+  OrderLineDto,
+  PackDto,
+  ShipmentDto,
+  SkuResponse,
+} from '@/lib/api/generated';
+import { quantityInputLabel, quantityLabel, sharedQuantityUom } from '@/lib/format-quantity';
+import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
+import {
+  canLabelOrder,
+  connectionOptionLabel,
   DISPATCH_TERMINAL_WARNING,
   dispatchOutcome,
   dispatchReason,
@@ -15,18 +31,26 @@ import {
   EMPTY_MEASUREMENTS,
   isPipelineStatus,
   PIPELINE_STATUSES,
+  labelReason,
+  MANIFEST_TERMINAL_WARNING,
+  manifestOutcome,
+  manifestReason,
+  parseDispatchDraft,
+  parseLabelDraft,
+  parseManifestDraft,
   packOutcome,
   packReason,
   packedLineLabel,
   packScanDraftFromLines,
   parcelMeasurementLabel,
-  parseDispatchDraft,
   parsePackDraft,
+  shipmentRecordLabel,
   type PackMeasurements,
   type PackScanDraftLine,
   type PipelineStatus,
 } from '@/lib/outbound-pack-dispatch';
-import { filterPage, lineQuantityLabel, orderStatusLabel, pageFilterCount } from '@/lib/outbound-orders';
+import { filterPage, lineQuantityLabel, orderStatusLabel, pageFilterCount, readReason } from '@/lib/outbound-orders';
+import { useCarrierConnections, useManifests, useOrderShipment } from '@/lib/use-outbound-labels';
 import { useOrderDetail, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { usePipelineOrders } from '@/lib/use-outbound-pack-dispatch';
 import { roleHasCapability } from '@/lib/users';
@@ -74,6 +98,10 @@ export function OutboundPackDispatch({
 }: OutboundSurfaceProps) {
   const canPack = roleHasCapability(role, 'pack.execute');
   const canDispatch = roleHasCapability(role, 'dispatch.execute');
+  // Story 4.6c — the label station and the manifest closure ride the same
+  // surface, gated on `labels.execute` (the same Owner + Ops Manager +
+  // Operator grant as pack and dispatch).
+  const canLabel = roleHasCapability(role, 'labels.execute');
   return (
     <Section title="Pack & Dispatch">
       <div className="text-(--muted-foreground)">
@@ -86,6 +114,7 @@ export function OutboundPackDispatch({
         warehouseId={warehouseId}
         canPack={canPack}
         canDispatch={canDispatch}
+        canLabel={canLabel}
       />
     </Section>
   );
@@ -100,11 +129,13 @@ function PackDispatchTable({
   warehouseId,
   canPack,
   canDispatch,
+  canLabel,
 }: {
   tenantId: string;
   warehouseId: string;
   canPack: boolean;
   canDispatch: boolean;
+  canLabel: boolean;
 }) {
   const orders = usePipelineOrders(warehouseId);
   const [statusFilter, setStatusFilter] = useState<PipelineStatus | null>(null);
@@ -196,6 +227,7 @@ function PackDispatchTable({
                 orderId={order.id}
                 canPack={canPack}
                 canDispatch={canDispatch}
+                canLabel={canLabel}
               />
             ) : null
           }
@@ -208,6 +240,8 @@ function PackDispatchTable({
           }
         />
       )}
+
+      <ManifestSection tenantId={tenantId} warehouseId={warehouseId} pageOrders={pipeline} canLabel={canLabel} />
     </div>
   );
 }
@@ -235,11 +269,13 @@ function PackDispatchPanel({
   orderId,
   canPack,
   canDispatch,
+  canLabel,
 }: {
   tenantId: string;
   orderId: string;
   canPack: boolean;
   canDispatch: boolean;
+  canLabel: boolean;
 }) {
   const detail = useOrderDetail(orderId);
   // The SKU map only decorates: it names each line's SKU code and unit, and a
@@ -336,18 +372,22 @@ function PackDispatchPanel({
       ) : (
         <>
           <ReadOnlyLines lines={order.lines} skuMap={skuMap} />
-          {status === 'ready_to_dispatch' &&
-            (canDispatch ? (
-              <DispatchSection
-                tenantId={tenantId}
-                orderId={orderId}
-                onDispatched={setRecord}
-              />
-            ) : (
-              <div className="text-xs text-(--muted-foreground)">
-                Packed and waiting for dispatch.
-              </div>
-            ))}
+          {status === 'ready_to_dispatch' && (
+            <>
+              <LabelSection tenantId={tenantId} orderId={orderId} canLabel={canLabel} />
+              {canDispatch ? (
+                <DispatchSection
+                  tenantId={tenantId}
+                  orderId={orderId}
+                  onDispatched={setRecord}
+                />
+              ) : (
+                <div className="text-xs text-(--muted-foreground)">
+                  Packed and waiting for dispatch.
+                </div>
+              )}
+            </>
+          )}
           {status === 'dispatched' && (
             <div className="text-xs text-(--muted-foreground)">
               Dispatched — terminal. There is no un-dispatch.
@@ -736,4 +776,567 @@ function DispatchSection({
       )}
     </form>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* The label station (story 4.6c)                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The label step in the row expansion (capability `labels.execute`, hidden —
+ * never disabled — without it). One labelled shipment per order, ever: the
+ * form is the connection picker plus the OPTIONAL parcel measurements (the
+ * pack bench's rule, verbatim), and the 501 `carrier-transport-unconfigured`
+ * / 503 `carrier-encryption-unavailable` refusals render the server's own
+ * words inline — they are refusals, not errors: nothing was written, the
+ * order stays `ready_to_dispatch`, and the retry is a fresh submit of the
+ * still-mounted draft.
+ *
+ * The `Idempotency-Key` is minted once per DRAFT (the pack bench's
+ * convention): a label that times out after the server committed replays on
+ * retry instead of generating a second label, and any edit — connection or
+ * measurement — mints a fresh key.
+ */
+function LabelSection({
+  tenantId,
+  orderId,
+  canLabel,
+}: {
+  tenantId: string;
+  orderId: string;
+  canLabel: boolean;
+}) {
+  const connections = useCarrierConnections();
+  const shipmentRead = useOrderShipment(orderId);
+  // The label result is THIS panel's mutation result; the broadcaster's
+  // refetch re-runs the shipment read, and the local state keeps rendering
+  // through the flip.
+  const [labelled, setLabelled] = useState<ShipmentDto | null>(null);
+  const [connectionId, setConnectionId] = useState('');
+  const [measurements, setMeasurements] = useState<PackMeasurements>(EMPTY_MEASUREMENTS);
+  const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  /** Any draft edit invalidates the key the previous attempt would replay. */
+  function editMeasurements(patch: Partial<PackMeasurements>) {
+    setIdempotencyKey(null);
+    setMeasurements((current) => ({ ...current, ...patch }));
+  }
+
+  function pickConnection(id: string) {
+    setIdempotencyKey(null);
+    setConnectionId(id);
+  }
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const parsed = parseLabelDraft(connectionId, measurements);
+    if (parsed.body === null) {
+      // Nothing is requested that the backend would only answer 400 to.
+      setProblem(parsed.problem);
+      return;
+    }
+    setProblem(null);
+    // Reused across retries of an unchanged draft; minted afresh otherwise.
+    const key = idempotencyKey ?? ulid();
+    setIdempotencyKey(key);
+    setPending(true);
+    setError(null);
+    try {
+      const { shipment } = await fetchApiLabelOrder(tenantId, orderId, parsed.body, key);
+      if (!mounted.current) {
+        // The panel unmounted mid-flight but the label COMMITTED — the
+        // sibling outbound readers (the list, the manifest section) must
+        // still refetch.
+        notifyOutboundChanged();
+        return;
+      }
+      setLabelled(shipment);
+      setIdempotencyKey(null);
+      setMeasurements(EMPTY_MEASUREMENTS);
+      notifyOutboundChanged();
+    } catch (caught) {
+      if (!mounted.current) return;
+      // The refusal renders verbatim and nothing was written — the form
+      // stays on screen with its draft and key, so the retry is a fresh
+      // submit of the same request.
+      setError(labelReason(caught));
+    } finally {
+      if (mounted.current) setPending(false);
+    }
+  }
+
+  // The shipment read is the truth: a label generated elsewhere (another
+  // operator, an API call) shows up here through the broadcaster's refetch.
+  const shipment =
+    labelled ??
+    (shipmentRead.state === 'ready' && shipmentRead.data !== null ? shipmentRead.data.shipment : null);
+
+  if (shipment !== null) {
+    // Terminal when the shipment closed onto a manifest; otherwise the record
+    // names the carrier and tracking, and dispatch auto-stamps from it.
+    return (
+      <div className="flex flex-col gap-1 rounded-sm border border-(--border) bg-(--muted) p-3 text-xs">
+        <div className="font-medium">Label</div>
+        <div className="text-(--muted-foreground)">
+          {shipmentRecordLabel(shipment)} · labelled by {shipment.labelledBy}
+        </div>
+        <div className="text-(--muted-foreground)">
+          {shipment.manifestId === null
+            ? 'Dispatch stamps this carrier and tracking onto the record unless free text is given.'
+            : 'Manifested — the shipment closed onto a manifest and is terminal.'}
+        </div>
+      </div>
+    );
+  }
+
+  if (shipmentRead.state === 'loading') {
+    return <div className="text-xs text-(--muted-foreground)">Loading label…</div>;
+  }
+  if (shipmentRead.state === 'failed') {
+    return <ReadFailure word="Label unavailable" reason={shipmentRead.reason} onRetry={shipmentRead.reload} />;
+  }
+
+  // No label yet: the form is the affordance, gated (hidden, not disabled).
+  if (!canLabel) {
+    return null;
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
+      <div className="text-xs text-(--muted-foreground)">
+        Generate the carrier label. The order stays ready to dispatch and dispatch auto-stamps this
+        shipment&apos;s carrier and tracking unless free text is given.
+      </div>
+      {connections.state === 'loading' ? (
+        <div className="text-xs text-(--muted-foreground)">Loading carrier connections…</div>
+      ) : connections.state === 'failed' ? (
+        <ReadFailure word="Connections unavailable" reason={connections.reason} onRetry={connections.reload} />
+      ) : connections.data.length === 0 ? (
+        <div className="text-xs text-(--muted-foreground)">
+          No carrier connection is set up yet — connect one in Settings to generate labels.
+        </div>
+      ) : (
+        <label className="flex flex-col gap-1 sm:w-80">
+          <span className={labelClass}>Carrier connection</span>
+          <select
+            className={selectClass}
+            value={connectionId}
+            onChange={(e) => pickConnection(e.target.value)}
+          >
+            <option value="">Pick a connection…</option>
+            {connections.data.map((connection) => (
+              <option key={connection.id} value={connection.id}>
+                {connectionOptionLabel(connection)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <fieldset className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
+        <legend className="px-1 text-xs text-(--muted-foreground)">Measurements (optional)</legend>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Weight (g)</span>
+            <input
+              className={inputClass}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={measurements.weightGrams}
+              onChange={(e) => editMeasurements({ weightGrams: e.target.value })}
+              placeholder="—"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Length (mm)</span>
+            <input
+              className={inputClass}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={measurements.lengthMm}
+              onChange={(e) => editMeasurements({ lengthMm: e.target.value })}
+              placeholder="—"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Width (mm)</span>
+            <input
+              className={inputClass}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={measurements.widthMm}
+              onChange={(e) => editMeasurements({ widthMm: e.target.value })}
+              placeholder="—"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Height (mm)</span>
+            <input
+              className={inputClass}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={measurements.heightMm}
+              onChange={(e) => editMeasurements({ heightMm: e.target.value })}
+              placeholder="—"
+            />
+          </label>
+        </div>
+      </fieldset>
+      <div>
+        <button type="submit" disabled={pending} className={primaryClass}>
+          {pending ? 'Generating…' : 'Generate label'}
+        </button>
+      </div>
+      {problem !== null && (
+        <FeedbackBanner tone="rejected" word="Label not generated" reason={problem} />
+      )}
+      {error !== null && (
+        <FeedbackBanner tone="rejected" word="Label not generated" reason={error} />
+      )}
+    </form>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* The manifest section (story 4.6c)                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The manifest section below the table. Its reads are UNGATED — the manifest
+ * is the hand-over record — while the builder is gated on `labels.execute`
+ * (hidden, never disabled).
+ *
+ * The builder is PAGE-SCOPED, and says so: there is no list-shipments route,
+ * only a per-order shipment read-back, so the closure is built from the
+ * labelled shipments of this page's `ready_to_dispatch` orders. The selection
+ * is scoped to ONE carrier connection client-side — each labelled shipment
+ * carries its connection id, so a mixed set is refused before anything is
+ * sent (the backend would 409 verbatim, but the refusal is deterministic
+ * client-side).
+ *
+ * The `Idempotency-Key` is minted per CONFIRMATION (the dispatch confirm's
+ * convention — the form's presentation IS the confirm): minted at the first
+ * submit, reused across retries of an unchanged selection, and any selection
+ * edit mints a fresh key.
+ */
+function ManifestSection({
+  tenantId,
+  warehouseId,
+  pageOrders,
+  canLabel,
+}: {
+  tenantId: string;
+  warehouseId: string;
+  /** The page's pipeline rows (unfiltered by the status control). */
+  pageOrders: readonly OrderEntryDto[];
+  canLabel: boolean;
+}) {
+  const manifests = useManifests(warehouseId);
+  const readyOrderIds = pageOrders
+    .filter((order) => canLabelOrder(order.status))
+    .map((order) => order.id);
+  const labelled = useLabelledShipments(tenantId, readyOrderIds);
+  // Narrowed once: every closure below reads the ready arm's list, and an
+  // empty page reads as none to manifest.
+  const labelledShipments = labelled.state === 'ready' ? labelled.data : [];
+
+  // The builder's draft: which connection's shipments, and which of them.
+  const [connectionId, setConnectionId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<ManifestDto | null>(null);
+
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  /** A selection edit invalidates the key the previous attempt would replay. */
+  function toggle(shipmentId: string) {
+    setIdempotencyKey(null);
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(shipmentId)) next.delete(shipmentId);
+      else next.add(shipmentId);
+      return next;
+    });
+  }
+
+  function pickBuilderConnection(id: string | null) {
+    setIdempotencyKey(null);
+    setConnectionId(id);
+    // A fresh connection means a fresh default: all of its labelled
+    // shipments, pre-checked — the manifest is the hand-over of the batch.
+    const group = id === null ? [] : labelledShipments.filter((s) => s.carrierConnectionId === id);
+    setSelected(new Set(group.map((s) => s.id)));
+  }
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const group = labelledShipments.filter((s) => s.carrierConnectionId === connectionId);
+    const selectedShipments = group.filter((s) => selected.has(s.id));
+    // Deterministic client-side: every shipment on a manifest rides ONE
+    // connection, and the connection is known here.
+    const mixed =
+      selectedShipments.length > 0 &&
+      new Set(selectedShipments.map((s) => s.carrierConnectionId)).size > 1;
+    if (mixed) {
+      setProblem('All shipments on a manifest ride one carrier connection.');
+      return;
+    }
+    const parsed = parseManifestDraft([...selected]);
+    if (parsed.body === null) {
+      setProblem(parsed.problem);
+      return;
+    }
+    setProblem(null);
+    // Per-CONFIRMATION: reused across retries of an unchanged selection.
+    const key = idempotencyKey ?? ulid();
+    setIdempotencyKey(key);
+    setPending(true);
+    setError(null);
+    try {
+      const { manifest } = await fetchApiCreateManifest(tenantId, warehouseId, parsed.body, key);
+      if (!mounted.current) {
+        notifyOutboundChanged();
+        return;
+      }
+      setOutcome(manifest);
+      setSelected(new Set());
+      setConnectionId(null);
+      setIdempotencyKey(null);
+      notifyOutboundChanged();
+    } catch (caught) {
+      if (!mounted.current) return;
+      // The 409 offender (missing, foreign, wrong state) renders verbatim.
+      setError(manifestReason(caught));
+    } finally {
+      if (mounted.current) setPending(false);
+    }
+  }
+
+  const builderConnection =
+    connectionId === null
+      ? null
+      : labelledShipments.filter((s) => s.carrierConnectionId === connectionId);
+
+  return (
+    <div className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
+      <div className="text-xs font-medium">Manifests</div>
+      <div className="text-xs text-(--muted-foreground)">
+        A manifest closes labelled shipments for one carrier connection as the hand-over document —
+        terminal, with no un-manifest.
+      </div>
+
+      {canLabel && (
+        <div className="flex flex-col gap-2">
+          {labelled.state === 'loading' ? (
+            <div className="text-xs text-(--muted-foreground)">Checking this page for labelled shipments…</div>
+          ) : labelled.state === 'failed' ? (
+            <ReadFailure word="Shipments unavailable" reason={labelled.reason} onRetry={labelled.reload} />
+          ) : labelledShipments.length === 0 ? (
+            <div className="text-xs text-(--muted-foreground)">
+              No labelled shipments to manifest on this page — generate labels on the rows above
+              first.
+            </div>
+          ) : (
+            <form onSubmit={onSubmit} className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
+              <div className="text-xs text-(--muted-foreground)">
+                {MANIFEST_TERMINAL_WARNING} The closure is all-or-nothing — nothing is written
+                unless every named shipment closes.
+              </div>
+              <label className="flex flex-col gap-1 sm:w-80">
+                <span className={labelClass}>Manifest onto</span>
+                <select
+                  className={selectClass}
+                  value={connectionId ?? ''}
+                  onChange={(e) => pickBuilderConnection(e.target.value === '' ? null : e.target.value)}
+                >
+                  <option value="">Pick a connection…</option>
+                  {connectionGroups(labelled.data).map(([id, connection]) => (
+                    <option key={id} value={id}>
+                      {connection}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {builderConnection !== null && (
+                <ul className="flex flex-col gap-1">
+                  {builderConnection.map((shipment) => (
+                    <li key={shipment.id} className="flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(shipment.id)}
+                        onChange={() => toggle(shipment.id)}
+                      />
+                      <span className="font-mono">{shipment.orderId}</span>
+                      <span className="data">
+                        {shipmentRecordLabel(shipment)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div>
+                <button type="submit" disabled={pending} className={primaryClass}>
+                  {pending ? 'Manifesting…' : 'Create manifest'}
+                </button>
+              </div>
+              {outcome !== null && <FeedbackBanner {...manifestOutcome(outcome)} />}
+              {problem !== null && (
+                <FeedbackBanner tone="rejected" word="No manifest" reason={problem} />
+              )}
+              {error !== null && (
+                <FeedbackBanner tone="rejected" word="No manifest" reason={error} />
+              )}
+            </form>
+          )}
+        </div>
+      )}
+
+      {manifests.state === 'loading' ? (
+        <div className="text-xs text-(--muted-foreground)">Loading manifests…</div>
+      ) : manifests.state === 'failed' ? (
+        <ReadFailure word="Manifests unavailable" reason={manifests.reason} onRetry={manifests.reload} />
+      ) : manifests.data.items.length === 0 ? (
+        <div className="text-xs text-(--muted-foreground)">No manifests yet.</div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {manifests.data.items.map((manifest) => (
+            <div key={manifest.id} className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-mono">{manifest.id}</span>
+              <span>{manifest.carrierCode}</span>
+              <span className="data">
+                {manifest.shipmentCount} {manifest.shipmentCount === 1 ? 'shipment' : 'shipments'}
+              </span>
+              <span className="text-(--muted-foreground)">
+                by {manifest.createdBy} ·{' '}
+                <time dateTime={manifest.createdAt}>{new Date(manifest.createdAt).toLocaleString()}</time>
+              </span>
+            </div>
+          ))}
+          {manifests.data.nextCursor !== null && (
+            <button
+              type="button"
+              className={`${buttonClass} w-fit`}
+              onClick={() => manifests.onCursor(manifests.data.nextCursor)}
+            >
+              Older manifests
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The distinct connection groups among labelled shipments, as picker options. */
+function connectionGroups(
+  shipments: readonly ShipmentDto[],
+): readonly (readonly [string, string])[] {
+  const seen = new Map<string, string>();
+  for (const shipment of shipments) {
+    if (!seen.has(shipment.carrierConnectionId)) {
+      seen.set(shipment.carrierConnectionId, shipment.carrierName);
+    }
+  }
+  return [...seen.entries()];
+}
+
+/**
+ * The labelled shipments of the given orders, page-scoped: a per-order
+ * shipment read per `ready_to_dispatch` order on the page (there is no
+ * list-shipments route). A 404 — the order has no label yet — reads as null
+ * and contributes nothing; a real failure fails the WHOLE arm with a Retry,
+ * because a builder built from a partially-read page would silently omit
+ * shipments from a terminal closure.
+ */
+function useLabelledShipments(
+  tenantId: string,
+  orderIds: readonly string[],
+): ({ state: 'loading' } | { state: 'ready'; data: readonly ShipmentDto[] } | { state: 'failed'; reason: string }) & {
+  reload: () => void;
+} {
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{
+    orderKey: string;
+    state:
+      | { state: 'ready'; data: readonly ShipmentDto[] }
+      | { state: 'failed'; reason: string };
+  } | null>(null);
+  const orderKey = orderIds.join(',');
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(OUTBOUND_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(OUTBOUND_CHANGED_EVENT, onChange);
+  }, []);
+
+  useEffect(() => {
+    if (orderIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const settled = await Promise.allSettled(
+        orderIds.map(async (orderId) => {
+          const response = await fetchApiGetShipment(tenantId, orderId);
+          return response === null ? null : response.shipment;
+        }),
+      );
+      if (cancelled) return;
+      const failures = settled.filter(
+        (entry): entry is PromiseRejectedResult => entry.status === 'rejected',
+      );
+      if (failures.length > 0) {
+        setResult({
+          orderKey,
+          state: { state: 'failed', reason: readReason(failures[0]!.reason, 'the labelled shipments') },
+        });
+        return;
+      }
+      const labelled = settled
+        .flatMap((entry) => (entry.status === 'fulfilled' && entry.value !== null ? [entry.value] : []))
+        .filter((shipment) => shipment.status === 'labelled');
+      setResult({ orderKey, state: { state: 'ready', data: labelled } });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // `orderIds` enters through `orderKey` (its joined form) — the array's
+    // identity churns every render of the table, and a refetch per render is
+    // the churn the key exists to prevent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, orderKey, revision]);
+
+  const reload = useCallback(() => setRevision((r) => r + 1), []);
+  if (orderIds.length === 0) {
+    return { state: 'ready', data: [], reload };
+  }
+  if (result === null || result.orderKey !== orderKey) {
+    return { state: 'loading', reload };
+  }
+  return { ...result.state, reload };
 }

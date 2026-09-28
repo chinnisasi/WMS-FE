@@ -86,6 +86,10 @@ export const CAPABILITIES = [
   // surface — 12-8 owns the mobile capture; the mirror stays in step with the
   // backend so the drift guard keeps passing.
   'excursion.record',
+  // Story 4.6c — the label station and the manifest closure (Owner + Ops
+  // Manager + Operator, mirroring `pack.execute`): the person who packed the
+  // parcel is the one who labels and hands it over.
+  'labels.execute',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -102,11 +106,18 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
   owner: CAPABILITIES,
   // Every operational mutation, no user management.
   ops_manager: CAPABILITIES.filter((capability) => !OWNER_ONLY_CAPABILITIES.includes(capability)),
-  // The floor verbs only: place, pick, pack, dispatch, record. Notably
+  // The floor verbs only: place, pick, pack, label, dispatch, record. Notably
   // **not** `orders.manage` — an Operator never creates or cancels an order —
   // and **not** `secure.move` (story 12-3): the cage is off-limits to floor
   // staff.
-  operator: ['putaway.execute', 'picks.execute', 'pack.execute', 'dispatch.execute', 'excursion.record'],
+  operator: [
+    'putaway.execute',
+    'picks.execute',
+    'pack.execute',
+    'dispatch.execute',
+    'excursion.record',
+    'labels.execute',
+  ],
   accountant: [],
 };
 

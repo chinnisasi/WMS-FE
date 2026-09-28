@@ -1,5 +1,15 @@
 import { ApiProblem } from '@/lib/api/client';
-import type { DispatchDto, DispatchedLineDto, OrderLineDto, PackDto, PackedLineDto } from '@/lib/api/generated';
+import type {
+  CarrierConnectionResponse,
+  DispatchDto,
+  DispatchedLineDto,
+  LabelOrderDto,
+  ManifestDto,
+  OrderLineDto,
+  PackDto,
+  PackedLineDto,
+  ShipmentDto,
+} from '@/lib/api/generated';
 import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON, verbatim, type OrderStatus, type Outcome } from '@/lib/outbound-orders';
 
@@ -439,6 +449,199 @@ export function dispatchReason(error: unknown): string {
         return error.detail ?? 'Check the carrier fields and try again.';
       default:
         return error.detail ?? `Not dispatched (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+/* ------------------------------------------------------------------ */
+/* Labels and manifests (story 4.6c)                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The decisions that live here for the label and manifest step (4.6c):
+ *   5. The label failure arms render VERBATIM — the 501
+ *      `carrier-transport-unconfigured` (a DIRECT carrier with no transport
+ *      on this deployment) and the 503 `carrier-encryption-unavailable` are
+ *      REFUSALS, not errors: nothing was written, the order stays
+ *      `ready_to_dispatch`, and the retry is a fresh submit. The 409 state
+ *      refusals are verbatim for the same reason the pack/dispatch ones are
+ *      (the state they name is server truth).
+ *   6. A manifest is terminal — there is no un-manifest — and the closure is
+ *      an all-or-nothing set: the form refuses an empty selection
+ *      client-side, and every offender 409 names is server truth.
+ */
+
+/** Labelling is offered for exactly one state — the label precondition's status arm. */
+export function canLabelOrder(status: OrderStatus): boolean {
+  return status === 'ready_to_dispatch';
+}
+
+/**
+ * The label form's draft → request body. The connection id is required (the
+ * picker's empty value is a client-side refusal, never a 400); the optional
+ * measurements ride the SAME rule as the pack bench's — whole grams, all
+ * three sides together or none — so the label form reuses `parsePackDraft`'s
+ * measurement arm verbatim by sending it an empty scan set and taking the
+ * body's measurement arms back.
+ */
+export interface ParsedLabelDraft {
+  readonly body: LabelOrderDto | null;
+  readonly problem: string | null;
+}
+
+export function parseLabelDraft(
+  carrierConnectionId: string,
+  measurements: PackMeasurements,
+): ParsedLabelDraft {
+  if (carrierConnectionId.trim() === '') {
+    return { body: null, problem: 'Pick the carrier connection this label generates through.' };
+  }
+  // The measurement rule IS the pack bench's rule, verbatim — an empty scan
+  // list contributes no entries and leaves only the measurement arms. The
+  // parser's `scanned` arm is the pack body's shape, not the label's — the
+  // measurements are taken back alone.
+  const parsed = parsePackDraft([], measurements);
+  if (parsed.problem !== null) {
+    return { body: null, problem: parsed.problem };
+  }
+  const measurementsOnly =
+    parsed.body === null
+      ? {}
+      : {
+          ...(parsed.body.weightGrams === undefined ? {} : { weightGrams: parsed.body.weightGrams }),
+          ...(parsed.body.dimensionsMm === undefined ? {} : { dimensionsMm: parsed.body.dimensionsMm }),
+        };
+  return {
+    body: {
+      carrierConnectionId,
+      ...measurementsOnly,
+    },
+    problem: null,
+  };
+}
+
+/** One connection picker's option: the display name and the account label. */
+export function connectionOptionLabel(connection: CarrierConnectionResponse): string {
+  return `${connection.carrierName} — ${connection.accountLabel}`;
+}
+
+/**
+ * The label result, built from the RESPONSE's own shipment: the carrier, the
+ * adapter-issued tracking and the measurements, and the fact the order
+ * itself did not move — the label is a station act beside the state machine.
+ */
+export function labelOutcome(shipment: ShipmentDto): Outcome {
+  return {
+    tone: 'accepted',
+    word: 'Label generated',
+    reason: `${shipment.carrierName} · tracking ${shipment.trackingNumber} · ${parcelMeasurementLabel(
+      shipment,
+    )}. The order stays ready to dispatch.`,
+  };
+}
+
+/**
+ * One shipment record's carrier arms, as the panel states them: the carrier,
+ * the tracking, and the manifest it closed onto — honestly terminal.
+ */
+export function shipmentRecordLabel(shipment: ShipmentDto): string {
+  const parts = [`Carrier ${shipment.carrierName}`, `Tracking ${shipment.trackingNumber}`];
+  return shipment.manifestId === null ? parts.join(' · ') : `${parts.join(' · ')} · manifested`;
+}
+
+/** The manifest confirm's terminal warning — a closed shipment never returns. */
+export const MANIFEST_TERMINAL_WARNING =
+  'Manifesting is terminal — a shipment never returns to labelled after it closes onto a manifest.';
+
+/**
+ * The manifest form's selection → request body. An empty selection is a
+ * client-side refusal; the order of the selection and its duplicates are the
+ * server's concern to normalize (the set is the intent), so the ids go as
+ * given.
+ */
+export interface ParsedManifestDraft {
+  /** Mutable: this object is passed straight to the SDK as `CreateManifestDto`. */
+  readonly body: { readonly shipmentIds: string[] } | null;
+  readonly problem: string | null;
+}
+
+export function parseManifestDraft(shipmentIds: readonly string[]): ParsedManifestDraft {
+  if (shipmentIds.length === 0) {
+    return { body: null, problem: 'Pick at least one labelled shipment to manifest.' };
+  }
+  return { body: { shipmentIds: [...shipmentIds] }, problem: null };
+}
+
+/**
+ * The manifest result, built from the RESPONSE's own record: how many
+ * shipments the hand-over document closed, and onto which carrier.
+ */
+export function manifestOutcome(manifest: ManifestDto): Outcome {
+  const count = manifest.shipmentCount;
+  return {
+    tone: 'accepted',
+    word: 'Manifest created',
+    reason: `${count} ${count === 1 ? 'shipment' : 'shipments'} closed onto ${manifest.carrierCode}. There is no un-manifest.`,
+  };
+}
+
+/**
+ * Label failures. The 409 and BOTH retryable-failure arms (the 501
+ * `carrier-transport-unconfigured` naming the carrier, the 503
+ * `carrier-encryption-unavailable`) render VERBATIM — they are refusals
+ * whose cause is server truth, and rendering them in the server's own words
+ * is the UX-DR19 retryable-inline contract. The 422 `idempotency-key-reuse`
+ * is the fixed house copy.
+ */
+export function labelReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    if (error.status === 409 || error.status === 501 || error.status === 503) {
+      return verbatim(error);
+    }
+    switch (error.code) {
+      case 'not-found':
+        return 'This order or carrier connection no longer exists — refresh the page.';
+      case 'role-denied':
+        return 'Your role cannot generate labels.';
+      case 'permission-denied':
+        return 'That carrier connection belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This label was already processed with a different request.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Check the connection and measurements and try again.';
+      default:
+        return error.detail ?? `Label not generated (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+/**
+ * Manifest failures. The 409 arms name the offender server-side (missing,
+ * foreign, wrong state, two connections) — verbatim. The 422
+ * `idempotency-key-reuse` is the fixed house copy.
+ */
+export function manifestReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    if (error.status === 409) return verbatim(error);
+    switch (error.code) {
+      case 'not-found':
+        return 'The warehouse no longer exists — refresh the page.';
+      case 'role-denied':
+        return 'Your role cannot manifest shipments.';
+      case 'permission-denied':
+        return 'That warehouse belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This manifest was already processed.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Check the selected shipments and try again.';
+      default:
+        return error.detail ?? `Manifest not created (${error.code}).`;
     }
   }
   return UNREACHABLE_REASON;
