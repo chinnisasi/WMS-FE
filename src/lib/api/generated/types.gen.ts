@@ -1732,6 +1732,10 @@ export type ManifestDto = {
      */
     shipmentCount: number;
     /**
+     * The closed shipment ids — carried by the CREATE response only (the idempotency snapshot); list rows are header rows (the shipments point back through their manifestId)
+     */
+    shipmentIds?: Array<string>;
+    /**
      * The operator who created it
      */
     createdBy: string;

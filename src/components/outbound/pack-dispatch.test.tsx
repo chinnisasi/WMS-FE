@@ -287,6 +287,8 @@ let connectionRows: unknown[] = [];
 /** Per-order shipment read-backs: absent → 404 "no label yet". */
 let shipmentsByOrder: Record<string, unknown | null> = {};
 let manifestRows: unknown[] = [];
+/** The keyset cursor the manifests list advertises, for the pager test. */
+let manifestsNextCursor: string | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -366,7 +368,7 @@ function stubRouter(): void {
       if (failManifests) {
         return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The manifests are down.' });
       }
-      return json(200, { items: manifestRows, nextCursor: null });
+      return json(200, { items: manifestRows, nextCursor: manifestsNextCursor });
     }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname)) {
       const id = pathname.split('/').pop()!;
@@ -403,6 +405,7 @@ beforeEach(() => {
   failShipment = false;
   failManifests = false;
   ordersNextCursor = null;
+  manifestsNextCursor = null;
   packResponder = () => {
     orderStatuses['order-1'] = 'ready_to_dispatch';
     return { status: 201, body: { pack: packedFixture('order-1') } };
@@ -529,6 +532,8 @@ async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
 const mutations = () => requests.filter((r) => r.method === 'POST');
 const orderListReads = () =>
   requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/orders'));
+const manifestListReads = () =>
+  requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/manifests'));
 
 /** Set a labelled <select>'s value the way a real pick would reach React. */
 async function selectOption(rendered: Rendered, labelText: string, value: string): Promise<void> {
@@ -1325,6 +1330,20 @@ describe('the manifest section (4.6c)', () => {
 
     expect(mutations()).toHaveLength(0);
     expect(text(view)).toContain('Pick at least one labelled shipment to manifest.');
+  });
+
+  test('the manifests pager carries the keyset cursor to the older page', async () => {
+    manifestRows = [manifestFixture('mf-1')];
+    manifestsNextCursor = 'older-manifests-cursor';
+    view = await mount('operator');
+
+    await pressButton(view, 'Older manifests');
+    await settle();
+
+    const pages = manifestListReads();
+    expect(pages).toHaveLength(2);
+    expect(pages[0]!.search).toBe('');
+    expect(pages[1]!.search).toBe('?cursor=older-manifests-cursor');
   });
 });
 

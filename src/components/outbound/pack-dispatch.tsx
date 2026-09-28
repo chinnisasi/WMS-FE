@@ -877,10 +877,13 @@ function LabelSection({
   }
 
   // The shipment read is the truth: a label generated elsewhere (another
-  // operator, an API call) shows up here through the broadcaster's refetch.
+  // operator, an API call) shows up here through the broadcaster's refetch —
+  // and the read-back outranks the local `labelled` snapshot, which goes
+  // stale the moment the shipment manifests (the read-back sees
+  // `manifested`; `labelled` still says `labelled`).
   const shipment =
-    labelled ??
-    (shipmentRead.state === 'ready' && shipmentRead.data !== null ? shipmentRead.data.shipment : null);
+    (shipmentRead.state === 'ready' && shipmentRead.data !== null ? shipmentRead.data.shipment : null) ??
+    labelled;
 
   if (shipment !== null) {
     // Terminal when the shipment closed onto a manifest; otherwise the record
@@ -1099,16 +1102,13 @@ function ManifestSection({
     event.preventDefault();
     const group = labelledShipments.filter((s) => s.carrierConnectionId === connectionId);
     const selectedShipments = group.filter((s) => selected.has(s.id));
-    // Deterministic client-side: every shipment on a manifest rides ONE
-    // connection, and the connection is known here.
-    const mixed =
-      selectedShipments.length > 0 &&
-      new Set(selectedShipments.map((s) => s.carrierConnectionId)).size > 1;
-    if (mixed) {
-      setProblem('All shipments on a manifest ride one carrier connection.');
-      return;
-    }
-    const parsed = parseManifestDraft([...selected]);
+    // The body is built from the VISIBLE, connection-filtered selection —
+    // the checkboxes render `selectedShipments`, so the ids the operator
+    // sees are the ids that post. (A stale id lingering in `selected` from a
+    // previous read would otherwise post a shipment the current list does
+    // not show — and the one-connection rule the server enforces is already
+    // guaranteed here: `group` is a single connection's shipments.)
+    const parsed = parseManifestDraft(selectedShipments.map((s) => s.id));
     if (parsed.body === null) {
       setProblem(parsed.problem);
       return;
