@@ -258,6 +258,10 @@ let listRows: () => unknown[] = () => [];
 let failList = false;
 let failDetail = false;
 let skuFail = false;
+/** Story 4.6c — the label station's and manifest section's read failures. */
+let failConnections = false;
+let failShipment = false;
+let failManifests = false;
 /** The keyset cursor the list advertises, for the pager test. */
 let ordersNextCursor: string | null = null;
 /** Answers the pack POST; swapped per test to make an attempt refuse. */
@@ -340,9 +344,15 @@ function stubRouter(): void {
       return json(200, { items: listRows(), nextCursor: ordersNextCursor });
     }
     if (method === 'GET' && pathname.endsWith('/carriers/connections')) {
+      if (failConnections) {
+        return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The connections are down.' });
+      }
       return json(200, { items: connectionRows, nextCursor: null });
     }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+\/shipment$/.test(pathname)) {
+      if (failShipment) {
+        return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The shipment read is down.' });
+      }
       const orderId = pathname.split('/')[pathname.split('/').length - 2]!;
       const shipment = shipmentsByOrder[orderId];
       // The route answers 404 `not-found` when the order has no label yet —
@@ -353,6 +363,9 @@ function stubRouter(): void {
       return json(200, { shipment });
     }
     if (method === 'GET' && pathname.endsWith('/outbound/manifests')) {
+      if (failManifests) {
+        return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The manifests are down.' });
+      }
       return json(200, { items: manifestRows, nextCursor: null });
     }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname)) {
@@ -386,6 +399,9 @@ beforeEach(() => {
   failList = false;
   failDetail = false;
   skuFail = false;
+  failConnections = false;
+  failShipment = false;
+  failManifests = false;
   ordersNextCursor = null;
   packResponder = () => {
     orderStatuses['order-1'] = 'ready_to_dispatch';
@@ -1333,5 +1349,85 @@ describe('the label and manifest gates (4.6c)', () => {
     // But the hand-over record itself is readable by every role.
     expect(body).toContain('mf-1');
     expect(body).toContain('1 shipment');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The 4.6c read failures                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Matrix row 12 — every 4.6c read reports its own failure: a failed arm with
+ * its word and the reason, never blank and never an endless "Loading…", and
+ * the Retry affordance recovers it.
+ */
+describe('the 4.6c read failures', () => {
+  test('a failed shipment read inside the expanded row renders Label unavailable and Retry recovers', async () => {
+    failShipment = true;
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    expect(text(view)).toContain('Label unavailable');
+    expect(text(view)).toContain('The shipment read is down.');
+    // Never blank, never an endless "Loading…": the record is simply not
+    // claimed to exist.
+    expect(text(view)).not.toContain('Loading label…');
+
+    failShipment = false;
+    await pressButton(view, 'Retry');
+    await settle();
+    expect(text(view)).toContain('Generate label');
+  });
+
+  test('a failed connections read renders Connections unavailable and Retry recovers', async () => {
+    failConnections = true;
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    expect(text(view)).toContain('Connections unavailable');
+    expect(text(view)).toContain('The connections are down.');
+    expect(text(view)).not.toContain('Loading carrier connections…');
+
+    failConnections = false;
+    await pressButton(view, 'Retry');
+    await settle();
+    expect(text(view)).not.toContain('Connections unavailable');
+    expect(text(view)).toContain('Carrier connection');
+    expect(text(view)).toContain('Generate label');
+  });
+
+  test('a failed manifests list read renders Manifests unavailable and Retry recovers', async () => {
+    failManifests = true;
+    manifestRows = [manifestFixture('mf-1')];
+    view = await mount('operator');
+
+    expect(text(view)).toContain('Manifests unavailable');
+    expect(text(view)).toContain('The manifests are down.');
+    expect(text(view)).not.toContain('Loading manifests…');
+
+    failManifests = false;
+    await pressButton(view, 'Retry');
+    await settle();
+    expect(text(view)).toContain('mf-1');
+  });
+
+  test('a failed per-order shipment read feeding the manifest builder renders Shipments unavailable and Retry recovers', async () => {
+    failShipment = true;
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+
+    expect(text(view)).toContain('Shipments unavailable');
+    expect(text(view)).toContain('The shipment read is down.');
+    expect(text(view)).not.toContain('Checking this page for labelled shipments…');
+
+    failShipment = false;
+    await pressButton(view, 'Retry');
+    await settle();
+    expect(text(view)).not.toContain('Shipments unavailable');
+    expect(text(view)).toContain('Pick a connection…');
+    expect(text(view)).toContain('Sandbox Express');
   });
 });
