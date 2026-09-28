@@ -31,10 +31,10 @@ afterEach(() => {
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
-    // Stories 5-1 / 5-2 added `transfers.manage`, `transfers.execute` and
-    // `adjustments.approve` — 25 became 28 (5-1's mirror catch-up rode 5-2's
-    // FE change).
-    expect(ROLE_CAPABILITIES.owner.length).toBe(28);
+    // Stories 5-1 / 5-2 / 5-3 added `transfers.manage`, `transfers.execute`,
+    // `adjustments.approve` and the `counts.*` pair — 25 became 30 (5-1's
+    // mirror catch-up rode 5-2's FE change; 5-3's rode 5-3's).
+    expect(ROLE_CAPABILITIES.owner.length).toBe(30);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -63,6 +63,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'transfers.manage')).toBe(true);
     expect(roleHasCapability('owner', 'transfers.execute')).toBe(true);
     expect(roleHasCapability('owner', 'adjustments.approve')).toBe(true);
+    expect(roleHasCapability('owner', 'counts.manage')).toBe(true);
+    expect(roleHasCapability('owner', 'counts.execute')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -93,6 +95,10 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'labels.execute')).toBe(true);
     expect(roleHasCapability('ops_manager', 'transfers.manage')).toBe(true);
     expect(roleHasCapability('ops_manager', 'transfers.execute')).toBe(true);
+    // Story 5-3 — the count plan verbs (the on-demand create and the policy
+    // write, which IS the schedule) are manager verbs too.
+    expect(roleHasCapability('ops_manager', 'counts.manage')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'counts.execute')).toBe(true);
     // Story 5-2 — the approval gate is owner-only: the manager who may raise
     // the adjustment does not hold the pen.
     expect(roleHasCapability('ops_manager', 'adjustments.approve')).toBe(false);
@@ -127,6 +133,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'labels.execute',
         'transfers.manage',
         'transfers.execute',
+        'counts.manage',
+        'counts.execute',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -137,9 +145,10 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 3.5 opened the operator column with `putaway.execute`; stories
     // 4.3 / 4.5 / 4.6 added pick, pack and dispatch; story 12-5 added the
     // excursion record (the floor records what it observes); story 4.6c added
-    // the label station (the person who packed is the one who labels).
-    // Planning verbs (orders, waves) stay out — an Operator executes, it does
-    // not plan.
+    // the label station (the person who packed is the one who labels); story
+    // 5-3 added the count submit (the floor counts what it walks). Planning
+    // verbs (orders, waves, counts.manage) stay out — an Operator executes,
+    // it does not plan.
     expect(ROLE_CAPABILITIES.operator).toEqual([
       'putaway.execute',
       'picks.execute',
@@ -149,6 +158,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
       'labels.execute',
       // Story 5-1 — the floor confirms the transfer's inbound leg.
       'transfers.execute',
+      // Story 5-3 — the floor submits the bin's counted quantities.
+      'counts.execute',
     ]);
     expect(roleHasCapability('operator', 'putaway.execute')).toBe(true);
     expect(roleHasCapability('operator', 'warehouse.create')).toBe(false);
@@ -163,6 +174,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('operator', 'review.decide')).toBe(false);
     expect(roleHasCapability('operator', 'transfers.manage')).toBe(false);
     expect(roleHasCapability('operator', 'adjustments.approve')).toBe(false);
+    // Story 5-3 — the floor submits counts but never schedules them.
+    expect(roleHasCapability('operator', 'counts.execute')).toBe(true);
+    expect(roleHasCapability('operator', 'counts.manage')).toBe(false);
     expect(ROLE_CAPABILITIES.accountant.length).toBe(0);
     expect(roleHasCapability('accountant', 'putaway.execute')).toBe(false);
     expect(roleHasCapability('accountant', 'users.invite')).toBe(false);
@@ -311,6 +325,24 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         roleHasCapability(role, 'adjustments.approve'),
       ),
     ).toEqual(['owner']);
+  });
+
+  // Story 5-3 — planning a count (the on-demand create and the policy write,
+  // which IS the schedule) is a manager verb; submitting the counted
+  // quantities through the inbox Count tab is the floor verb
+  // (`transfers.manage`/`transfers.execute`'s shape).
+  test('counts.manage belongs to owner and ops_manager; counts.execute reaches the operator', () => {
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'counts.manage'),
+      ),
+    ).toEqual(['owner', 'ops_manager']);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'counts.execute'),
+      ),
+    ).toEqual(['owner', 'ops_manager', 'operator']);
+    expect(roleHasCapability('accountant', 'counts.execute')).toBe(false);
   });
 });
 
