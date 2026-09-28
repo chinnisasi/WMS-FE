@@ -31,8 +31,10 @@ afterEach(() => {
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
-    // Story 4.6c added `labels.execute` — 24 became 25.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(25);
+    // Stories 5-1 / 5-2 added `transfers.manage`, `transfers.execute` and
+    // `adjustments.approve` — 25 became 28 (5-1's mirror catch-up rode 5-2's
+    // FE change).
+    expect(ROLE_CAPABILITIES.owner.length).toBe(28);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -58,6 +60,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'secure.move')).toBe(true);
     expect(roleHasCapability('owner', 'excursion.record')).toBe(true);
     expect(roleHasCapability('owner', 'labels.execute')).toBe(true);
+    expect(roleHasCapability('owner', 'transfers.manage')).toBe(true);
+    expect(roleHasCapability('owner', 'transfers.execute')).toBe(true);
+    expect(roleHasCapability('owner', 'adjustments.approve')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -86,6 +91,11 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'secure.move')).toBe(true);
     expect(roleHasCapability('ops_manager', 'excursion.record')).toBe(true);
     expect(roleHasCapability('ops_manager', 'labels.execute')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'transfers.manage')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'transfers.execute')).toBe(true);
+    // Story 5-2 — the approval gate is owner-only: the manager who may raise
+    // the adjustment does not hold the pen.
+    expect(roleHasCapability('ops_manager', 'adjustments.approve')).toBe(false);
     // Membership, spelled out — a length check passes a list of the right
     // size with the wrong member in it, which is the drift this file exists
     // to catch. The expected set is written here rather than derived from
@@ -115,6 +125,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'secure.move',
         'excursion.record',
         'labels.execute',
+        'transfers.manage',
+        'transfers.execute',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -135,6 +147,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
       'dispatch.execute',
       'excursion.record',
       'labels.execute',
+      // Story 5-1 — the floor confirms the transfer's inbound leg.
+      'transfers.execute',
     ]);
     expect(roleHasCapability('operator', 'putaway.execute')).toBe(true);
     expect(roleHasCapability('operator', 'warehouse.create')).toBe(false);
@@ -147,6 +161,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('operator', 'carrier.manage')).toBe(false);
     expect(roleHasCapability('operator', 'secure.move')).toBe(false);
     expect(roleHasCapability('operator', 'review.decide')).toBe(false);
+    expect(roleHasCapability('operator', 'transfers.manage')).toBe(false);
+    expect(roleHasCapability('operator', 'adjustments.approve')).toBe(false);
     expect(ROLE_CAPABILITIES.accountant.length).toBe(0);
     expect(roleHasCapability('accountant', 'putaway.execute')).toBe(false);
     expect(roleHasCapability('accountant', 'users.invite')).toBe(false);
@@ -269,6 +285,32 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         ),
       ).toEqual(['owner', 'ops_manager', 'operator']);
     }
+  });
+
+  // Story 5-1 — planning a transfer is a manager verb; confirming its
+  // inbound leg is the floor verb (`putaway.execute`'s shape).
+  test('transfers.manage belongs to owner and ops_manager; transfers.execute reaches the operator', () => {
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'transfers.manage'),
+      ),
+    ).toEqual(['owner', 'ops_manager']);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'transfers.execute'),
+      ),
+    ).toEqual(['owner', 'ops_manager', 'operator']);
+  });
+
+  // Story 5-2 — the adjustment approval gate is owner-only, the same
+  // segregation-of-duties shape as the user-management verbs: the manager who
+  // may raise the adjustment must not also hold the pen.
+  test('adjustments.approve belongs to the owner alone', () => {
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) =>
+        roleHasCapability(role, 'adjustments.approve'),
+      ),
+    ).toEqual(['owner']);
   });
 });
 
