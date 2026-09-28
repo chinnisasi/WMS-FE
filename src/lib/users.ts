@@ -104,6 +104,17 @@ export const CAPABILITIES = [
   // `review.decide`'s routing rationale: the ops_manager who may raise the
   // very adjustment must not also hold the pen.
   'adjustments.approve',
+  // Story 5-3 — FR-cycle-count's verbs. `counts.manage` plans: the on-demand
+  // count create (a planner pointing a bin at a count) AND the per-warehouse
+  // policy write (a policy IS the schedule — gating it separately would let
+  // a role that cannot manage counts redefine when counts happen, the
+  // `waves.manage` rationale). `counts.execute` is the floor verb —
+  // submitting the counted quantities through the inbox Count tab, mirroring
+  // `transfers.execute`/`picks.execute`: the operator counts what it walks.
+  // Neither has a web surface yet (counts run from mobile; the mirror stays
+  // in step with the backend so the drift guard keeps passing).
+  'counts.manage',
+  'counts.execute',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -140,6 +151,10 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     // Story 5-1 — the floor confirms the transfer's inbound leg (the
     // Transfer inbox task's op; `putaway.execute`'s rationale).
     'transfers.execute',
+    // Story 5-3 — the floor submits the bin's counted quantities (the Count
+    // inbox tab's op; the floor-verb pattern — `putaway.execute`'s
+    // rationale). Planning stays above: an operator never schedules counts.
+    'counts.execute',
   ],
   accountant: [],
 };
