@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import {
+  fetchApiGetOrderRates,
   fetchApiGetShipment,
   fetchApiListConnections,
   fetchApiListManifests,
@@ -10,11 +11,13 @@ import {
 import type {
   CarrierConnectionResponse,
   ManifestDto,
+  OrderRatesResponse,
   ShipmentResponse,
 } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import { detailReason, readReason } from '@/lib/outbound-orders';
+import { ratesReason } from '@/lib/outbound-pack-dispatch';
 import type { ResourceState, Reloadable } from '@/lib/use-outbound-orders';
 
 /**
@@ -137,6 +140,68 @@ export function useOrderShipment(orderId: string | null): ResourceState<Shipment
             tenantId,
             orderId,
             state: { state: 'failed', reason: detailReason(error) },
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, orderId, revision]);
+
+  const reload = useCallback(() => setRevision((r) => r + 1), []);
+  const stale =
+    orderId === null ||
+    tenantId === null ||
+    result === null ||
+    result.tenantId !== tenantId ||
+    result.orderId !== orderId;
+
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+}
+
+/**
+ * One order's carrier rate shopping read (story 4.6d): one quoted-or-refused
+ * item per live carrier connection, recomputed per read — never stored, so
+ * every OUTBOUND_CHANGED refetch re-prices the order fresh. A 404 (unknown or
+ * foreign order) is "no rates" (`null`) — an expected state, never a failed
+ * read. A failed read is its own arm with a Retry, exactly like the label
+ * station's other reads; a rate READ is never capability-gated, so this hook
+ * is not either.
+ */
+export function useOrderRates(orderId: string | null): ResourceState<OrderRatesResponse | null> &
+  Reloadable {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{
+    tenantId: string;
+    orderId: string;
+    state: ResourceState<OrderRatesResponse | null>;
+  } | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(OUTBOUND_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(OUTBOUND_CHANGED_EVENT, onChange);
+  }, []);
+
+  useEffect(() => {
+    if (tenantId === null || orderId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rates = await fetchApiGetOrderRates(tenantId, orderId);
+        if (!cancelled) setResult({ tenantId, orderId, state: { state: 'ready', data: rates } });
+      } catch (error) {
+        if (!cancelled) {
+          setResult({
+            tenantId,
+            orderId,
+            state: { state: 'failed', reason: ratesReason(error) },
           });
         }
       }

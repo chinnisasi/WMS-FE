@@ -29,6 +29,7 @@ import {
   dispatchRecordLabel,
   dispatchedLineLabel,
   EMPTY_MEASUREMENTS,
+  formatInrPaise,
   isPipelineStatus,
   PIPELINE_STATUSES,
   labelReason,
@@ -50,7 +51,7 @@ import {
   type PipelineStatus,
 } from '@/lib/outbound-pack-dispatch';
 import { filterPage, lineQuantityLabel, orderStatusLabel, pageFilterCount, readReason } from '@/lib/outbound-orders';
-import { useCarrierConnections, useManifests, useOrderShipment } from '@/lib/use-outbound-labels';
+import { useCarrierConnections, useManifests, useOrderRates, useOrderShipment } from '@/lib/use-outbound-labels';
 import { useOrderDetail, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { usePipelineOrders } from '@/lib/use-outbound-pack-dispatch';
 import { roleHasCapability } from '@/lib/users';
@@ -808,6 +809,12 @@ function LabelSection({
 }) {
   const connections = useCarrierConnections();
   const shipmentRead = useOrderShipment(orderId);
+  // Story 4.6d — the rate shopping read, beside the shipment read: one
+  // quoted-or-refused item per live connection, recomputed at every refetch
+  // (it is a READ — nothing is stored), rendered as a strip between the
+  // connection picker and the measurements so the operator picks a carrier
+  // with the prices in view.
+  const rates = useOrderRates(orderId);
   // The label result is THIS panel's mutation result; the broadcaster's
   // refetch re-runs the shipment read, and the local state keeps rendering
   // through the flip.
@@ -945,6 +952,32 @@ function LabelSection({
             ))}
           </select>
         </label>
+      )}
+      {rates.state === 'loading' ? (
+        <div className="text-xs text-(--muted-foreground)">Loading rates…</div>
+      ) : rates.state === 'failed' ? (
+        <ReadFailure word="Rates unavailable" reason={rates.reason} onRetry={rates.reload} />
+      ) : rates.data === null || rates.data.rates.items.length === 0 ? null : (
+        <div className="flex flex-col gap-1 rounded-sm border border-(--border) bg-(--muted) p-3 text-xs">
+          <div className="font-medium">Rates</div>
+          <div className="text-(--muted-foreground)">
+            Recomputed at every read — nothing is stored, charged or promised.
+          </div>
+          {rates.data.rates.items.map((item) => (
+            <div key={item.connectionId} className="flex flex-col gap-0.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-medium">{item.carrierName}</span>
+                {item.quote !== null ? (
+                  <span>{formatInrPaise(item.quote.amountPaise)}</span>
+                ) : (
+                  <span className="rounded-sm border border-(--border) bg-(--background) px-1.5 py-0.5 text-(--muted-foreground)">
+                    {item.refusal === null ? 'Refused' : item.refusal.detail}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
       <fieldset className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
         <legend className="px-1 text-xs text-(--muted-foreground)">Measurements (optional)</legend>

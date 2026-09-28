@@ -646,3 +646,56 @@ export function manifestReason(error: unknown): string {
   }
   return UNREACHABLE_REASON;
 }
+
+/* ------------------------------------------------------------------ */
+/* The rates strip (story 4.6d)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * INR money from integer paise (AD-9) — the rate quote's only money shape.
+ * Indian digit grouping is rendered by hand (the last three digits are the
+ * first group and every group before it holds two: `1,23,456` — never
+ * `123,456`) so the surface never depends on the runtime's ICU build; the
+ * paise fraction is always shown (₹25.00, not ₹25) because a quote is an
+ * exact paise figure, not an approximation.
+ */
+export function formatInrPaise(amountPaise: number): string {
+  const negative = amountPaise < 0;
+  const abs = Math.abs(Math.trunc(amountPaise));
+  const rupees = Math.floor(abs / 100);
+  const paise = abs % 100;
+  const digits = String(rupees);
+  const grouped =
+    digits.length <= 3
+      ? digits
+      : `${digits.slice(0, digits.length - 3).replace(/\B(?=(\d{2})+(?!\d))/g, ',')},${digits.slice(-3)}`;
+  return `${negative ? '−' : ''}₹${grouped}.${String(paise).padStart(2, '0')}`;
+}
+
+/**
+ * The rates read's failures (story 4.6d). The 409 arms — `missing-sku-weight`
+ * naming the SKUs, `conflict` naming the order's state — and the whole-read
+ * 503s (an unreadable credential is a deployment fault, not a quote) render
+ * VERBATIM: they are the server's own words about this order, and the retry
+ * (after the operator fixes the catalog) is a fresh read. The 404 never
+ * reaches this mapper — the hook renders it as "no rates" (a null), never a
+ * failed read.
+ */
+export function ratesReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    if (error.status === 409 || error.status === 501 || error.status === 503) {
+      return verbatim(error);
+    }
+    switch (error.code) {
+      case 'not-found':
+        return 'This order no longer exists — refresh the page.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Check the order and retry.';
+      default:
+        return error.detail ?? `Rates unavailable (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
+import { OUTBOUND_CHANGED_EVENT } from '../../lib/outbound';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { OutboundPackDispatch } from './pack-dispatch';
@@ -237,6 +238,36 @@ function connectionFixture(): unknown {
   };
 }
 
+/** Story 4.6d — one quoted item and one refused item, sorted by carrierCode. */
+function ratesFixture(): unknown {
+  return {
+    rates: {
+      orderId: 'order-2',
+      items: [
+        {
+          connectionId: 'conn-2',
+          carrierCode: 'delhivery',
+          carrierName: 'Delhivery',
+          quote: null,
+          refusal: {
+            code: 'carrier-transport-unconfigured',
+            status: 501,
+            title: 'Carrier transport unconfigured',
+            detail: 'Carrier "delhivery" has no label transport on this deployment — its real integration has not been configured. Retry once it lands.',
+          },
+        },
+        {
+          connectionId: 'conn-1',
+          carrierCode: 'sandbox',
+          carrierName: 'Sandbox Express',
+          quote: { amountPaise: 123456 },
+          refusal: null,
+        },
+      ],
+    },
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* The stubbed backend                                                 */
 /* ------------------------------------------------------------------ */
@@ -262,6 +293,8 @@ let skuFail = false;
 let failConnections = false;
 let failShipment = false;
 let failManifests = false;
+/** Story 4.6d — the rate shopping read's failure arm. */
+let failRates = false;
 /** The keyset cursor the list advertises, for the pager test. */
 let ordersNextCursor: string | null = null;
 /** Answers the pack POST; swapped per test to make an attempt refuse. */
@@ -286,6 +319,8 @@ let manifestResponder: () => { status: number; body: unknown } = () => ({
 let connectionRows: unknown[] = [];
 /** Per-order shipment read-backs: absent → 404 "no label yet". */
 let shipmentsByOrder: Record<string, unknown | null> = {};
+/** Story 4.6d — per-order rate responses: absent → 404 (rendered as "no rates"). */
+let ratesByOrder: Record<string, unknown> = {};
 let manifestRows: unknown[] = [];
 /** The keyset cursor the manifests list advertises, for the pager test. */
 let manifestsNextCursor: string | null = null;
@@ -364,6 +399,19 @@ function stubRouter(): void {
       }
       return json(200, { shipment });
     }
+    if (method === 'GET' && /\/outbound\/orders\/[^/]+\/rates$/.test(pathname)) {
+      if (failRates) {
+        return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The rates read is down.' });
+      }
+      const orderId = pathname.split('/')[pathname.split('/').length - 2]!;
+      const rates = ratesByOrder[orderId];
+      if (rates === undefined) {
+        // The route answers 404 for an unknown or foreign order — the hook
+        // renders that as "no rates", never a failed read.
+        return json(404, { code: 'not-found', title: 'No order', status: 404, detail: 'No such order.' });
+      }
+      return json(200, rates);
+    }
     if (method === 'GET' && pathname.endsWith('/outbound/manifests')) {
       if (failManifests) {
         return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The manifests are down.' });
@@ -404,6 +452,7 @@ beforeEach(() => {
   failConnections = false;
   failShipment = false;
   failManifests = false;
+  failRates = false;
   ordersNextCursor = null;
   manifestsNextCursor = null;
   packResponder = () => {
@@ -424,6 +473,7 @@ beforeEach(() => {
   };
   connectionRows = [];
   shipmentsByOrder = {};
+  ratesByOrder = {};
   manifestRows = [];
   stubRouter();
   // The slip and record render `new Date(packedAt).toLocaleString()`; pinning
@@ -534,6 +584,8 @@ const orderListReads = () =>
   requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/orders'));
 const manifestListReads = () =>
   requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/manifests'));
+const rateReads = () =>
+  requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/rates'));
 
 /** Set a labelled <select>'s value the way a real pick would reach React. */
 async function selectOption(rendered: Rendered, labelText: string, value: string): Promise<void> {
@@ -1448,5 +1500,121 @@ describe('the 4.6c read failures', () => {
     expect(text(view)).not.toContain('Shipments unavailable');
     expect(text(view)).toContain('Pick a connection…');
     expect(text(view)).toContain('Sandbox Express');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The rates strip (story 4.6d)                                        */
+/* ------------------------------------------------------------------ */
+
+describe('the rates strip (4.6d)', () => {
+  test('quoted and refused items render between the connection picker and the measurements, and the read is a bare GET', async () => {
+    connectionRows = [connectionFixture()];
+    ratesByOrder['order-2'] = ratesFixture();
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    const body = text(view);
+    expect(body).toContain('Rates');
+    // The quoted item shows the INR-formatted amount (123456 paise).
+    expect(body).toContain('Sandbox Express');
+    expect(body).toContain('₹1,234.56');
+    // The refused item shows the verbatim refusal chip, in the server's words.
+    expect(body).toContain('Delhivery');
+    expect(body).toContain('has no label transport on this deployment');
+    // The strip sits inside the label form — the picker and the measurements
+    // fieldset are both still there.
+    expect(body).toContain('Carrier connection');
+    expect(body).toContain('Measurements (optional)');
+    expect(body).toContain('Generate label');
+
+    // The rates read is a READ: a GET with no Idempotency-Key, recomputed at
+    // every read, and nothing is stored or posted by it.
+    const rateReads = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/rates'));
+    expect(rateReads).toHaveLength(1);
+    expect(rateReads[0]!.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/outbound/orders/order-2/rates`);
+    expect(rateReads[0]!.idempotencyKey).toBeNull();
+    expect(mutations()).toHaveLength(0);
+  });
+
+  test('a failed rates read renders Rates unavailable and Retry recovers', async () => {
+    connectionRows = [connectionFixture()];
+    ratesByOrder['order-2'] = ratesFixture();
+    failRates = true;
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    expect(text(view)).toContain('Rates unavailable');
+    expect(text(view)).toContain('The rates read is down.');
+    expect(text(view)).not.toContain('Loading rates…');
+    // The rest of the form is unaffected by the failed strip.
+    expect(text(view)).toContain('Generate label');
+
+    failRates = false;
+    await pressButton(view, 'Retry');
+    await settle();
+    expect(text(view)).not.toContain('Rates unavailable');
+    expect(text(view)).toContain('₹1,234.56');
+  });
+
+  test('the strip is hidden when the role carries no labels.execute — gating hides, never disables', async () => {
+    connectionRows = [connectionFixture()];
+    ratesByOrder['order-2'] = ratesFixture();
+    view = await mount('accountant');
+    await expand(view, 'order-2');
+
+    // The accountant reads the whole surface but is offered neither the label
+    // form nor the rates strip.
+    const body = text(view);
+    expect(body).not.toContain('₹1,234.56');
+    expect(body).not.toContain('Generate label');
+    expect(body).not.toContain('Measurements (optional)');
+  });
+
+  test('a 404 rates read renders as no rates at all, never a failed read', async () => {
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    // No rates response was staged → 404 → the hook's null: no strip, no
+    // failure arm, and the label form is unaffected.
+    expect(text(view)).not.toContain('Rates unavailable');
+    expect(text(view)).not.toContain('₹1,234.56');
+    expect(text(view)).toContain('Generate label');
+  });
+
+  test('the OUTBOUND_CHANGED refetch re-runs the rates read — quotes are recomputed, never served stale', async () => {
+    connectionRows = [connectionFixture()];
+    ratesByOrder['order-2'] = ratesFixture();
+    view = await mount('operator');
+    await expand(view, 'order-2');
+    expect(rateReads()).toHaveLength(1);
+    expect(text(view)).toContain('₹1,234.56');
+
+    // A mutation elsewhere (another operator's label, an API call) broadcasts;
+    // the strip re-prices from the new read — nothing was stored, so there is
+    // nothing to serve stale (the outbound-waves broadcaster precedent).
+    ratesByOrder['order-2'] = {
+      rates: {
+        orderId: 'order-2',
+        items: [
+          {
+            connectionId: 'conn-1',
+            carrierCode: 'sandbox',
+            carrierName: 'Sandbox Express',
+            quote: { amountPaise: 654321 },
+            refusal: null,
+          },
+        ],
+      },
+    };
+    await act(async () => {
+      window.dispatchEvent(new Event(OUTBOUND_CHANGED_EVENT));
+    });
+    await settle();
+
+    expect(rateReads()).toHaveLength(2);
+    expect(text(view)).toContain('₹6,543.21');
+    expect(text(view)).not.toContain('₹1,234.56');
   });
 });

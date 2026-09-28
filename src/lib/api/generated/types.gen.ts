@@ -1681,6 +1681,67 @@ export type ShipmentResponse = {
     shipment: ShipmentDto;
 };
 
+export type RateQuoteDto = {
+    /**
+     * The quote in integer paise — the sandbox arm’s deterministic formula
+     */
+    amountPaise: number;
+};
+
+export type RateRefusalDto = {
+    /**
+     * The machine-readable problem code the client branches on
+     */
+    code: string;
+    /**
+     * The problem’s HTTP status (501 for an unconfigured transport)
+     */
+    status: number;
+    /**
+     * The problem’s title
+     */
+    title: string;
+    /**
+     * The problem’s detail
+     */
+    detail: string;
+};
+
+export type RateItemDto = {
+    /**
+     * The carrier connection that produced this item
+     */
+    connectionId: string;
+    /**
+     * The adapter code (items are sorted by it)
+     */
+    carrierCode: string;
+    /**
+     * The carrier’s display name
+     */
+    carrierName: string;
+    /**
+     * The quote — null on a refused item
+     */
+    quote: RateQuoteDto | null;
+    /**
+     * The typed refusal — null on a quoted item
+     */
+    refusal: RateRefusalDto | null;
+};
+
+export type OrderRatesDto = {
+    orderId: string;
+    /**
+     * One item per live carrier connection, sorted by carrierCode
+     */
+    items: Array<RateItemDto>;
+};
+
+export type OrderRatesResponse = {
+    rates: OrderRatesDto;
+};
+
 export type OrderEntryDto = {
     id: string;
     tenantId: string;
@@ -5640,6 +5701,57 @@ export type OutboundControllerGetShipmentResponses = {
 };
 
 export type OutboundControllerGetShipmentResponse = OutboundControllerGetShipmentResponses[keyof OutboundControllerGetShipmentResponses];
+
+export type OutboundControllerGetOrderRatesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/rates';
+};
+
+export type OutboundControllerGetOrderRatesErrors = {
+    /**
+     * Malformed orderId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No order with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not ratable (it does not read ready_to_dispatch — conflict naming the status), or a contributing line’s SKU carries no weight_grams (missing-sku-weight naming the SKUs). Nothing is written
+     */
+    409: ProblemDetailsDto;
+    /**
+     * CARRIER_ENCRYPTION_KEY is missing (carrier-encryption-unavailable) or a stored credential does not open under it (carrier-credential-unreadable — rotate the connection). Nothing is written
+     */
+    503: ProblemDetailsDto;
+};
+
+export type OutboundControllerGetOrderRatesError = OutboundControllerGetOrderRatesErrors[keyof OutboundControllerGetOrderRatesErrors];
+
+export type OutboundControllerGetOrderRatesResponses = {
+    /**
+     * The rate list: a deterministic sandbox quote in integer paise, a DIRECT carrier’s verbatim 501 refusal, or an empty list when the tenant has no live carrier connection
+     */
+    200: OrderRatesResponse;
+};
+
+export type OutboundControllerGetOrderRatesResponse = OutboundControllerGetOrderRatesResponses[keyof OutboundControllerGetOrderRatesResponses];
 
 export type OutboundControllerGetOrderData = {
     body?: never;

@@ -30,6 +30,7 @@ import {
   outboundControllerGenerateWave,
   outboundControllerDispatchOrder,
   outboundControllerGetOrder,
+  outboundControllerGetOrderRates,
   outboundControllerGetShipment,
   outboundControllerGetWave,
   outboundControllerLabelOrder,
@@ -102,6 +103,7 @@ import type {
   GenerateWaveDto,
   LabelOrderDto,
   ManifestListResponse,
+  OrderRatesResponse,
   ManifestResponse,
   OrderListResponse,
   ShipmentResponse,
@@ -1259,6 +1261,31 @@ export async function fetchApiGetShipment(
   options?: { signal?: AbortSignal },
 ): Promise<ShipmentResponse | null> {
   const { data, error } = await outboundControllerGetShipment({
+    path: { tenantId, orderId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    if (isProblemDetails(error) && error.code === 'not-found' && error.status === 404) {
+      return null;
+    }
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The order's carrier rate shopping read (story 4.6d) — one quoted-or-refused
+ * item per live carrier connection, sorted by carrierCode. A READ: no
+ * idempotency key, no capability, nothing stored, recomputed per request. A
+ * 404 means the order does not exist in this tenant (unknown or foreign) and
+ * the caller renders "no order" rather than a failed read.
+ */
+export async function fetchApiGetOrderRates(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<OrderRatesResponse | null> {
+  const { data, error } = await outboundControllerGetOrderRates({
     path: { tenantId, orderId },
     signal: options?.signal,
   });
