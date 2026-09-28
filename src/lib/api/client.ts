@@ -10,6 +10,7 @@ import {
   catalogControllerListProducts,
   catalogControllerListSkus,
   catalogControllerReplaceKit,
+  carriersControllerListConnections,
   complianceControllerGetOrderColdChainTrace,
   complianceControllerListExcursions,
   complianceControllerResolveExcursion,
@@ -25,10 +26,14 @@ import {
   outboundControllerCancelWave,
   outboundControllerCreateOrder,
   outboundControllerCreateWavePolicy,
+  outboundControllerCreateManifest,
   outboundControllerGenerateWave,
   outboundControllerDispatchOrder,
   outboundControllerGetOrder,
+  outboundControllerGetShipment,
   outboundControllerGetWave,
+  outboundControllerLabelOrder,
+  outboundControllerListManifests,
   outboundControllerListOrders,
   outboundControllerPackOrder,
   outboundControllerListWavePolicies,
@@ -89,11 +94,17 @@ import type {
   MeResponse,
   MintEnrollmentCodeResponse,
   CreateOrderDto,
+  CarrierConnectionListResponse,
   CreateWavePolicyDto,
+  CreateManifestDto,
   DispatchOrderDto,
   DispatchResponse,
   GenerateWaveDto,
+  LabelOrderDto,
+  ManifestListResponse,
+  ManifestResponse,
   OrderListResponse,
+  ShipmentResponse,
   OrderResponse,
   PackOrderDto,
   PackResponse,
@@ -1151,6 +1162,131 @@ export async function fetchApiDispatchOrder(
     path: { tenantId, orderId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Labels, shipments and manifests (story 4.6c)                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The tenant's carrier connections (story 4.6b's read, consumed by 4.6c's
+ * label form picker). Each row carries the display name and the account
+ * label — everything the label form's picker states; the credential material
+ * itself is never in a response.
+ */
+export async function fetchApiListConnections(
+  tenantId: string,
+  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<CarrierConnectionListResponse> {
+  const { data, error } = await carriersControllerListConnections({
+    path: { tenantId },
+    query:
+      options?.cursor === undefined && options?.limit === undefined
+        ? undefined
+        : {
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+            ...(options.limit === undefined ? {} : { limit: options.limit }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Generates a label for a packed order through a carrier connection
+ * (capability `labels.execute`, story 4.6c) — one labelled shipment per
+ * order, ever. The adapter's failure arms are REFUSALS, not errors: a 501
+ * `carrier-transport-unconfigured` (a DIRECT carrier with no transport on
+ * this deployment) and a 503 `carrier-encryption-unavailable` write nothing
+ * and leave the order labellable, so the UI retry is a fresh submit.
+ */
+export async function fetchApiLabelOrder(
+  tenantId: string,
+  orderId: string,
+  body: LabelOrderDto,
+  idempotencyKey: string,
+): Promise<ShipmentResponse> {
+  const { data, error } = await outboundControllerLabelOrder({
+    path: { tenantId, orderId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Closes a set of labelled shipments onto ONE carrier connection as a
+ * manifest (capability `labels.execute`, story 4.6c) — terminal, with no
+ * un-manifest. The body names shipment ids; duplicates collapse and order
+ * is irrelevant (the set is the intent).
+ */
+export async function fetchApiCreateManifest(
+  tenantId: string,
+  warehouseId: string,
+  body: CreateManifestDto,
+  idempotencyKey: string,
+): Promise<ManifestResponse> {
+  const { data, error } = await outboundControllerCreateManifest({
+    path: { tenantId, warehouseId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The order's shipment read-back (story 4.6c) — null when the order has no
+ * label yet. The route answers 404 in that case; the caller treats a 404
+ * `not-found` as "no shipment yet" rather than a failed read.
+ */
+export async function fetchApiGetShipment(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ShipmentResponse | null> {
+  const { data, error } = await outboundControllerGetShipment({
+    path: { tenantId, orderId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    if (isProblemDetails(error) && error.code === 'not-found' && error.status === 404) {
+      return null;
+    }
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** One warehouse's manifest page, newest first (keyset cursor pagination). */
+export async function fetchApiListManifests(
+  tenantId: string,
+  warehouseId: string,
+  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<ManifestListResponse> {
+  const { data, error } = await outboundControllerListManifests({
+    path: { tenantId, warehouseId },
+    query:
+      options?.cursor === undefined && options?.limit === undefined
+        ? undefined
+        : {
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+            ...(options.limit === undefined ? {} : { limit: options.limit }),
+          },
+    signal: options?.signal,
   });
   if (error || !data) {
     throw unwrapError(error, 400);

@@ -31,8 +31,8 @@ afterEach(() => {
 
 describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
-    // Story 12-5 added `excursion.record` — 23 became 24.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(24);
+    // Story 4.6c added `labels.execute` — 24 became 25.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(25);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -57,6 +57,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'carrier.manage')).toBe(true);
     expect(roleHasCapability('owner', 'secure.move')).toBe(true);
     expect(roleHasCapability('owner', 'excursion.record')).toBe(true);
+    expect(roleHasCapability('owner', 'labels.execute')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -84,6 +85,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'carrier.manage')).toBe(true);
     expect(roleHasCapability('ops_manager', 'secure.move')).toBe(true);
     expect(roleHasCapability('ops_manager', 'excursion.record')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'labels.execute')).toBe(true);
     // Membership, spelled out — a length check passes a list of the right
     // size with the wrong member in it, which is the drift this file exists
     // to catch. The expected set is written here rather than derived from
@@ -112,6 +114,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'carrier.manage',
         'secure.move',
         'excursion.record',
+        'labels.execute',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -121,14 +124,17 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('operator holds exactly the floor verbs; accountant is read-only', () => {
     // Story 3.5 opened the operator column with `putaway.execute`; stories
     // 4.3 / 4.5 / 4.6 added pick, pack and dispatch; story 12-5 added the
-    // excursion record (the floor records what it observes). Planning verbs
-    // (orders, waves) stay out — an Operator executes, it does not plan.
+    // excursion record (the floor records what it observes); story 4.6c added
+    // the label station (the person who packed is the one who labels).
+    // Planning verbs (orders, waves) stay out — an Operator executes, it does
+    // not plan.
     expect(ROLE_CAPABILITIES.operator).toEqual([
       'putaway.execute',
       'picks.execute',
       'pack.execute',
       'dispatch.execute',
       'excursion.record',
+      'labels.execute',
     ]);
     expect(roleHasCapability('operator', 'putaway.execute')).toBe(true);
     expect(roleHasCapability('operator', 'warehouse.create')).toBe(false);
@@ -137,7 +143,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('operator', 'orders.manage')).toBe(false);
     expect(roleHasCapability('operator', 'waves.manage')).toBe(false);
     // Story 4.6b — configuring a carrier account is settings work, not a
-    // floor verb: the operator column stays at four.
+    // floor verb: the operator column stays at the floor verbs only.
     expect(roleHasCapability('operator', 'carrier.manage')).toBe(false);
     expect(roleHasCapability('operator', 'secure.move')).toBe(false);
     expect(roleHasCapability('operator', 'review.decide')).toBe(false);

@@ -187,6 +187,56 @@ function dispatchedFixture(orderId: string): unknown {
   };
 }
 
+function shipmentFixture(orderId: string): unknown {
+  return {
+    id: 'sh-1',
+    orderId,
+    tenantId: TENANT_ID,
+    warehouseId: WAREHOUSE_ID,
+    status: 'labelled',
+    carrierConnectionId: 'conn-1',
+    carrierCode: 'sandbox',
+    carrierName: 'Sandbox Express',
+    trackingNumber: 'SBX-ABCDEF012345',
+    labelDocumentRef: 'sandbox://labels/abc123',
+    weightGrams: null,
+    dimensionsMm: null,
+    labelledBy: 'priya@example.com',
+    labelledAt: NOW_ISO,
+    manifestId: null,
+  };
+}
+
+function manifestFixture(manifestId: string): unknown {
+  return {
+    id: manifestId,
+    tenantId: TENANT_ID,
+    warehouseId: WAREHOUSE_ID,
+    carrierConnectionId: 'conn-1',
+    carrierCode: 'sandbox',
+    shipmentCount: 1,
+    createdBy: 'priya@example.com',
+    createdAt: NOW_ISO,
+    updatedAt: NOW_ISO,
+  };
+}
+
+function connectionFixture(): unknown {
+  return {
+    id: 'conn-1',
+    tenantId: TENANT_ID,
+    carrierCode: 'sandbox',
+    carrierName: 'Sandbox Express',
+    accountLabel: 'ops@sandbox.test',
+    credentialVersion: 1,
+    connectedBy: 'priya@example.com',
+    rotatedAt: null,
+    rotatedBy: null,
+    createdAt: '2026-09-16T10:00:00.000Z',
+    updatedAt: '2026-09-16T10:00:00.000Z',
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* The stubbed backend                                                 */
 /* ------------------------------------------------------------------ */
@@ -208,6 +258,10 @@ let listRows: () => unknown[] = () => [];
 let failList = false;
 let failDetail = false;
 let skuFail = false;
+/** Story 4.6c — the label station's and manifest section's read failures. */
+let failConnections = false;
+let failShipment = false;
+let failManifests = false;
 /** The keyset cursor the list advertises, for the pager test. */
 let ordersNextCursor: string | null = null;
 /** Answers the pack POST; swapped per test to make an attempt refuse. */
@@ -220,6 +274,21 @@ let dispatchResponder: () => { status: number; body: unknown } = () => ({
   status: 201,
   body: { dispatch: dispatchedFixture('order-2') },
 });
+/* Story 4.6c — the label station and the manifest closure. */
+let labelResponder: () => { status: number; body: unknown } = () => ({
+  status: 201,
+  body: { shipment: shipmentFixture('order-2') },
+});
+let manifestResponder: () => { status: number; body: unknown } = () => ({
+  status: 201,
+  body: { manifest: manifestFixture('mf-1') },
+});
+let connectionRows: unknown[] = [];
+/** Per-order shipment read-backs: absent → 404 "no label yet". */
+let shipmentsByOrder: Record<string, unknown | null> = {};
+let manifestRows: unknown[] = [];
+/** The keyset cursor the manifests list advertises, for the pager test. */
+let manifestsNextCursor: string | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -260,6 +329,14 @@ function stubRouter(): void {
       const answer = dispatchResponder();
       return json(answer.status, answer.body);
     }
+    if (method === 'POST' && pathname.endsWith('/label')) {
+      const answer = labelResponder();
+      return json(answer.status, answer.body);
+    }
+    if (method === 'POST' && pathname.endsWith('/outbound/manifests')) {
+      const answer = manifestResponder();
+      return json(answer.status, answer.body);
+    }
 
     // ── reads ──────────────────────────────────────────────────────────
     if (method === 'GET' && pathname.endsWith('/outbound/orders')) {
@@ -267,6 +344,31 @@ function stubRouter(): void {
         return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The list is down.' });
       }
       return json(200, { items: listRows(), nextCursor: ordersNextCursor });
+    }
+    if (method === 'GET' && pathname.endsWith('/carriers/connections')) {
+      if (failConnections) {
+        return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The connections are down.' });
+      }
+      return json(200, { items: connectionRows, nextCursor: null });
+    }
+    if (method === 'GET' && /\/outbound\/orders\/[^/]+\/shipment$/.test(pathname)) {
+      if (failShipment) {
+        return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The shipment read is down.' });
+      }
+      const orderId = pathname.split('/')[pathname.split('/').length - 2]!;
+      const shipment = shipmentsByOrder[orderId];
+      // The route answers 404 `not-found` when the order has no label yet —
+      // the expected state of a ready_to_dispatch order, never a failure.
+      if (shipment === undefined) {
+        return json(404, { code: 'not-found', title: 'No shipment', status: 404, detail: 'No label yet.' });
+      }
+      return json(200, { shipment });
+    }
+    if (method === 'GET' && pathname.endsWith('/outbound/manifests')) {
+      if (failManifests) {
+        return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The manifests are down.' });
+      }
+      return json(200, { items: manifestRows, nextCursor: manifestsNextCursor });
     }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname)) {
       const id = pathname.split('/').pop()!;
@@ -299,7 +401,11 @@ beforeEach(() => {
   failList = false;
   failDetail = false;
   skuFail = false;
+  failConnections = false;
+  failShipment = false;
+  failManifests = false;
   ordersNextCursor = null;
+  manifestsNextCursor = null;
   packResponder = () => {
     orderStatuses['order-1'] = 'ready_to_dispatch';
     return { status: 201, body: { pack: packedFixture('order-1') } };
@@ -308,6 +414,17 @@ beforeEach(() => {
     orderStatuses['order-2'] = 'dispatched';
     return { status: 201, body: { dispatch: dispatchedFixture('order-2') } };
   };
+  labelResponder = () => {
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    return { status: 201, body: { shipment: shipmentFixture('order-2') } };
+  };
+  manifestResponder = () => {
+    manifestRows = [manifestFixture('mf-1')];
+    return { status: 201, body: { manifest: manifestFixture('mf-1') } };
+  };
+  connectionRows = [];
+  shipmentsByOrder = {};
+  manifestRows = [];
   stubRouter();
   // The slip and record render `new Date(packedAt).toLocaleString()`; pinning
   // the clock keeps those strings stable across machines.
@@ -415,6 +532,24 @@ async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
 const mutations = () => requests.filter((r) => r.method === 'POST');
 const orderListReads = () =>
   requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/orders'));
+const manifestListReads = () =>
+  requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/manifests'));
+
+/** Set a labelled <select>'s value the way a real pick would reach React. */
+async function selectOption(rendered: Rendered, labelText: string, value: string): Promise<void> {
+  const label = [...rendered.container.querySelectorAll('label')].find((l) =>
+    l.textContent?.includes(labelText),
+  );
+  const select = label?.querySelector('select');
+  if (!(select instanceof HTMLSelectElement)) {
+    throw new Error(`No select labelled "${labelText}"`);
+  }
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    setter.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /* The pipeline list                                                   */
@@ -924,5 +1059,394 @@ describe('read failures', () => {
     await settle();
     expect(text(view)).toContain('Pack this order');
     expect(text(view)).toContain('4.000 kg ordered');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The label station (story 4.6c)                                      */
+/* ------------------------------------------------------------------ */
+
+describe('the label step (4.6c)', () => {
+  test('the label form sends the connection and the record renders from the response', async () => {
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    expect(text(view)).toContain('Generate label');
+    expect(text(view)).toContain('Carrier connection');
+
+    await selectOption(view, 'Carrier connection', 'conn-1');
+    await pressButton(view, 'Generate label');
+    await settle();
+
+    const posts = mutations();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/outbound/orders/order-2/label`);
+    expect(posts[0]!.idempotencyKey).not.toBeNull();
+    // A bare label is the connection alone — measurements stay optional.
+    expect(posts[0]!.body).toEqual({ carrierConnectionId: 'conn-1' });
+
+    const body = text(view);
+    expect(body).toContain('Carrier Sandbox Express · Tracking SBX-ABCDEF012345');
+    expect(body).toContain('Dispatch stamps this carrier and tracking');
+    // The label is a station act beside the state machine: the row's status
+    // does not move.
+    expect(text(view)).toContain('Ready to dispatch');
+  });
+
+  test('measurements ride the label body when given, under the pack rule', async () => {
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    await selectOption(view, 'Carrier connection', 'conn-1');
+    // The label form's four measurement inputs — the only number inputs on
+    // this expanded row.
+    const numeric = inputs(view).filter((i) => i.type === 'number');
+    expect(numeric).toHaveLength(4);
+    await typeInto(numeric[0]!, '2500');
+    await typeInto(numeric[1]!, '300');
+    await typeInto(numeric[2]!, '200');
+    await typeInto(numeric[3]!, '100');
+    await pressButton(view, 'Generate label');
+    await settle();
+
+    expect(mutations()[0]!.body).toEqual({
+      carrierConnectionId: 'conn-1',
+      weightGrams: 2500,
+      dimensionsMm: { lengthMm: 300, widthMm: 200, heightMm: 100 },
+    });
+    // The record renders from the response shipment — the carrier and
+    // tracking, not the posted measurements.
+    expect(text(view)).toContain('Carrier Sandbox Express · Tracking SBX-ABCDEF012345');
+  });
+
+  test('a 501 unconfigured-carrier refusal renders verbatim and a retry reuses the key', async () => {
+    connectionRows = [connectionFixture()];
+    labelResponder = () => ({
+      status: 501,
+      body: {
+        code: 'carrier-transport-unconfigured',
+        title: 'Carrier transport unconfigured',
+        status: 501,
+        detail: 'The delhivery carrier has no transport on this deployment. Connect a carrier with one, or record the hand-over on dispatch.',
+      },
+    });
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    await selectOption(view, 'Carrier connection', 'conn-1');
+    await pressButton(view, 'Generate label');
+    await settle();
+
+    expect(text(view)).toContain(
+      'Carrier transport unconfigured — The delhivery carrier has no transport on this deployment. Connect a carrier with one, or record the hand-over on dispatch.',
+    );
+    expect(text(view)).toContain('Label not generated');
+    // Nothing was written and nothing moved optimistically: the form is still
+    // on screen and the row still reads ready_to_dispatch.
+    expect(text(view)).toContain('Ready to dispatch');
+    expect(text(view)).not.toContain('Tracking SBX-ABCDEF012345');
+
+    const firstKey = mutations()[0]!.idempotencyKey;
+    await pressButton(view, 'Generate label');
+    await settle();
+    const posts = mutations();
+    expect(posts).toHaveLength(2);
+    expect(posts[1]!.idempotencyKey).toBe(firstKey);
+  });
+
+  test('a 503 key-unavailable refusal renders verbatim — retryable inline', async () => {
+    connectionRows = [connectionFixture()];
+    labelResponder = () => ({
+      status: 503,
+      body: {
+        code: 'carrier-encryption-unavailable',
+        title: 'Carrier encryption unavailable',
+        status: 503,
+        detail: 'The carrier encryption key is not configured. Set CARRIER_ENCRYPTION_KEY and retry — nothing was written.',
+      },
+    });
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    await selectOption(view, 'Carrier connection', 'conn-1');
+    await pressButton(view, 'Generate label');
+    await settle();
+
+    expect(text(view)).toContain(
+      'Carrier encryption unavailable — The carrier encryption key is not configured. Set CARRIER_ENCRYPTION_KEY and retry — nothing was written.',
+    );
+    // The retry affordance is the same button — the refusal is inline.
+    expect(buttonLabels(view)).toContain('Generate label');
+  });
+
+  test('an edited draft mints a fresh idempotency key', async () => {
+    connectionRows = [connectionFixture()];
+    labelResponder = () => ({
+      status: 501,
+      body: {
+        code: 'carrier-transport-unconfigured',
+        title: 'Carrier transport unconfigured',
+        status: 501,
+        detail: 'no transport',
+      },
+    });
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    await selectOption(view, 'Carrier connection', 'conn-1');
+    await pressButton(view, 'Generate label');
+    await settle();
+    const firstKey = mutations()[0]!.idempotencyKey;
+
+    // An edit — a measurement — makes the next attempt a NEW label.
+    const numeric = inputs(view).filter((i) => i.type === 'number');
+    await typeInto(numeric[0]!, '2500');
+    await pressButton(view, 'Generate label');
+    await settle();
+
+    const posts = mutations();
+    expect(posts).toHaveLength(2);
+    expect(posts[1]!.idempotencyKey).not.toBe(firstKey);
+    expect(posts[1]!.body).toEqual({ carrierConnectionId: 'conn-1', weightGrams: 2500 });
+  });
+
+  test('an existing label renders its record instead of the form — one label per order, ever', async () => {
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    const body = text(view);
+    expect(body).toContain('Carrier Sandbox Express · Tracking SBX-ABCDEF012345');
+    expect(body).not.toContain('Generate label');
+
+    // The manifest closure below names the labelled shipment.
+    expect(text(view)).toContain('Pick a connection…');
+    expect(text(view)).toContain('Sandbox Express');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The manifest section (story 4.6c)                                   */
+/* ------------------------------------------------------------------ */
+
+describe('the manifest section (4.6c)', () => {
+  test('the closure sends the labelled shipments and states the terminality', async () => {
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+
+    expect(text(view)).toContain('Manifests');
+    expect(text(view)).toContain('no un-manifest');
+    expect(text(view)).toContain('Pick a connection…');
+
+    await selectOption(view, 'Manifest onto', 'conn-1');
+    await settle();
+    // The connection's labelled shipments pre-check — the manifest is the
+    // hand-over of the batch.
+    const checkboxes = [...view.container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+    expect(checkboxes).toHaveLength(1);
+    expect(checkboxes[0]!.checked).toBe(true);
+
+    await pressButton(view, 'Create manifest');
+    await settle();
+
+    const posts = mutations();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.pathname).toBe(
+      `/api/v1/tenants/${TENANT_ID}/warehouses/${WAREHOUSE_ID}/outbound/manifests`,
+    );
+    expect(posts[0]!.idempotencyKey).not.toBeNull();
+    expect(posts[0]!.body).toEqual({ shipmentIds: ['sh-1'] });
+
+    const body = text(view);
+    expect(body).toContain('Manifest created');
+    expect(body).toContain('1 shipment closed onto sandbox. There is no un-manifest.');
+    // The manifest list read back the created record.
+    expect(text(view)).toContain('mf-1');
+  });
+
+  test('a 409 offender renders verbatim and a selection edit mints a fresh key', async () => {
+    // Two labelled shipments on the page, both on the same connection — the
+    // builder pre-checks both, so an untick leaves a real (non-empty) set.
+    orderStatuses['order-1'] = 'ready_to_dispatch';
+    shipmentsByOrder['order-1'] = {
+      ...(shipmentFixture('order-1') as Record<string, unknown>),
+      id: 'sh-2',
+    };
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    connectionRows = [connectionFixture()];
+    manifestResponder = () => ({
+      status: 409,
+      body: {
+        code: 'manifest-shipments-conflict',
+        status: 409,
+        detail: '1 of the named shipment(s) do not exist in this tenant.',
+      },
+    });
+    view = await mount('operator');
+
+    await selectOption(view, 'Manifest onto', 'conn-1');
+    await settle();
+    await pressButton(view, 'Create manifest');
+    await settle();
+
+    expect(text(view)).toContain('1 of the named shipment(s) do not exist in this tenant.');
+    expect(text(view)).toContain('No manifest');
+    // The selection goes as given — the set is the intent, order irrelevant.
+    expect(mutations()[0]!.body).toEqual({ shipmentIds: ['sh-2', 'sh-1'] });
+    const firstKey = mutations()[0]!.idempotencyKey;
+
+    // Untick one — the next attempt is a NEW manifest with the edited set.
+    const checkboxes = [...view.container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+    await act(async () => {
+      checkboxes[0]!.click();
+    });
+    await pressButton(view, 'Create manifest');
+    await settle();
+
+    const posts = mutations();
+    expect(posts).toHaveLength(2);
+    expect(posts[1]!.idempotencyKey).not.toBe(firstKey);
+    expect(posts[1]!.body).toEqual({ shipmentIds: ['sh-1'] });
+  });
+
+  test('an empty selection is refused client-side — nothing is sent', async () => {
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+
+    await selectOption(view, 'Manifest onto', 'conn-1');
+    await settle();
+    // Untick the pre-checked shipment, then submit the empty set.
+    const checkboxes = [...view.container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+    await act(async () => {
+      checkboxes[0]!.click();
+    });
+    await pressButton(view, 'Create manifest');
+    await settle();
+
+    expect(mutations()).toHaveLength(0);
+    expect(text(view)).toContain('Pick at least one labelled shipment to manifest.');
+  });
+
+  test('the manifests pager carries the keyset cursor to the older page', async () => {
+    manifestRows = [manifestFixture('mf-1')];
+    manifestsNextCursor = 'older-manifests-cursor';
+    view = await mount('operator');
+
+    await pressButton(view, 'Older manifests');
+    await settle();
+
+    const pages = manifestListReads();
+    expect(pages).toHaveLength(2);
+    expect(pages[0]!.search).toBe('');
+    expect(pages[1]!.search).toBe('?cursor=older-manifests-cursor');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The 4.6c capability gates                                           */
+/* ------------------------------------------------------------------ */
+
+describe('the label and manifest gates (4.6c)', () => {
+  test('a role without labels.execute is offered neither the label form nor the manifest builder, and still reads the manifest record', async () => {
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    manifestRows = [manifestFixture('mf-1')];
+    view = await mount('accountant');
+    await expand(view, 'order-2');
+
+    const body = text(view);
+    expect(body).not.toContain('Generate label');
+    expect(body).not.toContain('Manifest onto');
+    expect(body).not.toContain('Create manifest');
+    // The dispatch affordance is likewise absent, unchanged from 4-2d.
+    expect(body).not.toContain('Dispatch this order');
+    expect(body).toContain('Packed and waiting for dispatch.');
+    // But the hand-over record itself is readable by every role.
+    expect(body).toContain('mf-1');
+    expect(body).toContain('1 shipment');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The 4.6c read failures                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Matrix row 12 — every 4.6c read reports its own failure: a failed arm with
+ * its word and the reason, never blank and never an endless "Loading…", and
+ * the Retry affordance recovers it.
+ */
+describe('the 4.6c read failures', () => {
+  test('a failed shipment read inside the expanded row renders Label unavailable and Retry recovers', async () => {
+    failShipment = true;
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    expect(text(view)).toContain('Label unavailable');
+    expect(text(view)).toContain('The shipment read is down.');
+    // Never blank, never an endless "Loading…": the record is simply not
+    // claimed to exist.
+    expect(text(view)).not.toContain('Loading label…');
+
+    failShipment = false;
+    await pressButton(view, 'Retry');
+    await settle();
+    expect(text(view)).toContain('Generate label');
+  });
+
+  test('a failed connections read renders Connections unavailable and Retry recovers', async () => {
+    failConnections = true;
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    expect(text(view)).toContain('Connections unavailable');
+    expect(text(view)).toContain('The connections are down.');
+    expect(text(view)).not.toContain('Loading carrier connections…');
+
+    failConnections = false;
+    await pressButton(view, 'Retry');
+    await settle();
+    expect(text(view)).not.toContain('Connections unavailable');
+    expect(text(view)).toContain('Carrier connection');
+    expect(text(view)).toContain('Generate label');
+  });
+
+  test('a failed manifests list read renders Manifests unavailable and Retry recovers', async () => {
+    failManifests = true;
+    manifestRows = [manifestFixture('mf-1')];
+    view = await mount('operator');
+
+    expect(text(view)).toContain('Manifests unavailable');
+    expect(text(view)).toContain('The manifests are down.');
+    expect(text(view)).not.toContain('Loading manifests…');
+
+    failManifests = false;
+    await pressButton(view, 'Retry');
+    await settle();
+    expect(text(view)).toContain('mf-1');
+  });
+
+  test('a failed per-order shipment read feeding the manifest builder renders Shipments unavailable and Retry recovers', async () => {
+    failShipment = true;
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+
+    expect(text(view)).toContain('Shipments unavailable');
+    expect(text(view)).toContain('The shipment read is down.');
+    expect(text(view)).not.toContain('Checking this page for labelled shipments…');
+
+    failShipment = false;
+    await pressButton(view, 'Retry');
+    await settle();
+    expect(text(view)).not.toContain('Shipments unavailable');
+    expect(text(view)).toContain('Pick a connection…');
+    expect(text(view)).toContain('Sandbox Express');
   });
 });

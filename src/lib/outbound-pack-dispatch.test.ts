@@ -28,7 +28,19 @@ import {
   PIPELINE_STATUSES,
 } from '@/lib/outbound-pack-dispatch';
 import type { QuantityUom } from '@/lib/format-quantity';
-import type { OrderLineDto } from '@/lib/api/generated';
+import type { CarrierConnectionResponse, ManifestDto, OrderLineDto, ShipmentDto } from '@/lib/api/generated';
+import {
+  canLabelOrder,
+  connectionOptionLabel,
+  labelOutcome,
+  labelReason,
+  MANIFEST_TERMINAL_WARNING,
+  manifestOutcome,
+  manifestReason,
+  parseLabelDraft,
+  parseManifestDraft,
+  shipmentRecordLabel,
+} from '@/lib/outbound-pack-dispatch';
 
 /**
  * The pure derivation the pack & dispatch surface (story 4-2d) renders from.
@@ -497,5 +509,221 @@ describe('refusal mappers', () => {
   test('a non-problem failure is transport-shaped — the unreachable copy', () => {
     expect(packReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
     expect(dispatchReason(undefined)).toBe(UNREACHABLE_REASON);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Labels and manifests (story 4.6c)                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The label/manifest claims that live beside the pack/dispatch ones:
+ *   6. the label body requires a connection client-side and reuses the pack
+ *      bench's measurement rule verbatim,
+ *   7. the 409 / 501 / 503 arms render the server's own words — the 501 and
+ *      503 are REFUSALS (nothing was written), so the retry is a fresh
+ *      submit, and the cause is server truth,
+ *   8. the manifest body carries the selection as given (the set is the
+ *      intent) and refuses an empty one before anything is sent,
+ *   9. the outcomes are built from the RESPONSE's own shipment/manifest.
+ */
+
+const SHIPMENT: ShipmentDto = {
+  id: 'sh-1',
+  orderId: 'order-1',
+  tenantId: 't-1',
+  warehouseId: 'w-1',
+  status: 'labelled',
+  carrierConnectionId: 'conn-1',
+  carrierCode: 'sandbox',
+  carrierName: 'Sandbox Express',
+  trackingNumber: 'SBX-ABCDEF012345',
+  labelDocumentRef: 'sandbox://labels/abc',
+  weightGrams: 2500,
+  dimensionsMm: { lengthMm: 300, widthMm: 200, heightMm: 100 },
+  labelledBy: 'priya@example.com',
+  labelledAt: '2026-09-16T12:00:00.000Z',
+  manifestId: null,
+};
+
+const MANIFEST: ManifestDto = {
+  id: 'mf-1',
+  tenantId: 't-1',
+  warehouseId: 'w-1',
+  carrierConnectionId: 'conn-1',
+  carrierCode: 'sandbox',
+  shipmentCount: 2,
+  createdBy: 'priya@example.com',
+  createdAt: '2026-09-16T12:00:00.000Z',
+  updatedAt: '2026-09-16T12:00:00.000Z',
+};
+
+describe('the label and manifest step (4.6c)', () => {
+  test('labelling is offered for exactly ready_to_dispatch', () => {
+    for (const status of ['accepted', 'ready_to_dispatch', 'dispatched', 'cancelled'] as const) {
+      expect(canLabelOrder(status)).toBe(status === 'ready_to_dispatch');
+    }
+  });
+
+  test('an empty connection is refused client-side — never a 400 round trip', () => {
+    const parsed = parseLabelDraft('  ', EMPTY_MEASUREMENTS);
+    expect(parsed.body).toBeNull();
+    expect(parsed.problem).toBe('Pick the carrier connection this label generates through.');
+  });
+
+  test('a bare label is the connection alone — measurements stay optional', () => {
+    const parsed = parseLabelDraft('conn-1', EMPTY_MEASUREMENTS);
+    expect(parsed.problem).toBeNull();
+    expect(parsed.body).toEqual({ carrierConnectionId: 'conn-1' });
+  });
+
+  test('the label measurements ride the pack bench rule verbatim', () => {
+    const ok = parseLabelDraft('conn-1', {
+      ...EMPTY_MEASUREMENTS,
+      weightGrams: '2500',
+      lengthMm: '300',
+      widthMm: '200',
+      heightMm: '100',
+    });
+    expect(ok.problem).toBeNull();
+    expect(ok.body).toEqual({
+      carrierConnectionId: 'conn-1',
+      weightGrams: 2500,
+      dimensionsMm: { lengthMm: 300, widthMm: 200, heightMm: 100 },
+    });
+    // The same refusals, the same copy — one rule, two forms.
+    const partial = parseLabelDraft('conn-1', { ...EMPTY_MEASUREMENTS, lengthMm: '300', widthMm: '200' });
+    expect(partial.body).toBeNull();
+    expect(partial.problem).toBe('Dimensions are all three sides together, or none of them.');
+    const heavy = parseLabelDraft('conn-1', { ...EMPTY_MEASUREMENTS, weightGrams: String(MAX_WEIGHT_GRAMS + 1) });
+    expect(heavy.problem).toBe('Weight is at most 1,000,000 grams.');
+  });
+
+  test('the manifest selection goes as given — the set is the server intent', () => {
+    const parsed = parseManifestDraft(['sh-2', 'sh-1', 'sh-2']);
+    expect(parsed.problem).toBeNull();
+    expect(parsed.body!.shipmentIds).toEqual(['sh-2', 'sh-1', 'sh-2']);
+    const empty = parseManifestDraft([]);
+    expect(empty.body).toBeNull();
+    expect(empty.problem).toBe('Pick at least one labelled shipment to manifest.');
+  });
+
+  test('the label outcome is built from the response shipment, not the request', () => {
+    const outcome = labelOutcome(SHIPMENT);
+    expect(outcome.tone).toBe('accepted');
+    expect(outcome.word).toBe('Label generated');
+    expect(outcome.reason).toBe(
+      'Sandbox Express · tracking SBX-ABCDEF012345 · 2,500 g · 300 × 200 × 100 mm. The order stays ready to dispatch.',
+    );
+  });
+
+  test('the label outcome reads honestly when no measurements were taken', () => {
+    const outcome = labelOutcome({ ...SHIPMENT, weightGrams: null, dimensionsMm: null });
+    expect(outcome.reason).toBe(
+      'Sandbox Express · tracking SBX-ABCDEF012345 · Unmeasured. The order stays ready to dispatch.',
+    );
+  });
+
+  test('the shipment record names carrier, tracking, and its manifest closure', () => {
+    expect(shipmentRecordLabel(SHIPMENT)).toBe('Carrier Sandbox Express · Tracking SBX-ABCDEF012345');
+    expect(shipmentRecordLabel({ ...SHIPMENT, manifestId: 'mf-1' })).toBe(
+      'Carrier Sandbox Express · Tracking SBX-ABCDEF012345 · manifested',
+    );
+  });
+
+  test('the manifest outcome counts the closure onto its carrier', () => {
+    const outcome = manifestOutcome(MANIFEST);
+    expect(outcome.tone).toBe('accepted');
+    expect(outcome.word).toBe('Manifest created');
+    expect(outcome.reason).toBe('2 shipments closed onto sandbox. There is no un-manifest.');
+    expect(manifestOutcome({ ...MANIFEST, shipmentCount: 1 }).reason).toBe(
+      '1 shipment closed onto sandbox. There is no un-manifest.',
+    );
+  });
+
+  test('the manifest warning states the terminality', () => {
+    expect(MANIFEST_TERMINAL_WARNING).toContain('terminal');
+    expect(MANIFEST_TERMINAL_WARNING).toContain('never returns to labelled');
+  });
+
+  test('the connection option names the display and the account', () => {
+    const connection = {
+      id: 'conn-1',
+      carrierCode: 'sandbox',
+      carrierName: 'Sandbox Express',
+      accountLabel: 'ops@sandbox.test',
+      createdAt: '2026-09-16T10:00:00.000Z',
+    } as unknown as CarrierConnectionResponse;
+    expect(connectionOptionLabel(connection)).toBe('Sandbox Express — ops@sandbox.test');
+  });
+
+  test('the label 409 and BOTH retryable-failure arms are verbatim — refusals, not errors', () => {
+    const unconfigured = new ApiProblem(
+      'carrier-transport-unconfigured',
+      501,
+      'The delhivery carrier has no transport on this deployment. Connect a carrier with one, or record the hand-over on dispatch.',
+      'Carrier transport unconfigured',
+    );
+    expect(labelReason(unconfigured)).toBe(
+      'Carrier transport unconfigured — The delhivery carrier has no transport on this deployment. Connect a carrier with one, or record the hand-over on dispatch.',
+    );
+    const keyUnavailable = new ApiProblem(
+      'carrier-encryption-unavailable',
+      503,
+      'The carrier encryption key is not configured. Set CARRIER_ENCRYPTION_KEY and retry — nothing was written.',
+      'Carrier encryption unavailable',
+    );
+    expect(labelReason(keyUnavailable)).toBe(
+      'Carrier encryption unavailable — The carrier encryption key is not configured. Set CARRIER_ENCRYPTION_KEY and retry — nothing was written.',
+    );
+    expect(
+      labelReason(new ApiProblem('order-already-dispatched', 409, 'The order reads dispatched.', 'Order already dispatched')),
+    ).toBe('Order already dispatched — The order reads dispatched.');
+    // A problem whose title never reaches the response renders as its detail.
+    expect(labelReason(new ApiProblem('shipment-manifested', 409, 'This shipment is on manifest mf-1.', undefined))).toBe(
+      'This shipment is on manifest mf-1.',
+    );
+  });
+
+  test('the label house-copy arms stay distinct per command', () => {
+    expect(labelReason(new ApiProblem('not-found', 404))).toBe(
+      'This order or carrier connection no longer exists — refresh the page.',
+    );
+    expect(labelReason(new ApiProblem('role-denied', 403))).toBe('Your role cannot generate labels.');
+    expect(labelReason(new ApiProblem('permission-denied', 403))).toBe(
+      'That carrier connection belongs to another tenant — sign in again.',
+    );
+    expect(labelReason(new ApiProblem('idempotency-key-reuse', 422, 'Key reuse'))).toBe(
+      'This label was already processed with a different request.',
+    );
+    expect(labelReason(new ApiProblem('unauthenticated', 401))).toBe('Your session expired — sign in again.');
+    expect(labelReason(new ApiProblem('validation-failed', 400, 'Weight must be at least 1.'))).toBe(
+      'Weight must be at least 1.',
+    );
+    expect(labelReason(new ApiProblem('something-else', 500))).toBe('Label not generated (something-else).');
+  });
+
+  test('the manifest 409 arms are verbatim; its key reuse is house copy', () => {
+    expect(
+      manifestReason(
+        new ApiProblem('manifest-shipments-conflict', 409, '2 of the named shipment(s) do not exist in this tenant.', undefined),
+      ),
+    ).toBe('2 of the named shipment(s) do not exist in this tenant.');
+    expect(
+      manifestReason(new ApiProblem('manifest-connections-conflict', 409, 'Shipments span different carrier connections.', undefined)),
+    ).toBe('Shipments span different carrier connections.');
+    expect(manifestReason(new ApiProblem('idempotency-key-reuse', 422, 'Key reuse'))).toBe(
+      'This manifest was already processed.',
+    );
+    expect(manifestReason(new ApiProblem('role-denied', 403))).toBe('Your role cannot manifest shipments.');
+    expect(manifestReason(new ApiProblem('validation-failed', 400, 'shipmentIds must not be empty'))).toBe(
+      'shipmentIds must not be empty',
+    );
+    expect(manifestReason(new ApiProblem('something-else', 500))).toBe('Manifest not created (something-else).');
+  });
+
+  test('a non-problem label failure is transport-shaped', () => {
+    expect(labelReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
+    expect(manifestReason(undefined)).toBe(UNREACHABLE_REASON);
   });
 });
