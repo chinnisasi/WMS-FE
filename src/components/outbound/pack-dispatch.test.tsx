@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
+import { OUTBOUND_CHANGED_EVENT } from '../../lib/outbound';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { OutboundPackDispatch } from './pack-dispatch';
@@ -583,6 +584,8 @@ const orderListReads = () =>
   requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/orders'));
 const manifestListReads = () =>
   requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/manifests'));
+const rateReads = () =>
+  requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/rates'));
 
 /** Set a labelled <select>'s value the way a real pick would reach React. */
 async function selectOption(rendered: Rendered, labelText: string, value: string): Promise<void> {
@@ -1578,5 +1581,40 @@ describe('the rates strip (4.6d)', () => {
     expect(text(view)).not.toContain('Rates unavailable');
     expect(text(view)).not.toContain('₹1,234.56');
     expect(text(view)).toContain('Generate label');
+  });
+
+  test('the OUTBOUND_CHANGED refetch re-runs the rates read — quotes are recomputed, never served stale', async () => {
+    connectionRows = [connectionFixture()];
+    ratesByOrder['order-2'] = ratesFixture();
+    view = await mount('operator');
+    await expand(view, 'order-2');
+    expect(rateReads()).toHaveLength(1);
+    expect(text(view)).toContain('₹1,234.56');
+
+    // A mutation elsewhere (another operator's label, an API call) broadcasts;
+    // the strip re-prices from the new read — nothing was stored, so there is
+    // nothing to serve stale (the outbound-waves broadcaster precedent).
+    ratesByOrder['order-2'] = {
+      rates: {
+        orderId: 'order-2',
+        items: [
+          {
+            connectionId: 'conn-1',
+            carrierCode: 'sandbox',
+            carrierName: 'Sandbox Express',
+            quote: { amountPaise: 654321 },
+            refusal: null,
+          },
+        ],
+      },
+    };
+    await act(async () => {
+      window.dispatchEvent(new Event(OUTBOUND_CHANGED_EVENT));
+    });
+    await settle();
+
+    expect(rateReads()).toHaveLength(2);
+    expect(text(view)).toContain('₹6,543.21');
+    expect(text(view)).not.toContain('₹1,234.56');
   });
 });

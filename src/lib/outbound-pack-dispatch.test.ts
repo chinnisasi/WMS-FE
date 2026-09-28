@@ -760,6 +760,21 @@ describe('the rates strip (4.6d)', () => {
     expect(
       ratesReason(new ApiProblem('carrier-credential-unreadable', 503, 'Connection c-1 cannot be opened.', undefined)),
     ).toBe('Connection c-1 cannot be opened.');
+    // The 501 arrives as a refused ITEM in the happy path, but if the whole
+    // read ever carries it (a single-connection tenant), it is verbatim too —
+    // the labelReason 501 contract, same words.
+    expect(
+      ratesReason(
+        new ApiProblem(
+          'carrier-transport-unconfigured',
+          501,
+          'Carrier "delhivery" has no label transport on this deployment — its real integration has not been configured. Retry once it lands.',
+          undefined,
+        ),
+      ),
+    ).toBe(
+      'Carrier "delhivery" has no label transport on this deployment — its real integration has not been configured. Retry once it lands.',
+    );
     expect(ratesReason(new ApiProblem('unauthenticated', 401))).toBe('Your session expired — sign in again.');
     expect(ratesReason(new ApiProblem('validation-failed', 400, 'orderId must be a UUID'))).toBe(
       'orderId must be a UUID',

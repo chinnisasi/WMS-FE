@@ -5736,6 +5736,10 @@ export type OutboundControllerGetOrderRatesErrors = {
      * The order is not ratable (it does not read ready_to_dispatch — conflict naming the status), or a contributing line’s SKU carries no weight_grams (missing-sku-weight naming the SKUs). Nothing is written
      */
     409: ProblemDetailsDto;
+    /**
+     * CARRIER_ENCRYPTION_KEY is missing (carrier-encryption-unavailable) or a stored credential does not open under it (carrier-credential-unreadable — rotate the connection). Nothing is written
+     */
+    503: ProblemDetailsDto;
 };
 
 export type OutboundControllerGetOrderRatesError = OutboundControllerGetOrderRatesErrors[keyof OutboundControllerGetOrderRatesErrors];
