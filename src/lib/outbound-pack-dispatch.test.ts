@@ -16,6 +16,7 @@ import {
   MAX_DIMENSION_MM,
   MAX_WEIGHT_GRAMS,
   MAX_NAMED_SHORT_LINES,
+  MAX_QUANTITY_BASE,
   MIN_SCAN_QTY,
   packOutcome,
   packReason,
@@ -145,6 +146,20 @@ describe('the pack draft', () => {
     const parsed = parsePackDraft([scan('ol-1', 'sku-1', 4, '0.0005')], EMPTY_MEASUREMENTS);
     expect(parsed.body).toBeNull();
     expect(parsed.problem).toBe(`A scanned quantity is at least ${MIN_SCAN_QTY}.`);
+  });
+
+  test('a scanned value past the largest exact milli-unit count is refused client-side', () => {
+    const parsed = parsePackDraft(
+      [scan('ol-1', 'sku-1', 4, String(MAX_QUANTITY_BASE + 1))],
+      EMPTY_MEASUREMENTS,
+    );
+    expect(parsed.body).toBeNull();
+    expect(parsed.problem).toBe(`A scanned quantity is at most ${MAX_QUANTITY_BASE.toLocaleString('en-US')}.`);
+    const atTheBound = parsePackDraft(
+      [scan('ol-1', 'sku-1', 4, String(MAX_QUANTITY_BASE))],
+      EMPTY_MEASUREMENTS,
+    );
+    expect(atTheBound.body!.scanned).toEqual([{ skuId: 'sku-1', qty: MAX_QUANTITY_BASE }]);
   });
 
   test('a non-decimal scanned value is refused client-side, never Number()-parsed', () => {
@@ -330,7 +345,7 @@ describe('outcomes', () => {
     expect(outcome.reason).toContain('…and 2 more');
   });
 
-  test('the dispatch outcome names the retired holds and the terminality', () => {
+  test('the dispatch outcome names the retired holds and the terminality, at the shared unit', () => {
     const base = {
       orderId: 'order-1',
       tenantId: 't-1',
@@ -346,13 +361,33 @@ describe('outcomes', () => {
       totalUnits: 7,
       lines: [DISPATCHED_LINE, { ...DISPATCHED_LINE, orderLineId: 'ol-2', skuId: 'sku-2' }],
     };
-    expect(dispatchOutcome({ ...base, retiredReservationIds: ['r-1', 'r-2'] }).reason).toBe(
-      '2 lines · 7 units shipped; 2 reservation holds retired. The order is dispatched — there is no un-dispatch.',
+    expect(dispatchOutcome({ ...base, retiredReservationIds: ['r-1', 'r-2'] }, uomOf).reason).toBe(
+      '2 lines · 7.000 kg shipped; 2 reservation holds retired. The order is dispatched — there is no un-dispatch.',
     );
-    expect(dispatchOutcome({ ...base, retiredReservationIds: ['r-1'] }).reason).toContain('1 reservation hold retired');
-    expect(dispatchOutcome({ ...base, retiredReservationIds: [] }).reason).toContain(
+    expect(dispatchOutcome({ ...base, retiredReservationIds: ['r-1'] }, uomOf).reason).toContain('1 reservation hold retired');
+    expect(dispatchOutcome({ ...base, retiredReservationIds: [] }, uomOf).reason).toContain(
       'no reservation holds were left to retire',
     );
+  });
+
+  test('a dispatch of lines in mixed units falls back to the raw-number total', () => {
+    const dispatch = {
+      orderId: 'order-1',
+      tenantId: 't-1',
+      warehouseId: 'w-1',
+      orderStatus: 'dispatched' as const,
+      source: 'manual' as const,
+      integrationId: null,
+      externalEventId: null,
+      dispatchedBy: 'priya@example.com',
+      dispatchedAt: '2026-09-16T12:00:00.000Z',
+      carrierName: null,
+      trackingNumber: null,
+      totalUnits: 7,
+      retiredReservationIds: [],
+      lines: [DISPATCHED_LINE, { ...DISPATCHED_LINE, orderLineId: 'ol-4', skuId: 'sku-4' }],
+    };
+    expect(dispatchOutcome(dispatch, uomOf).reason).toContain('2 lines · 7 units shipped;');
   });
 });
 
@@ -445,6 +480,12 @@ describe('refusal mappers', () => {
     expect(packReason(new ApiProblem('not-found', 404))).toBe('This order no longer exists — refresh the list.');
     expect(packReason(new ApiProblem('role-denied', 403))).toBe('Your role cannot pack orders.');
     expect(dispatchReason(new ApiProblem('role-denied', 403))).toBe('Your role cannot dispatch orders.');
+    expect(packReason(new ApiProblem('permission-denied', 403))).toBe(
+      'That order belongs to another tenant — sign in again.',
+    );
+    expect(dispatchReason(new ApiProblem('permission-denied', 403))).toBe(
+      'That order belongs to another tenant — sign in again.',
+    );
     expect(packReason(new ApiProblem('unauthenticated', 401))).toBe('Your session expired — sign in again.');
     expect(packReason(new ApiProblem('validation-failed', 400, 'Weight must be at least 1.'))).toBe(
       'Weight must be at least 1.',

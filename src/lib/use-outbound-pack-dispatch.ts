@@ -1,6 +1,6 @@
 'use client';
 
-import { useOutboundOrders, type OutboundOrdersPage, type Reloadable, type ResourceState } from '@/lib/use-outbound-orders';
+import { useOutboundOrders } from '@/lib/use-outbound-orders';
 
 /**
  * The pack & dispatch surface's reads (story 4-2d).
@@ -23,15 +23,11 @@ import { useOutboundOrders, type OutboundOrdersPage, type Reloadable, type Resou
  * mappers live in `lib/outbound-pack-dispatch.ts`, tested.
  */
 
-export type { OutboundOrdersPage, Reloadable, ResourceState };
-
 /**
  * One cursor-paginated page of the warehouse's orders, newest first — the
  * read the pack & dispatch pipeline filters its packable/dispatchable rows
  * out of.
  */
-export function usePipelineOrders(
-  warehouseId: string | null,
-): ResourceState<OutboundOrdersPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+export function usePipelineOrders(warehouseId: string | null) {
   return useOutboundOrders(warehouseId);
 }

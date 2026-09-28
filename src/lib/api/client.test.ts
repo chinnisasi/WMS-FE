@@ -712,7 +712,7 @@ describe('outbound pack and dispatch wrappers (story 4-2d)', () => {
     clearSession();
   });
 
-  test('dispatch posts the carrier fields — the blank ones dropped, not sent as blank', async () => {
+  test('dispatch posts the carrier body and the Idempotency-Key header to the tenant-scoped path', async () => {
     writeSession(SESSION);
     stubFetch(201, { dispatch: { orderId: ORDER_ID, lines: [], totalUnits: 7 } });
     await fetchApiDispatchOrder(

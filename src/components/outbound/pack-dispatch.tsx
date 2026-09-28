@@ -113,7 +113,8 @@ function PackDispatchTable({
   // The pipeline page-scoped to its statuses: a cancelled order is not on it.
   // The list endpoint offers cursor + limit and nothing else — no status
   // filter, no sort, no search — so this control filters the LOADED page and
-  // says so, exactly like the sibling surfaces' controls.
+  // says so, counting against the pipeline-filtered set: the denominator
+  // names only orders this page could ever show.
   const loaded = orders.state === 'ready' ? orders.data.items : [];
   const pipeline = loaded.filter((order) => isPipelineStatus(order.status));
   const rows = filterPage(pipeline, statusFilter);
@@ -176,7 +177,7 @@ function PackDispatchTable({
           </select>
         </label>
         <span className="text-xs text-(--muted-foreground)">
-          {pageFilterCount(rows.length, loaded.length)}
+          {pageFilterCount(rows.length, pipeline.length)}
         </span>
       </div>
 
@@ -260,14 +261,7 @@ function PackDispatchPanel({
   }
   if (detail.state === 'failed') {
     return (
-      <div className="flex flex-col items-start gap-2">
-        <div role="alert" className="text-xs text-(--destructive)">
-          {detail.reason}
-        </div>
-        <button type="button" onClick={detail.reload} className={`${buttonClass} text-xs`}>
-          Retry
-        </button>
-      </div>
+      <ReadFailure word="Order unavailable" reason={detail.reason} onRetry={detail.reload} />
     );
   }
 
@@ -305,7 +299,7 @@ function PackDispatchPanel({
       )}
       {record !== null && (
         <div className="flex flex-col gap-2">
-          <FeedbackBanner {...dispatchOutcome(record)} />
+          <FeedbackBanner {...dispatchOutcome(record, uomOf)} />
           <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
             <div className="text-xs font-medium">Dispatch record</div>
             <div className="text-xs text-(--muted-foreground)">
@@ -357,6 +351,11 @@ function PackDispatchPanel({
           {status === 'dispatched' && (
             <div className="text-xs text-(--muted-foreground)">
               Dispatched — terminal. There is no un-dispatch.
+            </div>
+          )}
+          {status === 'cancelled' && (
+            <div className="text-xs text-(--muted-foreground)">
+              Cancelled — the pipeline stops here; there is nothing to pack or dispatch.
             </div>
           )}
         </>
@@ -457,7 +456,7 @@ function PackBench({
     const parsed = parsePackDraft(scans, measurements);
     if (parsed.body === null) {
       // Nothing is requested that the backend would only answer 400 to.
-      setProblem(parsed.problem ?? '');
+      setProblem(parsed.problem);
       return;
     }
     setProblem(null);
@@ -468,7 +467,13 @@ function PackBench({
     setError(null);
     try {
       const { pack } = await fetchApiPackOrder(tenantId, orderId, parsed.body, key);
-      if (!mounted.current) return;
+      if (!mounted.current) {
+        // The bench unmounted mid-flight (row collapsed, warehouse switched)
+        // but the pack COMMITTED — the sibling outbound readers must still
+        // refetch, or they stay stale until their next read.
+        notifyOutboundChanged();
+        return;
+      }
       onPacked(pack);
       setIdempotencyKey(null);
       notifyOutboundChanged();
@@ -644,7 +649,14 @@ function DispatchSection({
         parseDispatchDraft(fields),
         key,
       );
-      if (!mounted.current) return;
+      if (!mounted.current) {
+        // The confirm unmounted mid-flight (row collapsed, warehouse
+        // switched) but the dispatch COMMITTED — the sibling outbound
+        // readers must still refetch, or they stay stale until their next
+        // read.
+        notifyOutboundChanged();
+        return;
+      }
       onDispatched(dispatch);
       setConfirmOpen(false);
       setIdempotencyKey(null);

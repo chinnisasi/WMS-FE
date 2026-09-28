@@ -207,6 +207,9 @@ let orderStatuses: Record<string, string> = {};
 let listRows: () => unknown[] = () => [];
 let failList = false;
 let failDetail = false;
+let skuFail = false;
+/** The keyset cursor the list advertises, for the pager test. */
+let ordersNextCursor: string | null = null;
 /** Answers the pack POST; swapped per test to make an attempt refuse. */
 let packResponder: () => { status: number; body: unknown } = () => ({
   status: 201,
@@ -263,7 +266,7 @@ function stubRouter(): void {
       if (failList) {
         return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The list is down.' });
       }
-      return json(200, { items: listRows(), nextCursor: null });
+      return json(200, { items: listRows(), nextCursor: ordersNextCursor });
     }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname)) {
       const id = pathname.split('/').pop()!;
@@ -273,6 +276,9 @@ function stubRouter(): void {
       return json(200, { order: orderDetail(id, orderStatuses[id] ?? 'accepted') });
     }
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
+      if (skuFail) {
+        return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The SKU list is down.' });
+      }
       return json(200, { items: SKU_ROWS, nextCursor: null });
     }
     return json(404, { code: 'not-found', title: 'Unrouted in this test', status: 404 });
@@ -292,6 +298,8 @@ beforeEach(() => {
   listRows = () => Object.entries(orderStatuses).map(([id, status]) => orderRow(id, status));
   failList = false;
   failDetail = false;
+  skuFail = false;
+  ordersNextCursor = null;
   packResponder = () => {
     orderStatuses['order-1'] = 'ready_to_dispatch';
     return { status: 201, body: { pack: packedFixture('order-1') } };
@@ -413,14 +421,29 @@ const orderListReads = () =>
 /* ------------------------------------------------------------------ */
 
 describe('the pipeline list', () => {
-  test('a cancelled order is not on the pipeline page, and the filter says page-scoped', async () => {
+  test('a cancelled order is not on the pipeline page, and the filter counts only what it could show', async () => {
     view = await mount('operator');
     const body = text(view);
     expect(body).toContain('order-1');
     expect(body).toContain('order-3');
     expect(body).not.toContain('order-4');
-    expect(body).toContain('3 of 4 on this page');
+    // The denominator is the pipeline-filtered set — a cancelled order can
+    // never be on this page, so it never counts against the control.
+    expect(body).toContain('3 of 3 on this page');
     expect(body).toContain('Filter this page');
+  });
+
+  test('the pager carries the keyset cursor to the next page', async () => {
+    ordersNextCursor = 'opaque-cursor';
+    view = await mount('operator');
+
+    await pressButton(view, 'Next');
+    await settle();
+
+    const pages = orderListReads();
+    expect(pages).toHaveLength(2);
+    expect(pages[0]!.search).toBe('');
+    expect(pages[1]!.search).toBe('?cursor=opaque-cursor');
   });
 
   test('a dispatched row offers nothing — no pack, no dispatch, terminal note', async () => {
@@ -676,6 +699,29 @@ describe('the pack bench', () => {
 
     expect(mutations()[0]!.body).toEqual({ scanned: [{ skuId: 'sku-1', qty: 4 }] });
   });
+
+  test('the SKU map failing leaves the pack flow intact on raw ids and unit-agnostic copy', async () => {
+    skuFail = true;
+    view = await mount('operator');
+    await expand(view, 'order-1');
+
+    // The bench renders on the raw skuIds — the map only decorates, and a
+    // decoration read failing must never block the pack flow.
+    expect(text(view)).toContain('sku-1');
+    expect(text(view)).toContain('4 units ordered');
+    expect(buttonLabels(view)).toContain('Pack this order');
+
+    await pressButton(view, 'Pack this order');
+    await settle();
+
+    expect(mutations()).toHaveLength(1);
+    expect(mutations()[0]!.body).toEqual({
+      scanned: [
+        { skuId: 'sku-1', qty: 4 },
+        { skuId: 'sku-2', qty: 3 },
+      ],
+    });
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -757,6 +803,50 @@ describe('dispatch', () => {
     const posts = mutations();
     expect(posts).toHaveLength(2);
     expect(posts[1]!.idempotencyKey).toBe(firstKey);
+  });
+
+  test('backing out of the confirm drops the minted key and a re-open mints fresh', async () => {
+    // First attempt refuses — its key is now on record; back out instead of
+    // retrying.
+    dispatchResponder = () => ({
+      status: 409,
+      body: {
+        code: 'order-not-packed',
+        title: 'Order not packed',
+        status: 409,
+        detail: 'The order reads accepted, not ready_to_dispatch.',
+      },
+    });
+    view = await mount('operator');
+    await expand(view, 'order-2');
+
+    await pressButton(view, 'Dispatch this order');
+    await pressButton(view, 'Dispatch this order');
+    await settle();
+    const attemptedKey = mutations()[0]!.idempotencyKey;
+
+    await pressButton(view, 'Keep it as it is');
+    // The confirmation is closed, nothing further was sent, and the
+    // affordance is back.
+    expect(text(view)).not.toContain('no un-dispatch');
+    expect(mutations()).toHaveLength(1);
+    expect(buttonLabels(view)).toContain('Dispatch this order');
+
+    // A re-open is a NEW confirmation — it mints a fresh key, not the one
+    // the backed-out attempt would have replayed.
+    dispatchResponder = () => {
+      orderStatuses['order-2'] = 'dispatched';
+      return { status: 201, body: { dispatch: dispatchedFixture('order-2') } };
+    };
+    await pressButton(view, 'Dispatch this order');
+    await pressButton(view, 'Dispatch this order');
+    await settle();
+
+    const posts = mutations();
+    expect(posts).toHaveLength(2);
+    expect(posts[1]!.idempotencyKey).not.toBeNull();
+    expect(posts[1]!.idempotencyKey).not.toBe(attemptedKey);
+    expect(text(view)).toContain('Order dispatched');
   });
 
   test('editing a carrier field mints a fresh idempotency key', async () => {

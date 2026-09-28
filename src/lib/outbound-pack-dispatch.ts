@@ -38,8 +38,11 @@ export const PIPELINE_STATUSES = ['accepted', 'ready_to_dispatch', 'dispatched']
 
 export type PipelineStatus = (typeof PIPELINE_STATUSES)[number];
 
+/** Membership is derived, never a negative check: a fifth lifecycle arm must
+ * opt in here (and in `ORDER_STATUS_LABEL`'s compile) or it stays off the
+ * pipeline — it must never auto-appear. */
 export function isPipelineStatus(status: OrderStatus): status is PipelineStatus {
-  return status !== 'cancelled';
+  return (PIPELINE_STATUSES as readonly string[]).includes(status);
 }
 
 /** Packing is offered for exactly one state — the pack precondition's status arm. */
@@ -112,6 +115,12 @@ export const MAX_DIMENSION_MM = 100_000;
  * scan line, and the server reads an absent SKU as scanned 0.
  */
 export const MIN_SCAN_QTY = 0.001;
+/**
+ * The backend's `@Max` on one scanned line's qty (outbound.dto.ts,
+ * PackScanLineDto) — wms-be's `MAX_QUANTITY_BASE` (quantity.ts), the largest
+ * exact milli-unit count: `Math.floor(MAX_SAFE_INTEGER / 10 ** 3)`.
+ */
+export const MAX_QUANTITY_BASE = Math.floor(Number.MAX_SAFE_INTEGER / 1_000);
 
 export interface ParsedPackDraft {
   readonly body: {
@@ -158,6 +167,14 @@ export function parsePackDraft(
     // positive value finer than it is a guaranteed 400.
     if (qty < MIN_SCAN_QTY) {
       return { body: null, problem: `A scanned quantity is at least ${MIN_SCAN_QTY}.` };
+    }
+    // The backend's `@Max(MAX_QUANTITY_BASE)` on a scan line: a value past
+    // the largest exact milli-unit count is a guaranteed 400.
+    if (qty > MAX_QUANTITY_BASE) {
+      return {
+        body: null,
+        problem: `A scanned quantity is at most ${MAX_QUANTITY_BASE.toLocaleString('en-US')}.`,
+      };
     }
     scanned.push({ skuId: line.skuId, qty });
   }
@@ -219,8 +236,9 @@ export function parsePackDraft(
  * fields the viewer left blank are DROPPED from the body, never sent as `''` —
  * an empty body is a complete dispatch, and the backend treats a blank string
  * as absent anyway. Nothing here can be refused client-side: the fields are
- * free text bounded by the input's own `maxLength` (the backend's
- * `@Length(0, 200)`, dispatch.command.ts:42-43).
+ * free text bounded by the input's own `maxLength`, which mirrors the
+ * backend's `@Length(0, MAX_CARRIER_NAME_LENGTH)` /
+ * `@Length(0, MAX_TRACKING_NUMBER_LENGTH)` (dispatch.command.ts — both 200).
  */
 export function parseDispatchDraft(fields: { readonly carrierName: string; readonly trackingNumber: string }): {
   readonly carrierName?: string;
@@ -283,9 +301,14 @@ export function packOutcome(
 /**
  * The dispatch result, built from the response's own record. The retired
  * holds are the point of the command — the ATP correction — so the count is
- * named, and the terminality is stated rather than implied.
+ * named, and the terminality is stated rather than implied. The headline is
+ * unit-aware exactly like `packOutcome`: the shipped total at the lines'
+ * shared unit, or the raw-number fallback when the units mix.
  */
-export function dispatchOutcome(dispatch: DispatchDto): Outcome {
+export function dispatchOutcome(
+  dispatch: DispatchDto,
+  uomOf: (skuId: string) => QuantityUom | undefined,
+): Outcome {
   const retired = dispatch.retiredReservationIds.length;
   const retiredClause =
     retired === 0
@@ -296,7 +319,10 @@ export function dispatchOutcome(dispatch: DispatchDto): Outcome {
   return {
     tone: 'accepted',
     word: 'Order dispatched',
-    reason: `${dispatch.lines.length} ${dispatch.lines.length === 1 ? 'line' : 'lines'} · ${dispatch.totalUnits} units shipped; ${retiredClause}. The order is dispatched — there is no un-dispatch.`,
+    reason: `${dispatch.lines.length} ${dispatch.lines.length === 1 ? 'line' : 'lines'} · ${quantityLabel(
+      dispatch.totalUnits,
+      sharedQuantityUom(dispatch.lines, uomOf),
+    )} shipped; ${retiredClause}. The order is dispatched — there is no un-dispatch.`,
   };
 }
 
