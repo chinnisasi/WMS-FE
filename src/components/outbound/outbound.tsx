@@ -14,17 +14,19 @@ import {
 
 import { OutboundOrders } from '@/components/outbound/outbound-orders';
 import { OutboundWaves } from '@/components/outbound/outbound-waves';
+import { OutboundPackDispatch } from '@/components/outbound/pack-dispatch';
 import { ReadFailure, Section, selectClass } from '@/components/outbound/shell';
 
 /**
- * The Outbound page: orders (story 4.2b) and the waves they group into
- * (story 4.2c), in the order the work happens.
+ * The Outbound page: orders (story 4.2b), the waves they group into (story
+ * 4.2c) and the pack & dispatch pipeline that finishes them (story 4.2d), in
+ * the order the work happens.
  *
- * This component owns everything the two surfaces share — the session gate,
+ * This component owns everything the three surfaces share — the session gate,
  * the warehouse read, the warehouse picker, and the signed-in role. Each
  * surface used to resolve all four for itself, which put two pickers on one
- * page that could disagree with each other. There is one picker now, and both
- * surfaces are keyed on the warehouse it resolves, so a switch resets each
+ * page that could disagree with each other. There is one picker now, and every
+ * surface is keyed on the warehouse it resolves, so a switch resets each
  * surface's cursor, filter, expanded row and pending confirmation together.
  */
 export function Outbound() {
@@ -140,11 +142,18 @@ function OutboundSessioned() {
         warehouseLabel={warehouseLabel}
         role={role}
       />
+      <OutboundPackDispatch
+        key={`pack-${warehouseId}`}
+        tenantId={tenantId}
+        warehouseId={warehouseId}
+        warehouseLabel={warehouseLabel}
+        role={role}
+      />
     </div>
   );
 }
 
-/** The props both Outbound surfaces take, resolved once by the page. */
+/** The props the Outbound surfaces take, resolved once by the page. */
 export interface OutboundSurfaceProps {
   readonly tenantId: string;
   readonly warehouseId: string;
