@@ -26,9 +26,11 @@ import {
   outboundControllerCreateOrder,
   outboundControllerCreateWavePolicy,
   outboundControllerGenerateWave,
+  outboundControllerDispatchOrder,
   outboundControllerGetOrder,
   outboundControllerGetWave,
   outboundControllerListOrders,
+  outboundControllerPackOrder,
   outboundControllerListWavePolicies,
   outboundControllerListWaves,
   outboundControllerReleaseWave,
@@ -88,9 +90,13 @@ import type {
   MintEnrollmentCodeResponse,
   CreateOrderDto,
   CreateWavePolicyDto,
+  DispatchOrderDto,
+  DispatchResponse,
   GenerateWaveDto,
   OrderListResponse,
   OrderResponse,
+  PackOrderDto,
+  PackResponse,
   OverReceiptDecisionResponse,
   OverReceiptListResponse,
   PlaceQcHoldDto,
@@ -1093,6 +1099,57 @@ export async function fetchApiCancelOrder(
   const { data, error } = await outboundControllerCancelOrder({
     path: { tenantId, orderId },
     body: {},
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Packs a fully-picked accepted order at the bench (capability `pack.execute`,
+ * story 4.5). The scan is verified against what was actually PICKED — never
+ * what was ordered — so a short-picked order packs with fewer units, and a
+ * discrepancy is refused 422 `pack-mismatch` naming every divergent SKU with
+ * BOTH quantities. Nothing is written on any refusal arm. The 201 carries the
+ * packing slip, which is also the idempotency snapshot: a replay (same key,
+ * same payload) re-serves it byte-for-byte.
+ */
+export async function fetchApiPackOrder(
+  tenantId: string,
+  orderId: string,
+  body: PackOrderDto,
+  idempotencyKey: string,
+): Promise<PackResponse> {
+  const { data, error } = await outboundControllerPackOrder({
+    path: { tenantId, orderId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Dispatches a packed order (capability `dispatch.execute`, story 4.6) — the
+ * TERMINAL transition of the order state machine: every committed reservation
+ * the order still owns is retired, which is the ATP correction, and there is
+ * no un-dispatch. The body is optional and empty means complete: carrier and
+ * tracking are optional free text, and a blank string is treated as absent by
+ * the backend.
+ */
+export async function fetchApiDispatchOrder(
+  tenantId: string,
+  orderId: string,
+  body: DispatchOrderDto,
+  idempotencyKey: string,
+): Promise<DispatchResponse> {
+  const { data, error } = await outboundControllerDispatchOrder({
+    path: { tenantId, orderId },
+    body,
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {

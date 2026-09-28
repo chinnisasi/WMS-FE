@@ -11,6 +11,7 @@ import {
   fetchApiCreateProduct,
   fetchApiCreateWarehouse,
   fetchApiCreateWavePolicy,
+  fetchApiDispatchOrder,
   fetchApiEditProduct,
   fetchApiEditSku,
   fetchApiGenerateWave,
@@ -27,6 +28,7 @@ import {
   fetchApiListWarehouses,
   fetchApiListWavePolicies,
   fetchApiListWaves,
+  fetchApiPackOrder,
   fetchApiRegisterTenant,
   fetchApiReleaseWave,
   fetchApiReplaceKit,
@@ -669,6 +671,125 @@ describe('outbound wave wrappers (story 4.2c)', () => {
       const problem = error as ApiProblem;
       expect(problem.code).toBe('no-eligible-orders');
       expect(problem.status).toBe(422);
+    }
+    clearSession();
+  });
+});
+
+describe('outbound pack and dispatch wrappers (story 4-2d)', () => {
+  const ORDER_ID = '0198f7a2-1b3c-7d4e-8f90-0011223344ff';
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+
+  test('pack posts the scan body to the tenant-scoped pack path with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { pack: { orderId: ORDER_ID, lines: [], totalUnits: 7 } });
+    await fetchApiPackOrder(
+      SESSION.tenant.id,
+      ORDER_ID,
+      {
+        scanned: [
+          { skuId: 'sku-1', qty: 4 },
+          { skuId: 'sku-2', qty: 3 },
+        ],
+        weightGrams: 2500,
+        dimensionsMm: { lengthMm: 300, widthMm: 200, heightMm: 100 },
+      },
+      KEY,
+    );
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/orders/${ORDER_ID}/pack`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({
+      scanned: [
+        { skuId: 'sku-1', qty: 4 },
+        { skuId: 'sku-2', qty: 3 },
+      ],
+      weightGrams: 2500,
+      dimensionsMm: { lengthMm: 300, widthMm: 200, heightMm: 100 },
+    });
+    clearSession();
+  });
+
+  test('dispatch posts the carrier fields — the blank ones dropped, not sent as blank', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { dispatch: { orderId: ORDER_ID, lines: [], totalUnits: 7 } });
+    await fetchApiDispatchOrder(
+      SESSION.tenant.id,
+      ORDER_ID,
+      { carrierName: 'Blue Dart', trackingNumber: 'BD0012345678' },
+      KEY,
+    );
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/orders/${ORDER_ID}/dispatch`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({
+      carrierName: 'Blue Dart',
+      trackingNumber: 'BD0012345678',
+    });
+    clearSession();
+  });
+
+  test('dispatch with no carrier fields sends an empty body — a complete dispatch', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { dispatch: { orderId: ORDER_ID, lines: [], totalUnits: 0 } });
+    await fetchApiDispatchOrder(SESSION.tenant.id, ORDER_ID, {}, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/orders/${ORDER_ID}/dispatch`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({});
+    clearSession();
+  });
+
+  test('a 422 pack-mismatch refusal unwraps with its title and detail intact', async () => {
+    writeSession(SESSION);
+    // The refusal's detail names both quantities — the only place picked
+    // quantities exist in this whole client, so the surface renders it
+    // verbatim and the wrapper must carry both fields through.
+    const detail = 'SPICE-01 scanned 4.000 kg but picked 3.000 kg.';
+    stubFetch(422, {
+      type: 'about:blank',
+      code: 'pack-mismatch',
+      title: 'Pack mismatch',
+      status: 422,
+      detail,
+    });
+    try {
+      await fetchApiPackOrder(SESSION.tenant.id, ORDER_ID, { scanned: [{ skuId: 'sku-1', qty: 4 }] }, KEY);
+      expect.unreachable();
+    } catch (error) {
+      const problem = error as ApiProblem;
+      expect(problem).toBeInstanceOf(ApiProblem);
+      expect(problem.status).toBe(422);
+      expect(problem.code).toBe('pack-mismatch');
+      expect(problem.title).toBe('Pack mismatch');
+      expect(problem.detail).toBe(detail);
+    }
+    clearSession();
+  });
+
+  test('a 409 dispatch refusal (not packed) unwraps with its status intact', async () => {
+    writeSession(SESSION);
+    stubFetch(409, {
+      type: 'about:blank',
+      code: 'order-not-packed',
+      title: 'Order not packed',
+      status: 409,
+      detail: 'The order reads accepted, not ready_to_dispatch.',
+    });
+    try {
+      await fetchApiDispatchOrder(SESSION.tenant.id, ORDER_ID, {}, KEY);
+      expect.unreachable();
+    } catch (error) {
+      const problem = error as ApiProblem;
+      expect(problem).toBeInstanceOf(ApiProblem);
+      expect(problem.status).toBe(409);
+      expect(problem.code).toBe('order-not-packed');
+      expect(problem.detail).toBe('The order reads accepted, not ready_to_dispatch.');
     }
     clearSession();
   });
