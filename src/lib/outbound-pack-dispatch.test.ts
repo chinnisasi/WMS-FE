@@ -40,6 +40,8 @@ import {
   parseLabelDraft,
   parseManifestDraft,
   shipmentRecordLabel,
+  formatInrPaise,
+  ratesReason,
 } from '@/lib/outbound-pack-dispatch';
 
 /**
@@ -725,5 +727,53 @@ describe('the label and manifest step (4.6c)', () => {
   test('a non-problem label failure is transport-shaped', () => {
     expect(labelReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
     expect(manifestReason(undefined)).toBe(UNREACHABLE_REASON);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The rates strip (story 4.6d)                                        */
+/* ------------------------------------------------------------------ */
+
+describe('the rates strip (4.6d)', () => {
+  test('formatInrPaise renders integer paise with Indian digit grouping and an always-shown paise fraction', () => {
+    expect(formatInrPaise(0)).toBe('₹0.00');
+    expect(formatInrPaise(2500)).toBe('₹25.00');
+    expect(formatInrPaise(123456)).toBe('₹1,234.56');
+    expect(formatInrPaise(100000001)).toBe('₹10,00,000.01');
+    expect(formatInrPaise(9999)).toBe('₹99.99');
+    expect(formatInrPaise(100)).toBe('₹1.00');
+    expect(formatInrPaise(150)).toBe('₹1.50');
+    expect(formatInrPaise(-150)).toBe('−₹1.50');
+  });
+
+  test('the rates read refusals render verbatim; the rest is house copy', () => {
+    // The 409 arms — missing-sku-weight naming the SKUs, conflict naming the
+    // order's state — are the server's words about THIS order.
+    expect(
+      ratesReason(new ApiProblem('missing-sku-weight', 409, 'These SKUs carry no weight_grams, so the order cannot be priced: RATE-UNWGT.', undefined)),
+    ).toBe('These SKUs carry no weight_grams, so the order cannot be priced: RATE-UNWGT.');
+    expect(
+      ratesReason(new ApiProblem('conflict', 409, 'Order "o-1" reads "accepted" — only a packed (ready_to_dispatch) order is rated.', undefined)),
+    ).toBe('Order "o-1" reads "accepted" — only a packed (ready_to_dispatch) order is rated.');
+    // A whole-read 503 (an unreadable credential) is a deployment fault, not
+    // a quote — verbatim too.
+    expect(
+      ratesReason(new ApiProblem('carrier-credential-unreadable', 503, 'Connection c-1 cannot be opened.', undefined)),
+    ).toBe('Connection c-1 cannot be opened.');
+    expect(ratesReason(new ApiProblem('unauthenticated', 401))).toBe('Your session expired — sign in again.');
+    expect(ratesReason(new ApiProblem('validation-failed', 400, 'orderId must be a UUID'))).toBe(
+      'orderId must be a UUID',
+    );
+    expect(ratesReason(new ApiProblem('something-else', 500))).toBe('Rates unavailable (something-else).');
+    // The 404 never reaches this mapper (the hook renders it as "no rates"),
+    // but if it ever did it would still be house copy, not a lie.
+    expect(ratesReason(new ApiProblem('not-found', 404, 'No order.', undefined))).toBe(
+      'This order no longer exists — refresh the page.',
+    );
+  });
+
+  test('a non-problem rates failure is transport-shaped', () => {
+    expect(ratesReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
+    expect(ratesReason(undefined)).toBe(UNREACHABLE_REASON);
   });
 });
