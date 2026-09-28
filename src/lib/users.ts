@@ -90,6 +90,20 @@ export const CAPABILITIES = [
   // Manager + Operator, mirroring `pack.execute`): the person who packed the
   // parcel is the one who labels and hands it over.
   'labels.execute',
+  // Story 5-1 — the transfer-order commands (FR-18/FR-29; the FE mirror
+  // catch-up: the 5-1 story shipped backend-only). `transfers.manage` plans
+  // and confirms the outbound leg (the planner verbs); `transfers.execute`
+  // confirms the inbound leg, the floor verb mirroring
+  // `putaway.execute`'s rationale.
+  'transfers.manage',
+  'transfers.execute',
+  // Story 5-2 — FR-19: the approval-flow decisions (approve/reject a pending
+  // over-threshold stock adjustment) AND the threshold policy write (the
+  // config rides the same capability, per the human-approved decision of
+  // 2026-09-28). OWNER-ONLY (see OWNER_ONLY_CAPABILITIES), mirroring
+  // `review.decide`'s routing rationale: the ops_manager who may raise the
+  // very adjustment must not also hold the pen.
+  'adjustments.approve',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -100,7 +114,13 @@ export type Capability = (typeof CAPABILITIES)[number];
  * hand-copied list — a copy drifts the moment a capability is added, which is
  * exactly how this mirror fell eight entries behind in the first place.
  */
-const OWNER_ONLY_CAPABILITIES: readonly Capability[] = ['users.invite', 'users.role_change'];
+const OWNER_ONLY_CAPABILITIES: readonly Capability[] = [
+  'users.invite',
+  'users.role_change',
+  // Story 5-2 — the adjustment approval gate: owner-only by the same
+  // segregation-of-duties rationale as the user-management verbs.
+  'adjustments.approve',
+];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
   owner: CAPABILITIES,
@@ -117,6 +137,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     'dispatch.execute',
     'excursion.record',
     'labels.execute',
+    // Story 5-1 — the floor confirms the transfer's inbound leg (the
+    // Transfer inbox task's op; `putaway.execute`'s rationale).
+    'transfers.execute',
   ],
   accountant: [],
 };
