@@ -115,6 +115,13 @@ export const CAPABILITIES = [
   // in step with the backend so the drift guard keeps passing).
   'counts.manage',
   'counts.execute',
+  // Story 5-4 — variances.resolve: the resolution verb for an open count
+  // variance — approve-adjust (the explicit stock correction) or recount
+  // (the fresh task as the new basis). Owner + Ops Manager (CHECKPOINT 1,
+  // ratified 2026-09-29 — one step above the floor that counts). The
+  // over-threshold owner-only rule is NOT modelled here: it is a command
+  // check on the submit-frozen threshold stamp, not a capability split.
+  'variances.resolve',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

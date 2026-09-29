@@ -33,8 +33,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
   test('owner holds every capability', () => {
     // Stories 5-1 / 5-2 / 5-3 added `transfers.manage`, `transfers.execute`,
     // `adjustments.approve` and the `counts.*` pair — 25 became 30 (5-1's
-    // mirror catch-up rode 5-2's FE change; 5-3's rode 5-3's).
-    expect(ROLE_CAPABILITIES.owner.length).toBe(30);
+    // mirror catch-up rode 5-2's FE change; 5-3's rode 5-3's); story 5-4
+    // adds `variances.resolve` — 30 became 31.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(31);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -65,6 +66,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'adjustments.approve')).toBe(true);
     expect(roleHasCapability('owner', 'counts.manage')).toBe(true);
     expect(roleHasCapability('owner', 'counts.execute')).toBe(true);
+    // Story 5-4 — the variance resolution verb.
+    expect(roleHasCapability('owner', 'variances.resolve')).toBe(true);
   });
 
   test('ops_manager is operationally broad but holds no users capabilities', () => {
@@ -99,6 +102,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // write, which IS the schedule) are manager verbs too.
     expect(roleHasCapability('ops_manager', 'counts.manage')).toBe(true);
     expect(roleHasCapability('ops_manager', 'counts.execute')).toBe(true);
+    // Story 5-4 — resolving variances is a manager verb too (CHECKPOINT 1:
+    // one step above the floor that counts).
+    expect(roleHasCapability('ops_manager', 'variances.resolve')).toBe(true);
     // Story 5-2 — the approval gate is owner-only: the manager who may raise
     // the adjustment does not hold the pen.
     expect(roleHasCapability('ops_manager', 'adjustments.approve')).toBe(false);
@@ -135,6 +141,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'transfers.execute',
         'counts.manage',
         'counts.execute',
+        'variances.resolve',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -177,6 +184,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 5-3 — the floor submits counts but never schedules them.
     expect(roleHasCapability('operator', 'counts.execute')).toBe(true);
     expect(roleHasCapability('operator', 'counts.manage')).toBe(false);
+    // Story 5-4 — the floor never resolves variances.
+    expect(roleHasCapability('operator', 'variances.resolve')).toBe(false);
     expect(ROLE_CAPABILITIES.accountant.length).toBe(0);
     expect(roleHasCapability('accountant', 'putaway.execute')).toBe(false);
     expect(roleHasCapability('accountant', 'users.invite')).toBe(false);
