@@ -23,9 +23,10 @@ export const MAX_CONSIDERED_EVENT_SEQS = 200;
  * The approve_adjust arm's consulted-seqs requirement: the statement is the
  * flow's backbone — the server stores it, audits it, and validates every
  * seq against the bin's warehouse ledger, so client selection cannot
- * fabricate history. Refused client-side (non-empty, within 200, no
- * duplicates) only where the rule is knowable without a DB row; everything
- * else is the 400/409 the server answers.
+ * fabricate history. Refused client-side (non-empty, within 200) only where
+ * the rule is knowable without a DB row; duplicates are NOT checked here —
+ * the sender normalizes (dedupes + sorts) at send. Everything else is the
+ * 400/409 the server answers.
  */
 export function resolveDraftProblem(
   decision: 'approve_adjust' | 'recount',
@@ -59,8 +60,7 @@ export function varianceListReason(error: unknown): string {
     switch (error.code) {
       case 'invalid-cursor':
         return 'That page reference is stale — the queue restarted from the first page.';
-      case 'not-found':
-        return 'That warehouse no longer exists — refresh the page.';
+      // No not-found arm: the variances list route has no 404 server-side.
       case 'permission-denied':
         return 'That data belongs to another tenant — sign in again.';
       case 'unauthenticated':
@@ -192,7 +192,9 @@ export function ledgerListReason(error: unknown): string {
       case 'invalid-cursor':
         return 'That page reference is stale — the timeline restarted from the first page.';
       case 'not-found':
-        return 'This bin no longer exists — refresh the queue.';
+        // The events route's 404 is the WAREHOUSE (a bin is only a query
+        // filter, never a 404 of its own).
+        return 'This warehouse no longer exists — refresh the queue.';
       case 'permission-denied':
         return 'That data belongs to another tenant — sign in again.';
       case 'unauthenticated':

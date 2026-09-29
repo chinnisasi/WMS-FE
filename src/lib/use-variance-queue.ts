@@ -174,6 +174,10 @@ export function useBinLedgerEvents(
     requested: string | null;
     state: ResourceState<LedgerEventsPage>;
   } | null>(null);
+  // The refetch trigger: the effect observes it, so a reload whose
+  // requested/result reset leaves deps UNCHANGED (a first-page failure) is
+  // still a re-run, not a no-op. Same counter as useVarianceQueue above.
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     if (tenantId === null || warehouseId === null || binId === null) return;
@@ -210,7 +214,7 @@ export function useBinLedgerEvents(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, binId, activeCursor]);
+  }, [tenantId, warehouseId, binId, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
@@ -220,10 +224,12 @@ export function useBinLedgerEvents(
     [warehouseId, binId],
   );
   // The Retry affordance: clear the failure first, and restart from the
-  // first page (a stale cursor would loop its own failure).
+  // first page (a stale cursor would loop its own failure); the revision
+  // bump re-runs the effect when the resets alone change nothing.
   const reload = useCallback(() => {
     setRequested(null);
     setResult(null);
+    setRevision((r) => r + 1);
   }, []);
 
   const stale =

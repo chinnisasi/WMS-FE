@@ -21,8 +21,8 @@ import { ConflictsQueues } from './queues';
  * The switcher is driven through a stubbed global `fetch` like the
  * excursion-queue suite — the queue components' own reads are answered with
  * quiet empty pages; only the switcher's behavior is under test here (the
- * variances/pendings queues carry their own component-level assertions in
- * the wrapper pins).
+ * variance and adjustment-pending queues carry their own component-level
+ * suites: variance-queue.test.tsx / adjustment-pendings-queue.test.tsx).
  */
 
 const TENANT_ID = '0198f7a2-1b3c-7d4e-8f90-112233445566';

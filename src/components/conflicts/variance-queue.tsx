@@ -10,8 +10,7 @@ import { isOwnerOnlyVariance, resolveDraftProblem, varianceResolveReason } from 
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkuMap, useUserMap } from '@/lib/use-inbound';
-import { useBinCodeMaps } from '@/lib/use-bin-code-maps';
-import type { BinCodeMaps } from '@/lib/use-bin-code-maps';
+import { binCodeLabel, useBinCodeMaps } from '@/lib/use-bin-code-maps';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import {
   useBinLedgerEvents,
@@ -96,7 +95,11 @@ function VarianceQueueSessioned() {
   );
   const canDecide = roleHasCapability(role, 'variances.resolve');
 
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  // Per-entry in-flight state (a Set, in state — not a single slot): two
+  // rows can be in flight at once, and one slot would re-enable card A's
+  // buttons while its request is still outstanding just because card B
+  // started moving.
+  const [resolving, setResolving] = useState<ReadonlySet<string>>(new Set());
   // The outcome banner belongs to the entries it spoke about (keyed state,
   // not a reset effect — the house rule): a tab switch shows DIFFERENT
   // entries, and a stale "Correction applied" would invite the misread that
@@ -131,7 +134,7 @@ function VarianceQueueSessioned() {
       return;
     }
     resolveInFlight.current.add(entry.id);
-    setResolvingId(entry.id);
+    setResolving((prev) => new Set(prev).add(entry.id));
     showOutcome(null);
     try {
       const resolved = await fetchApiResolveVariance(
@@ -171,7 +174,11 @@ function VarianceQueueSessioned() {
       if (alreadyResolved) queue.reload();
     } finally {
       resolveInFlight.current.delete(entry.id);
-      setResolvingId(null);
+      setResolving((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
     }
   }
 
@@ -223,12 +230,12 @@ function VarianceQueueSessioned() {
               entry={entry}
               sku={skus?.[entry.skuId]}
               warehouseLabel={warehouses.find((w) => w.id === entry.warehouseId)?.code ?? null}
-              binCode={binCodeOf(binMaps, entry.warehouseId, entry.binId)}
+              binCode={binCodeLabel(binMaps, entry.warehouseId, entry.binId)}
               resolvedBy={
                 entry.resolvedBy === null ? null : (users?.[entry.resolvedBy]?.email ?? null)
               }
               canDecide={canDecide}
-              resolving={resolvingId === entry.id}
+              resolving={resolving.has(entry.id)}
               onResolve={resolve}
             />
           ))}
@@ -254,17 +261,6 @@ function VarianceQueueSessioned() {
       )}
     </section>
   );
-}
-
-/** The bin-code join's card label; a bin the walk has not landed renders unknown. */
-function binCodeOf(
-  maps: BinCodeMaps | null,
-  warehouseId: string,
-  binId: string,
-): string | null {
-  const map = maps?.[warehouseId];
-  if (map === undefined) return null;
-  return map[binId] ?? null;
 }
 
 /**

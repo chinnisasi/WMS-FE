@@ -91,7 +91,8 @@ describe('isOwnerOnlyVariance (the submit-frozen threshold, strictly over)', () 
 describe('varianceListReason (the queue read arms)', () => {
   test('mapped arms and the default', () => {
     expect(varianceListReason(problem('invalid-cursor', 400))).toContain('restarted from the first');
-    expect(varianceListReason(problem('not-found', 404))).toContain('no longer exists');
+    // No not-found arm: the variances list route has no 404 server-side, so
+    // an unexpected 404 rides the default arm like any other code.
     expect(varianceListReason(problem('permission-denied', 403))).toContain('another tenant');
     expect(varianceListReason(problem('unauthenticated', 401))).toContain('session expired');
     expect(varianceListReason(problem('validation-failed', 400, 'no such filter'))).toBe(

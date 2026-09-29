@@ -14,8 +14,7 @@ import { adjustmentDecisionReason } from '@/lib/review-queue';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkuMap, useUserMap } from '@/lib/use-inbound';
-import type { BinCodeMaps } from '@/lib/use-bin-code-maps';
-import { useBinCodeMaps } from '@/lib/use-bin-code-maps';
+import { binCodeLabel, useBinCodeMaps } from '@/lib/use-bin-code-maps';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import {
   useAdjustmentPendings,
@@ -86,7 +85,7 @@ function AdjustmentPendingsQueueSessioned() {
   const users = useUserMap();
   const { items: warehouses } = useTenantWarehouses() ?? { tenantId: null, items: [] };
   // The page's distinct warehouses drive the bin-code join (enrichment —
-  // binCodeOf renders the honest "(unknown bin)" where a walk has not
+  // binCodeLabel renders the honest "(unknown bin)" where a walk has not
   // landed or failed).
   const items = queue.state === 'ready' ? queue.data.items : [];
   const warehouseIds = [...new Set(items.map((entry) => entry.warehouseId))];
@@ -100,7 +99,11 @@ function AdjustmentPendingsQueueSessioned() {
   );
   const canApprove = roleHasCapability(role, 'adjustments.approve');
 
-  const [decidingId, setDecidingId] = useState<string | null>(null);
+  // Per-entry in-flight state (a Set, in state — not a single slot): two
+  // rows can be in flight at once, and one slot would re-enable card A's
+  // buttons while its request is still outstanding just because card B
+  // started moving.
+  const [deciding, setDeciding] = useState<ReadonlySet<string>>(new Set());
   // The outcome banner belongs to the entries it spoke about (keyed state,
   // not a reset effect — the house rule): a tab switch shows DIFFERENT
   // entries, and a stale approval would invite the misread that the newly
@@ -124,7 +127,7 @@ function AdjustmentPendingsQueueSessioned() {
     const session = readSession();
     if (session === null || decideInFlight.current.has(entry.id)) return;
     decideInFlight.current.add(entry.id);
-    setDecidingId(entry.id);
+    setDeciding((prev) => new Set(prev).add(entry.id));
     showOutcome(null);
     try {
       const decided =
@@ -133,7 +136,7 @@ function AdjustmentPendingsQueueSessioned() {
           : await fetchApiRejectAdjustmentPending(session.tenant.id, entry.id, ulid());
       showOutcome({
         tone: 'accepted',
-        word: `${skus?.[entry.skuId]?.code ?? 'Pend'} ${decided.status}`,
+        word: `Adjustment ${decided.status}`,
         reason:
           decision === 'approve'
             ? 'The stored arms re-executed and the ledger carries the adjustment.'
@@ -142,13 +145,17 @@ function AdjustmentPendingsQueueSessioned() {
       queue.reload();
     } catch (error) {
       // Clients branch on the machine-readable problem `code`: a 409
-      // `adjustment-pending-decided` means another approver moved first —
-      // the queue re-reads (the reload IS the recovery); a 422
-      // `idempotency-key-reuse` names the fresh-key re-click. Guard-class
-      // refusals from the approve arm's re-execution (a moved world) leave
-      // the row pending and render the server's own words.
+      // `adjustment-pending-decided` (or a bare 409 `conflict` — another
+      // decision was in flight) means another approver moved first — the
+      // queue re-reads (the reload IS the recovery the `conflict` arm's
+      // copy promises); a 422 `idempotency-key-reuse` names the fresh-key
+      // re-click. Guard-class refusals from the approve arm's re-execution
+      // (a moved world) leave the row pending and render the server's own
+      // words.
       const alreadyDecided =
-        error instanceof ApiProblem && error.code === 'adjustment-pending-decided';
+        error instanceof ApiProblem &&
+        error.status === 409 &&
+        (error.code === 'adjustment-pending-decided' || error.code === 'conflict');
       showOutcome({
         tone: 'rejected',
         word: decision === 'approve' ? 'Not approved' : 'Not rejected',
@@ -157,7 +164,11 @@ function AdjustmentPendingsQueueSessioned() {
       if (alreadyDecided) queue.reload();
     } finally {
       decideInFlight.current.delete(entry.id);
-      setDecidingId(null);
+      setDeciding((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
     }
   }
 
@@ -209,13 +220,13 @@ function AdjustmentPendingsQueueSessioned() {
               entry={entry}
               sku={skus?.[entry.skuId]}
               warehouseLabel={warehouses.find((w) => w.id === entry.warehouseId)?.code ?? null}
-              binCode={binCodeOf(binMaps, entry.warehouseId, entry.binId)}
+              binCode={binCodeLabel(binMaps, entry.warehouseId, entry.binId)}
               requestedBy={users?.[entry.requestedBy]?.email ?? null}
               decidedBy={
                 entry.decidedBy === null ? null : (users?.[entry.decidedBy]?.email ?? null)
               }
               canApprove={canApprove}
-              deciding={decidingId === entry.id}
+              deciding={deciding.has(entry.id)}
               onDecide={decide}
             />
           ))}
@@ -241,18 +252,6 @@ function AdjustmentPendingsQueueSessioned() {
       )}
     </section>
   );
-}
-
-/** The bin-code join's card label; a bin the walk has not landed renders unknown. */
-function binCodeOf(
-  maps: BinCodeMaps | null,
-  warehouseId: string,
-  binId: string,
-): string | null {
-  if (maps === null) return null;
-  const map = maps[warehouseId];
-  if (map === undefined) return null;
-  return map[binId] ?? null;
 }
 
 /**
@@ -284,8 +283,10 @@ function AdjustmentPendingCard({
 }) {
   const qty = (value: number) => quantityLabel(value, sku ?? null);
   const pending = entry.status === 'pending';
+  // Signed like the variance card: a minus names a decrease; zero and a
+  // gain render the bare quantity (a zero pend is `0`, never `+0`).
   const delta =
-    entry.quantityDelta < 0 ? `−${qty(Math.abs(entry.quantityDelta))}` : `+${qty(entry.quantityDelta)}`;
+    entry.quantityDelta < 0 ? `−${qty(Math.abs(entry.quantityDelta))}` : qty(entry.quantityDelta);
 
   return (
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
