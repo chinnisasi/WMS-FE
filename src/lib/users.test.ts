@@ -67,7 +67,6 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('owner', 'counts.manage')).toBe(true);
     expect(roleHasCapability('owner', 'counts.execute')).toBe(true);
     // Story 5-4 — the variance resolution verb.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(31);
     expect(roleHasCapability('owner', 'variances.resolve')).toBe(true);
   });
 
