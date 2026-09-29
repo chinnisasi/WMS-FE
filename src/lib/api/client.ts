@@ -21,7 +21,13 @@ import {
   inboundControllerGetPurchaseOrder,
   inboundControllerListPurchaseOrders,
   inboundControllerListVendors,
+  inventoryControllerApproveAdjustment,
+  inventoryControllerListAdjustmentPendings,
+  inventoryControllerListEvents,
   inventoryControllerListStock,
+  inventoryControllerRejectAdjustment,
+  movementsControllerListCountVariances,
+  movementsControllerResolveCountVariance,
   outboundControllerCancelOrder,
   outboundControllerCancelWave,
   outboundControllerCreateOrder,
@@ -70,6 +76,8 @@ import { ensureSessionHint, readSession, clearSession, writeSession } from '../a
 import type {
   AcceptInviteDto,
   AcceptInviteResponse,
+  AdjustmentDecisionResponse,
+  AdjustmentPendingListResponse,
   BinGridResponse,
   BinListResponse,
   BinMergeResponse,
@@ -80,9 +88,11 @@ import type {
   CreateProductDto,
   CreateWarehouseDto,
   CreateZoneDto,
+  CountVarianceListResponse,
   DeviceListResponse,
   DeviceResponse,
   ExcursionListResponse,
+  LedgerEventListResponse,
   ExcursionResponse,
   GenerateBinsDto,
   GoodsReceiptListResponse,
@@ -125,6 +135,8 @@ import type {
   PurchaseOrderListResponse,
   PurchaseOrderResponse,
   RegisterTenantDto,
+  ResolveCountVarianceDto,
+  ResolveCountVarianceResponse,
   SegregationMatrixResponse,
   SetUserRoleDto,
   SetupChecklistResponse,
@@ -1550,6 +1562,167 @@ export async function fetchApiGetOrderColdChainTrace(
 ): Promise<ColdChainTraceResponse> {
   const { data, error } = await complianceControllerGetOrderColdChainTrace({
     path: { tenantId, warehouseId, orderId },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The count-variance review queue (stories 5-4/5-5): the tenant's variances
+ * keyed on (createdAt, id), newest first, status- and warehouse-filterable. A
+ * read, never capability-gated — the deciding MUTATION is `variances.resolve`.
+ * Same query-shape as the excursion queue read: a first page with no filters
+ * sends no query.
+ */
+export async function fetchApiListVariances(
+  tenantId: string,
+  options?: {
+    status?: 'open' | 'adjusted' | 'recounted';
+    warehouseId?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<CountVarianceListResponse> {
+  const { data, error } = await movementsControllerListCountVariances({
+    path: { tenantId },
+    query:
+      options?.status === undefined &&
+      options?.warehouseId === undefined &&
+      options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.status === undefined ? {} : { status: options.status }),
+            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Resolves a count variance (capability `variances.resolve`). The body arms:
+ * `{decision:'approve_adjust', consideredEventSeqs}` — the consulted ledger
+ * seqs the approver ticked, non-empty and ≤ 200 on the approve arm; or
+ * `{decision:'recount'}`, no seqs required. Every click carries a fresh
+ * ULID, so a double click replays, never duplicates.
+ */
+export async function fetchApiResolveVariance(
+  tenantId: string,
+  varianceId: string,
+  body: ResolveCountVarianceDto,
+  idempotencyKey: string,
+): Promise<ResolveCountVarianceResponse> {
+  const { data, error } = await movementsControllerResolveCountVariance({
+    path: { tenantId, varianceId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The 5-2 adjustment-approval queue — pendings whose |delta| exceeded the
+ * tenant's threshold, keyset cursor pagination, status-filterable. A read,
+ * never capability-gated.
+ */
+export async function fetchApiListAdjustmentPendings(
+  tenantId: string,
+  options?: {
+    status?: 'pending' | 'approved' | 'rejected';
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<AdjustmentPendingListResponse> {
+  const { data, error } = await inventoryControllerListAdjustmentPendings({
+    path: { tenantId },
+    query:
+      options?.status === undefined && options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.status === undefined ? {} : { status: options.status }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Approves a pending adjustment (capability `adjustments.approve`) — the
+ * stored arms re-execute through the full guard set; a moved world answers
+ * the guard's 400/409/422 verbatim and the row stays pending.
+ */
+export async function fetchApiApproveAdjustmentPending(
+  tenantId: string,
+  pendingId: string,
+  idempotencyKey: string,
+): Promise<AdjustmentDecisionResponse> {
+  const { data, error } = await inventoryControllerApproveAdjustment({
+    path: { tenantId, pendingId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Rejects a pending adjustment (capability `adjustments.approve`) — the
+ * same decide contract, reject arm: status flip only, no stock write.
+ */
+export async function fetchApiRejectAdjustmentPending(
+  tenantId: string,
+  pendingId: string,
+  idempotencyKey: string,
+): Promise<AdjustmentDecisionResponse> {
+  const { data, error } = await inventoryControllerRejectAdjustment({
+    path: { tenantId, pendingId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * One warehouse's ledger timeline (story 2.4's read), newest first, keyset —
+ * narrowed to a bin's events (`fromBin == bin || toBin == bin`) for the
+ * variance-review ledger panel (story 5-5): the history the approver consults
+ * before an approve-adjust correction.
+ */
+export async function fetchApiListLedgerEvents(
+  tenantId: string,
+  warehouseId: string,
+  options?: {
+    binId?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<LedgerEventListResponse> {
+  const { data, error } = await inventoryControllerListEvents({
+    path: { tenantId, warehouseId },
+    query:
+      options?.binId === undefined && options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.binId === undefined ? {} : { binId: options.binId }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
   });
   if (error || !data) {
     throw unwrapError(error, 400);
