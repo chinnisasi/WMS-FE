@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from 'react';
 
 import { OverReceiptQueue } from '@/components/conflicts/over-receipt-queue';
 import { ExcursionQueue } from '@/components/conflicts/excursion-queue';
+import { RejectedOpsQueue } from '@/components/conflicts/rejected-ops-queue';
 import { VarianceQueue } from '@/components/conflicts/variance-queue';
 import { AdjustmentPendingsQueue } from '@/components/conflicts/adjustment-pendings-queue';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -48,9 +49,13 @@ const QUEUES: readonly {
     capabilities: ['adjustments.approve'],
   },
   { id: 'excursions', label: 'Excursions', capabilities: ['review.decide'] },
+  // Story 5-6: the AD-14 quarantine residents' queue — the decisions ride
+  // `review.decide` (owner + ops_manager), so the tab is hidden from roles
+  // holding none, like the over-receipts and excursions tabs.
+  { id: 'rejected-ops', label: 'Rejected ops', capabilities: ['review.decide'] },
 ];
 
-type Queue = 'over-receipts' | 'variances' | 'adjustment-pendings' | 'excursions';
+type Queue = 'over-receipts' | 'variances' | 'adjustment-pendings' | 'excursions' | 'rejected-ops';
 
 export function ConflictsQueues() {
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
@@ -108,6 +113,8 @@ export function ConflictsQueues() {
             <VarianceQueue />
           ) : active === 'adjustment-pendings' ? (
             <AdjustmentPendingsQueue />
+          ) : active === 'rejected-ops' ? (
+            <RejectedOpsQueue />
           ) : (
             <ExcursionQueue />
           )}
