@@ -1853,8 +1853,11 @@ export async function fetchApiListReorderPolicies(
  * `replenishment.manage`) — last-write-wins against the
  * `(tenant, warehouse, sku)` unique. `reorderPoint`/`reorderQty` are
  * MILLI-units (base UoM × 10³) on this module's wire, strictly positive.
- * A 404 answers an unknown or foreign warehouse/SKU; everything else is the
- * 400 the server's own words carry.
+ * Arms: 400 validation-failed naming the offending field; 403 role-denied
+ * (or a foreign session); 404 the warehouse or SKU is unknown/foreign;
+ * 409 conflict on a concurrent upsert of the same (warehouse, sku) or a
+ * concurrent idempotent request; 422 idempotency-key-reuse on a reused key
+ * with a different payload.
  */
 export async function fetchApiUpsertReorderPolicy(
   tenantId: string,

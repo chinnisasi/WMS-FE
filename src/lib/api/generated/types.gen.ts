@@ -3919,7 +3919,7 @@ export type SubmitSuggestedPoDto = {
      */
     vendorId?: string;
     /**
-     * The quantity to order in MILLI-units. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded. Omitted keeps the draft's quantity.
+     * The quantity to order in MILLI-units (strictly positive; positive-integer-milli bound). Omitted keeps the draft's quantity.
      */
     quantityMilli?: number;
 };

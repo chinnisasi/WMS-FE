@@ -56,6 +56,8 @@ let requests: {
 let breachRows: Record<string, unknown>[];
 let draftRows: Record<string, unknown>[];
 let policyRows: Record<string, unknown>[];
+/** When set, the policies read serves these pages IN ORDER (the walker's cursor chain). */
+let policyPageQueue: { items: Record<string, unknown>[]; nextCursor: string | null }[] | null = null;
 /** The next dismiss answer; non-200 simulates the 409 race arm. */
 let nextDismissStatus = 200;
 /** The next submit answer; non-200 simulates the 409 race arm. */
@@ -167,6 +169,11 @@ function stubRouter(): void {
       return json(200, { items: draftRows, nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith('/replenishment/policies')) {
+      if (policyPageQueue !== null) {
+        // The multi-page walker scenario: pages served IN ORDER, exhausted
+        // queue keeps answering with a live cursor (the chain never ends).
+        return json(200, policyPageQueue.length > 0 ? (policyPageQueue.shift() as { items: Record<string, unknown>[]; nextCursor: string | null }) : { items: policyRows, nextCursor: 'cursor-deeper' });
+      }
       return json(200, { items: policyRows, nextCursor: null });
     }
     if (method === 'POST' && pathname.endsWith('/dismiss')) {
@@ -225,6 +232,7 @@ beforeEach(() => {
   breachRows = [breach()];
   draftRows = [draft()];
   policyRows = [policy()];
+  policyPageQueue = null;
   stubRouter();
   writeSession(OWNER_SESSION);
 });
@@ -436,5 +444,40 @@ describe('ReplenishmentView: the read-only render (story 6-1)', () => {
     const labels = [...view.container.querySelectorAll('button')].map((b) => b.textContent);
     expect(labels).toEqual(['Open', 'Recovered', 'Actioned', 'Dismissed', 'Drafts', 'Submitted', 'Dismissed']);
     expect([...view.container.querySelectorAll('input, select')]).toEqual([]);
+  });
+});
+
+describe('ReplenishmentView: the policy walker\'s truncated-is-SAID contract (story 6-1)', () => {
+  test('a chain that still has a cursor at the last hop accumulates the pages AND says the list is truncated', async () => {
+    // Every page points at the next — the walk rides to MAX_PAGE_HOPS and
+    // the truncation flag must be SAID (an override beyond the cap missing
+    // from the map would render as the SKU default governing).
+    policyPageQueue = Array.from({ length: 20 }, () => ({ items: [policy()], nextCursor: 'cursor-does-not-end' }));
+    view = await mount();
+
+    const policyGets = readsEndingWith('/replenishment/policies');
+    expect(policyGets.length).toBe(20); // MAX_PAGE_HOPS — accumulated, not one page
+    // The chain: every hop after the first carries the previous page's cursor.
+    expect(policyGets[0]!.query).not.toContain('cursor=');
+    for (let i = 1; i < policyGets.length; i++) {
+      expect(policyGets[i]!.query).toContain('cursor=cursor-does-not-end');
+    }
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('More overrides exist than this table can walk');
+    expect(text).toContain('the list is truncated');
+  });
+
+  test('a chain whose last hop carries the null cursor is NOT truncated', async () => {
+    policyPageQueue = [
+      { items: [policy()], nextCursor: 'cursor-2' },
+      { items: [policy()], nextCursor: null },
+    ];
+    view = await mount();
+
+    const policyGets = readsEndingWith('/replenishment/policies');
+    expect(policyGets.length).toBe(2); // the chain ended where the server said
+    expect(policyGets[1]!.query).toContain('cursor=cursor-2');
+    const text = view.container.textContent ?? '';
+    expect(text).not.toContain('More overrides exist than this table can walk');
   });
 });

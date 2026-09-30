@@ -419,7 +419,10 @@ function BreachCard({
       {entry.status !== 'open' && (
         <div className="flex flex-wrap gap-x-2 text-xs text-(--muted-foreground)">
           <span>now {BREACH_TAB_LABEL[entry.status].toLowerCase()}</span>
-          {resolvedBy !== null && <span>· dismissed by {resolvedBy}</span>}
+          {/* The status decides the verb: an `actioned` breach's resolver SUBMITTED its PO (the submit arm stamps resolvedBy too), a `dismissed` one dismissed it — "dismissed by" on an actioned card would mis-read the audit. */}
+          {resolvedBy !== null && (
+            <span>· {entry.status === 'actioned' ? 'actioned by' : 'dismissed by'} {resolvedBy}</span>
+          )}
           {entry.resolvedAt !== null && (
             <time dateTime={entry.resolvedAt}>{new Date(entry.resolvedAt).toLocaleString()}</time>
           )}
