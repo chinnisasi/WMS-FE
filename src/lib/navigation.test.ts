@@ -71,4 +71,21 @@ describe('sidebar IA skeleton', () => {
     expect(NAV_ITEMS).toHaveLength(NAV_ITEM_COUNT);
     expect(visibleNavItems('owner')).toHaveLength(NAV_ITEM_COUNT);
   });
+
+  // Story 6-1: Replenishment declares `replenishment.manage` (the spec's
+  // Code Map authors the gate), so the planner roles see it and the floor
+  // roles do not. Pinned for all four roles so a role-set edit cannot
+  // silently add or drop the surface (the Conflicts pin's precedent).
+  test('Replenishment is visible to owner and ops_manager, hidden from operator and accountant', () => {
+    expect(NAV_ITEMS.find((i) => i.id === 'replenishment')?.capabilities).toEqual([
+      'replenishment.manage',
+    ]);
+    for (const role of ['owner', 'ops_manager'] as const satisfies readonly UserRole[]) {
+      expect(visibleNavItems(role).some((i) => i.id === 'replenishment')).toBe(true);
+    }
+    for (const role of ['operator', 'accountant'] as const satisfies readonly UserRole[]) {
+      expect(visibleNavItems(role).some((i) => i.id === 'replenishment')).toBe(false);
+    }
+    expect(visibleNavItems(undefined).some((i) => i.id === 'replenishment')).toBe(false);
+  });
 });

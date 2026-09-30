@@ -1,12 +1,7 @@
-import { SurfacePlaceholder } from '@/components/shell/surface-placeholder';
+import { ReplenishmentView } from '@/components/replenishment/replenishment-view';
 
 export const metadata = { title: 'Replenishment' };
 
 export default function ReplenishmentPage() {
-  return (
-    <SurfacePlaceholder
-      title="Replenishment"
-      description="IA skeleton surface — functionality lands in a later story."
-    />
-  );
+  return <ReplenishmentView />;
 }

@@ -21,11 +21,13 @@ export interface NavItem {
    * story 3.3 gates Conflicts & Reviews behind `review.decide`.
    *
    * A gate belongs here only when the surface has nothing to *read* for a
-   * role that cannot act — which is true of the Conflicts action queue and
-   * of nothing else so far. Outbound (story 4.2b) is deliberately ungated
-   * for that reason, like `inbound` and `inventory`: its list and expanded
-   * order detail are readable by every role, and only the create form and
-   * the cancel affordance consult `orders.manage`, inside the component.
+   * role that cannot act — which is true of the Conflicts action queue, and,
+   * by the spec's own authorship (story 6-1), of Replenishment: the list
+   * reads are member-open server-side and the intended read-only entry is
+   * Epic 9's panel. Outbound (story 4.2b) is deliberately ungated for that
+   * reason, like `inbound` and `inventory`: its list and expanded order
+   * detail are readable by every role, and only the create form and the
+   * cancel affordance consult `orders.manage`, inside the component.
    */
   readonly capabilities?: readonly Capability[];
 }
@@ -38,7 +40,17 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'moves', label: 'Moves', href: '/moves', monogram: 'MV' },
   { id: 'conflicts', label: 'Conflicts & Reviews', href: '/conflicts', monogram: 'CR', capabilities: ['review.decide'] },
   { id: 'notifications', label: 'Notifications', href: '/notifications', monogram: 'NO' },
-  { id: 'replenishment', label: 'Replenishment', href: '/replenishment', monogram: 'RP' },
+  // Story 6-1 — gated on `replenishment.manage` (the spec's Code Map names
+  // the gate): the breach queue, the suggested-PO drafts and the policy
+  // table are planner tools; list reads stay member-open server-side, and
+  // the intended read-only entry point is Epic 9's notification panel.
+  {
+    id: 'replenishment',
+    label: 'Replenishment',
+    href: '/replenishment',
+    monogram: 'RP',
+    capabilities: ['replenishment.manage'],
+  },
   { id: 'channels', label: 'Channels', href: '/channels', monogram: 'CH' },
   { id: 'compliance', label: 'Compliance', href: '/compliance', monogram: 'CO' },
   { id: 'reports', label: 'Reports / Audit', href: '/reports', monogram: 'RA' },

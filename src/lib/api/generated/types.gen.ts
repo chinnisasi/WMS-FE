@@ -846,7 +846,7 @@ export type SyncReportRowDto = {
 
 export type RecordSyncReportDto = {
     /**
-     * The dropped terminal ops retained by the last replay pass(es)
+     * The dropped terminal ops retained by the last replay pass(es). 200 rows is the per-report ceiling; the EFFECTIVE bound is the body limit (~100 kB default — 32 kB per-row payload cap × 50-row slices is the uploader's real shape), so a report that exceeds the body limit is refused 413 before any row can be named.
      */
     rows: Array<SyncReportRowDto>;
 };
@@ -3795,6 +3795,138 @@ export type TransferDetailResponse = {
         [key: string]: unknown;
     }>;
     events: Array<TransferLegEventResponseDto>;
+};
+
+export type UpsertReorderPolicyDto = {
+    warehouseId: string;
+    skuId: string;
+    /**
+     * Reorder point in MILLI-units (base UoM × 10³) — the ATP level below which a breach opens. Strictly positive; the per-warehouse override replaces the SKU-column default.
+     */
+    reorderPoint: number;
+    /**
+     * Reorder quantity in MILLI-units (base UoM × 10³) — the draft PO's default suggested quantity. Strictly positive.
+     */
+    reorderQty: number;
+};
+
+export type ReorderPolicyDto = {
+    id: string;
+    warehouseId: string;
+    skuId: string;
+    /**
+     * Reorder point in milli-units (base UoM × 10³)
+     */
+    reorderPoint: number;
+    /**
+     * Reorder quantity in milli-units (base UoM × 10³)
+     */
+    reorderQty: number;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last-write time
+     */
+    updatedAt: string;
+};
+
+export type ReorderPolicyResponse = {
+    policy: ReorderPolicyDto;
+};
+
+export type ReorderPolicyListResponse = {
+    items: Array<ReorderPolicyDto>;
+    nextCursor?: string | null;
+};
+
+export type BreachDto = {
+    id: string;
+    warehouseId: string;
+    skuId: string;
+    status: 'open' | 'recovered' | 'actioned' | 'dismissed';
+    /**
+     * The reorder point FROZEN at detection, milli-units
+     */
+    pointMilli: number;
+    /**
+     * The ATP FROZEN at detection, milli-units
+     */
+    atpMilli: number;
+    /**
+     * The breach instant (ISO-8601 UTC) — the row's creation time
+     */
+    breachAt: string;
+    /**
+     * Resolution instant, null while open
+     */
+    resolvedAt: string | null;
+    /**
+     * The resolver's user id, null while open (and on worker recovery)
+     */
+    resolvedBy: string | null;
+};
+
+export type BreachListResponse = {
+    items: Array<BreachDto>;
+    nextCursor?: string | null;
+};
+
+export type BreachResponse = {
+    breach: BreachDto;
+};
+
+export type SuggestedPoDto = {
+    id: string;
+    /**
+     * The breach whose opening minted the draft
+     */
+    breachId: string;
+    warehouseId: string;
+    skuId: string;
+    /**
+     * The suggested vendor, null when the tenant carried no default
+     */
+    vendorId: string | null;
+    /**
+     * The suggested quantity in milli-units (base UoM × 10³)
+     */
+    quantityMilli: number;
+    status: 'draft' | 'submitted' | 'dismissed';
+    /**
+     * The real PO's id once submitted, null while a draft
+     */
+    submittedPoId: string | null;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last-write time
+     */
+    updatedAt: string;
+};
+
+export type SuggestedPoListResponse = {
+    items: Array<SuggestedPoDto>;
+    nextCursor?: string | null;
+};
+
+export type SubmitSuggestedPoDto = {
+    /**
+     * The vendor to purchase from — omitted keeps the draft's (a null-vendor draft refuses without it)
+     */
+    vendorId?: string;
+    /**
+     * The quantity to order in MILLI-units. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded. Omitted keeps the draft's quantity.
+     */
+    quantityMilli?: number;
+};
+
+export type SubmitSuggestedPoResponse = {
+    suggestedPoId: string;
+    purchaseOrder: PurchaseOrderDto;
 };
 
 export type TenancyControllerRegisterData = {
@@ -9308,3 +9440,389 @@ export type MovementsControllerGetTransferResponses = {
 };
 
 export type MovementsControllerGetTransferResponse = MovementsControllerGetTransferResponses[keyof MovementsControllerGetTransferResponses];
+
+export type ReplenishmentControllerListReorderPoliciesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Only one warehouse's policies
+         */
+        warehouseId?: string;
+        /**
+         * Only one SKU's policies
+         */
+        skuId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/replenishment/policies';
+};
+
+export type ReplenishmentControllerListReorderPoliciesErrors = {
+    /**
+     * Malformed cursor, a non-uuid warehouseId/skuId filter, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A filtered warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerListReorderPoliciesError = ReplenishmentControllerListReorderPoliciesErrors[keyof ReplenishmentControllerListReorderPoliciesErrors];
+
+export type ReplenishmentControllerListReorderPoliciesResponses = {
+    200: ReorderPolicyListResponse;
+};
+
+export type ReplenishmentControllerListReorderPoliciesResponse = ReplenishmentControllerListReorderPoliciesResponses[keyof ReplenishmentControllerListReorderPoliciesResponses];
+
+export type ReplenishmentControllerUpsertReorderPolicyData = {
+    body: UpsertReorderPolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/replenishment/policies';
+};
+
+export type ReplenishmentControllerUpsertReorderPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a non-positive / non-integer reorderPoint or reorderQty (validation-failed, naming the field)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks replenishment.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse or SKU does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent upsert of the same (warehouse, sku) (conflict), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerUpsertReorderPolicyError = ReplenishmentControllerUpsertReorderPolicyErrors[keyof ReplenishmentControllerUpsertReorderPolicyErrors];
+
+export type ReplenishmentControllerUpsertReorderPolicyResponses = {
+    /**
+     * The override row (created or overwritten — the idempotency snapshot)
+     */
+    200: ReorderPolicyResponse;
+};
+
+export type ReplenishmentControllerUpsertReorderPolicyResponse = ReplenishmentControllerUpsertReorderPolicyResponses[keyof ReplenishmentControllerUpsertReorderPolicyResponses];
+
+export type ReplenishmentControllerDeleteReorderPolicyData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        policyId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/replenishment/policies/{policyId}';
+};
+
+export type ReplenishmentControllerDeleteReorderPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed policyId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks replenishment.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No override with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerDeleteReorderPolicyError = ReplenishmentControllerDeleteReorderPolicyErrors[keyof ReplenishmentControllerDeleteReorderPolicyErrors];
+
+export type ReplenishmentControllerDeleteReorderPolicyResponses = {
+    /**
+     * The deleted override row (the idempotency snapshot)
+     */
+    200: ReorderPolicyResponse;
+};
+
+export type ReplenishmentControllerDeleteReorderPolicyResponse = ReplenishmentControllerDeleteReorderPolicyResponses[keyof ReplenishmentControllerDeleteReorderPolicyResponses];
+
+export type ReplenishmentControllerListBreachesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Only breaches of one status (the queue tabs)
+         */
+        status?: 'open' | 'recovered' | 'actioned' | 'dismissed';
+        /**
+         * Only one warehouse's breaches
+         */
+        warehouseId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/replenishment/breaches';
+};
+
+export type ReplenishmentControllerListBreachesErrors = {
+    /**
+     * Malformed status, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A filtered warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerListBreachesError = ReplenishmentControllerListBreachesErrors[keyof ReplenishmentControllerListBreachesErrors];
+
+export type ReplenishmentControllerListBreachesResponses = {
+    200: BreachListResponse;
+};
+
+export type ReplenishmentControllerListBreachesResponse = ReplenishmentControllerListBreachesResponses[keyof ReplenishmentControllerListBreachesResponses];
+
+export type ReplenishmentControllerDismissBreachData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        breachId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/replenishment/breaches/{breachId}/dismiss';
+};
+
+export type ReplenishmentControllerDismissBreachErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed breachId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks replenishment.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No breach with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The breach is not open (breach-not-open, naming the status), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerDismissBreachError = ReplenishmentControllerDismissBreachErrors[keyof ReplenishmentControllerDismissBreachErrors];
+
+export type ReplenishmentControllerDismissBreachResponses = {
+    /**
+     * The dismissed breach row (the idempotency snapshot)
+     */
+    200: BreachResponse;
+};
+
+export type ReplenishmentControllerDismissBreachResponse = ReplenishmentControllerDismissBreachResponses[keyof ReplenishmentControllerDismissBreachResponses];
+
+export type ReplenishmentControllerListSuggestedPosData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Only suggested POs of one status (the queue tabs)
+         */
+        status?: 'draft' | 'submitted' | 'dismissed';
+        /**
+         * Only one warehouse's drafts
+         */
+        warehouseId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/replenishment/suggested-pos';
+};
+
+export type ReplenishmentControllerListSuggestedPosErrors = {
+    /**
+     * Malformed status, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A filtered warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerListSuggestedPosError = ReplenishmentControllerListSuggestedPosErrors[keyof ReplenishmentControllerListSuggestedPosErrors];
+
+export type ReplenishmentControllerListSuggestedPosResponses = {
+    200: SuggestedPoListResponse;
+};
+
+export type ReplenishmentControllerListSuggestedPosResponse = ReplenishmentControllerListSuggestedPosResponses[keyof ReplenishmentControllerListSuggestedPosResponses];
+
+export type ReplenishmentControllerSubmitSuggestedPoData = {
+    body?: SubmitSuggestedPoDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        draftId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/replenishment/suggested-pos/{draftId}/submit';
+};
+
+export type ReplenishmentControllerSubmitSuggestedPoErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed draftId, a non-positive/non-integer quantityMilli (validation-failed), or no vendor on the draft or edits (suggested-po-vendor-required)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks replenishment.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No draft with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The draft is not a draft (suggested-po-submitted), the PO code is already in use (conflict), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerSubmitSuggestedPoError = ReplenishmentControllerSubmitSuggestedPoErrors[keyof ReplenishmentControllerSubmitSuggestedPoErrors];
+
+export type ReplenishmentControllerSubmitSuggestedPoResponses = {
+    /**
+     * The draft → submitted, and the FLAT PO snapshot — body.purchaseOrder IS the minted PO ({id, code, status, vendorId, warehouseId, lines…})
+     */
+    200: SubmitSuggestedPoResponse;
+};
+
+export type ReplenishmentControllerSubmitSuggestedPoResponse = ReplenishmentControllerSubmitSuggestedPoResponses[keyof ReplenishmentControllerSubmitSuggestedPoResponses];
