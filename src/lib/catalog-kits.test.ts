@@ -64,6 +64,10 @@ function sku(over: Partial<SkuResponse> = {}): SkuResponse {
     // does not. The fixture satisfies the generated type while the runtime
     // truth is "null carries no rule" (12-2). Tracked in PENDING.
     hazardClass: 'toxic',
+    // Same known-bad family: the BE marks abcClass nullable ("or null when
+    // it is not yet classified") and 0.99.0 drops `| null` on the enum —
+    // the fixture satisfies the generated type (5-3 regen).
+    abcClass: 'a',
     createdAt: '2026-09-01T00:00:00.000Z',
     ...over,
   };

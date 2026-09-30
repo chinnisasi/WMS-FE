@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { CarriersControllerCatalogueData, CarriersControllerCatalogueErrors, CarriersControllerCatalogueResponses, CarriersControllerConnectData, CarriersControllerConnectErrors, CarriersControllerConnectResponses, CarriersControllerDisconnectData, CarriersControllerDisconnectErrors, CarriersControllerDisconnectResponses, CarriersControllerListConnectionsData, CarriersControllerListConnectionsErrors, CarriersControllerListConnectionsResponses, CarriersControllerRotateData, CarriersControllerRotateErrors, CarriersControllerRotateResponses, CatalogControllerCreateKitData, CatalogControllerCreateKitErrors, CatalogControllerCreateKitResponses, CatalogControllerCreateProductData, CatalogControllerCreateProductErrors, CatalogControllerCreateProductResponses, CatalogControllerEditProductData, CatalogControllerEditProductErrors, CatalogControllerEditProductResponses, CatalogControllerEditSkuData, CatalogControllerEditSkuErrors, CatalogControllerEditSkuResponses, CatalogControllerGetSegregationMatrixData, CatalogControllerGetSegregationMatrixErrors, CatalogControllerGetSegregationMatrixResponses, CatalogControllerImportCatalogData, CatalogControllerImportCatalogErrors, CatalogControllerImportCatalogResponses, CatalogControllerListKitsData, CatalogControllerListKitsErrors, CatalogControllerListKitsResponses, CatalogControllerListProductsData, CatalogControllerListProductsErrors, CatalogControllerListProductsResponses, CatalogControllerListSkusData, CatalogControllerListSkusErrors, CatalogControllerListSkusResponses, CatalogControllerReplaceKitData, CatalogControllerReplaceKitErrors, CatalogControllerReplaceKitResponses, ComplianceControllerGetOrderColdChainTraceData, ComplianceControllerGetOrderColdChainTraceErrors, ComplianceControllerGetOrderColdChainTraceResponses, ComplianceControllerListExcursionsData, ComplianceControllerListExcursionsErrors, ComplianceControllerListExcursionsResponses, ComplianceControllerRecordExcursionData, ComplianceControllerRecordExcursionErrors, ComplianceControllerRecordExcursionResponses, ComplianceControllerResolveExcursionData, ComplianceControllerResolveExcursionErrors, ComplianceControllerResolveExcursionResponses, DevicesControllerBadgeInData, DevicesControllerBadgeInErrors, DevicesControllerBadgeInResponses, DevicesControllerEnrollData, DevicesControllerEnrollErrors, DevicesControllerEnrollResponses, DevicesControllerListDevicesData, DevicesControllerListDevicesErrors, DevicesControllerListDevicesResponses, DevicesControllerMintEnrollmentCodeData, DevicesControllerMintEnrollmentCodeErrors, DevicesControllerMintEnrollmentCodeResponses, DevicesControllerRevokeDeviceData, DevicesControllerRevokeDeviceErrors, DevicesControllerRevokeDeviceResponses, DevicesControllerSelfTestEchoData, DevicesControllerSelfTestEchoErrors, DevicesControllerSelfTestEchoResponses, EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, InboundControllerAmendPurchaseOrderData, InboundControllerAmendPurchaseOrderErrors, InboundControllerAmendPurchaseOrderResponses, InboundControllerClosePurchaseOrderData, InboundControllerClosePurchaseOrderErrors, InboundControllerClosePurchaseOrderResponses, InboundControllerCreatePurchaseOrderData, InboundControllerCreatePurchaseOrderErrors, InboundControllerCreatePurchaseOrderResponses, InboundControllerCreateVendorData, InboundControllerCreateVendorErrors, InboundControllerCreateVendorResponses, InboundControllerGetPurchaseOrderData, InboundControllerGetPurchaseOrderErrors, InboundControllerGetPurchaseOrderResponses, InboundControllerListPurchaseOrdersData, InboundControllerListPurchaseOrdersErrors, InboundControllerListPurchaseOrdersResponses, InboundControllerListVendorsData, InboundControllerListVendorsErrors, InboundControllerListVendorsResponses, InventoryControllerAdjustStockData, InventoryControllerAdjustStockErrors, InventoryControllerAdjustStockResponses, InventoryControllerGetBatchData, InventoryControllerGetBatchErrors, InventoryControllerGetBatchResponses, InventoryControllerGetSerialData, InventoryControllerGetSerialErrors, InventoryControllerGetSerialResponses, InventoryControllerListBatchesData, InventoryControllerListBatchesErrors, InventoryControllerListBatchesResponses, InventoryControllerListEventsData, InventoryControllerListEventsErrors, InventoryControllerListEventsResponses, InventoryControllerListStockData, InventoryControllerListStockErrors, InventoryControllerListStockResponses, OutboundControllerCancelOrderData, OutboundControllerCancelOrderErrors, OutboundControllerCancelOrderResponses, OutboundControllerCancelWaveData, OutboundControllerCancelWaveErrors, OutboundControllerCancelWaveResponses, OutboundControllerCreateManifestData, OutboundControllerCreateManifestErrors, OutboundControllerCreateManifestResponses, OutboundControllerCreateOrderData, OutboundControllerCreateOrderErrors, OutboundControllerCreateOrderResponses, OutboundControllerCreateWavePolicyData, OutboundControllerCreateWavePolicyErrors, OutboundControllerCreateWavePolicyResponses, OutboundControllerDispatchOrderData, OutboundControllerDispatchOrderErrors, OutboundControllerDispatchOrderResponses, OutboundControllerGenerateWaveData, OutboundControllerGenerateWaveErrors, OutboundControllerGenerateWaveResponses, OutboundControllerGetOrderData, OutboundControllerGetOrderErrors, OutboundControllerGetOrderRatesData, OutboundControllerGetOrderRatesErrors, OutboundControllerGetOrderRatesResponses, OutboundControllerGetOrderResponses, OutboundControllerGetShipmentData, OutboundControllerGetShipmentErrors, OutboundControllerGetShipmentResponses, OutboundControllerGetWaveData, OutboundControllerGetWaveErrors, OutboundControllerGetWaveResponses, OutboundControllerLabelOrderData, OutboundControllerLabelOrderErrors, OutboundControllerLabelOrderResponses, OutboundControllerListManifestsData, OutboundControllerListManifestsErrors, OutboundControllerListManifestsResponses, OutboundControllerListOrdersData, OutboundControllerListOrdersErrors, OutboundControllerListOrdersResponses, OutboundControllerListWavePoliciesData, OutboundControllerListWavePoliciesErrors, OutboundControllerListWavePoliciesResponses, OutboundControllerListWavesData, OutboundControllerListWavesErrors, OutboundControllerListWavesResponses, OutboundControllerPackOrderData, OutboundControllerPackOrderErrors, OutboundControllerPackOrderFromDeviceData, OutboundControllerPackOrderFromDeviceErrors, OutboundControllerPackOrderFromDeviceResponses, OutboundControllerPackOrderResponses, OutboundControllerRecordPickData, OutboundControllerRecordPickErrors, OutboundControllerRecordPickResponses, OutboundControllerReleaseWaveData, OutboundControllerReleaseWaveErrors, OutboundControllerReleaseWaveResponses, PutawayControllerListPlacementsData, PutawayControllerListPlacementsErrors, PutawayControllerListPlacementsResponses, PutawayControllerListPutawayTasksData, PutawayControllerListPutawayTasksErrors, PutawayControllerListPutawayTasksResponses, PutawayControllerPlacePutawayData, PutawayControllerPlacePutawayErrors, PutawayControllerPlacePutawayResponses, ReceivingControllerApproveOverReceiptData, ReceivingControllerApproveOverReceiptErrors, ReceivingControllerApproveOverReceiptResponses, ReceivingControllerGetCatalogSnapshotData, ReceivingControllerGetCatalogSnapshotErrors, ReceivingControllerGetCatalogSnapshotResponses, ReceivingControllerListGoodsReceiptsData, ReceivingControllerListGoodsReceiptsErrors, ReceivingControllerListGoodsReceiptsResponses, ReceivingControllerListOverReceiptsData, ReceivingControllerListOverReceiptsErrors, ReceivingControllerListOverReceiptsResponses, ReceivingControllerListQcHoldsData, ReceivingControllerListQcHoldsErrors, ReceivingControllerListQcHoldsResponses, ReceivingControllerPlaceQcHoldData, ReceivingControllerPlaceQcHoldErrors, ReceivingControllerPlaceQcHoldResponses, ReceivingControllerRejectOverReceiptData, ReceivingControllerRejectOverReceiptErrors, ReceivingControllerRejectOverReceiptResponses, ReceivingControllerReleaseQcHoldData, ReceivingControllerReleaseQcHoldErrors, ReceivingControllerReleaseQcHoldResponses, ReceivingControllerSubmitGoodsReceiptData, ReceivingControllerSubmitGoodsReceiptErrors, ReceivingControllerSubmitGoodsReceiptResponses, TenancyControllerCreateBinData, TenancyControllerCreateBinErrors, TenancyControllerCreateBinResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerCreateZoneData, TenancyControllerCreateZoneErrors, TenancyControllerCreateZoneResponses, TenancyControllerGenerateBinGridData, TenancyControllerGenerateBinGridErrors, TenancyControllerGenerateBinGridResponses, TenancyControllerListBinsData, TenancyControllerListBinsErrors, TenancyControllerListBinsResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerListZonesData, TenancyControllerListZonesErrors, TenancyControllerListZonesResponses, TenancyControllerMergeBinData, TenancyControllerMergeBinErrors, TenancyControllerMergeBinResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerRetireBinData, TenancyControllerRetireBinErrors, TenancyControllerRetireBinResponses, TenancyControllerSetBinBlockedData, TenancyControllerSetBinBlockedErrors, TenancyControllerSetBinBlockedResponses, TenancyControllerSetupChecklistData, TenancyControllerSetupChecklistErrors, TenancyControllerSetupChecklistResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses, UsersControllerAcceptInviteData, UsersControllerAcceptInviteErrors, UsersControllerAcceptInviteResponses, UsersControllerInviteUserData, UsersControllerInviteUserErrors, UsersControllerInviteUserResponses, UsersControllerListUsersData, UsersControllerListUsersErrors, UsersControllerListUsersResponses, UsersControllerMeData, UsersControllerMeErrors, UsersControllerMeResponses, UsersControllerSetUserRoleData, UsersControllerSetUserRoleErrors, UsersControllerSetUserRoleResponses } from './types.gen';
+import type { CarriersControllerCatalogueData, CarriersControllerCatalogueErrors, CarriersControllerCatalogueResponses, CarriersControllerConnectData, CarriersControllerConnectErrors, CarriersControllerConnectResponses, CarriersControllerDisconnectData, CarriersControllerDisconnectErrors, CarriersControllerDisconnectResponses, CarriersControllerListConnectionsData, CarriersControllerListConnectionsErrors, CarriersControllerListConnectionsResponses, CarriersControllerRotateData, CarriersControllerRotateErrors, CarriersControllerRotateResponses, CatalogControllerCreateKitData, CatalogControllerCreateKitErrors, CatalogControllerCreateKitResponses, CatalogControllerCreateProductData, CatalogControllerCreateProductErrors, CatalogControllerCreateProductResponses, CatalogControllerEditProductData, CatalogControllerEditProductErrors, CatalogControllerEditProductResponses, CatalogControllerEditSkuData, CatalogControllerEditSkuErrors, CatalogControllerEditSkuResponses, CatalogControllerGetSegregationMatrixData, CatalogControllerGetSegregationMatrixErrors, CatalogControllerGetSegregationMatrixResponses, CatalogControllerImportCatalogData, CatalogControllerImportCatalogErrors, CatalogControllerImportCatalogResponses, CatalogControllerListKitsData, CatalogControllerListKitsErrors, CatalogControllerListKitsResponses, CatalogControllerListProductsData, CatalogControllerListProductsErrors, CatalogControllerListProductsResponses, CatalogControllerListSkusData, CatalogControllerListSkusErrors, CatalogControllerListSkusResponses, CatalogControllerReplaceKitData, CatalogControllerReplaceKitErrors, CatalogControllerReplaceKitResponses, ComplianceControllerGetOrderColdChainTraceData, ComplianceControllerGetOrderColdChainTraceErrors, ComplianceControllerGetOrderColdChainTraceResponses, ComplianceControllerListExcursionsData, ComplianceControllerListExcursionsErrors, ComplianceControllerListExcursionsResponses, ComplianceControllerRecordExcursionData, ComplianceControllerRecordExcursionErrors, ComplianceControllerRecordExcursionResponses, ComplianceControllerResolveExcursionData, ComplianceControllerResolveExcursionErrors, ComplianceControllerResolveExcursionResponses, DevicesControllerBadgeInData, DevicesControllerBadgeInErrors, DevicesControllerBadgeInResponses, DevicesControllerEnrollData, DevicesControllerEnrollErrors, DevicesControllerEnrollResponses, DevicesControllerListDevicesData, DevicesControllerListDevicesErrors, DevicesControllerListDevicesResponses, DevicesControllerMintEnrollmentCodeData, DevicesControllerMintEnrollmentCodeErrors, DevicesControllerMintEnrollmentCodeResponses, DevicesControllerRevokeDeviceData, DevicesControllerRevokeDeviceErrors, DevicesControllerRevokeDeviceResponses, DevicesControllerSelfTestEchoData, DevicesControllerSelfTestEchoErrors, DevicesControllerSelfTestEchoResponses, EchoControllerEchoData, EchoControllerEchoErrors, EchoControllerEchoResponses, HealthControllerHealthData, HealthControllerHealthErrors, HealthControllerHealthResponses, InboundControllerAmendPurchaseOrderData, InboundControllerAmendPurchaseOrderErrors, InboundControllerAmendPurchaseOrderResponses, InboundControllerClosePurchaseOrderData, InboundControllerClosePurchaseOrderErrors, InboundControllerClosePurchaseOrderResponses, InboundControllerCreatePurchaseOrderData, InboundControllerCreatePurchaseOrderErrors, InboundControllerCreatePurchaseOrderResponses, InboundControllerCreateVendorData, InboundControllerCreateVendorErrors, InboundControllerCreateVendorResponses, InboundControllerGetPurchaseOrderData, InboundControllerGetPurchaseOrderErrors, InboundControllerGetPurchaseOrderResponses, InboundControllerListPurchaseOrdersData, InboundControllerListPurchaseOrdersErrors, InboundControllerListPurchaseOrdersResponses, InboundControllerListVendorsData, InboundControllerListVendorsErrors, InboundControllerListVendorsResponses, InventoryControllerAdjustStockData, InventoryControllerAdjustStockErrors, InventoryControllerAdjustStockResponses, InventoryControllerApproveAdjustmentData, InventoryControllerApproveAdjustmentErrors, InventoryControllerApproveAdjustmentResponses, InventoryControllerGetAdjustmentPolicyData, InventoryControllerGetAdjustmentPolicyErrors, InventoryControllerGetAdjustmentPolicyResponses, InventoryControllerGetBatchData, InventoryControllerGetBatchErrors, InventoryControllerGetBatchResponses, InventoryControllerGetSerialData, InventoryControllerGetSerialErrors, InventoryControllerGetSerialResponses, InventoryControllerListAdjustmentPendingsData, InventoryControllerListAdjustmentPendingsErrors, InventoryControllerListAdjustmentPendingsResponses, InventoryControllerListBatchesData, InventoryControllerListBatchesErrors, InventoryControllerListBatchesResponses, InventoryControllerListEventsData, InventoryControllerListEventsErrors, InventoryControllerListEventsResponses, InventoryControllerListStockData, InventoryControllerListStockErrors, InventoryControllerListStockResponses, InventoryControllerRejectAdjustmentData, InventoryControllerRejectAdjustmentErrors, InventoryControllerRejectAdjustmentResponses, InventoryControllerSetAdjustmentPolicyData, InventoryControllerSetAdjustmentPolicyErrors, InventoryControllerSetAdjustmentPolicyResponses, MovementsControllerCancelTransferData, MovementsControllerCancelTransferErrors, MovementsControllerCancelTransferResponses, MovementsControllerConfirmInboundData, MovementsControllerConfirmInboundErrors, MovementsControllerConfirmInboundResponses, MovementsControllerConfirmOutboundData, MovementsControllerConfirmOutboundErrors, MovementsControllerConfirmOutboundResponses, MovementsControllerCreateCountData, MovementsControllerCreateCountErrors, MovementsControllerCreateCountResponses, MovementsControllerCreateTransferData, MovementsControllerCreateTransferErrors, MovementsControllerCreateTransferResponses, MovementsControllerGetTransferData, MovementsControllerGetTransferErrors, MovementsControllerGetTransferResponses, MovementsControllerGetVariancePolicyData, MovementsControllerGetVariancePolicyErrors, MovementsControllerGetVariancePolicyResponses, MovementsControllerListCountVariancesData, MovementsControllerListCountVariancesErrors, MovementsControllerListCountVariancesResponses, MovementsControllerListTransfersData, MovementsControllerListTransfersErrors, MovementsControllerListTransfersResponses, MovementsControllerResolveCountVarianceData, MovementsControllerResolveCountVarianceErrors, MovementsControllerResolveCountVarianceResponses, MovementsControllerSetVariancePolicyData, MovementsControllerSetVariancePolicyErrors, MovementsControllerSetVariancePolicyResponses, MovementsControllerSubmitCountData, MovementsControllerSubmitCountErrors, MovementsControllerSubmitCountResponses, MovementsControllerUpsertCountPoliciesData, MovementsControllerUpsertCountPoliciesErrors, MovementsControllerUpsertCountPoliciesResponses, OutboundControllerCancelOrderData, OutboundControllerCancelOrderErrors, OutboundControllerCancelOrderResponses, OutboundControllerCancelWaveData, OutboundControllerCancelWaveErrors, OutboundControllerCancelWaveResponses, OutboundControllerCreateManifestData, OutboundControllerCreateManifestErrors, OutboundControllerCreateManifestResponses, OutboundControllerCreateOrderData, OutboundControllerCreateOrderErrors, OutboundControllerCreateOrderResponses, OutboundControllerCreateWavePolicyData, OutboundControllerCreateWavePolicyErrors, OutboundControllerCreateWavePolicyResponses, OutboundControllerDispatchOrderData, OutboundControllerDispatchOrderErrors, OutboundControllerDispatchOrderResponses, OutboundControllerGenerateWaveData, OutboundControllerGenerateWaveErrors, OutboundControllerGenerateWaveResponses, OutboundControllerGetOrderData, OutboundControllerGetOrderErrors, OutboundControllerGetOrderRatesData, OutboundControllerGetOrderRatesErrors, OutboundControllerGetOrderRatesResponses, OutboundControllerGetOrderResponses, OutboundControllerGetShipmentData, OutboundControllerGetShipmentErrors, OutboundControllerGetShipmentResponses, OutboundControllerGetWaveData, OutboundControllerGetWaveErrors, OutboundControllerGetWaveResponses, OutboundControllerLabelOrderData, OutboundControllerLabelOrderErrors, OutboundControllerLabelOrderResponses, OutboundControllerListManifestsData, OutboundControllerListManifestsErrors, OutboundControllerListManifestsResponses, OutboundControllerListOrdersData, OutboundControllerListOrdersErrors, OutboundControllerListOrdersResponses, OutboundControllerListWavePoliciesData, OutboundControllerListWavePoliciesErrors, OutboundControllerListWavePoliciesResponses, OutboundControllerListWavesData, OutboundControllerListWavesErrors, OutboundControllerListWavesResponses, OutboundControllerPackOrderData, OutboundControllerPackOrderErrors, OutboundControllerPackOrderFromDeviceData, OutboundControllerPackOrderFromDeviceErrors, OutboundControllerPackOrderFromDeviceResponses, OutboundControllerPackOrderResponses, OutboundControllerRecordPickData, OutboundControllerRecordPickErrors, OutboundControllerRecordPickResponses, OutboundControllerReleaseWaveData, OutboundControllerReleaseWaveErrors, OutboundControllerReleaseWaveResponses, PutawayControllerListPlacementsData, PutawayControllerListPlacementsErrors, PutawayControllerListPlacementsResponses, PutawayControllerListPutawayTasksData, PutawayControllerListPutawayTasksErrors, PutawayControllerListPutawayTasksResponses, PutawayControllerPlacePutawayData, PutawayControllerPlacePutawayErrors, PutawayControllerPlacePutawayResponses, ReceivingControllerApproveOverReceiptData, ReceivingControllerApproveOverReceiptErrors, ReceivingControllerApproveOverReceiptResponses, ReceivingControllerGetCatalogSnapshotData, ReceivingControllerGetCatalogSnapshotErrors, ReceivingControllerGetCatalogSnapshotResponses, ReceivingControllerListGoodsReceiptsData, ReceivingControllerListGoodsReceiptsErrors, ReceivingControllerListGoodsReceiptsResponses, ReceivingControllerListOverReceiptsData, ReceivingControllerListOverReceiptsErrors, ReceivingControllerListOverReceiptsResponses, ReceivingControllerListQcHoldsData, ReceivingControllerListQcHoldsErrors, ReceivingControllerListQcHoldsResponses, ReceivingControllerPlaceQcHoldData, ReceivingControllerPlaceQcHoldErrors, ReceivingControllerPlaceQcHoldResponses, ReceivingControllerRejectOverReceiptData, ReceivingControllerRejectOverReceiptErrors, ReceivingControllerRejectOverReceiptResponses, ReceivingControllerReleaseQcHoldData, ReceivingControllerReleaseQcHoldErrors, ReceivingControllerReleaseQcHoldResponses, ReceivingControllerSubmitGoodsReceiptData, ReceivingControllerSubmitGoodsReceiptErrors, ReceivingControllerSubmitGoodsReceiptResponses, TenancyControllerCreateBinData, TenancyControllerCreateBinErrors, TenancyControllerCreateBinResponses, TenancyControllerCreateWarehouseData, TenancyControllerCreateWarehouseErrors, TenancyControllerCreateWarehouseResponses, TenancyControllerCreateZoneData, TenancyControllerCreateZoneErrors, TenancyControllerCreateZoneResponses, TenancyControllerGenerateBinGridData, TenancyControllerGenerateBinGridErrors, TenancyControllerGenerateBinGridResponses, TenancyControllerListBinsData, TenancyControllerListBinsErrors, TenancyControllerListBinsResponses, TenancyControllerListWarehousesData, TenancyControllerListWarehousesErrors, TenancyControllerListWarehousesResponses, TenancyControllerListZonesData, TenancyControllerListZonesErrors, TenancyControllerListZonesResponses, TenancyControllerMergeBinData, TenancyControllerMergeBinErrors, TenancyControllerMergeBinResponses, TenancyControllerRegisterData, TenancyControllerRegisterErrors, TenancyControllerRegisterResponses, TenancyControllerRetireBinData, TenancyControllerRetireBinErrors, TenancyControllerRetireBinResponses, TenancyControllerSetBinBlockedData, TenancyControllerSetBinBlockedErrors, TenancyControllerSetBinBlockedResponses, TenancyControllerSetupChecklistData, TenancyControllerSetupChecklistErrors, TenancyControllerSetupChecklistResponses, TenancyControllerSignInData, TenancyControllerSignInErrors, TenancyControllerSignInResponses, UsersControllerAcceptInviteData, UsersControllerAcceptInviteErrors, UsersControllerAcceptInviteResponses, UsersControllerInviteUserData, UsersControllerInviteUserErrors, UsersControllerInviteUserResponses, UsersControllerListUsersData, UsersControllerListUsersErrors, UsersControllerListUsersResponses, UsersControllerMeData, UsersControllerMeErrors, UsersControllerMeResponses, UsersControllerSetUserRoleData, UsersControllerSetUserRoleErrors, UsersControllerSetUserRoleResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -543,7 +543,7 @@ export const devicesControllerSelfTestEcho = <ThrowOnError extends boolean = fal
 });
 
 /**
- * Records a manual stock adjustment (one ledger event + on-hand projection in one commit)
+ * Records a manual stock adjustment (one ledger event + on-hand projection in one commit; over a tenant approval threshold it PENDS instead — 202)
  */
 export const inventoryControllerAdjustStock = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerAdjustStockData, ThrowOnError>): RequestResult<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError> => (options.client ?? client).post<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError>({
     security: [{
@@ -557,6 +557,75 @@ export const inventoryControllerAdjustStock = <ThrowOnError extends boolean = fa
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Reads the tenant's stock adjustment approval threshold (404 when no policy row exists — the approval flow is disabled)
+ */
+export const inventoryControllerGetAdjustmentPolicy = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerGetAdjustmentPolicyData, ThrowOnError>): RequestResult<InventoryControllerGetAdjustmentPolicyResponses, InventoryControllerGetAdjustmentPolicyErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerGetAdjustmentPolicyResponses, InventoryControllerGetAdjustmentPolicyErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/inventory/adjustment-policies',
+    ...options
+});
+
+/**
+ * Sets the tenant's stock adjustment approval threshold (FR-19) — an adjustment whose |quantityDelta| strictly exceeds it pends for Owner approval instead of applying
+ */
+export const inventoryControllerSetAdjustmentPolicy = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerSetAdjustmentPolicyData, ThrowOnError>): RequestResult<InventoryControllerSetAdjustmentPolicyResponses, InventoryControllerSetAdjustmentPolicyErrors, ThrowOnError> => (options.client ?? client).put<InventoryControllerSetAdjustmentPolicyResponses, InventoryControllerSetAdjustmentPolicyErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/inventory/adjustment-policies',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Lists the tenant's pending stock adjustments (keyset cursor pagination, status-filterable — the approval queue read; a read, never capability-gated)
+ */
+export const inventoryControllerListAdjustmentPendings = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerListAdjustmentPendingsData, ThrowOnError>): RequestResult<InventoryControllerListAdjustmentPendingsResponses, InventoryControllerListAdjustmentPendingsErrors, ThrowOnError> => (options.client ?? client).get<InventoryControllerListAdjustmentPendingsResponses, InventoryControllerListAdjustmentPendingsErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/inventory/adjustment-pendings',
+    ...options
+});
+
+/**
+ * Approves a pending stock adjustment (adjustments.approve) — the stored arms re-execute as ledger events at decision time (actor = approver); audited
+ */
+export const inventoryControllerApproveAdjustment = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerApproveAdjustmentData, ThrowOnError>): RequestResult<InventoryControllerApproveAdjustmentResponses, InventoryControllerApproveAdjustmentErrors, ThrowOnError> => (options.client ?? client).post<InventoryControllerApproveAdjustmentResponses, InventoryControllerApproveAdjustmentErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/inventory/adjustment-pendings/{pendingId}/approve',
+    ...options
+});
+
+/**
+ * Rejects a pending stock adjustment (adjustments.approve) — no stock write, the adjustment never applies; audited
+ */
+export const inventoryControllerRejectAdjustment = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerRejectAdjustmentData, ThrowOnError>): RequestResult<InventoryControllerRejectAdjustmentResponses, InventoryControllerRejectAdjustmentErrors, ThrowOnError> => (options.client ?? client).post<InventoryControllerRejectAdjustmentResponses, InventoryControllerRejectAdjustmentErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/inventory/adjustment-pendings/{pendingId}/reject',
+    ...options
 });
 
 /**
@@ -1333,5 +1402,222 @@ export const complianceControllerGetOrderColdChainTrace = <ThrowOnError extends 
             type: 'http'
         }],
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/cold-chain/orders/{orderId}',
+    ...options
+});
+
+/**
+ * Lists transfer orders (keyset cursor pagination — the read-only web surface, open to any member)
+ */
+export const movementsControllerListTransfers = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerListTransfersData, ThrowOnError>): RequestResult<MovementsControllerListTransfersResponses, MovementsControllerListTransfersErrors, ThrowOnError> => (options.client ?? client).get<MovementsControllerListTransfersResponses, MovementsControllerListTransfersErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/transfers',
+    ...options
+});
+
+/**
+ * Creates a transfer order (transfers.manage): a draft two-leg plan — per line, draw from a source bin and land in a planned destination bin
+ */
+export const movementsControllerCreateTransfer = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerCreateTransferData, ThrowOnError>): RequestResult<MovementsControllerCreateTransferResponses, MovementsControllerCreateTransferErrors, ThrowOnError> => (options.client ?? client).post<MovementsControllerCreateTransferResponses, MovementsControllerCreateTransferErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/transfers',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Confirms the outbound leg (transfers.manage): draws each line from its source bin into the source warehouse's system IN-TRANSIT bin — one ledger event per arm, the order flips to in_transit
+ */
+export const movementsControllerConfirmOutbound = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerConfirmOutboundData, ThrowOnError>): RequestResult<MovementsControllerConfirmOutboundResponses, MovementsControllerConfirmOutboundErrors, ThrowOnError> => (options.client ?? client).post<MovementsControllerConfirmOutboundResponses, MovementsControllerConfirmOutboundErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/transfers/{transferId}/outbound-confirm',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Confirms the inbound leg (transfers.execute — either session family): lands each line in its scanned or planned destination bin and completes the order — one ledger event per arm (cross-warehouse: a drain on the source chain AND an intake on the destination chain, ONE transaction)
+ *
+ * Accepts EITHER session family on the one route (the compliance controller's precedent): a web session or a device badge-in session — the Transfer inbox task's confirm. The command re-evaluates the actor's role and the destination placement gates against the DB at entry.
+ */
+export const movementsControllerConfirmInbound = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerConfirmInboundData, ThrowOnError>): RequestResult<MovementsControllerConfirmInboundResponses, MovementsControllerConfirmInboundErrors, ThrowOnError> => (options.client ?? client).post<MovementsControllerConfirmInboundResponses, MovementsControllerConfirmInboundErrors, ThrowOnError>({
+    security: [{
+            key: 'device',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/transfers/{transferId}/inbound-confirm',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Cancels a DRAFT transfer order (transfers.manage) — no stock has moved, so the cancel is pure state; an in-transit or completed order refuses (409 transfer-wrong-state)
+ */
+export const movementsControllerCancelTransfer = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerCancelTransferData, ThrowOnError>): RequestResult<MovementsControllerCancelTransferResponses, MovementsControllerCancelTransferErrors, ThrowOnError> => (options.client ?? client).post<MovementsControllerCancelTransferResponses, MovementsControllerCancelTransferErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/transfers/{transferId}/cancel',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Creates an on-demand count task (counts.manage): one open task per bin, with the per-SKU expected quantities and the bin's state epoch FROZEN at task start — an epoch-mismatch recount or the scheduler creates the other tasks
+ */
+export const movementsControllerCreateCount = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerCreateCountData, ThrowOnError>): RequestResult<MovementsControllerCreateCountResponses, MovementsControllerCreateCountErrors, ThrowOnError> => (options.client ?? client).post<MovementsControllerCreateCountResponses, MovementsControllerCreateCountErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/counts',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Submits a count (counts.execute — either session family): every task line is recorded with its counted quantity; counted ≠ expected appends an open variance row; the bin's epoch is compared for EQUALITY under the locks — a mismatch flags the variances AND auto-creates a fresh recount task (never a stock write)
+ *
+ * Accepts EITHER session family on the one route (the compliance controller's precedent): a web session or a device badge-in session — the Count inbox task's submit. Every task line must be counted; a line the body does not name is 400 count-incomplete (a 0 count must be EXPLICITLY entered).
+ */
+export const movementsControllerSubmitCount = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerSubmitCountData, ThrowOnError>): RequestResult<MovementsControllerSubmitCountResponses, MovementsControllerSubmitCountErrors, ThrowOnError> => (options.client ?? client).post<MovementsControllerSubmitCountResponses, MovementsControllerSubmitCountErrors, ThrowOnError>({
+    security: [{
+            key: 'device',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/counts/{taskId}/submit',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Upserts the warehouse's cycle-count policies (counts.manage): one row per (tenant, warehouse, ABC class) naming the scheduled count interval in days — a class with no row is never scheduled
+ */
+export const movementsControllerUpsertCountPolicies = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerUpsertCountPoliciesData, ThrowOnError>): RequestResult<MovementsControllerUpsertCountPoliciesResponses, MovementsControllerUpsertCountPoliciesErrors, ThrowOnError> => (options.client ?? client).put<MovementsControllerUpsertCountPoliciesResponses, MovementsControllerUpsertCountPoliciesErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/warehouses/{warehouseId}/count-policies',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Returns the tenant's variance-threshold policy, or 404 when unset (the routing is disabled; never capability-gated)
+ */
+export const movementsControllerGetVariancePolicy = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerGetVariancePolicyData, ThrowOnError>): RequestResult<MovementsControllerGetVariancePolicyResponses, MovementsControllerGetVariancePolicyErrors, ThrowOnError> => (options.client ?? client).get<MovementsControllerGetVariancePolicyResponses, MovementsControllerGetVariancePolicyErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/variance-policies',
+    ...options
+});
+
+/**
+ * Upserts the tenant's variance-threshold policy (variances.resolve): the |delta| ceiling (base units) above which a variance resolves by owner only — a submit freezes the threshold onto every variance row it writes; null disables the routing
+ */
+export const movementsControllerSetVariancePolicy = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerSetVariancePolicyData, ThrowOnError>): RequestResult<MovementsControllerSetVariancePolicyResponses, MovementsControllerSetVariancePolicyErrors, ThrowOnError> => (options.client ?? client).put<MovementsControllerSetVariancePolicyResponses, MovementsControllerSetVariancePolicyErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/variance-policies',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Lists count variances (keyset cursor pagination, newest first, status/warehouse-filterable; never capability-gated — the resolving mutation is variances.resolve)
+ */
+export const movementsControllerListCountVariances = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerListCountVariancesData, ThrowOnError>): RequestResult<MovementsControllerListCountVariancesResponses, MovementsControllerListCountVariancesErrors, ThrowOnError> => (options.client ?? client).get<MovementsControllerListCountVariancesResponses, MovementsControllerListCountVariancesErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/variances',
+    ...options
+});
+
+/**
+ * Resolves one open count variance (variances.resolve — owner + Ops Manager): approve_adjust applies the counted−expected delta as stock.adjusted ledger events (the task's frozen bin epoch must still EQUAL the live one), or recount mints a recount task and re-bases the variance; an over-threshold variance resolves by owner only
+ */
+export const movementsControllerResolveCountVariance = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerResolveCountVarianceData, ThrowOnError>): RequestResult<MovementsControllerResolveCountVarianceResponses, MovementsControllerResolveCountVarianceErrors, ThrowOnError> => (options.client ?? client).post<MovementsControllerResolveCountVarianceResponses, MovementsControllerResolveCountVarianceErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/variances/{varianceId}/resolve',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The transfer detail: the order, its lines, and BOTH legs' ledger events in order, each carrying referenceDoc {kind:"transfer", transferId}
+ */
+export const movementsControllerGetTransfer = <ThrowOnError extends boolean = false>(options: Options<MovementsControllerGetTransferData, ThrowOnError>): RequestResult<MovementsControllerGetTransferResponses, MovementsControllerGetTransferErrors, ThrowOnError> => (options.client ?? client).get<MovementsControllerGetTransferResponses, MovementsControllerGetTransferErrors, ThrowOnError>({
+    security: [{
+            key: 'bearer',
+            scheme: 'bearer',
+            type: 'http'
+        }],
+    url: '/tenants/{tenantId}/movements/transfers/{transferId}',
     ...options
 });

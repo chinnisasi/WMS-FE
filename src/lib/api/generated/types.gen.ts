@@ -480,6 +480,10 @@ export type SkuResponse = {
      */
     hazardClass: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
     /**
+     * The SKU's ABC classification the cycle-count scheduler schedules from, or null when it is not yet classified — a null class is EXCLUDED from scheduled count generation (on-demand still covers its bin, OQ-1).
+     */
+    abcClass: 'a' | 'b' | 'c';
+    /**
      * Generated server-side (uuidv7) unless provided
      */
     barcode: string;
@@ -604,6 +608,10 @@ export type PatchSkuDto = {
      * The SKU's hazard class (FR-41): explosive, oxidizer, flammable, corrosive-acid, corrosive-base, toxic or gas. Omit to leave unchanged; null clears the class (always succeeds — null carries no rule).
      */
     hazardClass?: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
+    /**
+     * The SKU's ABC classification (FR-cycle-count): a, b or c. Omit to leave unchanged; null clears the class (excludes the SKU from scheduled count generation, on-demand still covers it).
+     */
+    abcClass?: 'a' | 'b' | 'c';
 };
 
 export type KitComponentDto = {
@@ -818,9 +826,9 @@ export type StockAdjustmentDto = {
      */
     quantityDelta: number;
     /**
-     * Machine reason for the correction (e.g. stock-count)
+     * Machine reason for the correction — one of the closed adjustment vocabulary
      */
-    reasonCode: string;
+    reasonCode: 'stock-count' | 'damaged' | 'expired' | 'shrinkage' | 'found' | 'recall' | 'system-correction' | 'other';
     /**
      * The Ops Manager's note, carried verbatim on the event
      */
@@ -844,11 +852,11 @@ export type StockAdjustmentDto = {
 };
 
 export type LedgerEventSnapshotDto = {
-    id: string;
+    id: string | null;
     /**
-     * Gap-free per-warehouse replay order
+     * Gap-free per-warehouse replay order (null on a multi-serial aggregate snapshot)
      */
-    seq: number;
+    seq: number | null;
     type: string;
     skuId: string;
     binId: string | null;
@@ -878,6 +886,121 @@ export type OnHandSnapshotDto = {
 export type StockAdjustmentResponse = {
     event: LedgerEventSnapshotDto;
     onHand: OnHandSnapshotDto;
+};
+
+export type AdjustmentPendingDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    binId: string;
+    skuId: string;
+    /**
+     * Signed base-UoM delta frozen at request
+     */
+    quantityDelta: number;
+    /**
+     * The closed adjustment vocabulary value
+     */
+    reasonCode: string;
+    /**
+     * The requester's note, carried verbatim
+     */
+    note: string;
+    /**
+     * The override draw’s FEFO-override reason (present only on override draws; restored into the approved event’s referenceDoc)
+     */
+    batchOverrideReason: string | null;
+    /**
+     * The resolved catalog batch id (null when the request had none)
+     */
+    batchId: string | null;
+    /**
+     * The resolved serial ids, request order (null when the request had none)
+     */
+    serialIds: Array<string> | null;
+    /**
+     * The named handling units (catch-weight arm), request order (null when absent)
+     */
+    handlingUnitIds: Array<string> | null;
+    /**
+     * ISO-8601 UTC business time of the requested adjustment
+     */
+    occurredAt: string;
+    /**
+     * The requester
+     */
+    requestedBy: string;
+    /**
+     * ISO-8601 UTC request commit time
+     */
+    requestedAt: string;
+    /**
+     * pending | approved | rejected — 'pending' on the 202, the decided value on the queue after a decision
+     */
+    status: string;
+    decidedBy: string | null;
+    decidedAt: string | null;
+    /**
+     * The policy threshold (base UoM) as it read at request time — frozen context
+     */
+    thresholdQuantityAtRequest: number;
+};
+
+export type StockAdjustmentPendingResponse = {
+    pendingAdjustment: AdjustmentPendingDto;
+};
+
+export type AdjustmentPolicyDto = {
+    /**
+     * The |quantityDelta| ceiling in base UoM above which an adjustment pends for Owner approval (strictly greater pends; at-threshold applies immediately)
+     */
+    quantityThreshold: number;
+};
+
+export type AdjustmentPolicyResponse = {
+    id: string;
+    tenantId: string;
+    /**
+     * The threshold in base UoM (null would mean flow disabled — PUT requires it non-null)
+     */
+    quantityThreshold: number;
+    /**
+     * ISO-8601 UTC row creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC row last-update time
+     */
+    updatedAt: string;
+};
+
+export type AdjustmentPendingListResponse = {
+    items: Array<AdjustmentPendingDto>;
+    nextCursor?: string | null;
+};
+
+export type AdjustmentDecisionResponse = {
+    id: string;
+    /**
+     * 'approved' | 'rejected'
+     */
+    status: string;
+    /**
+     * The decider
+     */
+    decidedBy: string;
+    /**
+     * ISO-8601 UTC decision time
+     */
+    decidedAt: string;
+    /**
+     * The applied events (approve arm only; empty on reject)
+     */
+    events: Array<LedgerEventSnapshotDto>;
+    /**
+     * The settled on-hand (approve arm only; null on reject)
+     */
+    onHand: OnHandSnapshotDto | null;
 };
 
 export type LedgerReferenceDocDto = {
@@ -2503,6 +2626,89 @@ export type CatalogHandlingUnitDto = {
     skuId: string;
 };
 
+export type CatalogTransferTaskLineDto = {
+    lineId: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string | null;
+    /**
+     * Base units to land. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    qty: number;
+    /**
+     * The catalog batch identity on a batch-tracked line
+     */
+    batchRef: string | null;
+    /**
+     * The PLANNED destination bin — the confirm scan pre-fills from it
+     */
+    destBinId: string;
+    destBinCode: string;
+    /**
+     * The dest bin's state epoch, captured with the task
+     */
+    binStateEpoch: number | null;
+};
+
+export type CatalogTransferTaskDto = {
+    /**
+     * The transfer order awaiting inbound confirm
+     */
+    transferId: string;
+    /**
+     * The warehouse the units came from
+     */
+    sourceWarehouseId: string;
+    sourceWarehouseCode: string;
+    sourceWarehouseName: string;
+    destWarehouseId: string;
+    note: string | null;
+    /**
+     * When the outbound confirm put the units in transit (ISO-8601 UTC)
+     */
+    outboundConfirmedAt: string;
+    lines: Array<CatalogTransferTaskLineDto>;
+};
+
+export type CatalogCountTaskLineDto = {
+    skuId: string;
+    skuCode: string;
+    skuName: string | null;
+    /**
+     * The expectation frozen at task start. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    expectedQuantity: number;
+};
+
+export type CatalogCountTaskDto = {
+    /**
+     * The count task awaiting submit
+     */
+    taskId: string;
+    warehouseId: string;
+    binId: string;
+    /**
+     * The bin the count walks (the scan that opens the flow)
+     */
+    binCode: string;
+    /**
+     * How the task was born
+     */
+    origin: 'on_demand' | 'scheduled' | 'recount';
+    /**
+     * The bin state epoch FROZEN at task start — the submit quotes it back for the equality compare
+     */
+    binStateEpoch: number | null;
+    /**
+     * When the task was created (ISO-8601 UTC)
+     */
+    createdAt: string;
+    /**
+     * The FROZEN expectations — every line must be counted at submit
+     */
+    lines: Array<CatalogCountTaskLineDto>;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -2534,6 +2740,14 @@ export type CatalogSnapshotResponse = {
      * Story 10.7 (additive): every ACTIVE handling unit of the warehouse (id + skuId) — the labels a catch-weight bench scan resolves against, offline. Active-only self-prunes (units flip to packed at pack)
      */
     handlingUnits: Array<CatalogHandlingUnitDto>;
+    /**
+     * Story 5-1 (additive): the in-transit transfers TO this warehouse — the Transfer inbox tasks whose inbound confirm the operator executes (one confirm completes the whole order)
+     */
+    transferTasks: Array<CatalogTransferTaskDto>;
+    /**
+     * Story 5-3 (additive): the STORED pending count tasks of this warehouse — the Count inbox tasks whose submit the operator executes (every task line must be counted; 0 is a valid explicit count). The expectations were FROZEN at task start and are read here, never recomputed
+     */
+    countTasks: Array<CatalogCountTaskDto>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -3079,6 +3293,362 @@ export type ColdChainTraceResponse = {
      */
     bins: Array<ColdChainBinDto>;
     lines: Array<ColdChainLineDto>;
+};
+
+export type TransferLineDto = {
+    skuId: string;
+    /**
+     * Quantity to move. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    quantity: number;
+    /**
+     * The source bin the units draw from (source warehouse)
+     */
+    fromBinId: string;
+    /**
+     * The PLANNED destination bin (destination warehouse)
+     */
+    toBinId: string;
+    /**
+     * Catalog batch identity (required for batch-tracked SKUs, forbidden otherwise)
+     */
+    batchId?: string | null;
+    note?: string | null;
+};
+
+export type CreateTransferDto = {
+    /**
+     * The warehouse the stock leaves
+     */
+    sourceWarehouseId: string;
+    /**
+     * The warehouse the units land in (MAY equal the source)
+     */
+    destWarehouseId: string;
+    note?: string | null;
+    /**
+     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
+     */
+    occurredAt?: string;
+    lines: Array<TransferLineDto>;
+};
+
+export type TransferLineResponseDto = {
+    id: string;
+    skuId: string;
+    /**
+     * The line quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    quantity: number;
+    fromBinId: string;
+    toBinId: string;
+    /**
+     * The catalog batch identity on a batch-tracked line
+     */
+    batchRef: string | null;
+    note: string | null;
+};
+
+export type TransferOrderResponse = {
+    transfer: {
+        [key: string]: unknown;
+    };
+    lines: Array<TransferLineResponseDto>;
+};
+
+export type ConfirmOutboundLineDto = {
+    lineId: string;
+    /**
+     * The raw serial numbers of a serial-tracked line (one per unit, no duplicates)
+     */
+    serials?: Array<string>;
+};
+
+export type ConfirmOutboundDto = {
+    /**
+     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
+     */
+    occurredAt?: string;
+    /**
+     * Per-line serial scans — only for serial-tracked lines
+     */
+    lines?: Array<ConfirmOutboundLineDto>;
+};
+
+export type TransferLegEventResponseDto = {
+    /**
+     * The chain the event sits on
+     */
+    warehouseId: string;
+    seq: number;
+    /**
+     * transfer.outbound | transfer.inbound
+     */
+    type: string;
+    skuId: string;
+    /**
+     * The event's magnitude. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    quantity: number;
+    fromBinId: string | null;
+    toBinId: string | null;
+    batchRef: string | null;
+    serialRef: string | null;
+    /**
+     * Business time (ISO-8601 UTC)
+     */
+    occurredAt: string;
+};
+
+export type TransferConfirmResponse = {
+    transfer: {
+        [key: string]: unknown;
+    };
+    events: Array<TransferLegEventResponseDto>;
+};
+
+export type ConfirmInboundDto = {
+    /**
+     * The operator's SCANNED destination bin — authoritative when carried (redirecting every line), else each line lands in its planned bin
+     */
+    destBinId?: string | null;
+    /**
+     * The dest bin's state epoch the task read captured; null/absent = match, a stale epoch answers 409 transfer-bin-changed
+     */
+    binStateEpoch?: number | null;
+    /**
+     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
+     */
+    occurredAt?: string;
+};
+
+export type CancelTransferDto = {
+    note?: string | null;
+};
+
+export type CreateCountDto = {
+    /**
+     * The warehouse holding the bin
+     */
+    warehouseId: string;
+    /**
+     * The bin to count (in that warehouse)
+     */
+    binId: string;
+    /**
+     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
+     */
+    occurredAt?: string;
+};
+
+export type CountTaskResponseDto = {
+    id: string;
+    status: string;
+    warehouseId: string;
+    binId: string;
+    binCode: string;
+    origin: 'on_demand' | 'scheduled' | 'recount';
+    /**
+     * The bin state epoch FROZEN at task start
+     */
+    binStateEpoch: number | null;
+    /**
+     * Business time (ISO-8601 UTC)
+     */
+    createdAt: string;
+};
+
+export type CountTaskLineResponseDto = {
+    skuId: string;
+    /**
+     * The frozen expectation at task start. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    expectedQuantity: number;
+};
+
+export type CreateCountResponse = {
+    countTask: CountTaskResponseDto;
+    lines: Array<CountTaskLineResponseDto>;
+};
+
+export type SubmitCountLineDto = {
+    skuId: string;
+    /**
+     * What the operator counted. 0 is a valid count. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    countedQuantity: number;
+};
+
+export type SubmitCountDto = {
+    lines: Array<SubmitCountLineDto>;
+    /**
+     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
+     */
+    occurredAt?: string;
+};
+
+export type CountTaskSettledResponseDto = {
+    id: string;
+    status: string;
+    warehouseId: string;
+    binId: string;
+    /**
+     * Business time (ISO-8601 UTC)
+     */
+    completedAt: string;
+    /**
+     * A movement moved the bin between task start and submit (OQ-2)
+     */
+    epochConflict: boolean;
+};
+
+export type CountVarianceResponseDto = {
+    skuId: string;
+    expectedQuantity: number;
+    countedQuantity: number;
+    /**
+     * counted − expected (may be negative)
+     */
+    delta: number;
+    /**
+     * A movement moved the bin between task start and submit (OQ-2)
+     */
+    epochConflict: boolean;
+};
+
+export type SubmitCountResponse = {
+    countTask: CountTaskSettledResponseDto;
+    variances: Array<CountVarianceResponseDto>;
+    /**
+     * The auto-created recount task when the epoch conflicted (OQ-2)
+     */
+    recountTaskId: string | null;
+};
+
+export type CountPolicyDto = {
+    abcClass: 'a' | 'b' | 'c';
+    /**
+     * Count every due bin of this class at most this often
+     */
+    intervalDays: number;
+};
+
+export type UpsertCountPoliciesDto = {
+    policies: Array<CountPolicyDto>;
+    /**
+     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
+     */
+    occurredAt?: string;
+};
+
+export type CountPoliciesResponse = {
+    policies: Array<CountPolicyDto>;
+};
+
+export type SetVariancePolicyDto = {
+    /**
+     * The |delta| ceiling in BASE units above which a variance resolves by owner only (null/absent = disable the routing). Stored as milli-units. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    quantityThreshold?: number | null;
+};
+
+export type VariancePolicyResponse = {
+    id: string;
+    tenantId: string;
+    /**
+     * Base units; null = the routing is disabled
+     */
+    quantityThreshold: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CountVarianceEntryResponseDto = {
+    id: string;
+    tenantId: string;
+    taskId: string;
+    warehouseId: string;
+    binId: string;
+    skuId: string;
+    /**
+     * Base units — the frozen expectation
+     */
+    expectedQuantity: number;
+    /**
+     * Base units — what the operator counted
+     */
+    countedQuantity: number;
+    /**
+     * counted − expected (may be negative)
+     */
+    delta: number;
+    /**
+     * A movement moved the bin between task start and submit (OQ-2)
+     */
+    epochConflict: boolean;
+    status: 'open' | 'adjusted' | 'recounted';
+    /**
+     * Base units — the submit-frozen threshold; null = disabled
+     */
+    thresholdQuantity: number | null;
+    resolvedBy: string | null;
+    resolvedAt: string | null;
+    /**
+     * The recount arm’s minted task
+     */
+    recountTaskId: string | null;
+    /**
+     * The consulted ledger seqs
+     */
+    consideredEventSeqs: Array<number> | null;
+    createdAt: string;
+};
+
+export type CountVarianceListResponse = {
+    items: Array<CountVarianceEntryResponseDto>;
+    nextCursor?: string | null;
+};
+
+export type ResolveCountVarianceDto = {
+    /**
+     * The resolution arm
+     */
+    decision: 'approve_adjust' | 'recount';
+    /**
+     * The ledger seqs this resolution states it consulted (the bin timeline the approver pulled). Required, non-empty, on approve_adjust; optional on recount.
+     */
+    consideredEventSeqs?: Array<number> | null;
+    /**
+     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
+     */
+    occurredAt?: string;
+};
+
+export type ResolveCountVarianceResponse = {
+    variance: CountVarianceEntryResponseDto;
+    /**
+     * The approve arm’s applied correction (event id + seq + the settled on-hand); null on the recount arm
+     */
+    stockCorrection: {
+        [key: string]: unknown;
+    } | null;
+};
+
+export type TransferListResponse = {
+    items: Array<{
+        [key: string]: unknown;
+    }>;
+    nextCursor: string | null;
+};
+
+export type TransferDetailResponse = {
+    transfer: {
+        [key: string]: unknown;
+    };
+    lines: Array<{
+        [key: string]: unknown;
+    }>;
+    events: Array<TransferLegEventResponseDto>;
 };
 
 export type TenancyControllerRegisterData = {
@@ -4724,7 +5294,7 @@ export type InventoryControllerAdjustStockData = {
 
 export type InventoryControllerAdjustStockErrors = {
     /**
-     * Missing or malformed Idempotency-Key, invalid body, or a Story 2.4 batch/serial arm violation (validation-failed): batch/serials on an untracked SKU, a tracked movement missing its arm, malformed batch dates (or expiry preceding mfg), overrideReason on an intake or missing on an override draw, duplicate serials, or a quantityDelta that does not equal the serial count
+     * Missing or malformed Idempotency-Key, invalid body, or a Story 2.4 batch/serial arm violation (validation-failed): batch/serials on an untracked SKU, a tracked movement missing its arm, malformed batch dates (or expiry preceding mfg), overrideReason on an intake or missing on an override draw, duplicate serials, a quantityDelta that does not equal the serial count, or a reasonCode outside the closed adjustment vocabulary
      */
     400: ProblemDetailsDto;
     /**
@@ -4756,9 +5326,256 @@ export type InventoryControllerAdjustStockResponses = {
      * Adjustment committed: the ledger event snapshot plus the resulting on-hand quantity
      */
     201: StockAdjustmentResponse;
+    /**
+     * Story 5-2: |quantityDelta| exceeds the tenant's policy threshold — the adjustment PENDS (no ledger event, no on-hand change) until an Owner approves or rejects; the body is the pend snapshot with its threshold context
+     */
+    202: StockAdjustmentPendingResponse;
 };
 
 export type InventoryControllerAdjustStockResponse = InventoryControllerAdjustStockResponses[keyof InventoryControllerAdjustStockResponses];
+
+export type InventoryControllerGetAdjustmentPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/adjustment-policies';
+};
+
+export type InventoryControllerGetAdjustmentPolicyErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No policy row exists for this tenant (not-found) — with no row the approval flow is disabled and every adjustment applies immediately
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InventoryControllerGetAdjustmentPolicyError = InventoryControllerGetAdjustmentPolicyErrors[keyof InventoryControllerGetAdjustmentPolicyErrors];
+
+export type InventoryControllerGetAdjustmentPolicyResponses = {
+    200: AdjustmentPolicyResponse;
+};
+
+export type InventoryControllerGetAdjustmentPolicyResponse = InventoryControllerGetAdjustmentPolicyResponses[keyof InventoryControllerGetAdjustmentPolicyResponses];
+
+export type InventoryControllerSetAdjustmentPolicyData = {
+    body: AdjustmentPolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/adjustment-policies';
+};
+
+export type InventoryControllerSetAdjustmentPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid quantityThreshold (validation-failed): negative, non-integer, or over the int4 max of 2147483647 (the column is an integer — an oversized threshold is this 400, never a range 500)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks adjustments.approve (role-denied) — the policy write rides the same owner-only capability the decisions carry
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Concurrent request on the same Idempotency-Key, or two concurrent first-time policy writes (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InventoryControllerSetAdjustmentPolicyError = InventoryControllerSetAdjustmentPolicyErrors[keyof InventoryControllerSetAdjustmentPolicyErrors];
+
+export type InventoryControllerSetAdjustmentPolicyResponses = {
+    /**
+     * The tenant's adjustment policy row (created or updated; the write is idempotent under the Idempotency-Key)
+     */
+    200: AdjustmentPolicyResponse;
+};
+
+export type InventoryControllerSetAdjustmentPolicyResponse = InventoryControllerSetAdjustmentPolicyResponses[keyof InventoryControllerSetAdjustmentPolicyResponses];
+
+export type InventoryControllerListAdjustmentPendingsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Filter by decision state — omitted means every status
+         */
+        status?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/inventory/adjustment-pendings';
+};
+
+export type InventoryControllerListAdjustmentPendingsErrors = {
+    /**
+     * Malformed status, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type InventoryControllerListAdjustmentPendingsError = InventoryControllerListAdjustmentPendingsErrors[keyof InventoryControllerListAdjustmentPendingsErrors];
+
+export type InventoryControllerListAdjustmentPendingsResponses = {
+    /**
+     * The pending queue page (newest first): each row carries the resolved arms, the threshold context, and — after a decision — who decided
+     */
+    200: AdjustmentPendingListResponse;
+};
+
+export type InventoryControllerListAdjustmentPendingsResponse = InventoryControllerListAdjustmentPendingsResponses[keyof InventoryControllerListAdjustmentPendingsResponses];
+
+export type InventoryControllerApproveAdjustmentData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        pendingId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/adjustment-pendings/{pendingId}/approve';
+};
+
+export type InventoryControllerApproveAdjustmentErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed pendingId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks adjustments.approve (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No pending adjustment with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Already approved/rejected (adjustment-pending-decided), a kit SKU since the pend (kit-cannot-hold-stock), a concurrent idempotent request (conflict), or the world moved since the pend and the re-execution hit a guard whose 409 applies (e.g. a handling unit no longer active)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse), or the re-execution failed a guard whose 422 applies (insufficient-on-hand — the pending row STAYS pending; the whole decide transaction rolls back)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InventoryControllerApproveAdjustmentError = InventoryControllerApproveAdjustmentErrors[keyof InventoryControllerApproveAdjustmentErrors];
+
+export type InventoryControllerApproveAdjustmentResponses = {
+    200: AdjustmentDecisionResponse;
+};
+
+export type InventoryControllerApproveAdjustmentResponse = InventoryControllerApproveAdjustmentResponses[keyof InventoryControllerApproveAdjustmentResponses];
+
+export type InventoryControllerRejectAdjustmentData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        pendingId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/adjustment-pendings/{pendingId}/reject';
+};
+
+export type InventoryControllerRejectAdjustmentErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed pendingId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks adjustments.approve (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No pending adjustment with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Already approved/rejected (adjustment-pending-decided), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InventoryControllerRejectAdjustmentError = InventoryControllerRejectAdjustmentErrors[keyof InventoryControllerRejectAdjustmentErrors];
+
+export type InventoryControllerRejectAdjustmentResponses = {
+    200: AdjustmentDecisionResponse;
+};
+
+export type InventoryControllerRejectAdjustmentResponse = InventoryControllerRejectAdjustmentResponses[keyof InventoryControllerRejectAdjustmentResponses];
 
 export type InventoryControllerListEventsData = {
     body?: never;
@@ -4775,6 +5592,10 @@ export type InventoryControllerListEventsData = {
          */
         skuId?: string;
         /**
+         * Only events touching one bin (its source OR destination; story 5-4's bin-history read)
+         */
+        binId?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -4785,7 +5606,7 @@ export type InventoryControllerListEventsData = {
 
 export type InventoryControllerListEventsErrors = {
     /**
-     * Malformed skuId query, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     * Malformed skuId/binId query, cursor, or out-of-range limit (validation-failed / invalid-cursor)
      */
     400: ProblemDetailsDto;
     /**
@@ -7509,3 +8330,690 @@ export type ComplianceControllerGetOrderColdChainTraceResponses = {
 };
 
 export type ComplianceControllerGetOrderColdChainTraceResponse = ComplianceControllerGetOrderColdChainTraceResponses[keyof ComplianceControllerGetOrderColdChainTraceResponses];
+
+export type MovementsControllerListTransfersData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        status?: 'draft' | 'in_transit' | 'completed' | 'cancelled';
+        sourceWarehouseId?: string;
+        destWarehouseId?: string;
+        /**
+         * Opaque keyset cursor
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/movements/transfers';
+};
+
+export type MovementsControllerListTransfersErrors = {
+    /**
+     * Malformed cursor (invalid-cursor), malformed warehouse filter, or out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A warehouse filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerListTransfersError = MovementsControllerListTransfersErrors[keyof MovementsControllerListTransfersErrors];
+
+export type MovementsControllerListTransfersResponses = {
+    /**
+     * The transfer page (newest first, per-transfer line/unit sums)
+     */
+    200: TransferListResponse;
+};
+
+export type MovementsControllerListTransfersResponse = MovementsControllerListTransfersResponses[keyof MovementsControllerListTransfersResponses];
+
+export type MovementsControllerCreateTransferData = {
+    body: CreateTransferDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/transfers';
+};
+
+export type MovementsControllerCreateTransferErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — a catch-weight SKU, a batch- and serial-tracked SKU, a missing/forbidden batch arm, a system bin on either end, or a quantity finer than the SKU's unit allows (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks transfers.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A warehouse, bin, SKU, or batch does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A line names a kit SKU — a kit never holds stock (kit-cannot-hold-stock), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerCreateTransferError = MovementsControllerCreateTransferErrors[keyof MovementsControllerCreateTransferErrors];
+
+export type MovementsControllerCreateTransferResponses = {
+    /**
+     * Transfer created in draft (the idempotency snapshot)
+     */
+    201: TransferOrderResponse;
+};
+
+export type MovementsControllerCreateTransferResponse = MovementsControllerCreateTransferResponses[keyof MovementsControllerCreateTransferResponses];
+
+export type MovementsControllerConfirmOutboundData = {
+    body: ConfirmOutboundDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        transferId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/transfers/{transferId}/outbound-confirm';
+};
+
+export type MovementsControllerConfirmOutboundErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, or a serial-tracked line whose serial scans do not match its quantity (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks transfers.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The transfer, a line, or a scanned serial does not exist in this tenant (not-found, serial-unknown)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not draft (transfer-wrong-state), a source bin is short of the planned draw (transfer-source-short), a serial is already located elsewhere or scanned twice (serial-elsewhere, duplicate-serial), the source on-hand cannot cover the draw (insufficient-on-hand), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerConfirmOutboundError = MovementsControllerConfirmOutboundErrors[keyof MovementsControllerConfirmOutboundErrors];
+
+export type MovementsControllerConfirmOutboundResponses = {
+    /**
+     * Outbound confirmed: the leg events (the idempotency snapshot)
+     */
+    200: TransferConfirmResponse;
+};
+
+export type MovementsControllerConfirmOutboundResponse = MovementsControllerConfirmOutboundResponses[keyof MovementsControllerConfirmOutboundResponses];
+
+export type MovementsControllerConfirmInboundData = {
+    body: ConfirmInboundDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        transferId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/transfers/{transferId}/inbound-confirm';
+};
+
+export type MovementsControllerConfirmInboundErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token of either family, or a device token without a badge-in session (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks transfers.execute (role-denied), or the destination bin is secure/cage-class and the actor lacks secure.move (role-denied — the cage is off-limits to floor staff, FR-42)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The transfer or the scanned destination bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not in_transit (transfer-wrong-state), the scanned bin's state epoch is stale (transfer-bin-changed — the mobile client re-plans), or a destination placement gate refused — retired, blocked, storage-class mismatch (bin-retired, bin-blocked, bin-storage-mismatch), hazard co-location (bin-segregation-conflict), bulk-asset occupancy (bin-occupancy-conflict), or the load gates (bin-full, bin-overweight, bin-volume-exceeded, bin-item-oversize) — the order stays in_transit; or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerConfirmInboundError = MovementsControllerConfirmInboundErrors[keyof MovementsControllerConfirmInboundErrors];
+
+export type MovementsControllerConfirmInboundResponses = {
+    /**
+     * Inbound confirmed: both legs' events on a cross-warehouse transfer (the idempotency snapshot)
+     */
+    200: TransferConfirmResponse;
+};
+
+export type MovementsControllerConfirmInboundResponse = MovementsControllerConfirmInboundResponses[keyof MovementsControllerConfirmInboundResponses];
+
+export type MovementsControllerCancelTransferData = {
+    body: CancelTransferDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        transferId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/transfers/{transferId}/cancel';
+};
+
+export type MovementsControllerCancelTransferErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks transfers.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The transfer does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not draft (transfer-wrong-state), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerCancelTransferError = MovementsControllerCancelTransferErrors[keyof MovementsControllerCancelTransferErrors];
+
+export type MovementsControllerCancelTransferResponses = {
+    /**
+     * Transfer cancelled (the idempotency snapshot)
+     */
+    200: TransferOrderResponse;
+};
+
+export type MovementsControllerCancelTransferResponse = MovementsControllerCancelTransferResponses[keyof MovementsControllerCancelTransferResponses];
+
+export type MovementsControllerCreateCountData = {
+    body: CreateCountDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/counts';
+};
+
+export type MovementsControllerCreateCountErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, or a system bin (Receiving/QC-hold/In-Transit — counts target storage bins only) (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks counts.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse or the bin does not exist in this tenant — including a bin deleted between the listing and the create (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The bin already has a pending count task (count-task-open), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerCreateCountError = MovementsControllerCreateCountErrors[keyof MovementsControllerCreateCountErrors];
+
+export type MovementsControllerCreateCountResponses = {
+    /**
+     * Count task pending (the idempotency snapshot)
+     */
+    201: CreateCountResponse;
+};
+
+export type MovementsControllerCreateCountResponse = MovementsControllerCreateCountResponses[keyof MovementsControllerCreateCountResponses];
+
+export type MovementsControllerSubmitCountData = {
+    body: SubmitCountDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        taskId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/counts/{taskId}/submit';
+};
+
+export type MovementsControllerSubmitCountErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, or a task line the body never counted (count-incomplete)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token of either family, or a device token without a badge-in session (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks counts.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The count task, a named SKU, or the count task's bin does not exist in this tenant — the bin may have been deleted while the count was in progress ("The count task's bin no longer exists in this tenant.") (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The task is already completed (count-task-completed), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerSubmitCountError = MovementsControllerSubmitCountErrors[keyof MovementsControllerSubmitCountErrors];
+
+export type MovementsControllerSubmitCountResponses = {
+    /**
+     * Count completed: the variances and, on an epoch conflict, the recount task (the idempotency snapshot)
+     */
+    200: SubmitCountResponse;
+};
+
+export type MovementsControllerSubmitCountResponse = MovementsControllerSubmitCountResponses[keyof MovementsControllerSubmitCountResponses];
+
+export type MovementsControllerUpsertCountPoliciesData = {
+    body: UpsertCountPoliciesDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/warehouses/{warehouseId}/count-policies';
+};
+
+export type MovementsControllerUpsertCountPoliciesErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — an unknown abc_class or a non-positive interval (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks counts.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent first write of the same policy lost the unique-index race (conflict — retry), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerUpsertCountPoliciesError = MovementsControllerUpsertCountPoliciesErrors[keyof MovementsControllerUpsertCountPoliciesErrors];
+
+export type MovementsControllerUpsertCountPoliciesResponses = {
+    /**
+     * The warehouse's policy set after the upsert (the idempotency snapshot)
+     */
+    200: CountPoliciesResponse;
+};
+
+export type MovementsControllerUpsertCountPoliciesResponse = MovementsControllerUpsertCountPoliciesResponses[keyof MovementsControllerUpsertCountPoliciesResponses];
+
+export type MovementsControllerGetVariancePolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/variance-policies';
+};
+
+export type MovementsControllerGetVariancePolicyErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No policy row exists — the threshold routing is disabled (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerGetVariancePolicyError = MovementsControllerGetVariancePolicyErrors[keyof MovementsControllerGetVariancePolicyErrors];
+
+export type MovementsControllerGetVariancePolicyResponses = {
+    /**
+     * The tenant's policy row
+     */
+    200: VariancePolicyResponse;
+};
+
+export type MovementsControllerGetVariancePolicyResponse = MovementsControllerGetVariancePolicyResponses[keyof MovementsControllerGetVariancePolicyResponses];
+
+export type MovementsControllerSetVariancePolicyData = {
+    body: SetVariancePolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/variance-policies';
+};
+
+export type MovementsControllerSetVariancePolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — a negative/non-whole threshold or one above the stored column bound (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks variances.resolve (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A concurrent first write of the same policy lost the unique-index race (conflict — retry), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerSetVariancePolicyError = MovementsControllerSetVariancePolicyErrors[keyof MovementsControllerSetVariancePolicyErrors];
+
+export type MovementsControllerSetVariancePolicyResponses = {
+    /**
+     * The policy row after the upsert (the idempotency snapshot)
+     */
+    200: VariancePolicyResponse;
+};
+
+export type MovementsControllerSetVariancePolicyResponse = MovementsControllerSetVariancePolicyResponses[keyof MovementsControllerSetVariancePolicyResponses];
+
+export type MovementsControllerListCountVariancesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        status?: 'open' | 'adjusted' | 'recounted';
+        /**
+         * Narrow to one warehouse
+         */
+        warehouseId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/movements/variances';
+};
+
+export type MovementsControllerListCountVariancesErrors = {
+    /**
+     * Malformed status/warehouseId query, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type MovementsControllerListCountVariancesError = MovementsControllerListCountVariancesErrors[keyof MovementsControllerListCountVariancesErrors];
+
+export type MovementsControllerListCountVariancesResponses = {
+    /**
+     * The tenant's variance page (newest first, keyset cursor)
+     */
+    200: CountVarianceListResponse;
+};
+
+export type MovementsControllerListCountVariancesResponse = MovementsControllerListCountVariancesResponses[keyof MovementsControllerListCountVariancesResponses];
+
+export type MovementsControllerResolveCountVarianceData = {
+    body: ResolveCountVarianceDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        varianceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/variances/{varianceId}/resolve';
+};
+
+export type MovementsControllerResolveCountVarianceErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, consulted seqs this warehouse's ledger never wrote, or an approve-adjust guard refusal (bin retired / kit / catch-weight / batch parity) from the correction's re-execution (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks variances.resolve (role-denied), or an over-threshold variance resolved by a role below owner (variance-owner-required)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The variance, its count task, or its bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The variance is already resolved (variance-resolved), the task's frozen bin epoch no longer matches (variance-basis-moved — recount is the remedy), the bin already has an open count task on the RECOUNT arm (count-task-open — approve_adjust under an open sibling task is legal), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerResolveCountVarianceError = MovementsControllerResolveCountVarianceErrors[keyof MovementsControllerResolveCountVarianceErrors];
+
+export type MovementsControllerResolveCountVarianceResponses = {
+    /**
+     * The resolution (the idempotency snapshot): the variance in its terminal state, plus the approve arm's correction
+     */
+    200: ResolveCountVarianceResponse;
+};
+
+export type MovementsControllerResolveCountVarianceResponse = MovementsControllerResolveCountVarianceResponses[keyof MovementsControllerResolveCountVarianceResponses];
+
+export type MovementsControllerGetTransferData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        transferId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/transfers/{transferId}';
+};
+
+export type MovementsControllerGetTransferErrors = {
+    /**
+     * Malformed transferId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The transfer does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerGetTransferError = MovementsControllerGetTransferErrors[keyof MovementsControllerGetTransferErrors];
+
+export type MovementsControllerGetTransferResponses = {
+    /**
+     * The transfer detail (the two-leg audit read)
+     */
+    200: TransferDetailResponse;
+};
+
+export type MovementsControllerGetTransferResponse = MovementsControllerGetTransferResponses[keyof MovementsControllerGetTransferResponses];

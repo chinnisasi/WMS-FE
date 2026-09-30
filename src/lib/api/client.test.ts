@@ -11,6 +11,12 @@ import {
   fetchApiCreateProduct,
   fetchApiCreateWarehouse,
   fetchApiCreateWavePolicy,
+  fetchApiApproveAdjustmentPending,
+  fetchApiListAdjustmentPendings,
+  fetchApiListLedgerEvents,
+  fetchApiListVariances,
+  fetchApiRejectAdjustmentPending,
+  fetchApiResolveVariance,
   fetchApiDispatchOrder,
   fetchApiEditProduct,
   fetchApiEditSku,
@@ -1039,6 +1045,162 @@ describe('compliance and segregation wrappers (story 12-7)', () => {
       expect((error as ApiProblem).code).toBe('excursion-resolved');
       expect((error as ApiProblem).status).toBe(409);
       expect((error as ApiProblem).detail).toContain('resolved');
+    }
+    clearSession();
+  });
+});
+
+/**
+ * Story 5-5's six wrappers — the Conflicts & Reviews queue's reads and
+ * decisions. The variances and ledger wrappers follow the house read shape
+ * (a first page with no filters sends NO query at all), the three decision
+ * wrappers carry the fresh ULID `Idempotency-Key` header, and the resolve
+ * body carries the approve_adjust statement (`consideredEventSeqs`).
+ */
+describe('5-5 wrappers (variances, pendings, ledger events)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const VARIANCE_ID = '0198f7a2-1b3c-7d4e-8f90-5566778899aa';
+  const PENDING_ID = '0198f7a2-1b3c-7d4e-8f90-66778899aabb';
+  const WAREHOUSE_ID = '0198f7a2-1b3c-7d4e-8f90-778899aabbcc';
+  const BIN_ID = '0198f7a2-1b3c-7d4e-8f90-8899aabbccdd';
+
+  test('the variance list GET hits the movements path and forwards status + cursor', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListVariances(SESSION.tenant.id, { status: 'open', warehouseId: undefined, cursor: 'c1' });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/movements/variances`);
+    expect(url.searchParams.get('status')).toBe('open');
+    expect(url.searchParams.get('cursor')).toBe('c1');
+    expect(lastRequest!.method).toBe('GET');
+    clearSession();
+  });
+
+  test('a variance first page with no filters sends no query at all', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListVariances(SESSION.tenant.id);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/movements/variances`);
+    expect(url.search).toBe('');
+    clearSession();
+  });
+
+  test('the resolve POST carries the statement body and the fresh key header', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { variance: { id: VARIANCE_ID, status: 'adjusted' } });
+    await fetchApiResolveVariance(
+      SESSION.tenant.id,
+      VARIANCE_ID,
+      { decision: 'approve_adjust', consideredEventSeqs: [3, 1] },
+      KEY,
+    );
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/movements/variances/${VARIANCE_ID}/resolve`,
+    );
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({
+      decision: 'approve_adjust',
+      consideredEventSeqs: [3, 1],
+    });
+    clearSession();
+  });
+
+  test('the recount resolve body carries the decision alone', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { variance: { id: VARIANCE_ID, status: 'recounted' } });
+    await fetchApiResolveVariance(SESSION.tenant.id, VARIANCE_ID, { decision: 'recount' }, KEY);
+    expect(await lastRequest!.json()).toEqual({ decision: 'recount' });
+    clearSession();
+  });
+
+  test('the pendings list GET forwards status + cursor on the inventory path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListAdjustmentPendings(SESSION.tenant.id, { status: 'pending', cursor: 'p1' });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/inventory/adjustment-pendings`,
+    );
+    expect(url.searchParams.get('status')).toBe('pending');
+    expect(url.searchParams.get('cursor')).toBe('p1');
+    clearSession();
+  });
+
+  test('both pendings decisions POST with the key header and no body', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { pending: { id: PENDING_ID, status: 'approved' } });
+    await fetchApiApproveAdjustmentPending(SESSION.tenant.id, PENDING_ID, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/inventory/adjustment-pendings/${PENDING_ID}/approve`,
+    );
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.text()).toBe('');
+
+    stubFetch(200, { pending: { id: PENDING_ID, status: 'rejected' } });
+    await fetchApiRejectAdjustmentPending(SESSION.tenant.id, PENDING_ID, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/inventory/adjustment-pendings/${PENDING_ID}/reject`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    clearSession();
+  });
+
+  test('the ledger events GET carries the binId filter for the panel', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListLedgerEvents(SESSION.tenant.id, WAREHOUSE_ID, { binId: BIN_ID });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/warehouses/${WAREHOUSE_ID}/inventory/events`,
+    );
+    expect(url.searchParams.get('binId')).toBe(BIN_ID);
+    expect(url.searchParams.get('cursor')).toBeNull();
+    clearSession();
+  });
+
+  test('a 409 variance-resolved refusal keeps the machine-readable code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, {
+      code: 'variance-resolved',
+      title: 'Already resolved',
+      status: 409,
+      detail: 'This variance was resolved moments ago.',
+    });
+    try {
+      await fetchApiResolveVariance(
+        SESSION.tenant.id,
+        VARIANCE_ID,
+        { decision: 'recount' },
+        KEY,
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiProblem);
+      expect((error as ApiProblem).code).toBe('variance-resolved');
+      expect((error as ApiProblem).status).toBe(409);
+    }
+    clearSession();
+  });
+
+  test('a 409 adjustment-pending-decided refusal keeps the machine-readable code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, {
+      code: 'adjustment-pending-decided',
+      title: 'Already decided',
+      status: 409,
+      detail: 'Another approver settled this pend.',
+    });
+    try {
+      await fetchApiApproveAdjustmentPending(SESSION.tenant.id, PENDING_ID, KEY);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiProblem);
+      expect((error as ApiProblem).code).toBe('adjustment-pending-decided');
+      expect((error as ApiProblem).status).toBe(409);
     }
     clearSession();
   });
