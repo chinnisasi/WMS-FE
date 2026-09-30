@@ -207,3 +207,85 @@ export function ledgerListReason(error: unknown): string {
   }
   return UNREACHABLE_REASON;
 }
+
+/**
+ * The sync-report payload's bin-field probe — EXACTLY the server's recount
+ * arm's read (`payload.binId ?? payload.toBinId`): a pick/count/pack or
+ * excursion payload names its bin as `binId`, a transfer/putaway placement
+ * names it as `toBinId`, and the recount arm serves BOTH (so the ledger walk
+ * and the bin label follow the same). The probe that read `binId` alone hid a
+ * placement row's recount though the server would have served it (review
+ * Entry D) — every client-side bin gate reads through this helper.
+ */
+export function rejectedOpPayloadBinId(payload: Record<string, unknown>): string | null {
+  const direct = payload['binId'];
+  if (typeof direct === 'string' && direct.length > 0) return direct;
+  const placement = payload['toBinId'];
+  return typeof placement === 'string' && placement.length > 0 ? placement : null;
+}
+
+/** The rejected-ops list read's failure reasons (the same shape). */
+export function rejectedOpsListReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'invalid-cursor':
+        return 'That page reference is stale — the queue restarted from the first page.';
+      case 'permission-denied':
+        return 'That data belongs to another tenant — sign in again.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Check the queue filters and try again.';
+      default:
+        return error.detail ?? 'Could not load the rejected-ops queue.';
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+/**
+ * A rejected-op resolve command's failure reasons (capability
+ * `review.decide`). The apply and recount arms RE-EXECUTE against the live
+ * guard set, so their refusals surface the server's own words verbatim (the
+ * `adjustmentDecisionReason` guard-class pattern) — the cause lives in state
+ * this client holds no DTO for, and the row stays open on either side. Two
+ * 409s are recoverable: `rejected-op-resolved` (another reviewer moved
+ * first) reloads the queue; `count-task-open` names the bin's open count
+ * task. The recount arm's payload-less refusal is a 400 BACKSTOP — the
+ * client never sends recount without a bin, so reaching it is a defect.
+ */
+export function rejectedOpsResolveReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'rejected-op-resolved':
+        return 'This rejected op was already resolved — the queue has refreshed.';
+      case 'count-task-open':
+        return 'This bin already has an open count task — the recount arm needs the bin free.';
+      case 'idempotency-key-reuse':
+        return 'This resolution was already processed.';
+      case 'not-found':
+        // The 404 is ambiguous BY DESIGN: it covers the op row itself AND an
+        // inner command's re-executed refusal (a re-applied putaway whose bin
+        // vanished names the bin). The server's detail is the truth; the
+        // fallback reads as the op itself.
+        return error.detail ?? 'This rejected op no longer exists — refresh the queue.';
+      case 'role-denied':
+        return 'Your role cannot resolve rejected ops.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Check the request and try again.';
+    }
+    // The apply/recount re-execution's own refusals — a 403 device-revoked
+    // (the device was revoked since the op ran), or a 409 the re-executed
+    // command raised (`insufficient-on-hand`, a bin epoch moved…) — render
+    // the server's own words; the row stays open either way.
+    if (error.status === 403 || error.status === 409) {
+      return error.title !== undefined
+        ? `${error.title}${error.detail === undefined ? '' : ` — ${error.detail}`}`
+        : (error.detail ?? `The resolution was refused (${error.code}).`);
+    }
+    return error.detail ?? `Resolve failed (${error.code}).`;
+  }
+  return UNREACHABLE_REASON;
+}

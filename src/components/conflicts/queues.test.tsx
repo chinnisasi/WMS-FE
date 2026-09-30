@@ -104,10 +104,16 @@ function tabLabels(container: HTMLElement): string[] {
 }
 
 describe('ConflictsQueues: the per-tab capability gate (story 5-5)', () => {
-  test('the owner sees all four queues and lands on the over-receipt queue', async () => {
+  test('the owner sees all five queues and lands on the over-receipt queue', async () => {
     view = await mount(sessionFor('owner'));
     const labels = tabLabels(view.container);
-    expect(labels).toEqual(['Over-receipts', 'Variances', 'Adjustment pendings', 'Excursions']);
+    expect(labels).toEqual([
+      'Over-receipts',
+      'Variances',
+      'Adjustment pendings',
+      'Excursions',
+      'Rejected ops',
+    ]);
     // The first tab is active by default and its panel mounts.
     expect(
       view.container.querySelector(
@@ -121,7 +127,12 @@ describe('ConflictsQueues: the per-tab capability gate (story 5-5)', () => {
     // who may raise an adjustment must not also hold the approval pen — the
     // pendings tab is absent for them, by the mirror, like the backend.
     view = await mount(sessionFor('ops_manager'));
-    expect(tabLabels(view.container)).toEqual(['Over-receipts', 'Variances', 'Excursions']);
+    expect(tabLabels(view.container)).toEqual([
+      'Over-receipts',
+      'Variances',
+      'Excursions',
+      'Rejected ops',
+    ]);
   });
 
   test('a role holding none of the decision capabilities sees no tabs — the honest read line', async () => {
@@ -140,7 +151,7 @@ describe('ConflictsQueues: the per-tab capability gate (story 5-5)', () => {
 
   test('an unknown role (the pre-session render) sees the full tab list — the sidebar convention', async () => {
     view = await mount(null);
-    expect(tabLabels(view.container)).toHaveLength(4);
+    expect(tabLabels(view.container)).toHaveLength(5);
   });
 });
 

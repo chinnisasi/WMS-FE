@@ -15,7 +15,9 @@ import {
   complianceControllerListExcursions,
   complianceControllerResolveExcursion,
   devicesControllerListDevices,
+  devicesControllerListRejectedOps,
   devicesControllerMintEnrollmentCode,
+  devicesControllerResolveRejectedOp,
   devicesControllerRevokeDevice,
   healthControllerHealth,
   inboundControllerGetPurchaseOrder,
@@ -135,8 +137,11 @@ import type {
   PurchaseOrderListResponse,
   PurchaseOrderResponse,
   RegisterTenantDto,
+  RejectedOpListResponse,
+  RejectedOpResolveResponse,
   ResolveCountVarianceDto,
   ResolveCountVarianceResponse,
+  ResolveRejectedOpDto,
   SegregationMatrixResponse,
   SetUserRoleDto,
   SetupChecklistResponse,
@@ -1620,6 +1625,66 @@ export async function fetchApiResolveVariance(
 ): Promise<ResolveCountVarianceResponse> {
   const { data, error } = await movementsControllerResolveCountVariance({
     path: { tenantId, varianceId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The rejected-ops review queue (story 5-6): the terminal device ops a
+ * device's replay ended on without landing — refused outright (`rejected`)
+ * or held as an AD-14 quarantine resident (`quarantined`) — uploaded
+ * AUDIT-ONLY by the device's sync report. Keyset cursor pagination,
+ * status-filterable; the deciding MUTATION is `review.decide`. Same
+ * query-shape as the variance queue read: a first page with no filters
+ * sends no query.
+ */
+export async function fetchApiListRejectedOps(
+  tenantId: string,
+  options?: {
+    status?: 'open' | 'applied' | 'recounted' | 'discarded';
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<RejectedOpListResponse> {
+  const { data, error } = await devicesControllerListRejectedOps({
+    path: { tenantId },
+    query:
+      options?.status === undefined && options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.status === undefined ? {} : { status: options.status }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Resolves a rejected op (capability `review.decide`) — one of three arms:
+ * `{decision:'apply'}` re-executes the op against every live guard (never a
+ * force-write: binStateEpoch is stripped server-side and every refusal is
+ * answered verbatim with the row still open); `{decision:'recount'}` re-plans
+ * the bin (the payload must name one, or the server refuses 400); or
+ * `{decision:'discard'}` retires the row with a marker. Every click carries
+ * a fresh ULID, so a double click replays, never duplicates.
+ */
+export async function fetchApiResolveRejectedOp(
+  tenantId: string,
+  rejectedOpId: string,
+  body: ResolveRejectedOpDto,
+  idempotencyKey: string,
+): Promise<RejectedOpResolveResponse> {
+  const { data, error } = await devicesControllerResolveRejectedOp({
+    path: { tenantId, rejectedOpId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
   });

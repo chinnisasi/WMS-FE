@@ -795,6 +795,152 @@ export type DeviceSelfTestEchoResponse = {
     receivedAt: string;
 };
 
+export type SyncReportAttributionDto = {
+    /**
+     * The op's own device label (as sealed at enqueue)
+     */
+    deviceLabel?: string;
+    /**
+     * The op's own operator email (as sealed at enqueue)
+     */
+    operatorEmail?: string;
+};
+
+export type SyncReportRowDto = {
+    /**
+     * The mobile op's ULID (26 chars — the dedupe key)
+     */
+    opId: string;
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit';
+    /**
+     * The replay fate the server refused with
+     */
+    classification: 'rejected' | 'quarantined';
+    /**
+     * The refusal code, verbatim from the replay
+     */
+    problemCode: string;
+    /**
+     * The refusal detail, verbatim (null when the server sent none)
+     */
+    problemDetail?: string | null;
+    /**
+     * The op's payload as enqueued (base units; the apply arm re-executes it)
+     */
+    payload: {
+        [key: string]: unknown;
+    };
+    /**
+     * The op's own session as the device sealed it
+     */
+    attribution?: SyncReportAttributionDto | null;
+    /**
+     * When the op was enqueued on the device (ISO-8601)
+     */
+    opEnqueuedAt: string;
+    /**
+     * The op's business time when the payload carried one
+     */
+    opOccurredAt?: string | null;
+};
+
+export type RecordSyncReportDto = {
+    /**
+     * The dropped terminal ops retained by the last replay pass(es)
+     */
+    rows: Array<SyncReportRowDto>;
+};
+
+export type SyncReportRowAckResponse = {
+    /**
+     * The op's ULID
+     */
+    opId: string;
+    /**
+     * Whether this upload recorded the row (false = the (tenant, op_id) dedupe absorbed it)
+     */
+    recorded: boolean;
+};
+
+export type SyncReportResponse = {
+    /**
+     * Rows the report carried
+     */
+    received: number;
+    /**
+     * Rows newly recorded (open in the queue)
+     */
+    recorded: number;
+    /**
+     * Rows the per-row dedupe absorbed (already reported)
+     */
+    duplicates: number;
+    rows: Array<SyncReportRowAckResponse>;
+};
+
+export type RejectedOpResponse = {
+    id: string;
+    tenantId: string;
+    deviceId: string;
+    operatorUserId: string;
+    /**
+     * The mobile op's ULID
+     */
+    opId: string;
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit';
+    classification: 'rejected' | 'quarantined';
+    problemCode: string;
+    problemDetail: string | null;
+    payload: {
+        [key: string]: unknown;
+    };
+    /**
+     * Device name + operator id/email + the op's own session
+     */
+    attribution: {
+        [key: string]: unknown;
+    };
+    opEnqueuedAt: string;
+    opOccurredAt: string | null;
+    status: 'open' | 'applied' | 'recounted' | 'discarded';
+    resolvedBy: string | null;
+    resolvedAt: string | null;
+    /**
+     * The arm's outcome (the applied snapshot / minted count task id / the discard marker)
+     */
+    resolvedOutcome: {
+        [key: string]: unknown;
+    } | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type RejectedOpListResponse = {
+    items: Array<RejectedOpResponse>;
+    nextCursor: string | null;
+};
+
+export type ResolveRejectedOpDto = {
+    /**
+     * The arm — 'recount' requires the payload to carry a bin
+     */
+    decision: 'apply' | 'recount' | 'discard';
+    /**
+     * The decision instant (ISO-8601 UTC; server clock when absent)
+     */
+    occurredAt?: string;
+};
+
+export type RejectedOpResolveResponse = {
+    rejectedOp: RejectedOpResponse;
+    /**
+     * The arm's outcome — the re-executed command's snapshot, the minted count task id, or the discard marker
+     */
+    outcome: {
+        [key: string]: unknown;
+    } | null;
+};
+
 export type BatchInputDto = {
     /**
      * Batch code — unique per tenant + SKU; ensured idempotently on intake
@@ -5273,6 +5419,151 @@ export type DevicesControllerSelfTestEchoResponses = {
 };
 
 export type DevicesControllerSelfTestEchoResponse = DevicesControllerSelfTestEchoResponses[keyof DevicesControllerSelfTestEchoResponses];
+
+export type DevicesControllerRecordSyncReportData = {
+    body: RecordSyncReportDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/sync-reports';
+};
+
+export type DevicesControllerRecordSyncReportErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed report row (validation-failed, naming the row)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked), or a demoted/removed operator (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Concurrent idempotent request for the same key
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DevicesControllerRecordSyncReportError = DevicesControllerRecordSyncReportErrors[keyof DevicesControllerRecordSyncReportErrors];
+
+export type DevicesControllerRecordSyncReportResponses = {
+    201: SyncReportResponse;
+};
+
+export type DevicesControllerRecordSyncReportResponse = DevicesControllerRecordSyncReportResponses[keyof DevicesControllerRecordSyncReportResponses];
+
+export type DevicesControllerListRejectedOpsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        status?: 'open' | 'applied' | 'recounted' | 'discarded';
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/rejected-ops';
+};
+
+export type DevicesControllerListRejectedOpsErrors = {
+    /**
+     * Malformed cursor (invalid-cursor), out-of-range limit, or unknown status filter (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type DevicesControllerListRejectedOpsError = DevicesControllerListRejectedOpsErrors[keyof DevicesControllerListRejectedOpsErrors];
+
+export type DevicesControllerListRejectedOpsResponses = {
+    200: RejectedOpListResponse;
+};
+
+export type DevicesControllerListRejectedOpsResponse = DevicesControllerListRejectedOpsResponses[keyof DevicesControllerListRejectedOpsResponses];
+
+export type DevicesControllerResolveRejectedOpData = {
+    body: ResolveRejectedOpDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rejectedOpId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/rejected-ops/{rejectedOpId}/resolve';
+};
+
+export type DevicesControllerResolveRejectedOpErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, unknown decision, or the payload refusing an arm (validation-failed — including a payload recount cannot re-plan)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks review.decide (role-denied), or the apply re-execution's own guards refused (device-revoked, verbatim)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Rejected op does not exist in this tenant (not-found), or a recounted bin does not
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Row already resolved (rejected-op-resolved), a pending count task on the bin (count-task-open), or the re-executed command's own conflict (verbatim)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DevicesControllerResolveRejectedOpError = DevicesControllerResolveRejectedOpErrors[keyof DevicesControllerResolveRejectedOpErrors];
+
+export type DevicesControllerResolveRejectedOpResponses = {
+    200: RejectedOpResolveResponse;
+};
+
+export type DevicesControllerResolveRejectedOpResponse = DevicesControllerResolveRejectedOpResponses[keyof DevicesControllerResolveRejectedOpResponses];
 
 export type InventoryControllerAdjustStockData = {
     body: StockAdjustmentDto;

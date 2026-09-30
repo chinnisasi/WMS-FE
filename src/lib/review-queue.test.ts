@@ -9,6 +9,9 @@ import {
   adjustmentListReason,
   isOwnerOnlyVariance,
   ledgerListReason,
+  rejectedOpPayloadBinId,
+  rejectedOpsListReason,
+  rejectedOpsResolveReason,
   resolveDraftProblem,
   varianceListReason,
   varianceResolveReason,
@@ -205,5 +208,93 @@ describe('ledgerListReason (the bin timeline read arms)', () => {
     expect(ledgerListReason(problem('validation-failed', 400, 'bad binId'))).toBe('bad binId');
     expect(ledgerListReason(problem('weird', 500))).toContain('ledger timeline');
     expect(ledgerListReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
+  });
+});
+
+describe('rejectedOpPayloadBinId (the recount arm’s bin probe, review Entry D)', () => {
+  // THE pin: the probe must read exactly what the server's recount arm
+  // reads (`payload.binId ?? payload.toBinId`) — a placement payload that
+  // names its bin only as toBinId still counts as a bin-carrying row.
+  test('a pick/count-style payload carries binId; a placement carries toBinId', () => {
+    expect(rejectedOpPayloadBinId({ binId: 'bin-1' })).toBe('bin-1');
+    expect(rejectedOpPayloadBinId({ toBinId: 'bin-2' })).toBe('bin-2');
+    expect(rejectedOpPayloadBinId({ binId: 'bin-1', toBinId: 'bin-2' })).toBe('bin-1');
+  });
+
+  test('an absent, empty, or non-string bin is absent — the recount gate stays shut', () => {
+    expect(rejectedOpPayloadBinId({ picklistLineId: 'L-1' })).toBeNull();
+    expect(rejectedOpPayloadBinId({})).toBeNull();
+    expect(rejectedOpPayloadBinId({ binId: '' })).toBeNull();
+    expect(rejectedOpPayloadBinId({ binId: 42 })).toBeNull();
+    expect(rejectedOpPayloadBinId({ toBinId: null })).toBeNull();
+  });
+});
+
+describe('rejectedOpsListReason (the rejected-ops read arms, story 5-6)', () => {
+  test('mapped arms, the default, and the transport arm', () => {
+    expect(rejectedOpsListReason(problem('invalid-cursor', 400))).toContain('restarted');
+    expect(rejectedOpsListReason(problem('permission-denied', 403))).toContain('another tenant');
+    expect(rejectedOpsListReason(problem('unauthenticated', 401))).toContain('session expired');
+    expect(rejectedOpsListReason(problem('validation-failed', 400, 'bad status'))).toBe('bad status');
+    expect(rejectedOpsListReason(problem('weird', 500))).toContain('rejected-ops queue');
+    expect(rejectedOpsListReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
+  });
+});
+
+describe('rejectedOpsResolveReason (the rejected-op resolve command arms, story 5-6)', () => {
+  test('the already-resolved 409 names the reload recovery', () => {
+    expect(rejectedOpsResolveReason(problem('rejected-op-resolved', 409))).toContain(
+      'queue has refreshed',
+    );
+  });
+
+  test('the count-task-open 409 names the bin-free remedy', () => {
+    expect(rejectedOpsResolveReason(problem('count-task-open', 409))).toContain('bin free');
+  });
+
+  test('the re-execution refusals render the server words verbatim — the row stays open', () => {
+    // A 403 device-revoked: the op's device was revoked since the op ran.
+    expect(
+      rejectedOpsResolveReason(problem('device-revoked', 403, 'scanner-1 was revoked', 'Device revoked')),
+    ).toBe('Device revoked — scanner-1 was revoked');
+    // A 409 the re-executed command itself raised, title only, detail only.
+    expect(rejectedOpsResolveReason(problem('stock-moved', 409, undefined, 'Stock moved'))).toBe(
+      'Stock moved',
+    );
+    expect(rejectedOpsResolveReason(problem('stock-moved', 409, 'the bin moved mid-flight'))).toBe(
+      'the bin moved mid-flight',
+    );
+    expect(rejectedOpsResolveReason(problem('stock-moved', 409))).toContain('refused');
+    // An unspecified-code 403 rides the verbatim arm too — it is the
+    // re-execution's own guard speaking.
+    expect(rejectedOpsResolveReason(problem('epoch-moved', 403, 'the epoch moved'))).toBe(
+      'the epoch moved',
+    );
+  });
+
+  test('house set and fallbacks', () => {
+    // The not-found 404 is ambidextrous: a bare one (the op row itself,
+    // detail-less) says the op is gone; one carrying the server's detail —
+    // an inner command's re-executed refusal, e.g. a re-applied putaway
+    // naming the bin — is the server's words instead (review iteration 1,
+    // RB11).
+    expect(rejectedOpsResolveReason(problem('not-found', 404))).toContain('no longer exists');
+    expect(rejectedOpsResolveReason(problem('not-found', 404, 'No bin with id ...'))).toBe(
+      'No bin with id ...',
+    );
+    expect(rejectedOpsResolveReason(problem('role-denied', 403))).toContain('cannot resolve');
+    expect(rejectedOpsResolveReason(problem('idempotency-key-reuse', 422))).toContain(
+      'already processed',
+    );
+    expect(rejectedOpsResolveReason(problem('unauthenticated', 401))).toContain('session expired');
+    expect(rejectedOpsResolveReason(problem('validation-failed', 400, 'bin required'))).toBe(
+      'bin required',
+    );
+    expect(rejectedOpsResolveReason(problem('weird', 500, 'boom'))).toBe('boom');
+    expect(rejectedOpsResolveReason(problem('weird', 500))).toContain('Resolve failed');
+  });
+
+  test('a transport error renders the house unreachable copy', () => {
+    expect(rejectedOpsResolveReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
   });
 });
