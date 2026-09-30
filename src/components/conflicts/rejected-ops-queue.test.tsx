@@ -322,15 +322,30 @@ describe('RejectedOpsQueue: the resolve flow (story 5-6)', () => {
   });
 
   test('a placement payload naming its bin ONLY as toBinId still shows and POSTs the recount', async () => {
-    // The transfer.confirm placement shape the mobile outbox enqueues: no
-    // `binId` — the bin lives in `toBinId`. A probe reading `binId` alone
-    // hid this row's recount though the server serves it (review Entry D).
+    // The putaway.place placement payload the mobile outbox enqueues (the
+    // real carrier — review iteration 1, RB3): no `binId` key at all — the
+    // bin lives in `toBinId`. A probe reading `binId` alone would hide the
+    // recount though the server's arm reads `binId ?? toBinId` (review
+    // Entry D). A transfer.confirm row names its landing bin `destBinId` —
+    // OUTSIDE the recount vocabulary on both sides (the client's gate and
+    // the server's arm read the same two fields, in lockstep).
     opRows = [
       rejectedOp(
         {
-          opType: 'transfer.confirm',
+          opType: 'putaway.place',
           problemCode: 'bin-epoch-moved',
-          payload: { transferId: 'T-9', warehouseId: WAREHOUSE_ID, toBinId: BIN_ID },
+          payload: {
+            warehouseId: WAREHOUSE_ID,
+            grnId: '01980000-0000-7000-8000-0000000000f1',
+            grnLineId: '01980000-0000-7000-8000-0000000000f2',
+            skuId: '01980000-0000-7000-8000-0000000000d1',
+            batchId: null,
+            qty: 40,
+            toBinId: BIN_ID,
+            reasonCode: null,
+            occurredAt: '2026-09-09T11:00:00Z',
+            serials: null,
+          },
         },
         PLACEMENT_OP_ID,
       ),
@@ -338,8 +353,8 @@ describe('RejectedOpsQueue: the resolve flow (story 5-6)', () => {
     view = await mount();
 
     // The bin label resolves through the same probe — no "(unknown bin)".
-    expect(article(view, 'transfer.confirm').textContent).not.toContain('(unknown bin)');
-    await click(articleButton(article(view, 'transfer.confirm'), 'Open a recount'));
+    expect(article(view, 'putaway.place').textContent).not.toContain('(unknown bin)');
+    await click(articleButton(article(view, 'putaway.place'), 'Open a recount'));
     await settle();
 
     const posts = resolvePosts();

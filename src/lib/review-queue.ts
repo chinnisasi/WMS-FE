@@ -264,7 +264,11 @@ export function rejectedOpsResolveReason(error: unknown): string {
       case 'idempotency-key-reuse':
         return 'This resolution was already processed.';
       case 'not-found':
-        return 'This rejected op no longer exists — refresh the queue.';
+        // The 404 is ambiguous BY DESIGN: it covers the op row itself AND an
+        // inner command's re-executed refusal (a re-applied putaway whose bin
+        // vanished names the bin). The server's detail is the truth; the
+        // fallback reads as the op itself.
+        return error.detail ?? 'This rejected op no longer exists — refresh the queue.';
       case 'role-denied':
         return 'Your role cannot resolve rejected ops.';
       case 'unauthenticated':

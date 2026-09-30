@@ -273,7 +273,15 @@ describe('rejectedOpsResolveReason (the rejected-op resolve command arms, story 
   });
 
   test('house set and fallbacks', () => {
+    // The not-found 404 is ambidextrous: a bare one (the op row itself,
+    // detail-less) says the op is gone; one carrying the server's detail —
+    // an inner command's re-executed refusal, e.g. a re-applied putaway
+    // naming the bin — is the server's words instead (review iteration 1,
+    // RB11).
     expect(rejectedOpsResolveReason(problem('not-found', 404))).toContain('no longer exists');
+    expect(rejectedOpsResolveReason(problem('not-found', 404, 'No bin with id ...'))).toBe(
+      'No bin with id ...',
+    );
     expect(rejectedOpsResolveReason(problem('role-denied', 403))).toContain('cannot resolve');
     expect(rejectedOpsResolveReason(problem('idempotency-key-reuse', 422))).toContain(
       'already processed',
