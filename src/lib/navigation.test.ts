@@ -88,4 +88,21 @@ describe('sidebar IA skeleton', () => {
     }
     expect(visibleNavItems(undefined).some((i) => i.id === 'replenishment')).toBe(false);
   });
+
+  // Story 7-1: Channels declares `channel.manage` (the frozen holder set —
+  // owner + Ops Manager), so the managing roles see it and the floor and
+  // accounting roles do not. The spec's "no Operator-visible entry" pin,
+  // same precedent as Replenishment.
+  test('Channels is visible to owner and ops_manager, hidden from operator and accountant', () => {
+    expect(NAV_ITEMS.find((i) => i.id === 'channels')?.capabilities).toEqual([
+      'channel.manage',
+    ]);
+    for (const role of ['owner', 'ops_manager'] as const satisfies readonly UserRole[]) {
+      expect(visibleNavItems(role).some((i) => i.id === 'channels')).toBe(true);
+    }
+    for (const role of ['operator', 'accountant'] as const satisfies readonly UserRole[]) {
+      expect(visibleNavItems(role).some((i) => i.id === 'channels')).toBe(false);
+    }
+    expect(visibleNavItems(undefined).some((i) => i.id === 'channels')).toBe(false);
+  });
 });
