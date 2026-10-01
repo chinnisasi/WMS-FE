@@ -699,12 +699,16 @@ function BatchAlertCard({
         )}
       </div>
       <div className="data flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
-        <span>on-hand {qty(entry.onHandMilli)}</span>
+        {/* Optional in the dto because the DISMISSAL snapshot omits the stitches;
+            every list row (the only shape a card renders) carries both. */}
+        <span>on-hand {qty(entry.onHandMilli ?? 0)}</span>
         {/* The aged row's ONE frozen fact: age moves; the alert records what it saw. */}
         {entry.ageDays !== null && <span>age {entry.ageDays}d</span>}
-        {/* The list DTO carries no batch code (that's the catalog's identity,
-            fetched on click-through); the short id keeps rows distinguishable. */}
-        <span className="font-mono">batch {entry.batchId.slice(0, 8)}…</span>
+        {/* The batch's human code, stitched into the list read (catalog-owned
+            identity); the short id only if a shape ever arrives without it. */}
+        <span className="font-mono">
+          batch {entry.batchCode ?? `${entry.batchId.slice(0, 8)}…`}
+        </span>
         <time dateTime={entry.detectedAt}>{new Date(entry.detectedAt).toLocaleString()}</time>
       </div>
       {entry.status !== 'open' && (

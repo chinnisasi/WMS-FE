@@ -3980,7 +3980,11 @@ export type BatchAlertDto = {
     /**
      * The LIVE batch on-hand for this scope, milli-units — re-read at read time, never stored. Carried on LIST rows; absent on the dismissal snapshot.
      */
-    onHandMilli: number;
+    onHandMilli?: number;
+    /**
+     * The alerted batch's human code — the queue card renders it, never a truncated id. Carried on LIST rows; absent on the dismissal snapshot.
+     */
+    batchCode?: string;
     /**
      * The detection instant (ISO-8601 UTC) — the row's creation time
      */

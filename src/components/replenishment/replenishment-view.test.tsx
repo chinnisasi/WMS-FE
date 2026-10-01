@@ -133,6 +133,7 @@ function batchAlert(overrides: Record<string, unknown> = {}): Record<string, unk
     kind: 'expiry_upcoming',
     status: 'open',
     ageDays: null,
+    batchCode: 'B-EX-01',
     onHandMilli: 2500,
     detectedAt: '2026-09-28T08:00:00.000Z',
     resolvedAt: null,
@@ -257,7 +258,12 @@ function stubRouter(): void {
         : json(200, { expiryPolicy: expiryPolicyRow });
     }
     if (method === 'GET' && pathname.endsWith('/replenishment/batch-alerts')) {
-      return json(200, { items: batchAlertRows, nextCursor: null });
+      // The keyset Next: a FIRST-page read (no cursor query) carries a live
+      // nextCursor; the walked page ends (the policyPageQueue precedent —
+      // the same fixture serves both pages, the walk is what's pinned).
+      return url.searchParams.has('cursor')
+        ? json(200, { items: batchAlertRows, nextCursor: null })
+        : json(200, { items: batchAlertRows, nextCursor: 'cursor-alert-page-2' });
     }
     if (method === 'POST' && pathname.includes('/replenishment/batch-alerts/')) {
       if (nextAlertDismissStatus !== 200) {
@@ -271,7 +277,16 @@ function stubRouter(): void {
         });
       }
       return json(200, {
-        batchAlert: { ...batchAlert(), status: 'dismissed', resolvedBy: 'u-1', resolvedAt: '2026-09-28T09:00:00.000Z' },
+        // The dismissal snapshot omits the list stitches (onHandMilli,
+        // batchCode) — the dto's optional pair, exactly as the backend serves.
+        batchAlert: {
+          ...batchAlert(),
+          status: 'dismissed',
+          resolvedBy: 'u-1',
+          resolvedAt: '2026-09-28T09:00:00.000Z',
+          onHandMilli: undefined,
+          batchCode: undefined,
+        },
       });
     }
     if (method === 'GET' && pathname.includes('/inventory/batches/')) {
@@ -338,7 +353,7 @@ beforeEach(() => {
   policyRows = [policy()];
   batchAlertRows = [
     batchAlert(),
-    batchAlert({ id: ALERT2_ID, kind: 'aged', ageDays: 45, onHandMilli: 7000 }),
+    batchAlert({ id: ALERT2_ID, kind: 'aged', ageDays: 45, batchCode: 'B-AG-01', onHandMilli: 7000 }),
   ];
   expiryPolicyRow = expiryPolicy();
   batchDetailRow = batchDetail();
@@ -566,6 +581,9 @@ describe('ReplenishmentView: the read-only render (story 6-1)', () => {
       'Dismissed',
       'View batch',
       'View batch',
+      // The batch-alert read's first-page fixture carries a live nextCursor —
+      // the keyset Next renders (read-only sessions still page).
+      'Next',
       'Drafts',
       'Submitted',
       'Dismissed',
@@ -647,6 +665,9 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
     expect(text).toContain('on-hand 2.500 kg');
     expect(text).toContain('on-hand 7.000 kg');
     expect(text).toContain('age 45d');
+    // The code stitch: the card renders the batch's HUMAN code (the list read's
+    // batchCode), never a truncated id.
+    expect(text).toContain('batch B-EX-01');
     // The auto-resolve's resolvedBy-null is NAMED, never read as a human act.
     expect(text).toContain('resolved by consumption — nobody acted');
     expect(text).toContain('Expiring within 7 days · aged past 30 days of intake.');
@@ -667,6 +688,31 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
     const key = header(posts[0]!, 'idempotency-key')!;
     expect(key.length).toBeGreaterThanOrEqual(26);
     expect(readsEndingWith('/replenishment/batch-alerts').length).toBeGreaterThan(readsBefore);
+  });
+
+  test('the keyset Next: the walked read carries the cursor AND the scope filters; the walked page ends the affordance', async () => {
+    view = await mount();
+    const readsBefore = readsEndingWith('/replenishment/batch-alerts').length;
+    const next = [...view.container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Next',
+    );
+    expect(next).toBeDefined();
+
+    await click(next!);
+    await settle();
+
+    const walked = readsEndingWith('/replenishment/batch-alerts').slice(readsBefore);
+    expect(walked.length).toBeGreaterThan(0);
+    for (const read of walked) {
+      // The cursor rides the SAME stamped scope: filters preserved, cursor set.
+      expect(read.query).toContain('cursor=');
+      expect(read.query).toContain('warehouseId=');
+      expect(read.query).toContain('status=open');
+    }
+    // The walked page ends (the stub's cursor-carrying read returns null) —
+    // the Next affordance goes with it.
+    const buttonsAfter = [...view.container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter).not.toContain('Next');
   });
 
   test('a 409 batch-alert-not-open renders the server\'s words verbatim AND re-reads the queue', async () => {
