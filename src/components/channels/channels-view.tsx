@@ -450,6 +450,11 @@ function ConnectionCard({
       )}
       {canManage && (
         <BufferEditor
+          key={
+            `${entry.id}:${entryBuckets(entry)
+              .map((b) => `${b.warehouseId}:${b.skuId}:${b.bufferMilli}`)
+              .join('|')}`
+          }
           tenantId={tenantId}
           entry={entry}
           warehouses={warehouses}
@@ -781,10 +786,16 @@ function CredentialFieldInput({
 }
 
 function fieldSpecs(provider: ChannelProvider): readonly ChannelCredentialFieldSpec[] {
-  return CHANNEL_CREDENTIAL_FIELDS[provider];
+  // A provider code absent from the FE mirror (a fourth provider landing
+  // BE-side, or a de-registered row read by arm 4) degrades to an empty
+  // field set — the card renders, no crash takes the column down.
+  return CHANNEL_CREDENTIAL_FIELDS[provider] ?? [];
 }
 
 /* ── the standing-buffer editor ────────────────────────────────────────── */
+
+/** The buffer save's per-request bound (the backend's `MAX_BUFFER_ITEMS`). */
+const MAX_BUFFER_ITEMS = 200;
 
 /**
  * One buffer editor row's state — a (warehouse, SKU) pair and a raw decimal
@@ -841,6 +852,10 @@ function BufferEditor({
   const [cleared, setCleared] = useState<{ warehouseId: string; skuId: string }[]>([]);
   // This editor's own synchronous re-entry guard.
   const busy = useRef(false);
+  // Monotonic per-editor key source: `new-${prev.length}` collides after a
+  // removal (add, add, remove the first, add again → two `new-1`, and a
+  // later `patch`/remove then touches both rows).
+  const keySeq = useRef(0);
   const inFlight = working !== null;
 
   const skuList =
@@ -848,9 +863,11 @@ function BufferEditor({
 
   function addRow() {
     const firstFree = warehouses[0]?.id ?? '';
+    keySeq.current += 1;
+    const nextId = keySeq.current;
     setRows((prev) => [
       ...prev,
-      { key: `new-${prev.length}`, warehouseId: firstFree, skuId: skuList[0]?.id ?? '', raw: '' },
+      { key: `new-${nextId}`, warehouseId: firstFree, skuId: skuList[0]?.id ?? '', raw: '' },
     ]);
   }
 
@@ -878,6 +895,14 @@ function BufferEditor({
     // scope (the backend's documented authority).
     const items: { warehouseId: string; skuId: string; bufferMilli: number }[] = [];
     for (const row of rows) {
+      if (row.warehouseId === '' || row.skuId === '') {
+        onOutcome({
+          tone: 'rejected',
+          word: 'Not saved',
+          reason: 'Choose a warehouse and a SKU for every row before saving — nothing was sent.',
+        });
+        return;
+      }
       const parsed = parseMilliInput(row.raw);
       if (parsed === null) {
         onOutcome({
@@ -889,7 +914,16 @@ function BufferEditor({
       }
       items.push({ warehouseId: row.warehouseId, skuId: row.skuId, bufferMilli: parsed });
     }
-    for (const scope of cleared) {
+    // A row that re-introduces a cleared scope beats the trailing 0-clear
+    // (the backend applies per-item in ORDER — the trailing 0 would land
+    // LAST and end the re-set buffer at 0), so the re-introduced scope's
+    // cleared entry is dropped whatever the row's figure: an explicit 0 row
+    // already says "clear this scope" on its own.
+    const rowScopes = new Set(rows.map((row) => `${row.warehouseId}:${row.skuId}`));
+    const stillCleared = cleared.filter(
+      (scope) => !rowScopes.has(`${scope.warehouseId}:${scope.skuId}`),
+    );
+    for (const scope of stillCleared) {
       items.push({ warehouseId: scope.warehouseId, skuId: scope.skuId, bufferMilli: 0 });
     }
     if (items.length === 0) {
@@ -897,6 +931,17 @@ function BufferEditor({
         tone: 'accepted',
         word: 'Nothing to change',
         reason: 'The buffer editor holds no rows — the connection keeps whatever stands.',
+      });
+      return;
+    }
+    // The backend's per-request bound (its ArrayMaxSize names 200): a save
+    // carrying more would fail as a WHOLE-REQUEST 400 with no verdicts ever
+    // rendered — refuse it here with the bound named.
+    if (items.length > MAX_BUFFER_ITEMS) {
+      onOutcome({
+        tone: 'rejected',
+        word: 'Not saved',
+        reason: `This save carries ${items.length} lines; at most ${MAX_BUFFER_ITEMS} rows per save — clear in batches. Nothing was sent.`,
       });
       return;
     }

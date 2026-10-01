@@ -17,6 +17,7 @@ import {
   lagLabel,
   retryAcceptedSentence,
   setBuffersReason,
+  updateConnectionConfigReason,
 } from './channels';
 
 /**
@@ -150,6 +151,16 @@ describe('the reason mappers', () => {
     const unreachable = setBuffersReason(problem(503, 'reservation-store-unavailable'));
     expect(unreachable).toContain('no buffer was changed');
     expect(setBuffersReason(problem(404, 'not-found'))).toContain('no longer exists');
+  });
+
+  test('the backorder-policy mapper pins the capability refusal, the gone connection and the already-processed save', () => {
+    expect(updateConnectionConfigReason(problem(403, 'role-denied'))).toContain(
+      'cannot change a channel’s backorder policy',
+    );
+    expect(updateConnectionConfigReason(problem(404, 'not-found'))).toContain('no longer exists');
+    expect(updateConnectionConfigReason(problem(422, 'idempotency-key-reuse'))).toContain(
+      'already processed',
+    );
   });
 
   test('an unbranchable error renders the unreachable copy, not a stack trace', () => {

@@ -56,6 +56,10 @@ let nextConnectStatus = 201;
 /** null = the connect answered a problem payload (the mapper's arm). */
 let connectProblem: Record<string, unknown> | null = null;
 let nextBufferVerdicts: Record<string, unknown>[] | null = null;
+/** The config PUT's answer override (the backorder-policy arm's stub). */
+let nextConfigStatus = 200;
+/** null = the config PUT answered a problem payload (the mapper's arm). */
+let configProblem: Record<string, unknown> | null = null;
 
 function connection(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -164,6 +168,9 @@ function stubRouter(): void {
       });
     }
     if (method === 'PUT' && pathname.includes(`/channels/connections/${CONNECTION_ID}`)) {
+      if (configProblem !== null) {
+        return json(nextConfigStatus, configProblem);
+      }
       return json(200, connection({ ...(body as { backorderPolicy?: string }) }));
     }
     if (method === 'DELETE' && pathname.includes(`/channels/connections/${CONNECTION_ID}`)) {
@@ -183,6 +190,8 @@ beforeEach(() => {
   nextConnectStatus = 201;
   connectProblem = null;
   nextBufferVerdicts = null;
+  nextConfigStatus = 200;
+  configProblem = null;
   connectionRows = [connection()];
   stubRouter();
   writeSession(OWNER_SESSION);
@@ -275,7 +284,9 @@ describe('ChannelsView: the connect arm (story 7-1)', () => {
     });
     expect(header(posts[0]!, 'idempotency-key')).toBeDefined();
     const key = header(posts[0]!, 'idempotency-key')!;
-    expect(key.length).toBeGreaterThanOrEqual(26);
+    // The wire contract pins the key at EXACTLY 26 (the ULID; the backend
+    // validates minLength: 26, maxLength: 26).
+    expect(key.length).toBe(26);
     // The credentials object carries exactly the two filled fields — the
     // optional marketplaceId stays OUT of the body when blank.
     expect(
@@ -538,6 +549,58 @@ describe('ChannelsView: the standing-buffer editor (story 7-1, AD-13)', () => {
     await settle();
 
     expect(requests.filter((r) => r.method !== 'GET')).toEqual(before);
+  });
+});
+
+describe('ChannelsView: the backorder-policy arm (story 7-1)', () => {
+  test('the policy select PUTs {backorderPolicy} with a 26-char key, renders the saved sentence, and re-reads the list', async () => {
+    view = await mount();
+    const readsBefore = requestsOf('GET', '/channels/connections').length;
+    const policySelect = view.container.querySelector(
+      'select[aria-label="Backorder policy for Shopify"]',
+    ) as HTMLSelectElement;
+
+    setInput(policySelect, 'reject');
+    await settle();
+
+    const puts = requestsOf('PUT', `/channels/connections/${CONNECTION_ID}`);
+    expect(puts).toHaveLength(1);
+    expect(puts[0]!.body).toEqual({ backorderPolicy: 'reject' });
+    const key = header(puts[0]!, 'idempotency-key')!;
+    expect(key.length).toBe(26);
+    const banner = view.container.textContent ?? '';
+    expect(banner).toContain('Backorder policy saved');
+    expect(banner).toContain('Backorders are rejected');
+    // The saved sentence is the mapper's — and the list re-read (the wire's
+    // value is what re-derives the card).
+    expect(requestsOf('GET', '/channels/connections').length).toBeGreaterThan(readsBefore);
+  });
+
+  test('a policy-save refusal renders the mapper\'s words — the select stays put', async () => {
+    configProblem = {
+      code: 'role-denied',
+      title: 'Role denied',
+      status: 403,
+      detail: 'role denied',
+    };
+    nextConfigStatus = 403;
+    view = await mount();
+    const policySelect = view.container.querySelector(
+      'select[aria-label="Backorder policy for Shopify"]',
+    ) as HTMLSelectElement;
+
+    setInput(policySelect, 'reject');
+    await settle();
+
+    const banner = view.container.textContent ?? '';
+    // `updateConnectionConfigReason`'s exact words for the capability arm.
+    expect(banner).toContain('Not saved');
+    expect(banner).toContain('Your role cannot change a channel’s backorder policy.');
+    // The select stays put: the entry's policy is what still renders.
+    const still = view.container.querySelector(
+      'select[aria-label="Backorder policy for Shopify"]',
+    ) as HTMLSelectElement;
+    expect(still.value).toBe('accept');
   });
 });
 
