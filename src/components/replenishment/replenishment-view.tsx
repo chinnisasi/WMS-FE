@@ -6,11 +6,13 @@ import { useRef, useState, useSyncExternalStore } from 'react';
 import {
   ApiProblem,
   fetchApiDeleteReorderPolicy,
+  fetchApiDismissBatchAlert,
   fetchApiDismissBreach,
   fetchApiSubmitSuggestedPo,
   fetchApiUpsertReorderPolicy,
 } from '@/lib/api/client';
 import type {
+  BatchAlertDto,
   BreachDto,
   ReorderPolicyDto,
   SkuResponse,
@@ -20,12 +22,19 @@ import type {
 import { readSession, subscribeSession } from '@/lib/auth';
 import { quantityLabel } from '@/lib/format-quantity';
 import {
+  BATCH_ALERT_KIND_FILTERS,
+  BATCH_ALERT_KIND_LABEL,
+  BATCH_ALERT_STATUSES,
+  BATCH_ALERT_TAB_LABEL,
+  batchAlertDismissedSentence,
+  batchAlertQueueIntro,
   BREACH_TAB_LABEL,
   REPLENISHMENT_BREACH_STATUSES,
   SUGGESTED_PO_STATUSES,
   SUGGESTED_PO_TAB_LABEL,
   dismissAcceptedSentence,
   dismissBreachReason,
+  dismissBatchAlertReason,
   milliToBase,
   notifyReplenishmentChanged,
   parseMilliInput,
@@ -35,6 +44,8 @@ import {
   policyUpsertReason,
   submitAcceptedSentence,
   submitSuggestedPoReason,
+  type BatchAlertKindFilter,
+  type BatchAlertStatus,
   type BreachStatus,
   type SuggestedPoStatus,
 } from '@/lib/replenishment';
@@ -43,6 +54,9 @@ import { ulid } from '@/lib/ulid';
 import { useSkuMap, useUserMap, useVendorMap } from '@/lib/use-inbound';
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import {
+  useBatchAlerts,
+  useBatchDetail,
+  useExpiryPolicy,
   useReorderPolicies,
   useReplenishmentBreaches,
   useReplenishmentSuggestedPos,
@@ -64,12 +78,17 @@ import {
 } from '@/components/outbound/shell';
 
 /**
- * The Replenishment surface (story 6-1): the breach alert queue, the
- * suggested-PO drafts its sweeps minted (editable vendor + quantity,
- * submit / dismiss), and the per-warehouse reorder-override table over the
- * tenant's SKUs.
+ * The Replenishment surface (story 6-1, the expiry/aging queue is story
+ * 6-2): the breach alert queue, the batch expiry/aging alerts (kind-filtered,
+ * amber, click-through to the batch record), the suggested-PO drafts its
+ * sweeps minted (editable vendor + quantity, submit / dismiss), and the
+ * per-warehouse reorder-override table over the tenant's SKUs.
  *
- * Nothing on this surface orders anything by itself. The suggested-PO
+ * Nothing on this surface orders anything by itself, and nothing on it
+ * moves, blocks, or disposes stock: the batch alerts are EVIDENCE — a
+ * dismissal is bookkeeping on the alert row, and the scan may re-raise a
+ * dismissed alert while the batch still trips the tenant's thresholds with
+ * stock on hand (the open-only partial unique admits it). The suggested-PO
  * drafts are the SYSTEM's suggestion — the only writer of a real purchase
  * order is the submit button's command (the backend re-executes PO creation
  * under `po.manage`) — and nothing fires except an explicit click; there is
@@ -83,11 +102,13 @@ import {
  * per-command DB role read stays the authority.
  *
  * Wire units: replenishment quantities ride the module's MILLI wire (base
- * UoM × 10³) — `pointMilli`/`atpMilli`/`quantityMilli` and the policy
- * upsert body. Inputs accept base-unit decimals of at most three places
- * (milli admits nothing finer; `parseMilliInput` converts exactly, never
- * rounding); every rendered figure goes back out at the SKU's DECLARED
- * precision through `quantityLabel`, never as raw milli.
+ * UoM × 10³) — `pointMilli`/`atpMilli`/`quantityMilli`/`onHandMilli` and the
+ * policy upsert body. Inputs accept base-unit decimals of at most three
+ * places (milli admits nothing finer; `parseMilliInput` converts exactly,
+ * never rounding); every rendered figure goes back out at the SKU's
+ * DECLARED precision through `quantityLabel`, never as raw milli. (The
+ * batch DETAIL read is inventory's wire — base units at the edge — so its
+ * quantities skip the milli conversion.)
  */
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
@@ -194,6 +215,13 @@ function ReplenishmentSessioned() {
       )}
       <BreachQueue
         key={`breaches-${warehouseId}`}
+        tenantId={tenantId}
+        warehouseId={warehouseId}
+        warehouseLabel={warehouseLabel}
+        canManage={canManage}
+      />
+      <BatchAlertQueue
+        key={`batch-alerts-${warehouseId}`}
         tenantId={tenantId}
         warehouseId={warehouseId}
         warehouseLabel={warehouseLabel}
@@ -444,7 +472,335 @@ function BreachCard({
   );
 }
 
-/* ── section 2: the suggested-PO draft queue ───────────────────────────── */
+/* ── section 2: the expiry & aging batch alerts (story 6-2) ───────────── */
+
+/**
+ * The batch-alert queue panel. Two filters over one keyset read: the KIND
+ * filter (a batch can hold an expiry and an aged alert at once — two rows)
+ * and the lifecycle status tabs (the ops queue reads `open`). The panel is
+ * amber because every open row is a warning the eye should pre-attentively
+ * separate from the breach queue's neutral rows — and the kind chip NAMES
+ * its kind so the colour is never the only signal.
+ *
+ * The read-only caption reads the tenant's config (the expiry-policy GET):
+ * a `null` there is the DISABLE mechanism read back — the panel says the
+ * alerts are off rather than inventing lead/threshold days; the config's
+ * own editor is an outside-story concern (no FE editor in 6-2's scope).
+ */
+function BatchAlertQueue({
+  tenantId,
+  warehouseId,
+  warehouseLabel,
+  canManage,
+}: {
+  tenantId: string;
+  warehouseId: string;
+  warehouseLabel: string | null;
+  canManage: boolean;
+}) {
+  const [kind, setKind] = useState<BatchAlertKindFilter>('all');
+  const [tab, setTab] = useState<BatchAlertStatus>('open');
+  const queue = useBatchAlerts(warehouseId, kind, tab);
+  const policy = useExpiryPolicy();
+  const skus = useSkuMap();
+  const users = useUserMap();
+  // The outcome banner belongs to the tab it spoke about (the breach
+  // queue's keyed-state pattern).
+  const [outcomeFor, setOutcomeFor] = useState<{
+    tab: BatchAlertStatus;
+    outcome: Exclude<Outcome, null>;
+  } | null>(null);
+  const outcome: Outcome = outcomeFor?.tab === tab ? outcomeFor.outcome : null;
+  function showOutcome(next: Exclude<Outcome, null> | null) {
+    setOutcomeFor(next === null ? null : { tab, outcome: next });
+  }
+  const dismissInFlight = useRef<Set<string>>(new Set());
+  const [dismissing, setDismissing] = useState<ReadonlySet<string>>(new Set());
+  // The click-through: which row's batch detail is expanded, STAMPED with
+  // the tab it was opened on — a tab switch collapses it (different rows).
+  const [expandedFor, setExpandedFor] = useState<{
+    tab: BatchAlertStatus;
+    alertId: string;
+  } | null>(null);
+  const expandedId = expandedFor?.tab === tab ? expandedFor.alertId : null;
+
+  async function dismiss(entry: BatchAlertDto) {
+    if (dismissInFlight.current.has(entry.id)) return;
+    dismissInFlight.current.add(entry.id);
+    setDismissing((prev) => new Set(prev).add(entry.id));
+    showOutcome(null);
+    try {
+      const response = await fetchApiDismissBatchAlert(tenantId, entry.id, ulid());
+      showOutcome({
+        tone: 'accepted',
+        word: 'Alert dismissed',
+        reason: batchAlertDismissedSentence(response),
+      });
+      notifyReplenishmentChanged();
+    } catch (error) {
+      showOutcome({
+        tone: 'rejected',
+        word: 'Not dismissed',
+        reason: dismissBatchAlertReason(error),
+      });
+      // A 409 means the alert left open state in between (a scan auto-
+      // resolved it, another tab dismissed it) — the reload IS that
+      // refusal's recovery.
+      if (error instanceof ApiProblem && error.status === 409) {
+        queue.reload();
+      }
+    } finally {
+      dismissInFlight.current.delete(entry.id);
+      setDismissing((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  }
+
+  const kindLabel = (k: BatchAlertKindFilter) =>
+    k === 'all' ? 'All kinds' : BATCH_ALERT_KIND_LABEL[k];
+
+  return (
+    <Section title="Expiry & aging alerts">
+      <div className="-mt-2 text-xs text-(--muted-foreground)">
+        {policy.state === 'ready'
+          ? policy.data === null
+            ? 'Expiry and aging alerts are OFF — no expiry alert config has been set for this tenant.'
+            : `Expiring within ${policy.data.expiryLeadDays} day${policy.data.expiryLeadDays === 1 ? '' : 's'} · aged past ${policy.data.agingThresholdDays} day${policy.data.agingThresholdDays === 1 ? '' : 's'} of intake.`
+          : policy.state === 'failed'
+            ? policy.reason
+            : 'Reading the tenant’s alert config…'}
+      </div>
+      <div className="text-xs text-(--muted-foreground)">{batchAlertQueueIntro(tab)}</div>
+      <div className="flex flex-wrap items-center gap-4">
+        {/* The kind filter — a batch can carry BOTH kinds; `all` is the merge. */}
+        <StatusTabs
+          statuses={BATCH_ALERT_KIND_FILTERS}
+          labels={Object.fromEntries(
+            BATCH_ALERT_KIND_FILTERS.map((k) => [k, kindLabel(k)]),
+          ) as Record<BatchAlertKindFilter, string>}
+          value={kind}
+          ariaLabel="Batch alert kind"
+          onSelect={setKind}
+        />
+        <StatusTabs
+          statuses={BATCH_ALERT_STATUSES}
+          labels={BATCH_ALERT_TAB_LABEL}
+          value={tab}
+          ariaLabel="Batch alert status"
+          onSelect={setTab}
+        />
+      </div>
+      {queue.state === 'failed' ? (
+        <ReadFailure
+          word="Batch alerts unavailable"
+          reason={queue.reason}
+          onRetry={queue.reload}
+        />
+      ) : queue.state === 'ready' && queue.data.items.length === 0 ? (
+        <div className="rounded-md border border-(--border) p-3 text-(--muted-foreground)">
+          {kind === 'all'
+            ? `No ${tab === 'open' ? 'open' : BATCH_ALERT_TAB_LABEL[tab].toLowerCase()} batch alerts.`
+            : `No ${BATCH_ALERT_TAB_LABEL[tab].toLowerCase()} ${BATCH_ALERT_KIND_LABEL[kind].toLowerCase()} batch alerts.`}
+        </div>
+      ) : queue.state === 'ready' ? (
+        <div className="flex flex-col gap-2">
+          {queue.data.items.map((entry) => (
+            <BatchAlertCard
+              key={entry.id}
+              entry={entry}
+              sku={skus?.[entry.skuId] ?? null}
+              warehouseLabel={warehouseLabel}
+              resolvedBy={
+                entry.resolvedBy === null ? null : (users?.[entry.resolvedBy]?.email ?? null)
+              }
+              autoResolved={entry.status === 'resolved' && entry.resolvedBy === null}
+              canManage={canManage}
+              expanded={expandedId === entry.id}
+              dismissing={dismissing.has(entry.id)}
+              onToggle={() => void setExpandedFor((prev) => (prev?.tab === tab && prev?.alertId === entry.id ? null : { tab, alertId: entry.id }))}
+              onDismiss={() => void dismiss(entry)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="p-3 text-(--muted-foreground)">Loading…</div>
+      )}
+      {queue.state === 'ready' && queue.data.nextCursor !== null && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => queue.onCursor(queue.data.nextCursor)}
+            className="rounded-sm border border-(--border) px-3 py-1 text-xs hover:bg-(--muted)"
+          >
+            Next
+          </button>
+        </div>
+      )}
+      {outcome !== null && (
+        <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />
+      )}
+    </Section>
+  );
+}
+
+/**
+ * One batch-alert card. OPEN rows carry the amber treatment (the card's
+ * border and ground) with a kind chip naming the kind — the queue's
+ * separation is never colour alone. Quantities render at the row's own
+ * SKU's declared precision; a resolved row with no dismisser says so — the
+ * auto-resolve stamped nobody (`resolved_by` null), and claiming a human
+ * closed it would mis-read the audit.
+ */
+function BatchAlertCard({
+  entry,
+  sku,
+  warehouseLabel,
+  resolvedBy,
+  autoResolved,
+  canManage,
+  expanded,
+  dismissing,
+  onToggle,
+  onDismiss,
+}: {
+  entry: BatchAlertDto;
+  sku: SkuResponse | null;
+  warehouseLabel: string | null;
+  resolvedBy: string | null;
+  autoResolved: boolean;
+  canManage: boolean;
+  expanded: boolean;
+  dismissing: boolean;
+  onToggle: () => void;
+  onDismiss: () => void;
+}) {
+  const qty = (milli: number) => quantityLabel(milliToBase(milli), sku);
+  const isOpen = entry.status === 'open';
+  return (
+    <article
+      className={
+        isOpen
+          ? 'flex flex-col gap-2 rounded-sm border border-(--warning) bg-(--warning)/10 p-3'
+          : 'flex flex-col gap-2 rounded-sm border border-(--border) p-3'
+      }
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-mono text-xs">{sku?.code ?? '(unknown SKU)'}</span>
+        {warehouseLabel !== null && (
+          <span className="font-mono text-xs text-(--muted-foreground)">{warehouseLabel}</span>
+        )}
+        {isOpen && (
+          <span className="rounded-full border border-(--warning) bg-(--warning)/10 px-2 py-0.5 text-xs font-medium text-(--foreground)">
+            {BATCH_ALERT_KIND_LABEL[entry.kind]}
+          </span>
+        )}
+      </div>
+      <div className="data flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
+        {/* Optional in the dto because the DISMISSAL snapshot omits the stitches;
+            every list row (the only shape a card renders) carries both. */}
+        <span>on-hand {qty(entry.onHandMilli ?? 0)}</span>
+        {/* The aged row's ONE frozen fact: age moves; the alert records what it saw. */}
+        {entry.ageDays !== null && <span>age {entry.ageDays}d</span>}
+        {/* The batch's human code, stitched into the list read (catalog-owned
+            identity); the short id only if a shape ever arrives without it. */}
+        <span className="font-mono">
+          batch {entry.batchCode ?? `${entry.batchId.slice(0, 8)}…`}
+        </span>
+        <time dateTime={entry.detectedAt}>{new Date(entry.detectedAt).toLocaleString()}</time>
+      </div>
+      {entry.status !== 'open' && (
+        <div className="flex flex-wrap gap-x-2 text-xs text-(--muted-foreground)">
+          <span>now {BATCH_ALERT_TAB_LABEL[entry.status].toLowerCase()}</span>
+          {autoResolved ? (
+            <span>· resolved by consumption — nobody acted</span>
+          ) : (
+            resolvedBy !== null && <span>· dismissed by {resolvedBy}</span>
+          )}
+          {entry.resolvedAt !== null && (
+            <time dateTime={entry.resolvedAt}>{new Date(entry.resolvedAt).toLocaleString()}</time>
+          )}
+        </div>
+      )}
+      {expanded && <BatchDetailBlock batchId={entry.batchId} sku={sku} />}
+      <div className="flex flex-wrap justify-end gap-1">
+        <button type="button" onClick={onToggle} className={rowButtonClass}>
+          {expanded ? 'Hide batch' : 'View batch'}
+        </button>
+        {isOpen && canManage && (
+          <button
+            type="button"
+            disabled={dismissing}
+            onClick={() => void onDismiss()}
+            className="rounded-sm border border-(--border) px-3 py-1 text-xs hover:bg-(--muted) disabled:opacity-60"
+          >
+            {dismissing ? 'Dismissing…' : 'Dismiss'}
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+/**
+ * The alert's click-through: the batch RECORD (`GET .../inventory/batches/
+ * {id}` — inventory's wire, quantities in BASE units at the edge, so no
+ * milli conversion here). Read on demand, shown inline; a foreign or
+ * deleted batch is the failed arm, not a quiet collapse back to the row.
+ */
+function BatchDetailBlock({ batchId, sku }: { batchId: string; sku: SkuResponse | null }) {
+  const detail = useBatchDetail(batchId);
+  if (detail.state === 'loading') {
+    return <div className="p-2 text-xs text-(--muted-foreground)">Loading batch record…</div>;
+  }
+  if (detail.state === 'failed') {
+    return (
+      <div className="text-xs">
+        <ReadFailure word="Batch unavailable" reason={detail.reason} onRetry={detail.reload} />
+      </div>
+    );
+  }
+  const batch = detail.data;
+  return (
+    <div className="rounded-sm border border-(--border) bg-(--background) p-2 text-xs">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-mono">{batch.code}</span>
+        <span>{batch.status}</span>
+        {batch.expiryDate !== null && (
+          <span>
+            expiry <time dateTime={batch.expiryDate}>{new Date(batch.expiryDate).toLocaleDateString()}</time>
+          </span>
+        )}
+        {batch.mfgDate !== null && (
+          <span>
+            mfg <time dateTime={batch.mfgDate}>{new Date(batch.mfgDate).toLocaleDateString()}</time>
+          </span>
+        )}
+      </div>
+      <div className="mt-1 flex flex-col gap-0.5">
+        <span className="text-(--muted-foreground)">Stock by bin</span>
+        {batch.bins.length === 0 ? (
+          <span className="text-(--muted-foreground)">no stock anywhere in this tenant</span>
+        ) : (
+          batch.bins.map((bin) => (
+            <span key={`${bin.warehouseId}-${bin.binId}`} className="data">
+              {quantityLabel(bin.quantity, sku)} — {bin.warehouseId.slice(0, 8)}… / {bin.binId.slice(0, 8)}…
+            </span>
+          ))
+        )}
+      </div>
+      <div className="mt-1">
+        <span className="text-(--muted-foreground)">
+          {batch.history.length} movement{batch.history.length === 1 ? '' : 's'} since intake
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ── section 4: the suggested-PO draft queue ───────────────────────────── */
 
 function SuggestedPoQueue({
   tenantId,
@@ -720,7 +1076,7 @@ function quantityHint(precision: number | null): string {
   return precision === 0 ? 'whole units' : 'decimals to 3 places';
 }
 
-/* ── section 3: the reorder-override table ─────────────────────────────── */
+/* ── section 5: the reorder-override table ─────────────────────────────── */
 
 function PolicyTable({
   tenantId,

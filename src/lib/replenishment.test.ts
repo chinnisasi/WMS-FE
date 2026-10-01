@@ -1,11 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from './api/client';
+import type { BatchAlertResponse } from './api/generated';
 import {
+  BATCH_ALERT_KIND_LABEL,
+  BATCH_ALERT_KINDS,
+  BATCH_ALERT_STATUSES,
+  batchAlertDismissedSentence,
   BREACH_TAB_LABEL,
   SUGGESTED_PO_TAB_LABEL,
   dismissAcceptedSentence,
   dismissBreachReason,
+  dismissBatchAlertReason,
   milliToBase,
   parseMilliInput,
   policyDeletedSentence,
@@ -21,10 +27,11 @@ import {
 import { UNREACHABLE_REASON } from './outbound-orders';
 
 /**
- * The replenishment module's pure decisions (story 6-1). The load-bearing
- * pins: the verbatim 409 refusals (the server's own words are the only
- * honest rendering of a cause invisible in the DTOs this client holds),
- * the UNREACHABLE transport arm on every mapper, the milli input grammar
+ * The replenishment module's pure decisions (story 6-1; the batch-alert
+ * vocabulary and mappers are story 6-2). The load-bearing pins: the
+ * verbatim 409 refusals (the server's own words are the only honest
+ * rendering of a cause invisible in the DTOs this client holds), the
+ * UNREACHABLE transport arm on every mapper, the milli input grammar
  * (exact, never rounding, 0 admitted onto the wire), and the FLAT
  * submit-response reading — `purchaseOrder` IS the minted PO.
  */
@@ -196,8 +203,86 @@ describe('vocabularies', () => {
     expect(SUGGESTED_PO_STATUSES).toEqual(['draft', 'submitted', 'dismissed']);
     expect(Object.keys(SUGGESTED_PO_TAB_LABEL).sort()).toEqual([...SUGGESTED_PO_STATUSES].sort());
   });
+
+  test('the batch-alert vocabularies (story 6-2) mirror the backend CHECKs', () => {
+    expect(BATCH_ALERT_KINDS).toEqual(['expiry_upcoming', 'aged']);
+    expect(BATCH_ALERT_STATUSES).toEqual(['open', 'resolved', 'dismissed']);
+    expect(Object.keys(BATCH_ALERT_KIND_LABEL).sort()).toEqual([...BATCH_ALERT_KINDS].sort());
+    // The kind filter is the two kinds PLUS the unfiltered all.
+    expect(BATCH_ALERT_KIND_LABEL.expiry_upcoming).toBe('Expiring soon');
+    expect(BATCH_ALERT_KIND_LABEL.aged).toBe('Aged');
+  });
+
+  test('the list reason names the new subject', () => {
+    expect(replenishmentListReason(problem('unknown-code', 500), 'batch alerts')).toBe(
+      'Could not load the batch alerts.',
+    );
+    expect(replenishmentListReason(new Error('x'), 'batch alerts')).toBe(UNREACHABLE_REASON);
+  });
 });
 
+describe('dismissBatchAlertReason (story 6-2)', () => {
+  test('the 409 batch-alert-not-open arm renders the server\'s own words verbatim', () => {
+    expect(
+      dismissBatchAlertReason(
+        problem('batch-alert-not-open', 409, 'This batch alert was auto-resolved moments ago.', 'Batch alert not open'),
+      ),
+    ).toBe('Batch alert not open — This batch alert was auto-resolved moments ago.');
+  });
+
+  test('the 409 shape holds without a title or a detail', () => {
+    expect(dismissBatchAlertReason(problem('batch-alert-not-open', 409, 'some detail'))).toBe(
+      'some detail',
+    );
+    expect(dismissBatchAlertReason(problem('batch-alert-not-open', 409))).toBe(
+      'Not dismissed (batch-alert-not-open).',
+    );
+  });
+
+  test('the role gate, the missing row and the transport arm land as usual', () => {
+    expect(dismissBatchAlertReason(problem('role-denied', 403))).toBe(
+      'Your role cannot dismiss batch alerts.',
+    );
+    expect(dismissBatchAlertReason(problem('not-found', 404))).toBe(
+      'This alert no longer exists — refresh the queue.',
+    );
+    // Key reuse is a 422 here (a 409-carried one would land on the verbatim
+    // arm above — the code switch is only reachable for non-409s).
+    expect(dismissBatchAlertReason(problem('idempotency-key-reuse', 422))).toBe(
+      'This dismissal was already processed.',
+    );
+    expect(dismissBatchAlertReason(new Error('socket hang up'))).toBe(UNREACHABLE_REASON);
+  });
+});
+
+describe('batchAlertDismissedSentence (story 6-2)', () => {
+  test('the sentence names the kind AND the re-raise clause — dismissal is bookkeeping, not suppression', () => {
+    const snapshot = (kind: 'expiry_upcoming' | 'aged'): BatchAlertResponse => ({
+      batchAlert: {
+        id: 'alert-1',
+        warehouseId: 'w',
+        skuId: 's',
+        batchId: 'b',
+        kind,
+        status: 'dismissed',
+        ageDays: kind === 'aged' ? 30 : null,
+        onHandMilli: 5000,
+        detectedAt: '2026-09-28T08:00:00.000Z',
+        resolvedAt: '2026-09-28T09:00:00.000Z',
+        resolvedBy: 'u-1',
+      },
+    });
+    expect(batchAlertDismissedSentence(snapshot('expiry_upcoming'))).toContain(
+      'The expiry alert is dismissed',
+    );
+    expect(batchAlertDismissedSentence(snapshot('aged'))).toContain(
+      'The aged alert is dismissed',
+    );
+    expect(batchAlertDismissedSentence(snapshot('aged'))).toContain(
+      'the expiry scan raises a fresh alert',
+    );
+  });
+});
 /** A minimal problem-details carrier (positional, per ApiProblem's constructor). */
 function problem(code: string, status: number, detail?: string, title?: string): ApiProblem {
   return new ApiProblem(code, status, detail, title);

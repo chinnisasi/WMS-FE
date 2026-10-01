@@ -3929,6 +3929,85 @@ export type SubmitSuggestedPoResponse = {
     purchaseOrder: PurchaseOrderDto;
 };
 
+export type ExpiryPolicyDto = {
+    /**
+     * Lead days before a batch's expiry an `expiry_upcoming` alert opens
+     */
+    expiryLeadDays: number;
+    /**
+     * Batch age since intake that raises an `aged` alert
+     */
+    agingThresholdDays: number;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last-write time
+     */
+    updatedAt: string;
+};
+
+export type ExpiryPolicyResponse = {
+    expiryPolicy: ExpiryPolicyDto;
+};
+
+export type UpsertExpiryPolicyDto = {
+    /**
+     * Lead days before a batch's expiry an `expiry_upcoming` alert opens (already-expired batches qualify at every lead). Whole-day integer ≥ 0.
+     */
+    expiryLeadDays: number;
+    /**
+     * Batch age since intake (`batches.created_at`) that raises an `aged` alert. Whole-day integer ≥ 0.
+     */
+    agingThresholdDays: number;
+};
+
+export type BatchAlertDto = {
+    id: string;
+    warehouseId: string;
+    skuId: string;
+    /**
+     * The alerted batch (the click-through target)
+     */
+    batchId: string;
+    kind: 'expiry_upcoming' | 'aged';
+    status: 'open' | 'resolved' | 'dismissed';
+    /**
+     * Batch age in days FROZEN at detection (`aged` rows only; null on expiry rows)
+     */
+    ageDays: number | null;
+    /**
+     * The LIVE batch on-hand for this scope, milli-units — re-read at read time, never stored. Carried on LIST rows; absent on the dismissal snapshot.
+     */
+    onHandMilli?: number;
+    /**
+     * The alerted batch's human code — the queue card renders it, never a truncated id. Carried on LIST rows; absent on the dismissal snapshot.
+     */
+    batchCode?: string;
+    /**
+     * The detection instant (ISO-8601 UTC) — the row's creation time
+     */
+    detectedAt: string;
+    /**
+     * Resolution instant, null while open
+     */
+    resolvedAt: string | null;
+    /**
+     * The dismisser's user id, null while open (and on auto-resolve — nobody acted)
+     */
+    resolvedBy: string | null;
+};
+
+export type BatchAlertListResponse = {
+    items: Array<BatchAlertDto>;
+    nextCursor?: string | null;
+};
+
+export type BatchAlertResponse = {
+    batchAlert: BatchAlertDto;
+};
+
 export type TenancyControllerRegisterData = {
     body: RegisterTenantDto;
     headers: {
@@ -9826,3 +9905,204 @@ export type ReplenishmentControllerSubmitSuggestedPoResponses = {
 };
 
 export type ReplenishmentControllerSubmitSuggestedPoResponse = ReplenishmentControllerSubmitSuggestedPoResponses[keyof ReplenishmentControllerSubmitSuggestedPoResponses];
+
+export type ReplenishmentControllerGetExpiryPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/replenishment/expiry-policies';
+};
+
+export type ReplenishmentControllerGetExpiryPolicyErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The tenant has no expiry/aging config row — the alerts are disabled — (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerGetExpiryPolicyError = ReplenishmentControllerGetExpiryPolicyErrors[keyof ReplenishmentControllerGetExpiryPolicyErrors];
+
+export type ReplenishmentControllerGetExpiryPolicyResponses = {
+    200: ExpiryPolicyResponse;
+};
+
+export type ReplenishmentControllerGetExpiryPolicyResponse = ReplenishmentControllerGetExpiryPolicyResponses[keyof ReplenishmentControllerGetExpiryPolicyResponses];
+
+export type ReplenishmentControllerUpsertExpiryPolicyData = {
+    body: UpsertExpiryPolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/replenishment/expiry-policies';
+};
+
+export type ReplenishmentControllerUpsertExpiryPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a negative / non-integer expiryLeadDays or agingThresholdDays (validation-failed, naming the field)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks replenishment.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A concurrent write of the same tenant's config (conflict), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerUpsertExpiryPolicyError = ReplenishmentControllerUpsertExpiryPolicyErrors[keyof ReplenishmentControllerUpsertExpiryPolicyErrors];
+
+export type ReplenishmentControllerUpsertExpiryPolicyResponses = {
+    /**
+     * The config row (created or overwritten — the idempotency snapshot)
+     */
+    200: ExpiryPolicyResponse;
+};
+
+export type ReplenishmentControllerUpsertExpiryPolicyResponse = ReplenishmentControllerUpsertExpiryPolicyResponses[keyof ReplenishmentControllerUpsertExpiryPolicyResponses];
+
+export type ReplenishmentControllerListBatchAlertsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Only alerts of one kind (the queue's kind filter — a batch can carry both)
+         */
+        kind?: 'expiry_upcoming' | 'aged';
+        /**
+         * Only alerts of one status (the lifecycle tabs; the ops queue reads open)
+         */
+        status?: 'open' | 'resolved' | 'dismissed';
+        /**
+         * Only one warehouse's alerts
+         */
+        warehouseId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/replenishment/batch-alerts';
+};
+
+export type ReplenishmentControllerListBatchAlertsErrors = {
+    /**
+     * Malformed kind, status, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A filtered warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerListBatchAlertsError = ReplenishmentControllerListBatchAlertsErrors[keyof ReplenishmentControllerListBatchAlertsErrors];
+
+export type ReplenishmentControllerListBatchAlertsResponses = {
+    200: BatchAlertListResponse;
+};
+
+export type ReplenishmentControllerListBatchAlertsResponse = ReplenishmentControllerListBatchAlertsResponses[keyof ReplenishmentControllerListBatchAlertsResponses];
+
+export type ReplenishmentControllerDismissBatchAlertData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        alertId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/replenishment/batch-alerts/{alertId}/dismiss';
+};
+
+export type ReplenishmentControllerDismissBatchAlertErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed alertId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks replenishment.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No batch alert with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The alert is not open (batch-alert-not-open, naming the status), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReplenishmentControllerDismissBatchAlertError = ReplenishmentControllerDismissBatchAlertErrors[keyof ReplenishmentControllerDismissBatchAlertErrors];
+
+export type ReplenishmentControllerDismissBatchAlertResponses = {
+    /**
+     * The dismissed batch alert row (the idempotency snapshot)
+     */
+    200: BatchAlertResponse;
+};
+
+export type ReplenishmentControllerDismissBatchAlertResponse = ReplenishmentControllerDismissBatchAlertResponses[keyof ReplenishmentControllerDismissBatchAlertResponses];

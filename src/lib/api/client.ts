@@ -24,6 +24,7 @@ import {
   inboundControllerListPurchaseOrders,
   inboundControllerListVendors,
   inventoryControllerApproveAdjustment,
+  inventoryControllerGetBatch,
   inventoryControllerListAdjustmentPendings,
   inventoryControllerListEvents,
   inventoryControllerListStock,
@@ -56,7 +57,10 @@ import {
   receivingControllerReleaseQcHold,
   receivingControllerRejectOverReceipt,
   replenishmentControllerDeleteReorderPolicy,
+  replenishmentControllerDismissBatchAlert,
   replenishmentControllerDismissBreach,
+  replenishmentControllerGetExpiryPolicy,
+  replenishmentControllerListBatchAlerts,
   replenishmentControllerListBreaches,
   replenishmentControllerListReorderPolicies,
   replenishmentControllerListSuggestedPos,
@@ -138,6 +142,10 @@ import type {
   ReorderPolicyResponse,
   BreachListResponse,
   BreachResponse,
+  BatchAlertListResponse,
+  BatchAlertResponse,
+  BatchDetailResponse,
+  ExpiryPolicyResponse,
   SuggestedPoListResponse,
   SubmitSuggestedPoResponse,
   UpsertReorderPolicyDto,
@@ -2010,6 +2018,121 @@ export async function fetchApiSubmitSuggestedPo(
     path: { tenantId, draftId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The tenant's expiry/aging alert config read-back (an ungated read): null
+ * when no config row exists, which is the DISABLE mechanism — an absent row
+ * means the scan evaluates nothing for the tenant, so the panel renders
+ * "alerts are off" rather than a failed read.
+ *
+ * Arms: 200 `{expiryPolicy}` with the last-write snapshot; 404 `not-found`
+ * → null (the disabled convention); 401 unauth / 403 foreign session →
+ * thrown as usual. No 403 role arm — the read is open to every member.
+ */
+export async function fetchApiGetExpiryPolicy(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ExpiryPolicyResponse | null> {
+  const { data, error } = await replenishmentControllerGetExpiryPolicy({
+    path: { tenantId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    if (isProblemDetails(error) && error.code === 'not-found' && error.status === 404) {
+      return null;
+    }
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Lists the tenant's batch alerts (the expiry/aging queue read, open to any
+ * member), kind-/status-/warehouse-filterable with keyset cursor pagination;
+ * each row carries its LIVE on-hand (`onHandMilli`, re-read at read time).
+ * A first page with no filters sends no query.
+ *
+ * Arms: 400 `invalid-cursor` on a stale/malformed cursor (validation-failed
+ * naming `cursor` lands in the same mapper), `limit`/`kind`/`status`
+ * validation otherwise; 404 `not-found` on a foreign warehouse filter; the
+ * list read has no capability arm.
+ */
+export async function fetchApiListBatchAlerts(
+  tenantId: string,
+  options?: {
+    kind?: 'expiry_upcoming' | 'aged';
+    status?: 'open' | 'resolved' | 'dismissed';
+    warehouseId?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<BatchAlertListResponse> {
+  const { data, error } = await replenishmentControllerListBatchAlerts({
+    path: { tenantId },
+    query:
+      options?.kind === undefined &&
+      options?.status === undefined &&
+      options?.warehouseId === undefined &&
+      options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.kind === undefined ? {} : { kind: options.kind }),
+            ...(options.status === undefined ? {} : { status: options.status }),
+            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Dismisses an OPEN batch alert (capability `replenishment.manage`) —
+ * `open → dismissed`, the dismisser stamped; no stock-side effect (the
+ * alert is evidence). A 409 `batch-alert-not-open` means the alert left
+ * `open` state in between (auto-resolved by a scan, dismissed in another
+ * tab) — cause invisible client-side, so the server's words render. The
+ * body is empty.
+ */
+export async function fetchApiDismissBatchAlert(
+  tenantId: string,
+  alertId: string,
+  idempotencyKey: string,
+): Promise<BatchAlertResponse> {
+  const { data, error } = await replenishmentControllerDismissBatchAlert({
+    path: { tenantId, alertId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * One batch's detail read (the panel's click-through target): identity,
+ * expiry/mfg dates, lifecycle status, per-bin on-hand rows, and the full
+ * movement history. Unknown or foreign batch → 404, thrown (the caller
+ * renders the failed arm — unlike the expiry-policy read, a missing
+ * batch here is an error, not a "none yet" state).
+ */
+export async function fetchApiGetBatch(
+  tenantId: string,
+  batchId: string,
+  options?: { signal?: AbortSignal },
+): Promise<BatchDetailResponse> {
+  const { data, error } = await inventoryControllerGetBatch({
+    path: { tenantId, batchId },
+    signal: options?.signal,
   });
   if (error || !data) {
     throw unwrapError(error, 400);

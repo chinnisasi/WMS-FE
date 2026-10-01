@@ -1,13 +1,13 @@
 import { ApiProblem } from '@/lib/api/client';
-import type { SubmitSuggestedPoResponse } from '@/lib/api/generated';
+import type { BatchAlertResponse, SubmitSuggestedPoResponse } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
 /**
  * The replenishment surface's pure decisions (story 6-1, the
- * `review-queue.ts`/`outbound-orders.ts` pattern): the queue vocabularies,
- * the milli-quantity input grammar, and the machine-problem reason strings
- * of the reads and commands. Clients branch on the problem `code`, never on
- * prose.
+ * `review-queue.ts`/`outbound-orders.ts` pattern; the batch-alert vocabulary
+ * is story 6-2): the queue vocabularies, the milli-quantity input grammar,
+ * and the machine-problem reason strings of the reads and commands. Clients
+ * branch on the problem `code`, never on prose.
  */
 
 /** The breach alert lifecycle (the backend CHECK): `open` plus the three terminal arms. */
@@ -17,6 +17,23 @@ export type BreachStatus = (typeof REPLENISHMENT_BREACH_STATUSES)[number];
 /** The suggested-PO lifecycle (the backend CHECK): the draft queue plus its two settled arms. */
 export const SUGGESTED_PO_STATUSES = ['draft', 'submitted', 'dismissed'] as const;
 export type SuggestedPoStatus = (typeof SUGGESTED_PO_STATUSES)[number];
+
+/**
+ * The batch-alert vocabularies (story 6-2, the backend CHECKs): two kinds —
+ * an `expiry_upcoming` alert (the batch's expiry falls inside the tenant's
+ * lead days) and an `aged` alert (intake-anchored age past the threshold) —
+ * over the same open/resolved/dismissed lifecycle as a breach. A batch can
+ * hold BOTH at once (two rows; the queue's kind filter splits them).
+ */
+export const BATCH_ALERT_KINDS = ['expiry_upcoming', 'aged'] as const;
+export type BatchAlertKind = (typeof BATCH_ALERT_KINDS)[number];
+
+export const BATCH_ALERT_STATUSES = ['open', 'resolved', 'dismissed'] as const;
+export type BatchAlertStatus = (typeof BATCH_ALERT_STATUSES)[number];
+
+/** The kind filter's tabs: the two kinds plus the unfiltered `all`. */
+export const BATCH_ALERT_KIND_FILTERS = ['all', 'expiry_upcoming', 'aged'] as const;
+export type BatchAlertKindFilter = (typeof BATCH_ALERT_KIND_FILTERS)[number];
 
 export const BREACH_TAB_LABEL: Record<BreachStatus, string> = {
   open: 'Open',
@@ -29,6 +46,17 @@ export const SUGGESTED_PO_TAB_LABEL: Record<SuggestedPoStatus, string> = {
   draft: 'Drafts',
   submitted: 'Submitted',
   dismissed: 'Dismissed',
+};
+
+export const BATCH_ALERT_TAB_LABEL: Record<BatchAlertStatus, string> = {
+  open: 'Open',
+  resolved: 'Resolved',
+  dismissed: 'Dismissed',
+};
+
+export const BATCH_ALERT_KIND_LABEL: Record<BatchAlertKind, string> = {
+  expiry_upcoming: 'Expiring soon',
+  aged: 'Aged',
 };
 
 /** Fired on `window` after a replenishment mutation (policy, dismiss, submit). */
@@ -76,7 +104,7 @@ export function milliToBase(milli: number): number {
  */
 export function replenishmentListReason(
   error: unknown,
-  subject: 'reorder policies' | 'breaches' | 'suggested POs',
+  subject: 'reorder policies' | 'breaches' | 'suggested POs' | 'batch alerts',
 ): string {
   if (error instanceof ApiProblem) {
     switch (error.code) {
@@ -248,4 +276,62 @@ export function policySavedSentence(): string {
 /** The policy removal's one-sentence acceptance. */
 export function policyDeletedSentence(): string {
   return 'The override is gone — the SKU’s tenant-wide defaults resume as the effective point.';
+}
+
+/**
+ * A batch-alert dismissal's failure reasons (story 6-2, capability
+ * `replenishment.manage`). The 409 arm (`batch-alert-not-open`) lands
+ * verbatim — the alert auto-resolved between this client's read and the
+ * click, or was dismissed elsewhere, and no DTO here carries the cause, so
+ * the server's own words are the only honest rendering (the breach
+ * dismissal's convention). The queue reloads on any 409 either way.
+ */
+export function dismissBatchAlertReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    if (error.status === 409) {
+      return error.title !== undefined
+        ? `${error.title}${error.detail === undefined ? '' : ` — ${error.detail}`}`
+        : (error.detail ?? `Not dismissed (${error.code}).`);
+    }
+    switch (error.code) {
+      case 'not-found':
+        return 'This alert no longer exists — refresh the queue.';
+      case 'role-denied':
+        return 'Your role cannot dismiss batch alerts.';
+      case 'permission-denied':
+        return 'That data belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This dismissal was already processed.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Not dismissed — check the request and try again.';
+      default:
+        return error.detail ?? `Not dismissed (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+/**
+ * The batch-alert dismissal's acceptance sentence, from the response's own
+ * snapshot: it names the alert's new state AND the honest re-raise clause —
+ * dismissal is bookkeeping on an evidence row, not suppression: while the
+ * batch still sits inside the tenant's lead/threshold with stock on hand,
+ * the scan raises a FRESH alert on a later tick (the open-only partial
+ * unique admits it). Saying the alert is "gone" would promise what the
+ * system does not do.
+ */
+export function batchAlertDismissedSentence(response: BatchAlertResponse): string {
+  const alert = response.batchAlert;
+  const kind = alert.kind === 'aged' ? 'aged' : 'expiry';
+  return `The ${kind} alert is dismissed. While the batch still trips the tenant's thresholds with stock on hand, the expiry scan raises a fresh alert.`;
+}
+
+/** The batch-alert queue's one intro line (kind-aware on the open tab). */
+export function batchAlertQueueIntro(tab: BatchAlertStatus): string {
+  if (tab === 'open') {
+    return 'Batches inside the tenant’s expiry lead days or past its aging threshold, with stock on hand. An alert closes when the batch is consumed to zero (resolved, no one stamped) or you dismiss it here — dismissal is bookkeeping, not a stock action.';
+  }
+  return 'Resolved alerts closed themselves when the batch was consumed to zero; dismissed ones were dismissed here.';
 }
