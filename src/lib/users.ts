@@ -130,6 +130,12 @@ export const CAPABILITIES = [
   // re-asserts its own gate), so this capability covers the PLANNING surface;
   // no web verb exists without it that could mint a PO directly.
   'replenishment.manage',
+  // Story 7-1 — the channels surface's mutations (connect a sales channel,
+  // rotate its credentials, set its standing buffers, disconnect). Owner +
+  // Ops Manager only (the backend's decided holder set — channels are not a
+  // floor verb and not an accounting verb). The /channels surface is this
+  // story's T4; the mirror keeps the drift guard honest either way.
+  'channel.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

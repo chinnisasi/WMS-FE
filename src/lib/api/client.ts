@@ -10,6 +10,13 @@ import {
   catalogControllerListProducts,
   catalogControllerListSkus,
   catalogControllerReplaceKit,
+  channelsControllerConnect,
+  channelsControllerDisconnect,
+  channelsControllerListConnections,
+  channelsControllerRetryConnection,
+  channelsControllerRotateCredentials,
+  channelsControllerSetConnectionBuffers,
+  channelsControllerUpdateConnectionConfig,
   carriersControllerListConnections,
   complianceControllerGetOrderColdChainTrace,
   complianceControllerListExcursions,
@@ -96,6 +103,13 @@ import type {
   BinMergeResponse,
   BinResponse,
   CatalogImportResponse,
+  ChannelBuffersSetResponse,
+  ChannelConnectionResponse,
+  ChannelConnectionsResponse,
+  ConnectChannelDto,
+  RotateChannelCredentialDto,
+  SetChannelBuffersDto,
+  UpdateConnectionConfigDto,
   ColdChainTraceResponse,
   CreateBinDto,
   CreateProductDto,
@@ -2164,4 +2178,151 @@ export async function refreshSessionUser(): Promise<void> {
     // A failed refresh leaves the stored role in place — the backend still
     // gates every command; hiding is cosmetic, not authoritative.
   }
+}
+
+// ── Channels (story 7-1) ────────────────────────────────────────────────────
+
+/**
+ * Lists the tenant's channel connections with their sync health (story 7-1) —
+ * public faces only, never credential material. Open to every member
+ * server-side (the repo rule: reads ungated; the mutations carry
+ * `channel.manage`).
+ */
+export async function fetchApiListChannelConnections(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ChannelConnectionsResponse> {
+  const { data, error } = await channelsControllerListConnections({
+    path: { tenantId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Connects a sales channel (capability `channel.manage`, story 7-1): the
+ * provider-shaped credential material is sealed under CHANNEL_ENCRYPTION_KEY
+ * and NEVER returned — the snapshot is the connection's public face.
+ */
+export async function fetchApiConnectChannel(
+  tenantId: string,
+  body: ConnectChannelDto,
+  idempotencyKey: string,
+): Promise<ChannelConnectionResponse> {
+  const { data, error } = await channelsControllerConnect({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Rotates a connection's credential in place (capability `channel.manage`) —
+ * same id, the version bumped, the old sealed blob replaced.
+ */
+export async function fetchApiRotateChannelCredentials(
+  tenantId: string,
+  connectionId: string,
+  body: RotateChannelCredentialDto,
+  idempotencyKey: string,
+): Promise<ChannelConnectionResponse> {
+  const { data, error } = await channelsControllerRotateCredentials({
+    path: { tenantId, connectionId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Sets a connection's backorder policy (capability `channel.manage`) —
+ * stored now, consumed by 7-2's ingestion acceptance.
+ */
+export async function fetchApiUpdateChannelConnectionConfig(
+  tenantId: string,
+  connectionId: string,
+  body: UpdateConnectionConfigDto,
+  idempotencyKey: string,
+): Promise<ChannelConnectionResponse> {
+  const { data, error } = await channelsControllerUpdateConnectionConfig({
+    path: { tenantId, connectionId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Places / adjusts / clears a connection's standing buffers per item
+ * (capability `channel.manage`) — the per-item verdicts are the answer;
+ * a `refused` item carries the server's own words (`buffer-over-ceiling`,
+ * the pool figure) and the OLD buffer still stands.
+ */
+export async function fetchApiSetChannelBuffers(
+  tenantId: string,
+  connectionId: string,
+  body: SetChannelBuffersDto,
+  idempotencyKey: string,
+): Promise<ChannelBuffersSetResponse> {
+  const { data, error } = await channelsControllerSetConnectionBuffers({
+    path: { tenantId, connectionId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Disconnects a channel (capability `channel.manage`, DELETE): a hard
+ * delete — the sealed material is gone, its standing buffers release, its
+ * mappings drop. The 204 has no body the unwrap would have called `!data`;
+ * only a problem payload is an error here.
+ */
+export async function fetchApiDisconnectChannel(
+  tenantId: string,
+  connectionId: string,
+  idempotencyKey: string,
+): Promise<void> {
+  const { error } = await channelsControllerDisconnect({
+    path: { tenantId, connectionId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error) {
+    throw unwrapError(error, 400);
+  }
+}
+
+/**
+ * Retries a stalled connection (capability `channel.manage`) — re-appends
+ * the availability snapshot through the outbox and half-opens the breaker.
+ */
+export async function fetchApiRetryChannelConnection(
+  tenantId: string,
+  connectionId: string,
+  idempotencyKey: string,
+): Promise<ChannelConnectionResponse> {
+  const { data, error } = await channelsControllerRetryConnection({
+    path: { tenantId, connectionId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
 }

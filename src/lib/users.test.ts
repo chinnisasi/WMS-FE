@@ -35,8 +35,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // `adjustments.approve` and the `counts.*` pair — 25 became 30 (5-1's
     // mirror catch-up rode 5-2's FE change; 5-3's rode 5-3's); story 5-4
     // adds `variances.resolve` — 30 became 31; story 6-1 adds
-    // `replenishment.manage` — 31 became 32.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(32);
+    // `replenishment.manage` — 31 became 32; story 7-1 adds `channel.manage`
+    // — 32 became 33.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(33);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -110,6 +111,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('ops_manager', 'variances.resolve')).toBe(true);
     // Story 6-1 — the replenishment planning verbs are manager verbs too.
     expect(roleHasCapability('ops_manager', 'replenishment.manage')).toBe(true);
+    // Story 7-1 — the channels surface's mutations are manager verbs too
+    // (owner + Ops Manager; not a floor verb, not an accounting verb).
+    expect(roleHasCapability('ops_manager', 'channel.manage')).toBe(true);
     // Story 5-2 — the approval gate is owner-only: the manager who may raise
     // the adjustment does not hold the pen.
     expect(roleHasCapability('ops_manager', 'adjustments.approve')).toBe(false);
@@ -148,6 +152,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'counts.execute',
         'variances.resolve',
         'replenishment.manage',
+        // Story 7-1 — the channels surface's mutations are manager verbs too.
+        'channel.manage',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -183,6 +189,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 4.6b — configuring a carrier account is settings work, not a
     // floor verb: the operator column stays at the floor verbs only.
     expect(roleHasCapability('operator', 'carrier.manage')).toBe(false);
+    // Story 7-1 — a channel credential is not a floor verb either.
+    expect(roleHasCapability('operator', 'channel.manage')).toBe(false);
     expect(roleHasCapability('operator', 'secure.move')).toBe(false);
     expect(roleHasCapability('operator', 'review.decide')).toBe(false);
     expect(roleHasCapability('operator', 'transfers.manage')).toBe(false);

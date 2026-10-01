@@ -4008,6 +4008,114 @@ export type BatchAlertResponse = {
     batchAlert: BatchAlertDto;
 };
 
+export type ConnectChannelDto = {
+    /**
+     * The channel provider to connect
+     */
+    provider: 'shopify' | 'amazon-in' | 'flipkart';
+    /**
+     * Provider-shaped credential material (the fields the registry declares for the provider — sealed under CHANNEL_ENCRYPTION_KEY and never returned)
+     */
+    credentials: {
+        [key: string]: string;
+    };
+};
+
+export type ChannelConnectionResponse = {
+    id: string;
+    tenantId: string;
+    provider: string;
+    providerName: string;
+    status: 'connected';
+    backorderPolicy: 'accept' | 'reject';
+    credentialVersion: number;
+    connectedBy: string;
+    rotatedAt: string | null;
+    rotatedBy: string | null;
+    lastAttemptAt: string | null;
+    lastSyncedAt: string | null;
+    lastError: string | null;
+    breakerState: 'closed' | 'open' | 'half-open';
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type RotateChannelCredentialDto = {
+    /**
+     * The rotated provider-shaped credential material (sealed in place; version bumped) — never returned
+     */
+    credentials: {
+        [key: string]: string;
+    };
+};
+
+export type UpdateConnectionConfigDto = {
+    /**
+     * The channel's backorder policy (consumed by 7-2's ingestion acceptance)
+     */
+    backorderPolicy: 'accept' | 'reject';
+};
+
+export type ChannelBufferItemDto = {
+    warehouseId: string;
+    skuId: string;
+    /**
+     * Safety buffer in MILLI-units (base UoM × 10³) — the standing reservation target (0 clears it)
+     */
+    bufferMilli: number;
+};
+
+export type SetChannelBuffersDto = {
+    /**
+     * Buffer rows to place/adjust (≤ 200 per request)
+     */
+    items: Array<ChannelBufferItemDto>;
+};
+
+export type ChannelBufferVerdictDto = {
+    index: number;
+    warehouseId: string;
+    skuId: string;
+    status: 'applied' | 'unchanged' | 'refused';
+    bufferMilli: number;
+    standingMilli: number;
+    code?: 'buffer-over-ceiling';
+    detail?: string;
+};
+
+export type ChannelBuffersSetResponse = {
+    connectionId: string;
+    verdicts: Array<ChannelBufferVerdictDto>;
+};
+
+export type ChannelConnectionListEntryDto = {
+    id: string;
+    provider: string;
+    providerName: string;
+    status: string;
+    backorderPolicy: 'accept' | 'reject';
+    credentialVersion: number;
+    health: 'ok' | 'degraded' | 'error';
+    lastSyncedAt: string | null;
+    lastAttemptAt: string | null;
+    lastError: string | null;
+    syncLagMs: number | null;
+    breakerState: 'closed' | 'open' | 'half-open';
+    createdAt: string;
+    updatedAt: string;
+    /**
+     * The standing buffer buckets: {warehouseId, skuId, bufferMilli}
+     */
+    buffers: Array<{
+        [key: string]: unknown;
+    }>;
+    mappingCount: number;
+};
+
+export type ChannelConnectionsResponse = {
+    items: Array<ChannelConnectionListEntryDto>;
+};
+
 export type TenancyControllerRegisterData = {
     body: RegisterTenantDto;
     headers: {
@@ -10106,3 +10214,364 @@ export type ReplenishmentControllerDismissBatchAlertResponses = {
 };
 
 export type ReplenishmentControllerDismissBatchAlertResponse = ReplenishmentControllerDismissBatchAlertResponses[keyof ReplenishmentControllerDismissBatchAlertResponses];
+
+export type ChannelsControllerListConnectionsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/channels/connections';
+};
+
+export type ChannelsControllerListConnectionsErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ChannelsControllerListConnectionsError = ChannelsControllerListConnectionsErrors[keyof ChannelsControllerListConnectionsErrors];
+
+export type ChannelsControllerListConnectionsResponses = {
+    200: ChannelConnectionsResponse;
+};
+
+export type ChannelsControllerListConnectionsResponse = ChannelsControllerListConnectionsResponses[keyof ChannelsControllerListConnectionsResponses];
+
+export type ChannelsControllerConnectData = {
+    body: ConnectChannelDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/channels/connections';
+};
+
+export type ChannelsControllerConnectErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an unknown provider, or credential material missing a required field (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks channel.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * This provider is already connected for the tenant — rotate instead (connection-exists), or the same Idempotency-Key is in flight concurrently (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The deployment has no CHANNEL_ENCRYPTION_KEY (channel-encryption-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ChannelsControllerConnectError = ChannelsControllerConnectErrors[keyof ChannelsControllerConnectErrors];
+
+export type ChannelsControllerConnectResponses = {
+    201: ChannelConnectionResponse;
+};
+
+export type ChannelsControllerConnectResponse = ChannelsControllerConnectResponses[keyof ChannelsControllerConnectResponses];
+
+export type ChannelsControllerRotateCredentialsData = {
+    body: RotateChannelCredentialDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/channels/connections/{connectionId}/credentials';
+};
+
+export type ChannelsControllerRotateCredentialsErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, malformed connectionId, credential material missing a required field, or a provider this build no longer registers (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks channel.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such connection in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The same Idempotency-Key is being processed concurrently (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The deployment has no CHANNEL_ENCRYPTION_KEY (channel-encryption-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ChannelsControllerRotateCredentialsError = ChannelsControllerRotateCredentialsErrors[keyof ChannelsControllerRotateCredentialsErrors];
+
+export type ChannelsControllerRotateCredentialsResponses = {
+    200: ChannelConnectionResponse;
+};
+
+export type ChannelsControllerRotateCredentialsResponse = ChannelsControllerRotateCredentialsResponses[keyof ChannelsControllerRotateCredentialsResponses];
+
+export type ChannelsControllerDisconnectData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/channels/connections/{connectionId}';
+};
+
+export type ChannelsControllerDisconnectErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed connectionId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks channel.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such connection in this tenant, or it was already disconnected (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ChannelsControllerDisconnectError = ChannelsControllerDisconnectErrors[keyof ChannelsControllerDisconnectErrors];
+
+export type ChannelsControllerDisconnectResponses = {
+    /**
+     * The connection was deleted (its buffers released, its mappings dropped)
+     */
+    204: void;
+};
+
+export type ChannelsControllerDisconnectResponse = ChannelsControllerDisconnectResponses[keyof ChannelsControllerDisconnectResponses];
+
+export type ChannelsControllerUpdateConnectionConfigData = {
+    body: UpdateConnectionConfigDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/channels/connections/{connectionId}';
+};
+
+export type ChannelsControllerUpdateConnectionConfigErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, malformed connectionId, or an unknown backorderPolicy (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks channel.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such connection in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The same Idempotency-Key is being processed concurrently (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ChannelsControllerUpdateConnectionConfigError = ChannelsControllerUpdateConnectionConfigErrors[keyof ChannelsControllerUpdateConnectionConfigErrors];
+
+export type ChannelsControllerUpdateConnectionConfigResponses = {
+    200: ChannelConnectionResponse;
+};
+
+export type ChannelsControllerUpdateConnectionConfigResponse = ChannelsControllerUpdateConnectionConfigResponses[keyof ChannelsControllerUpdateConnectionConfigResponses];
+
+export type ChannelsControllerSetConnectionBuffersData = {
+    body: SetChannelBuffersDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/channels/connections/{connectionId}/buffers';
+};
+
+export type ChannelsControllerSetConnectionBuffersErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, malformed connectionId, an items list out of bounds (1–200), or a bufferMilli out of range (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks channel.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such connection, warehouse or SKU in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The same Idempotency-Key is being processed concurrently (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The reservation store is unreachable (reservation-store-unavailable) — nothing was written
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ChannelsControllerSetConnectionBuffersError = ChannelsControllerSetConnectionBuffersErrors[keyof ChannelsControllerSetConnectionBuffersErrors];
+
+export type ChannelsControllerSetConnectionBuffersResponses = {
+    200: ChannelBuffersSetResponse;
+};
+
+export type ChannelsControllerSetConnectionBuffersResponse = ChannelsControllerSetConnectionBuffersResponses[keyof ChannelsControllerSetConnectionBuffersResponses];
+
+export type ChannelsControllerRetryConnectionData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/channels/connections/{connectionId}/retry';
+};
+
+export type ChannelsControllerRetryConnectionErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed connectionId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks channel.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such connection in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The same Idempotency-Key is being processed concurrently (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The reservation store is unreachable — the ATP read failed closed (reservation-store-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ChannelsControllerRetryConnectionError = ChannelsControllerRetryConnectionErrors[keyof ChannelsControllerRetryConnectionErrors];
+
+export type ChannelsControllerRetryConnectionResponses = {
+    200: ChannelConnectionResponse;
+};
+
+export type ChannelsControllerRetryConnectionResponse = ChannelsControllerRetryConnectionResponses[keyof ChannelsControllerRetryConnectionResponses];

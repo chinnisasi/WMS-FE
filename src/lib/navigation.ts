@@ -51,7 +51,18 @@ export const NAV_ITEMS: readonly NavItem[] = [
     monogram: 'RP',
     capabilities: ['replenishment.manage'],
   },
-  { id: 'channels', label: 'Channels', href: '/channels', monogram: 'CH' },
+  // Story 7-1 — gated on `channel.manage` (the spec's frozen holder set:
+  // owner + Ops Manager — a channel credential and its standing buffers are
+  // not a floor verb and not an accounting verb). The list read is
+  // member-open server-side, but the surface's every affordance is the
+  // connection lifecycle, and an Operator reaches none of it.
+  {
+    id: 'channels',
+    label: 'Channels',
+    href: '/channels',
+    monogram: 'CH',
+    capabilities: ['channel.manage'],
+  },
   { id: 'compliance', label: 'Compliance', href: '/compliance', monogram: 'CO' },
   { id: 'reports', label: 'Reports / Audit', href: '/reports', monogram: 'RA' },
   { id: 'settings', label: 'Settings', href: '/settings', monogram: 'ST' },
