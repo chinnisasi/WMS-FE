@@ -16,6 +16,8 @@ import {
   channelsControllerRetryConnection,
   channelsControllerRotateCredentials,
   channelsControllerSetConnectionBuffers,
+  channelsControllerListConnectionMappings,
+  channelsControllerSetConnectionMappings,
   channelsControllerUpdateConnectionConfig,
   carriersControllerListConnections,
   complianceControllerGetOrderColdChainTrace,
@@ -104,11 +106,13 @@ import type {
   BinResponse,
   CatalogImportResponse,
   ChannelBuffersSetResponse,
+  ChannelConnectionMappingsResponse,
   ChannelConnectionResponse,
   ChannelConnectionsResponse,
   ConnectChannelDto,
   RotateChannelCredentialDto,
   SetChannelBuffersDto,
+  SetChannelMappingsDto,
   UpdateConnectionConfigDto,
   ColdChainTraceResponse,
   CreateBinDto,
@@ -207,6 +211,13 @@ import type {
  */
 // `||` (not `??`) so a set-but-empty env var still falls back to the default.
 const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000/api/v1';
+
+// Story 7-2: the ONE origin every surface composes absolute API URLs from —
+// the channel webhook rows are built on this base, never on
+// `window.location.origin` (bl-16: the backend the browser talks to — behind
+// a proxy, on another host, a LAN box — is the base configured here; the page
+// origin can differ from it).
+export const API_BASE_URL = baseUrl;
 
 client.setConfig({
   baseUrl,
@@ -2278,6 +2289,46 @@ export async function fetchApiSetChannelBuffers(
   idempotencyKey: string,
 ): Promise<ChannelBuffersSetResponse> {
   const { data, error } = await channelsControllerSetConnectionBuffers({
+    path: { tenantId, connectionId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Reads a connection's SKU mappings (story 7-2, capability `channel.manage`
+ * — channel settings are NOT available to operators, pinned bl-21).
+ */
+export async function fetchApiListConnectionMappings(
+  tenantId: string,
+  connectionId: string,
+): Promise<ChannelConnectionMappingsResponse> {
+  const { data, error } = await channelsControllerListConnectionMappings({
+    path: { tenantId, connectionId },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Replaces a connection's SKU mappings FULLY (story 7-2, capability
+ * `channel.manage`) — rows absent from the list are removed; the publish
+ * scope ceiling (skuCount × activeWarehouses) is validated server-side and
+ * its 400 names the arithmetic.
+ */
+export async function fetchApiSetConnectionMappings(
+  tenantId: string,
+  connectionId: string,
+  body: SetChannelMappingsDto,
+  idempotencyKey: string,
+): Promise<ChannelConnectionMappingsResponse> {
+  const { data, error } = await channelsControllerSetConnectionMappings({
     path: { tenantId, connectionId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },

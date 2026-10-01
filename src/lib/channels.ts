@@ -38,6 +38,14 @@ export interface ChannelCredentialFieldSpec {
   readonly label: string;
   readonly required: boolean;
   readonly description: string;
+  /**
+   * Whether the field is secret material (`true` renders a password input).
+   * A non-secret field (Shopify's `locationId` — a warehouse identifier the
+   * merchant looks up in their admin) hides behind dots for no reason, so
+   * the default for legacy fields is kept at `true` and the new 7-2 fields
+   * declare honestly. Optional so the 7-1 declarations stay as written.
+   */
+  readonly sensitive?: boolean;
 }
 
 /**
@@ -50,6 +58,12 @@ export const CHANNEL_CREDENTIAL_FIELDS: Record<ChannelProvider, readonly Channel
     { name: 'shopDomain', label: 'Store domain', required: true, description: 'The *.myshopify.com store domain the API is called against.' },
     { name: 'accessToken', label: 'Admin API access token', required: true, description: 'The Admin API access token minted for this app by the store owner.' },
     { name: 'apiVersion', label: 'Admin API version', required: false, description: 'Optional Admin API version pin (e.g. 2026-01); the adapter default applies when absent.' },
+    // Story 7-2's two optional credential fields (the registry declares them;
+    // this mirror renders them in the connect/rotate forms automatically):
+    // the webhook signing secret the ingest verification checks HMACs
+    // against, and the fulfillment location id the writeback requires.
+    { name: 'webhookSecret', label: 'Webhook signing secret', required: false, sensitive: true, description: 'The webhook signing secret from the merchant-side app setup — deliveries carry an HMAC the ingest checks against it. Omitted means webhook ingestion stays off.' },
+    { name: 'locationId', label: 'Fulfillment location id', required: false, sensitive: false, description: 'The store location id fulfillments are written against — the writeback refuses named (writeback-location-unset) while absent.' },
   ],
   'amazon-in': [
     { name: 'sellerId', label: 'Seller id', required: true, description: "The Selling Partner account's seller identifier." },
@@ -200,7 +214,9 @@ export function updateConnectionConfigReason(error: unknown): string {
   if (error instanceof ApiProblem) {
     switch (error.code) {
       case 'not-found':
-        return 'This connection no longer exists — refresh the page.';
+        // The 404 covers BOTH: an already-deleted connection and (story 7-2)
+        // a foreign or unknown ingest warehouse on this save.
+        return 'The connection — or the warehouse chosen to ingest — no longer exists — refresh the page.';
       case 'role-denied':
         return 'Your role cannot change a channel’s backorder policy.';
       case 'permission-denied':
@@ -346,6 +362,98 @@ export function buffersSavedSentence(verdicts: readonly ChannelBufferVerdictDto[
           .map((v) => v.detail ?? v.code ?? 'refused')
           .join(' · ')}`;
   return `${head}${refusedClause}`;
+}
+
+/**
+ * The providers whose webhook endpoints exist on the wire (the FE mirror of
+ * the backend registry's `webhook` declarations — amazon-in/flipkart keep
+ * the unconfigured 501 posture, so no URL is offered for them).
+ */
+export const CHANNEL_WEBHOOK_PROVIDERS = ['shopify'] as const;
+
+/**
+ * The webhook endpoint's URL, COMPOSED FROM THE CONFIGURED API BASE (story
+ * 7-2, bl-16): the deployment base the backend is publicly reachable on —
+ * never `window.location.origin`, which is the browser app's own host and
+ * would hand the merchant an unusable URL. The backend's `/api/v1` shell is
+ * stripped from the base and the route re-appended, so a base that already
+ * carries a path prefix composes the same URL.
+ */
+export function webhookUrlFromBase(
+  apiBaseUrl: string,
+  tenantId: string,
+  provider: string,
+  connectionId: string,
+  endpoint: 'orders' | 'cancellations',
+): string {
+  const url = new URL(apiBaseUrl);
+  url.pathname = url.pathname.replace(/\/api\/v1\/?$/, '');
+  return `${url.origin}${url.pathname.replace(/\/$/, '')}/api/v1/tenants/${tenantId}/webhooks/channels/${provider}/${connectionId}/${endpoint}`;
+}
+
+/**
+ * The mappings READ's failure reasons (capability `channel.manage` — both
+ * mapping routes carry it, pinned bl-21; a 403 here is the capability arm).
+ */
+export function listMappingsReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'not-found':
+        return 'This connection no longer exists — refresh the page.';
+      case 'role-denied':
+        return 'Your role cannot read a channel’s SKU mappings.';
+      case 'permission-denied':
+        return 'That data belongs to another tenant — sign in again.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      default:
+        return error.detail ?? `Mappings not shown (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+/**
+ * A mapping save's failure reasons (capability `channel.manage`; full
+ * replacement in one transaction). The `validation-failed` arm names the
+ * caps — the 200-SKU bound or the publish scope arithmetic
+ * (skuCount × activeWarehouses) — so the detail rides VERBATIM: it carries
+ * the numbers the editor must bring under the ceiling.
+ */
+export function setMappingsReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'not-found':
+        return 'A connection or SKU on this editor no longer exists — refresh the page.';
+      case 'role-denied':
+        return 'Your role cannot edit a channel’s SKU mappings.';
+      case 'permission-denied':
+        return 'That data belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This save was already processed — click again to send a fresh request.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Mappings must name up to 200 SKUs — nothing was sent.';
+      default:
+        return error.detail ?? `Not saved (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+/** The ingest-warehouse save's one-sentence acceptance (story 7-2). */
+export function ingestWarehouseSavedSentence(warehouseCode: string | null): string {
+  return warehouseCode === null
+    ? 'The ingest warehouse was cleared — channel orders will refuse (ingest-warehouse-unset) until a warehouse is set again.'
+    : `The ingest warehouse is ${warehouseCode} — channel orders land on it through THE order path.`;
+}
+
+/** The mapping save's one-sentence acceptance (story 7-2, full replacement). */
+export function mappingsSavedSentence(count: number): string {
+  return count === 0
+    ? 'The mapping set is cleared — no channel SKU maps, and ingest refuses unmapped lines.'
+    : `${count} mapping${count === 1 ? '' : 's'} replaced — rows absent from this save are removed before the next publish cycle.`;
 }
 
 /** The disconnect's one-sentence acceptance. */

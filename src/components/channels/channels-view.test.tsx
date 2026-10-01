@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
+import { API_BASE_URL } from '../../lib/api/client';
+import { webhookUrlFromBase } from '../../lib/channels';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { ChannelsView } from './channels-view';
@@ -24,6 +26,16 @@ import { ChannelsView } from './channels-view';
  *      affordance whose POST re-reads the list,
  *   6. an operator session renders the cards read-only — no mutating
  *      affordance at all.
+ *
+ * Story 7-2 adds (same stub discipline):
+ *   7. the SKU-mapping editor: open-then-GET, a FULL-replacement PUT with a
+ *      fresh key, local refusals (blank field, duplicate channel code, the
+ *      200-row cap) that send nothing, and the server refusal arms verbatim,
+ *   8. the ingest-warehouse select: a full-shape config PUT (the policy
+ *      rides), `null` clearing through the '' sentinel, the saved sentences,
+ *   9. the webhook URL rows: composed from the CONFIGURED API base (never
+ *      the page origin), readOnly inputs with a Copy affordance, and gated
+ *      off for a provider with no wired ingest.
  */
 
 const TENANT_ID = '0198f7a2-1b3c-7d4e-8f90-112233445566';
@@ -60,6 +72,14 @@ let nextBufferVerdicts: Record<string, unknown>[] | null = null;
 let nextConfigStatus = 200;
 /** null = the config PUT answered a problem payload (the mapper's arm). */
 let configProblem: Record<string, unknown> | null = null;
+/** The mappings GET's list answer override (the editor's read arm). */
+let mappingsList: Record<string, unknown>[] | null = null;
+/** The mappings PUT's answer override, non-200 = the arm. */
+let nextMappingsStatus = 200;
+/** null = the mappings PUT answered a problem payload (the mapper's arm). */
+let mappingsProblem: Record<string, unknown> | null = null;
+/** The mappings GET's problem payload (the read arm's refusal). */
+let mappingsGetProblem: Record<string, unknown> | null = null;
 
 function connection(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -82,6 +102,7 @@ function connection(overrides: Record<string, unknown> = {}): Record<string, unk
     updatedAt: '2026-10-01T08:00:00.000Z',
     buffers: [{ warehouseId: WAREHOUSE_ID, skuId: SKU_ID, bufferMilli: 4000 }],
     mappingCount: 3,
+    ingestWarehouseId: null,
     ...overrides,
   };
 }
@@ -167,6 +188,24 @@ function stubRouter(): void {
           ],
       });
     }
+    if (method === 'GET' && pathname.endsWith('/mappings')) {
+      if (mappingsGetProblem !== null) {
+        return json(nextMappingsStatus, mappingsGetProblem);
+      }
+      return json(200, {
+        connectionId: CONNECTION_ID,
+        items: mappingsList ?? [{ externalRef: 'shop-variant-1', skuId: SKU_ID }],
+      });
+    }
+    if (method === 'PUT' && pathname.endsWith('/mappings')) {
+      if (mappingsProblem !== null) {
+        return json(nextMappingsStatus, mappingsProblem);
+      }
+      return json(nextMappingsStatus, {
+        connectionId: CONNECTION_ID,
+        items: (body as { items: { externalRef: string; skuId: string }[] }).items,
+      });
+    }
     if (method === 'PUT' && pathname.includes(`/channels/connections/${CONNECTION_ID}`)) {
       if (configProblem !== null) {
         return json(nextConfigStatus, configProblem);
@@ -192,6 +231,10 @@ beforeEach(() => {
   nextBufferVerdicts = null;
   nextConfigStatus = 200;
   configProblem = null;
+  mappingsList = null;
+  nextMappingsStatus = 200;
+  mappingsProblem = null;
+  mappingsGetProblem = null;
   connectionRows = [connection()];
   stubRouter();
   writeSession(OWNER_SESSION);
@@ -623,5 +666,262 @@ describe('ChannelsView: the capability gate (story 7-1)', () => {
     expect(labels).toContain('Rotate credential');
     expect(labels).toContain('Disconnect');
     expect(labels).toContain('Save buffers');
+  });
+});
+
+describe('ChannelsView: the SKU-mapping editor (story 7-2)', () => {
+  test('open-then-GET; the save is a FULL-replacement PUT with a fresh key', async () => {
+    mappingsList = [
+      { externalRef: 'shop-variant-1', skuId: SKU_ID },
+      { externalRef: 'shop-variant-2', skuId: SKU_ID },
+    ];
+    view = await mount();
+
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    // The GET carried no key (a read, not a mutation).
+    expect(requestsOf('GET', '/mappings')).toHaveLength(1);
+
+    const ref1 = view.container.querySelector(
+      'input[aria-label="Channel SKU for row row-0"]',
+    ) as HTMLInputElement;
+    expect(ref1.value).toBe('shop-variant-1');
+    const sku0 = view.container.querySelector(
+      'select[aria-label="Warehouse SKU for row row-1"]',
+    ) as HTMLSelectElement;
+    setInput(sku0, SKU_ID);
+
+    await click(button(view.container, 'Add row'));
+    const newRow = view.container.querySelector(
+      'input[aria-label="Channel SKU for row new-3"]',
+    ) as HTMLInputElement;
+    setInput(newRow, 'shop-variant-3');
+
+    await click(button(view.container, 'Save mappings'));
+    await settle();
+
+    const puts = requestsOf('PUT', '/mappings');
+    expect(puts).toHaveLength(1);
+    // Full replacement: every row loaded plus the added one rides the save.
+    expect(puts[0]!.body).toEqual({
+      items: [
+        { externalRef: 'shop-variant-1', skuId: SKU_ID },
+        { externalRef: 'shop-variant-2', skuId: SKU_ID },
+        { externalRef: 'shop-variant-3', skuId: SKU_ID },
+      ],
+    });
+    expect(header(puts[0]!, 'idempotency-key')).toBeDefined();
+    expect(header(puts[0]!, 'idempotency-key')!.length).toBe(26);
+    const banner = view.container.textContent ?? '';
+    expect(banner).toContain('Mappings saved');
+    expect(banner).toContain('3 mappings replaced');
+    expect(banner).toContain('rows absent from this save are removed');
+    // The list re-reads — the saved set is the card's new read.
+    expect(requestsOf('GET', '/channels/connections').length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('a duplicate channel code refuses locally — nothing is sent', async () => {
+    mappingsList = [
+      { externalRef: 'shop-variant-1', skuId: SKU_ID },
+      { externalRef: 'shop-variant-2', skuId: SKU_ID },
+    ];
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    // Point row 2 at row 1's channel code.
+    setInput(
+      view.container.querySelector('input[aria-label="Channel SKU for row row-1"]') as HTMLInputElement,
+      'shop-variant-1',
+    );
+
+    const before = requests.filter((r) => r.method !== 'GET');
+    await click(button(view.container, 'Save mappings'));
+    await settle();
+
+    expect(requests.filter((r) => r.method !== 'GET')).toEqual(before); // no PUT
+    expect(view.container.textContent).toContain('one code maps to one SKU');
+  });
+
+  test('a blank row field refuses locally — nothing is sent', async () => {
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    await click(button(view.container, 'Add row')); // a blank externalRef row
+
+    const before = requests.filter((r) => r.method !== 'GET');
+    await click(button(view.container, 'Save mappings'));
+    await settle();
+
+    expect(requests.filter((r) => r.method !== 'GET')).toEqual(before);
+    expect(view.container.textContent).toContain('Every mapping row needs a channel SKU code');
+  });
+
+  test('a save over the per-request bound refuses locally — nothing is sent', async () => {
+    // 201 loaded rows; the cap is 200.
+    mappingsList = Array.from({ length: 201 }, (_, i) => ({
+      externalRef: `shop-variant-${i}`,
+      skuId: SKU_ID,
+    }));
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+
+    const before = requests.filter((r) => r.method !== 'GET');
+    await click(button(view.container, 'Save mappings'));
+    await settle();
+
+    expect(requests.filter((r) => r.method !== 'GET')).toEqual(before); // no PUT
+    expect(view.container.textContent).toContain('at most 200 rows per connection');
+  });
+
+  test('a save refusal renders the mapper\'s words — 403 names the capability, 400 rides the detail verbatim', async () => {
+    mappingsProblem = {
+      code: 'role-denied',
+      title: 'Role denied',
+      status: 403,
+      detail: 'role denied',
+    };
+    nextMappingsStatus = 403;
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    await click(button(view.container, 'Save mappings'));
+    await settle();
+
+    const banner = view.container.textContent ?? '';
+    expect(banner).toContain('Not saved');
+    expect(banner).toContain('Your role cannot edit a channel’s SKU mappings.');
+
+    mappingsProblem = {
+      code: 'validation-failed',
+      title: 'Validation failed',
+      status: 400,
+      detail: 'the published mapping set would exceed its ceiling (3 SKUs × 2 warehouses = 6 rows)',
+    };
+    nextMappingsStatus = 400;
+    await click(button(view.container, 'Save mappings'));
+    await settle();
+    expect(view.container.textContent).toContain(
+      '3 SKUs × 2 warehouses = 6 rows',
+    );
+  });
+
+  test('a read refusal renders the list mapper\'s words inline in the panel', async () => {
+    mappingsGetProblem = {
+      code: 'not-found',
+      title: 'Not found',
+      status: 404,
+      detail: 'not found',
+    };
+    nextMappingsStatus = 404;
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    const text = view.container.textContent ?? '';
+    // The GET's 404 is the mapper's arm — and NO save affordance while the
+    // panel cannot read what it would replace.
+    expect(text).toContain('This connection no longer exists — refresh the page.');
+    expect([...view.container.querySelectorAll('button')].map((b) => b.textContent)).not.toContain(
+      'Save mappings',
+    );
+  });
+});
+
+describe('ChannelsView: the ingest warehouse and webhook rows (story 7-2)', () => {
+  test('the webhook rows compose from the CONFIGURED API base — never the page origin — and Copy works', async () => {
+    view = await mount();
+    const expectedOrders = webhookUrlFromBase(
+      API_BASE_URL,
+      TENANT_ID,
+      'shopify',
+      CONNECTION_ID,
+      'orders',
+    );
+    const expectedCancellations = webhookUrlFromBase(
+      API_BASE_URL,
+      TENANT_ID,
+      'shopify',
+      CONNECTION_ID,
+      'cancellations',
+    );
+    const ordersRow = view.container.querySelector(
+      'input[aria-label="New-order webhook URL for Shopify"]',
+    ) as HTMLInputElement;
+    const cancellationsRow = view.container.querySelector(
+      'input[aria-label="Order-cancellation webhook URL for Shopify"]',
+    ) as HTMLInputElement;
+    // The value IS the composer's answer against the configured base — the
+    // origin it carries is API_BASE_URL's, not the page's.
+    expect(ordersRow.value).toBe(expectedOrders);
+    expect(cancellationsRow.value).toBe(expectedCancellations);
+    expect(new URL(ordersRow.value).origin).toBe(new URL(API_BASE_URL).origin);
+    expect(ordersRow.value).toContain(
+      `/api/v1/tenants/${TENANT_ID}/webhooks/channels/shopify/${CONNECTION_ID}/orders`,
+    );
+    expect(cancellationsRow.value).toContain('/cancellations');
+    // Copy affordance, no modal — the row's own button.
+    await click(button(view.container, 'Copy'));
+    await settle();
+    expect(button(view.container, 'Copied').textContent).toBe('Copied');
+  });
+
+  test('a provider without a wired ingest renders no webhook rows', async () => {
+    connectionRows = [
+      connection({ provider: 'amazon-in', providerName: 'Amazon.in' }),
+    ];
+    view = await mount();
+    expect(
+      view.container.querySelector('input[aria-label="New-order webhook URL for Amazon.in"]'),
+    ).toBeNull();
+  });
+
+  test('the ingest-warehouse select PUTs the full config shape with a fresh key; clearing sends null', async () => {
+    view = await mount();
+    const readsBefore = requestsOf('GET', '/channels/connections').length;
+    const select = view.container.querySelector(
+      'select[aria-label="Ingest warehouse for Shopify"]',
+    ) as HTMLSelectElement;
+    expect(select.value).toBe(''); // nothing ingests yet
+
+    setInput(select, WAREHOUSE_ID);
+    await settle();
+
+    const puts = requestsOf('PUT', `/channels/connections/${CONNECTION_ID}`);
+    expect(puts).toHaveLength(1);
+    // The WHOLE config shape — the standing policy rides an ingest-warehouse
+    // save (an omitted sibling field leaves it alone, but the editor always
+    // speaks the full shape).
+    expect(puts[0]!.body).toEqual({
+      backorderPolicy: 'accept',
+      ingestWarehouseId: WAREHOUSE_ID,
+    });
+    expect(header(puts[0]!, 'idempotency-key')!.length).toBe(26);
+    const banner = view.container.textContent ?? '';
+    expect(banner).toContain('Ingest warehouse saved');
+    expect(banner).toContain('W1');
+    expect(requestsOf('GET', '/channels/connections').length).toBeGreaterThan(readsBefore);
+  });
+
+  test('clearing the ingest warehouse sends the null sentinel and names what clearing costs', async () => {
+    connectionRows = [connection({ ingestWarehouseId: WAREHOUSE_ID })];
+    view = await mount();
+    const select = view.container.querySelector(
+      'select[aria-label="Ingest warehouse for Shopify"]',
+    ) as HTMLSelectElement;
+    expect(select.value).toBe(WAREHOUSE_ID);
+
+    // Clearing: '' is the sentinel that becomes null on the wire.
+    setInput(select, '');
+    await settle();
+
+    const puts = requestsOf('PUT', `/channels/connections/${CONNECTION_ID}`);
+    expect(puts).toHaveLength(1);
+    expect(puts[0]!.body).toEqual({
+      backorderPolicy: 'accept',
+      ingestWarehouseId: null,
+    });
+    const banner = view.container.textContent ?? '';
+    expect(banner).toContain('Ingest warehouse saved');
+    expect(banner).toContain('ingest-warehouse-unset');
   });
 });

@@ -8,16 +8,22 @@ import {
   CHANNEL_MANAGE_CAPABILITY,
   CHANNEL_PROVIDER_LABEL,
   CHANNEL_PROVIDERS,
+  CHANNEL_WEBHOOK_PROVIDERS,
   backorderPolicySavedSentence,
   buffersSavedSentence,
   connectAcceptedSentence,
   connectReason,
   disconnectAcceptedSentence,
   entryBuckets,
+  ingestWarehouseSavedSentence,
   lagLabel,
+  listMappingsReason,
+  mappingsSavedSentence,
   retryAcceptedSentence,
   setBuffersReason,
+  setMappingsReason,
   updateConnectionConfigReason,
+  webhookUrlFromBase,
 } from './channels';
 
 /**
@@ -39,15 +45,21 @@ describe('the provider vocabulary', () => {
   });
 
   test('each provider declares its credential fields in registry wire order', () => {
-    // Shopify: domain + access token required, the version pin optional.
+    // Shopify: domain + access token required; story 7-2 appends its two
+    // OPTIONAL fields — the webhook signing secret and the fulfillment
+    // location id the writeback writes against.
     expect(CHANNEL_CREDENTIAL_FIELDS.shopify.map((f) => f.name)).toEqual([
       'shopDomain',
       'accessToken',
       'apiVersion',
+      'webhookSecret',
+      'locationId',
     ]);
     expect(CHANNEL_CREDENTIAL_FIELDS.shopify.map((f) => f.required)).toEqual([
       true,
       true,
+      false,
+      false,
       false,
     ]);
     expect(CHANNEL_CREDENTIAL_FIELDS['amazon-in'].map((f) => f.name)).toEqual([
@@ -70,6 +82,19 @@ describe('the provider vocabulary', () => {
       true,
       false,
     ]);
+  });
+
+  test('the ingest/writback fields carry their sensitivity: the secret hides, the location id does not', () => {
+    const spec = (name: string) =>
+      CHANNEL_CREDENTIAL_FIELDS.shopify.find((f) => f.name === name) as never as {
+        sensitive?: boolean;
+      };
+    // Nothing declared = password-typed (the connect-form default), so only
+    // the location id OVERRIDES to text.
+    expect(spec('webhookSecret').sensitive).toBe(true);
+    expect(spec('locationId').sensitive).toBe(false);
+    expect(spec('accessToken').sensitive).toBeUndefined();
+    expect(spec('shopDomain').sensitive).toBeUndefined();
   });
 });
 
@@ -182,6 +207,83 @@ describe('the bucket stitch', () => {
   test('the surface vocabulary names the breaker and the capability it consults', () => {
     expect(BREAKER_LABEL['open']).toContain('open');
     expect(CHANNEL_MANAGE_CAPABILITY).toBe('channel.manage');
+  });
+});
+
+describe('the webhook endpoint composer (story 7-2, bl-16)', () => {
+  test('the URL is composed from the CONFIGURED API base, not the page origin', () => {
+    // The base carries /api/v1 — it is stripped and the route re-appended.
+    expect(
+      webhookUrlFromBase(
+        'https://api.example.co.uk/api/v1',
+        't-1',
+        'shopify',
+        'conn-1',
+        'orders',
+      ),
+    ).toBe('https://api.example.co.uk/api/v1/tenants/t-1/webhooks/channels/shopify/conn-1/orders');
+  });
+
+  test('a path-prefixed base keeps its prefix and a bare base simply gains one', () => {
+    expect(
+      webhookUrlFromBase('https://gateway.example.com/wms/api/v1', 't-1', 'shopify', 'c-1', 'cancellations'),
+    ).toBe(
+      'https://gateway.example.com/wms/api/v1/tenants/t-1/webhooks/channels/shopify/c-1/cancellations',
+    );
+    expect(
+      webhookUrlFromBase('https://gateway.example.com', 't-2', 'shopify', 'c-2', 'orders'),
+    ).toBe('https://gateway.example.com/api/v1/tenants/t-2/webhooks/channels/shopify/c-2/orders');
+  });
+
+  test('only the providers with a wired ingest offer URLs', () => {
+    expect([...CHANNEL_WEBHOOK_PROVIDERS]).toEqual(['shopify']);
+    expect(CHANNEL_WEBHOOK_PROVIDERS.includes('amazon-in' as never)).toBe(false);
+  });
+});
+
+describe('the mapping mappers (story 7-2)', () => {
+  test('the read mapper separates the capability arm, the gone connection and the session arm', () => {
+    expect(listMappingsReason(problem(403, 'role-denied'))).toContain(
+      'cannot read a channel’s SKU mappings',
+    );
+    expect(listMappingsReason(problem(404, 'not-found'))).toContain('no longer exists');
+    expect(listMappingsReason(problem(401, 'unauthenticated'))).toContain('sign in again');
+    expect(listMappingsReason(problem(403, 'permission-denied'))).toContain('another tenant');
+  });
+
+  test('the save mapper pins the full-replacement refusals, the 400 arms carry their detail VERBATIM', () => {
+    expect(setMappingsReason(problem(403, 'role-denied'))).toContain(
+      'cannot edit a channel’s SKU mappings',
+    );
+    expect(setMappingsReason(problem(404, 'not-found'))).toContain('refresh the page');
+    expect(setMappingsReason(problem(422, 'idempotency-key-reuse'))).toContain('already processed');
+    // The 200-SKU / publish-scope arithmetic binds ride the server's own words.
+    expect(
+      setMappingsReason(
+        problem(
+          400,
+          'validation-failed',
+          'mappings must name at most 200 SKUs (published rows for 3 SKUs across 2 warehouses = 6)',
+        ),
+      ),
+    ).toContain('published rows for 3 SKUs across 2 warehouses = 6');
+    expect(setMappingsReason(problem(400, 'validation-failed'))).toContain('up to 200 SKUs');
+    expect(setMappingsReason(new Error('Network request failed'))).toMatch(/failed|unreachable/i);
+  });
+});
+
+describe('the 7-2 acceptance sentences', () => {
+  test('the ingest-warehouse sentences name what clearing costs', () => {
+    expect(ingestWarehouseSavedSentence(null)).toContain('ingest-warehouse-unset');
+    expect(ingestWarehouseSavedSentence('WH-A')).toContain('WH-A');
+    expect(ingestWarehouseSavedSentence('WH-A')).toContain('order path');
+  });
+
+  test('the mapping-save sentence says full replacement out loud', () => {
+    expect(mappingsSavedSentence(1)).toContain('1 mapping replaced');
+    expect(mappingsSavedSentence(3)).toContain('3 mappings replaced');
+    expect(mappingsSavedSentence(2)).toContain('removed');
+    expect(mappingsSavedSentence(0)).toContain('cleared');
   });
 });
 
