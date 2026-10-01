@@ -3,23 +3,38 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import {
+  ApiProblem,
+  fetchApiGetBatch,
+  fetchApiGetExpiryPolicy,
+  fetchApiListBatchAlerts,
   fetchApiListBreaches,
   fetchApiListReorderPolicies,
   fetchApiListSuggestedPos,
 } from '@/lib/api/client';
-import type { BreachDto, ReorderPolicyDto, SuggestedPoDto } from '@/lib/api/generated';
+import type {
+  BatchAlertDto,
+  BatchDetailResponse,
+  BreachDto,
+  ExpiryPolicyDto,
+  ReorderPolicyDto,
+  SuggestedPoDto,
+} from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { MAX_PAGE_HOPS } from '@/lib/fetch-all-pages';
+import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import {
   REPLENISHMENT_CHANGED_EVENT,
   replenishmentListReason,
+  type BatchAlertKindFilter,
+  type BatchAlertStatus,
   type BreachStatus,
   type SuggestedPoStatus,
 } from '@/lib/replenishment';
 import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
 
 /**
- * The replenishment surface's reads (story 6-1), in the shape
+ * The replenishment surface's reads (story 6-1; the batch-alert reads are
+ * story 6-2), in the shape
  * `use-outbound-waves.ts`/`use-variance-queue.ts` established: session
  * identity through `useSyncExternalStore`, a `useEffect` fetch, a
  * `revision` counter bumped by the module's window event (and by
@@ -359,4 +374,306 @@ export function useReorderPolicies(
     result.warehouseId !== warehouseId;
 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+}
+
+export interface BatchAlertsPage {
+  items: readonly BatchAlertDto[];
+  nextCursor: string | null;
+}
+
+/**
+ * One warehouse's batch alerts (story 6-2), one kind filter and one status
+ * tab at a time — the breach queue's cursor-stamped shape with the kind
+ * axis added: `all` sends no `kind` query, and a kind/status tab switch
+ * makes any in-flight cursor a first-page request (stamped, never replayed
+ * against the wrong scope).
+ */
+export function useBatchAlerts(
+  warehouseId: string | null,
+  kind: BatchAlertKindFilter,
+  status: BatchAlertStatus,
+): ResourceState<BatchAlertsPage> &
+  Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [requested, setRequested] = useState<{
+    tenantId: string;
+    warehouseId: string;
+    kind: BatchAlertKindFilter;
+    status: BatchAlertStatus;
+    cursor: string | null;
+  } | null>(null);
+  const activeCursor =
+    requested !== null &&
+    requested.tenantId === tenantId &&
+    requested.warehouseId === warehouseId &&
+    requested.kind === kind &&
+    requested.status === status
+      ? requested.cursor
+      : null;
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{
+    tenantId: string;
+    warehouseId: string;
+    kind: BatchAlertKindFilter;
+    status: BatchAlertStatus;
+    requested: string | null;
+    state: ResourceState<BatchAlertsPage>;
+  } | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(REPLENISHMENT_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(REPLENISHMENT_CHANGED_EVENT, onChange);
+  }, []);
+
+  useEffect(() => {
+    if (tenantId === null || warehouseId === null) return;
+    let cancelled = false;
+    (async () => {
+      // `all` is no query at all — the kind axis is plain `kind`, riding the
+      // effect's dependency list directly.
+      const kindQuery = kind === 'all' ? undefined : kind;
+      try {
+        const page = await fetchApiListBatchAlerts(
+          tenantId,
+          activeCursor === null
+            ? { warehouseId, status, ...(kindQuery === undefined ? {} : { kind: kindQuery }) }
+            : {
+                warehouseId,
+                status,
+                cursor: activeCursor,
+                ...(kindQuery === undefined ? {} : { kind: kindQuery }),
+              },
+        );
+        if (!cancelled) {
+          setResult({
+            tenantId,
+            warehouseId,
+            kind,
+            status,
+            requested: activeCursor,
+            state: {
+              state: 'ready',
+              data: { items: page.items, nextCursor: page.nextCursor ?? null },
+            },
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setResult({
+            tenantId,
+            warehouseId,
+            kind,
+            status,
+            requested: activeCursor,
+            state: { state: 'failed', reason: replenishmentListReason(error, 'batch alerts') },
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, warehouseId, kind, status, activeCursor, revision]);
+
+  const onCursor = useCallback(
+    (cursor: string | null) => {
+      if (tenantId === null || warehouseId === null) return;
+      setRequested({ tenantId, warehouseId, kind, status, cursor });
+    },
+    [tenantId, warehouseId, kind, status],
+  );
+  const reload = useCallback(() => {
+    setRequested(null);
+    setResult(null);
+    setRevision((r) => r + 1);
+  }, []);
+
+  const stale =
+    tenantId === null ||
+    warehouseId === null ||
+    result === null ||
+    result.tenantId !== tenantId ||
+    result.warehouseId !== warehouseId ||
+    result.kind !== kind ||
+    result.status !== status ||
+    result.requested !== activeCursor;
+
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
+}
+
+/**
+ * The tenant's expiry/aging config (story 6-2), or `null` when no row
+ * exists — the null is the DISABLE mechanism read back, not "still
+ * loading": the panel's caption says the alerts are off. The GET is open to
+ * every member (404 only ever answers "no config row", which `fetchApiGetExpiryPolicy`
+ * folds to null).
+ */
+export function useExpiryPolicy(): ResourceState<ExpiryPolicyDto | null> & Reloadable {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{
+    tenantId: string;
+    state: ResourceState<ExpiryPolicyDto | null>;
+  } | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(REPLENISHMENT_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(REPLENISHMENT_CHANGED_EVENT, onChange);
+  }, []);
+
+  useEffect(() => {
+    if (tenantId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetchApiGetExpiryPolicy(tenantId);
+        if (!cancelled) {
+          setResult({
+            tenantId,
+            state: { state: 'ready', data: response?.expiryPolicy ?? null },
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setResult({
+            tenantId,
+            state: { state: 'failed', reason: expiryPolicyReason(error) },
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, revision]);
+
+  const reload = useCallback(() => {
+    setResult(null);
+    setRevision((r) => r + 1);
+  }, []);
+
+  const stale = tenantId === null || result === null || result.tenantId !== tenantId;
+
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+}
+
+/**
+ * The expiry-config read's failure reasons (story 6-2). The 404
+ * `not-found` arm never lands here — `fetchApiGetExpiryPolicy` folds it to
+ * null (the disabled convention) — so this mapper's not-found branch is
+ * kept for safety only.
+ */
+function expiryPolicyReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'not-found':
+        return 'The alert config is not set — expiry and aging alerts are off.';
+      case 'permission-denied':
+        return 'That data belongs to another tenant — sign in again.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Could not load the expiry alert config.';
+      default:
+        return error.detail ?? 'Could not load the expiry alert config.';
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+/**
+ * One batch's detail (story 6-2's click-through): a read-on-demand hook —
+ * the caller keeps it mounted only while an expanded row holds the id, so
+ * no `null`-id "loading forever" state can render. A foreign or deleted
+ * batch (404) is the explicit `failed` arm, not a quiet collapse back to
+ * the row.
+ */
+export function useBatchDetail(
+  batchId: string | null,
+): ResourceState<BatchDetailResponse> & Reloadable {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{
+    tenantId: string;
+    batchId: string;
+    state: ResourceState<BatchDetailResponse>;
+  } | null>(null);
+
+  useEffect(() => {
+    if (tenantId === null || batchId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await fetchApiGetBatch(tenantId, batchId);
+        if (!cancelled) {
+          setResult({
+            tenantId,
+            batchId,
+            state: { state: 'ready', data: detail },
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setResult({
+            tenantId,
+            batchId,
+            state: {
+              state: 'failed',
+              reason: replenishmentBatchDetailReason(error),
+            },
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, batchId, revision]);
+
+  const reload = useCallback(() => {
+    setResult(null);
+    setRevision((r) => r + 1);
+  }, []);
+
+  const stale =
+    tenantId === null || batchId === null || result === null ||
+    result.tenantId !== tenantId || result.batchId !== batchId;
+
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+}
+
+/**
+ * The batch detail read's failure reasons — a branch on the problem `code`,
+ * not prose (the mapper convention).
+ */
+function replenishmentBatchDetailReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'not-found':
+        return 'This batch no longer exists in this tenant — refresh the queue.';
+      case 'permission-denied':
+        return 'That data belongs to another tenant — sign in again.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'The batch reference is malformed.';
+      default:
+        return error.detail ?? 'Could not load the batch record.';
+    }
+  }
+  return UNREACHABLE_REASON;
 }

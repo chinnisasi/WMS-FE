@@ -7,23 +7,28 @@ import { render, type Rendered } from '../../lib/test/render';
 import { ReplenishmentView } from './replenishment-view';
 
 /**
- * The replenishment surface (story 6-1), driven through a stubbed global
- * `fetch` — the generated client is a fetch wrapper — so the wiring under
- * test is the one that ships. The claims only a component test can make:
+ * The replenishment surface (story 6-1, the batch-alert queue is story 6-2),
+ * driven through a stubbed global `fetch` — the generated client is a fetch
+ * wrapper — so the wiring under test is the one that ships. The claims only
+ * a component test can make:
  *   1. submit-never-auto: mounting the queues sends reads alone — no
  *      POST/PUT/DELETE of any kind until a button is clicked,
  *   2. the submit body carries the card's PICKED vendor and the parsed
  *      quantity in MILLI, with a per-click Idempotency-Key, and the outcome
  *      reads the FLAT response (`purchaseOrder` IS the minted PO),
- *   3. a 409 `suggested-po-submitted` and a 409 `breach-not-open` render the
- *      server's own words verbatim AND re-read their queue (the reload IS
- *      the refusal's recovery),
+ *   3. a 409 `suggested-po-submitted`, a 409 `breach-not-open` and a 409
+ *      `batch-alert-not-open` render the server's own words verbatim AND
+ *      re-read their queue (the reload IS the refusal's recovery),
  *   4. two synchronous clicks on a submit button send exactly ONE POST (the
  *      re-entry guard runs before `disabled` renders),
  *   5. an operator session renders the queues and the table read-only —
  *      no mutating affordance at all,
  *   6. a policy upsert sends a PUT whose body carries the milli-converted
- *      values the base-unit inputs named.
+ *      values the base-unit inputs named,
+ *   7. the batch-alert queue's kind filter rides the read as a query param,
+ *      open rows render amber WITH the kind named (never colour alone),
+ *      and the batch click-through reads the DETAIL route — base-unit
+ *      quantities there, no milli conversion.
  */
 
 const TENANT_ID = '0198f7a2-1b3c-7d4e-8f90-112233445566';
@@ -33,6 +38,10 @@ const BREACH_ID = '0198f7a2-1b3c-7d4e-8f90-444444444444';
 const DRAFT_ID = '0198f7a2-1b3c-7d4e-8f90-555555555555';
 const SKU_ID = '0198f7a2-1b3c-7d4e-8f90-666666666666';
 const POLICY_ID = '0198f7a2-1b3c-7d4e-8f90-777777777777';
+const ALERT_ID = '0198f7a2-1b3c-7d4e-8f90-888888888888';
+const ALERT2_ID = '0198f7a2-1b3c-7d4e-8f90-898989898989';
+const BATCH_ID = '0198f7a2-1b3c-7d4e-8f90-121212121212';
+const BIN_ID = '0198f7a2-1b3c-7d4e-8f90-131313131313';
 
 const OWNER_SESSION: StoredSession = {
   token: 'header.payload.signature',
@@ -56,12 +65,19 @@ let requests: {
 let breachRows: Record<string, unknown>[];
 let draftRows: Record<string, unknown>[];
 let policyRows: Record<string, unknown>[];
+let batchAlertRows: Record<string, unknown>[];
+/** null = no config row (the OFF convention read back). */
+let expiryPolicyRow: Record<string, unknown> | null;
+/** null = the batch detail read 404s (unknown/foreign batch). */
+let batchDetailRow: Record<string, unknown> | null;
 /** When set, the policies read serves these pages IN ORDER (the walker's cursor chain). */
 let policyPageQueue: { items: Record<string, unknown>[]; nextCursor: string | null }[] | null = null;
 /** The next dismiss answer; non-200 simulates the 409 race arm. */
 let nextDismissStatus = 200;
 /** The next submit answer; non-200 simulates the 409 race arm. */
 let nextSubmitStatus = 200;
+/** The next BATCH-ALERT dismiss answer; non-200 simulates the 409 race arm. */
+let nextAlertDismissStatus = 200;
 
 function breach(): Record<string, unknown> {
   return {
@@ -105,6 +121,60 @@ function policy(): Record<string, unknown> {
     reorderQty: 100000,
     createdAt: '2026-09-25T00:00:00.000Z',
     updatedAt: '2026-09-25T00:00:00.000Z',
+  };
+}
+
+function batchAlert(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: ALERT_ID,
+    warehouseId: WAREHOUSE_ID,
+    skuId: SKU_ID,
+    batchId: BATCH_ID,
+    kind: 'expiry_upcoming',
+    status: 'open',
+    ageDays: null,
+    onHandMilli: 2500,
+    detectedAt: '2026-09-28T08:00:00.000Z',
+    resolvedAt: null,
+    resolvedBy: null,
+    ...overrides,
+  };
+}
+
+function expiryPolicy(): Record<string, unknown> {
+  return {
+    expiryLeadDays: 7,
+    agingThresholdDays: 30,
+    createdAt: '2026-09-25T00:00:00.000Z',
+    updatedAt: '2026-09-25T00:00:00.000Z',
+  };
+}
+
+/** The batch DETAIL response — inventory's wire: bin quantities in BASE units. */
+function batchDetail(): Record<string, unknown> {
+  return {
+    id: BATCH_ID,
+    skuId: SKU_ID,
+    code: 'B-EX-01',
+    mfgDate: '2026-05-01T00:00:00.000Z',
+    expiryDate: '2026-10-05T00:00:00.000Z',
+    status: 'active',
+    bins: [{ warehouseId: WAREHOUSE_ID, binId: BIN_ID, quantity: 2.5 }],
+    history: [
+      {
+        warehouseId: WAREHOUSE_ID,
+        seq: 1,
+        type: 'stock.intaked',
+        skuId: SKU_ID,
+        quantityDelta: 2.5,
+        fromBinId: null,
+        toBinId: BIN_ID,
+        serialRef: null,
+        occurredAt: '2026-09-01T08:00:00.000Z',
+        recordedAt: '2026-09-01T08:00:01.000Z',
+        eventHash: 'deadbeef',
+      },
+    ],
   };
 }
 
@@ -176,6 +246,39 @@ function stubRouter(): void {
       }
       return json(200, { items: policyRows, nextCursor: null });
     }
+    if (method === 'GET' && pathname.endsWith('/replenishment/expiry-policies')) {
+      return expiryPolicyRow === null
+        ? json(404, {
+            code: 'not-found',
+            title: 'No expiry alert policy',
+            status: 404,
+            detail: 'No expiry alert config exists for this tenant.',
+          })
+        : json(200, { expiryPolicy: expiryPolicyRow });
+    }
+    if (method === 'GET' && pathname.endsWith('/replenishment/batch-alerts')) {
+      return json(200, { items: batchAlertRows, nextCursor: null });
+    }
+    if (method === 'POST' && pathname.includes('/replenishment/batch-alerts/')) {
+      if (nextAlertDismissStatus !== 200) {
+        const status = nextAlertDismissStatus;
+        nextAlertDismissStatus = 200;
+        return json(status, {
+          code: 'batch-alert-not-open',
+          title: 'Batch alert not open',
+          status: 409,
+          detail: 'This batch alert was auto-resolved moments ago.',
+        });
+      }
+      return json(200, {
+        batchAlert: { ...batchAlert(), status: 'dismissed', resolvedBy: 'u-1', resolvedAt: '2026-09-28T09:00:00.000Z' },
+      });
+    }
+    if (method === 'GET' && pathname.includes('/inventory/batches/')) {
+      return batchDetailRow === null
+        ? json(404, { code: 'not-found', title: 'No such batch', status: 404, detail: 'No batch with this id exists in this tenant.' })
+        : json(200, batchDetailRow);
+    }
     if (method === 'POST' && pathname.endsWith('/dismiss')) {
       if (nextDismissStatus !== 200) {
         const status = nextDismissStatus;
@@ -229,9 +332,16 @@ beforeEach(() => {
   requests = [];
   nextDismissStatus = 200;
   nextSubmitStatus = 200;
+  nextAlertDismissStatus = 200;
   breachRows = [breach()];
   draftRows = [draft()];
   policyRows = [policy()];
+  batchAlertRows = [
+    batchAlert(),
+    batchAlert({ id: ALERT2_ID, kind: 'aged', ageDays: 45, onHandMilli: 7000 }),
+  ];
+  expiryPolicyRow = expiryPolicy();
+  batchDetailRow = batchDetail();
   policyPageQueue = null;
   stubRouter();
   writeSession(OWNER_SESSION);
@@ -440,10 +550,214 @@ describe('ReplenishmentView: the read-only render (story 6-1)', () => {
     expect(text).toContain('SPICE-01');
     expect(text).toContain('10 kg');
     expect(text).toContain('Default point');
-    // The only buttons are the status tabs — no Dismiss, no submit, no Edit.
+    // The only buttons are the status/kind tabs and the read-only batch
+    // click-throughs — no Dismiss, no submit, no Edit.
     const labels = [...view.container.querySelectorAll('button')].map((b) => b.textContent);
-    expect(labels).toEqual(['Open', 'Recovered', 'Actioned', 'Dismissed', 'Drafts', 'Submitted', 'Dismissed']);
+    expect(labels).toEqual([
+      'Open',
+      'Recovered',
+      'Actioned',
+      'Dismissed',
+      'All kinds',
+      'Expiring soon',
+      'Aged',
+      'Open',
+      'Resolved',
+      'Dismissed',
+      'View batch',
+      'View batch',
+      'Drafts',
+      'Submitted',
+      'Dismissed',
+    ]);
     expect([...view.container.querySelectorAll('input, select')]).toEqual([]);
+  });
+});
+
+describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', () => {
+  beforeEach(() => {
+    // Isolate the 6-2 widgets: with the 6-1 queues empty, the only Dismiss
+    // buttons on the page belong to the batch-alert cards.
+    breachRows = [];
+    draftRows = [];
+  });
+
+  test('mounting sends reads alone; the queue read carries the warehouse and status (kind off on `all`)', async () => {
+    view = await mount();
+    const mutatingBefore = requests.filter((r) => r.method !== 'GET');
+    expect(mutatingBefore).toEqual([]);
+
+    const alertGets = readsEndingWith('/replenishment/batch-alerts');
+    expect(alertGets.length).toBeGreaterThanOrEqual(1);
+    for (const read of alertGets) {
+      expect(read.query).toContain('warehouseId=');
+      expect(read.query).toContain('status=open');
+      expect(read.query).not.toContain('kind=');
+    }
+    // The config read rode along once (tenant-scoped, no warehouse).
+    expect(readsEndingWith('/replenishment/expiry-policies').length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('the kind filter narrows the read; the status tab swaps the filter', async () => {
+    view = await mount();
+    const readsBefore = readsEndingWith('/replenishment/batch-alerts').length;
+
+    await click(button(view.container, 'Expiring soon'));
+    await settle();
+
+    const narrowed = readsEndingWith('/replenishment/batch-alerts').slice(readsBefore);
+    expect(narrowed.length).toBeGreaterThan(0);
+    for (const read of narrowed) {
+      expect(read.query).toContain('kind=expiry_upcoming');
+      expect(read.query).toContain('status=open');
+    }
+
+    const readsMid = readsEndingWith('/replenishment/batch-alerts').length;
+    await click(button(view.container, 'Resolved'));
+    await settle();
+
+    const resolved = readsEndingWith('/replenishment/batch-alerts').slice(readsMid);
+    expect(resolved.length).toBeGreaterThan(0);
+    expect(resolved[0]!.query).toContain('status=resolved');
+  });
+
+  test('open rows render amber with the kind NAMED, quantities at the SKU precision and the frozen age; a resolved row names its resolver class', async () => {
+    // One OPEN row of each kind is the default mount; the closed-row arm
+    // rides the second fixture (auto-resolved, resolvedBy still null).
+    batchAlertRows = [
+      batchAlert(),
+      batchAlert({
+        id: ALERT2_ID,
+        kind: 'aged',
+        ageDays: 45,
+        onHandMilli: 7000,
+        status: 'resolved',
+        resolvedAt: '2026-09-29T08:00:00.000Z',
+      }),
+    ];
+    view = await mount();
+
+    const articles = [...view.container.querySelectorAll('article')];
+    const openCard = articles.find((a) => a.textContent?.includes('Expiring soon'));
+    expect(openCard).toBeDefined();
+    expect(openCard!.className).toContain('border-(--warning)'); // the amber treatment
+    expect(openCard!.className).toContain('bg-(--warning)/10');
+    const text = view.container.textContent ?? '';
+    // Milli → declared SKU precision; the aged row's ONE frozen fact.
+    expect(text).toContain('on-hand 2.500 kg');
+    expect(text).toContain('on-hand 7.000 kg');
+    expect(text).toContain('age 45d');
+    // The auto-resolve's resolvedBy-null is NAMED, never read as a human act.
+    expect(text).toContain('resolved by consumption — nobody acted');
+    expect(text).toContain('Expiring within 7 days · aged past 30 days of intake.');
+  });
+
+  test('a dismissal POSTs with a ULID key, reads the snapshot, and re-reads the queue', async () => {
+    view = await mount();
+    const readsBefore = readsEndingWith('/replenishment/batch-alerts').length;
+
+    await click(button(view.container, 'Dismiss'));
+    await settle();
+
+    const posts = requests.filter(
+      (r) => r.method === 'POST' && r.pathname.includes('/replenishment/batch-alerts/'),
+    );
+    expect(posts).toHaveLength(1);
+    expect(header(posts[0]!, 'idempotency-key')).toBeDefined();
+    const key = header(posts[0]!, 'idempotency-key')!;
+    expect(key.length).toBeGreaterThanOrEqual(26);
+    expect(readsEndingWith('/replenishment/batch-alerts').length).toBeGreaterThan(readsBefore);
+  });
+
+  test('a 409 batch-alert-not-open renders the server\'s words verbatim AND re-reads the queue', async () => {
+    view = await mount();
+    const readsBefore = readsEndingWith('/replenishment/batch-alerts').length;
+    nextAlertDismissStatus = 409;
+
+    await click(button(view.container, 'Dismiss'));
+    await settle();
+
+    const banner = view.container.textContent ?? '';
+    expect(banner).toContain('Batch alert not open');
+    expect(banner).toContain('This batch alert was auto-resolved moments ago.');
+    expect(readsEndingWith('/replenishment/batch-alerts').length).toBeGreaterThan(readsBefore);
+  });
+
+  test('the success sentence says the re-raise clause — dismissal is not suppression', async () => {
+    view = await mount();
+
+    await click(button(view.container, 'Dismiss'));
+    await settle();
+
+    const banner = view.container.textContent ?? '';
+    expect(banner).toContain('Alert dismissed');
+    expect(banner).toContain('the expiry scan raises a fresh alert');
+  });
+
+  test('an absent config row is the OFF read-back, not a failed read', async () => {
+    expiryPolicyRow = null;
+    batchAlertRows = [];
+    view = await mount();
+
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('Expiry and aging alerts are OFF');
+    // The queue still reads (and renders) — the caption explains, failing isn't implied.
+    expect(readsEndingWith('/replenishment/batch-alerts').length).toBeGreaterThanOrEqual(1);
+    expect(text).toContain('No open batch alerts.');
+  });
+
+  test('the batch click-through reads the DETAIL route, renders its identity, and collapses without a second fetch', async () => {
+    view = await mount();
+
+    await click(button(view.container, 'View batch'));
+    await settle();
+
+    const detailGets = readsEndingWith(`/inventory/batches/${BATCH_ID}`);
+    expect(detailGets).toHaveLength(1);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('B-EX-01');
+    // The detail block is inventory's wire: BASE units — no milli
+    // CONVERSION (25 milli would be wrong); the figure still renders at the
+    // SKU's declared precision.
+    expect(text).toContain('2.500 kg — ' + WAREHOUSE_ID.slice(0, 8));
+    expect(text).toContain('1 movement since intake');
+
+    // Toggling closed and open again does not re-fetch (the read stays mounted).
+    await click(button(view.container, 'Hide batch'));
+    await settle();
+    await click(button(view.container, 'View batch'));
+    await settle();
+
+    // Collapsing unmounts the detail block (the caller keeps it mounted only
+    // while a row holds the id — the useBatchDetail contract), so
+    // re-expanding re-reads: live batch state, never a cached snapshot.
+    expect(readsEndingWith(`/inventory/batches/${BATCH_ID}`)).toHaveLength(2);
+  });
+
+  test('an expanded card whose batch read 404s shows the failed arm with a way back', async () => {
+    batchDetailRow = null;
+    view = await mount();
+
+    await click(button(view.container, 'View batch'));
+    await settle();
+
+    expect(readsEndingWith(`/inventory/batches/${BATCH_ID}`)).toHaveLength(1);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('Batch unavailable');
+    expect(text).toContain('This batch no longer exists in this tenant');
+
+    await click(button(view.container, 'Retry'));
+    await settle();
+    expect(readsEndingWith(`/inventory/batches/${BATCH_ID}`)).toHaveLength(2);
+  });
+
+  test('an operator session sees the alert rows with no Dismiss affordance', async () => {
+    view = await mount(OPERATOR_SESSION);
+    const buttons = [...view.container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons).not.toContain('Dismiss');
+    expect(buttons).not.toContain('Submit as purchase order');
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('on-hand 2.500 kg');
   });
 });
 
