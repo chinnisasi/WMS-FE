@@ -55,6 +55,13 @@ import {
   receivingControllerPlaceQcHold,
   receivingControllerReleaseQcHold,
   receivingControllerRejectOverReceipt,
+  replenishmentControllerDeleteReorderPolicy,
+  replenishmentControllerDismissBreach,
+  replenishmentControllerListBreaches,
+  replenishmentControllerListReorderPolicies,
+  replenishmentControllerListSuggestedPos,
+  replenishmentControllerSubmitSuggestedPo,
+  replenishmentControllerUpsertReorderPolicy,
   tenancyControllerCreateBin,
   tenancyControllerCreateWarehouse,
   tenancyControllerCreateZone,
@@ -127,6 +134,14 @@ import type {
   PlaceQcHoldDto,
   QcHoldListResponse,
   QcHoldResponse,
+  ReorderPolicyListResponse,
+  ReorderPolicyResponse,
+  BreachListResponse,
+  BreachResponse,
+  SuggestedPoListResponse,
+  SubmitSuggestedPoResponse,
+  UpsertReorderPolicyDto,
+  SubmitSuggestedPoDto,
   StockListResponse,
   PutKitDto,
   PatchBinDto,
@@ -1788,6 +1803,213 @@ export async function fetchApiListLedgerEvents(
             ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
           },
     signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Replenishment (story 6-1) — policies, breaches, suggested POs        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lists reorder override policies (a read, open to any member) — one page of
+ * the tenant's per-warehouse overrides, newest first, filterable to one
+ * warehouse and/or SKU. A first read with no filters sends no query.
+ */
+export async function fetchApiListReorderPolicies(
+  tenantId: string,
+  options?: {
+    warehouseId?: string;
+    skuId?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<ReorderPolicyListResponse> {
+  const { data, error } = await replenishmentControllerListReorderPolicies({
+    path: { tenantId },
+    query:
+      options?.warehouseId === undefined &&
+      options?.skuId === undefined &&
+      options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
+            ...(options.skuId === undefined ? {} : { skuId: options.skuId }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Upserts one per-warehouse reorder-point override (capability
+ * `replenishment.manage`) — last-write-wins against the
+ * `(tenant, warehouse, sku)` unique. `reorderPoint`/`reorderQty` are
+ * MILLI-units (base UoM × 10³) on this module's wire, strictly positive.
+ * Arms: 400 validation-failed naming the offending field; 403 role-denied
+ * (or a foreign session); 404 the warehouse or SKU is unknown/foreign;
+ * 409 conflict on a concurrent upsert of the same (warehouse, sku) or a
+ * concurrent idempotent request; 422 idempotency-key-reuse on a reused key
+ * with a different payload.
+ */
+export async function fetchApiUpsertReorderPolicy(
+  tenantId: string,
+  body: UpsertReorderPolicyDto,
+  idempotencyKey: string,
+): Promise<ReorderPolicyResponse> {
+  const { data, error } = await replenishmentControllerUpsertReorderPolicy({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Deletes one per-warehouse reorder override (capability
+ * `replenishment.manage`) — the SKU-column default resumes as the effective
+ * point. The delete carries no body; the 404 covers an already-removed row.
+ */
+export async function fetchApiDeleteReorderPolicy(
+  tenantId: string,
+  policyId: string,
+  idempotencyKey: string,
+): Promise<ReorderPolicyResponse> {
+  const { data, error } = await replenishmentControllerDeleteReorderPolicy({
+    path: { tenantId, policyId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Lists reorder breaches (the alert queue read, open to any member),
+ * status-filterable (the tabs) and to one warehouse. A first page with no
+ * filters sends no query.
+ */
+export async function fetchApiListBreaches(
+  tenantId: string,
+  options?: {
+    status?: 'open' | 'recovered' | 'actioned' | 'dismissed';
+    warehouseId?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<BreachListResponse> {
+  const { data, error } = await replenishmentControllerListBreaches({
+    path: { tenantId },
+    query:
+      options?.status === undefined &&
+      options?.warehouseId === undefined &&
+      options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.status === undefined ? {} : { status: options.status }),
+            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Dismisses an OPEN breach (capability `replenishment.manage`) — human
+ * dismissal (`dismissed`); its suggested-PO draft stays a draft. A 409
+ * means the breach left `open` state in between (recovered by a sweep,
+ * actioned by a submit) — cause invisible client-side, so the server's
+ * words render. The body is empty.
+ */
+export async function fetchApiDismissBreach(
+  tenantId: string,
+  breachId: string,
+  idempotencyKey: string,
+): Promise<BreachResponse> {
+  const { data, error } = await replenishmentControllerDismissBreach({
+    path: { tenantId, breachId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Lists suggested POs (the draft queue read, open to any member),
+ * status-filterable (the tabs) and to one warehouse. A first page with no
+ * filters sends no query.
+ */
+export async function fetchApiListSuggestedPos(
+  tenantId: string,
+  options?: {
+    status?: 'draft' | 'submitted' | 'dismissed';
+    warehouseId?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<SuggestedPoListResponse> {
+  const { data, error } = await replenishmentControllerListSuggestedPos({
+    path: { tenantId },
+    query:
+      options?.status === undefined &&
+      options?.warehouseId === undefined &&
+      options?.cursor === undefined
+        ? undefined
+        : {
+            ...(options.status === undefined ? {} : { status: options.status }),
+            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
+            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Submits a DRAFT suggested PO as a REAL purchase order (capability
+ * `replenishment.manage` — the mint itself re-executes the inbound PO
+ * command under `po.manage` server-side). Edits are optional: vendorId
+ * and/or quantityMilli (MILLI-units), omitted keys keep the draft's value.
+ * The response carrier is FLAT — `purchaseOrder` IS the minted PO
+ * (`{id, code, …, lines…}`), never a wrapped `{purchaseOrder: {…}}`
+ * snapshot; the success sentence reads the code off it directly.
+ *
+ * A 409 is either `suggested-po-submitted` (already submitted — the queue
+ * recovers by reload) or the inner PO command's re-execution refusing
+ * guard-class (the vendor or SKU moved; the draft stays a draft). The
+ * cause is invisible in every DTO this client holds, so 409s render the
+ * server's words.
+ */
+export async function fetchApiSubmitSuggestedPo(
+  tenantId: string,
+  draftId: string,
+  body: SubmitSuggestedPoDto,
+  idempotencyKey: string,
+): Promise<SubmitSuggestedPoResponse> {
+  const { data, error } = await replenishmentControllerSubmitSuggestedPo({
+    path: { tenantId, draftId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
     throw unwrapError(error, 400);

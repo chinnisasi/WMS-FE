@@ -122,6 +122,14 @@ export const CAPABILITIES = [
   // over-threshold owner-only rule is NOT modelled here: it is a command
   // check on the submit-frozen threshold stamp, not a capability split.
   'variances.resolve',
+  // Story 6-1 — the replenishment planning verbs: the per-warehouse reorder
+  // policy upsert/delete, the breach dismissal and the suggested-PO submit.
+  // Owner + Ops Manager only — a planner verb like `orders.manage`/`drops
+  // waves.manage`: an Operator picks stock, it never reorders it. The submit
+  // arm re-executes PO creation under `po.manage` (the inbound command
+  // re-asserts its own gate), so this capability covers the PLANNING surface;
+  // no web verb exists without it that could mint a PO directly.
+  'replenishment.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
