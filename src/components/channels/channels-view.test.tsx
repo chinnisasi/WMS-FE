@@ -715,7 +715,7 @@ describe('ChannelsView: the SKU-mapping editor (story 7-2)', () => {
     const banner = view.container.textContent ?? '';
     expect(banner).toContain('Mappings saved');
     expect(banner).toContain('3 mappings replaced');
-    expect(banner).toContain('rows absent from this save are removed');
+    expect(banner).toContain('rows absent from this save were removed by it');
     // The list re-reads — the saved set is the card's new read.
     expect(requestsOf('GET', '/channels/connections').length).toBeGreaterThanOrEqual(2);
   });
@@ -836,14 +836,14 @@ describe('ChannelsView: the ingest warehouse and webhook rows (story 7-2)', () =
       'shopify',
       CONNECTION_ID,
       'orders',
-    );
+    )!; // the test base is a valid URL — the composer composes it
     const expectedCancellations = webhookUrlFromBase(
       API_BASE_URL,
       TENANT_ID,
       'shopify',
       CONNECTION_ID,
       'cancellations',
-    );
+    )!;
     const ordersRow = view.container.querySelector(
       'input[aria-label="New-order webhook URL for Shopify"]',
     ) as HTMLInputElement;

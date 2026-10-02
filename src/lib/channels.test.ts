@@ -84,7 +84,7 @@ describe('the provider vocabulary', () => {
     ]);
   });
 
-  test('the ingest/writback fields carry their sensitivity: the secret hides, the location id does not', () => {
+  test('the ingest/writeback fields carry their sensitivity: the secret hides, the location id does not', () => {
     const spec = (name: string) =>
       CHANNEL_CREDENTIAL_FIELDS.shopify.find((f) => f.name === name) as never as {
         sensitive?: boolean;
@@ -233,6 +233,12 @@ describe('the webhook endpoint composer (story 7-2, bl-16)', () => {
     expect(
       webhookUrlFromBase('https://gateway.example.com', 't-2', 'shopify', 'c-2', 'orders'),
     ).toBe('https://gateway.example.com/api/v1/tenants/t-2/webhooks/channels/shopify/c-2/orders');
+  });
+
+  test('a relative or malformed base composes no URL — null, never a thrown render (triage row 47)', () => {
+    expect(webhookUrlFromBase('', 't-1', 'shopify', 'c-1', 'orders')).toBeNull();
+    expect(webhookUrlFromBase('/api/v1', 't-1', 'shopify', 'c-1', 'orders')).toBeNull();
+    expect(webhookUrlFromBase('not a url', 't-1', 'shopify', 'c-1', 'orders')).toBeNull();
   });
 
   test('only the providers with a wired ingest offer URLs', () => {

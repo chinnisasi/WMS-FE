@@ -688,6 +688,7 @@ function WebhookUrlRows({
     <div className="flex flex-col gap-1 text-xs">
       {rows.map(({ endpoint, label }) => {
         const url = webhookUrlFromBase(API_BASE_URL, tenantId, entry.provider, entry.id, endpoint);
+        if (url === null) return null; // an uncomposable base offers no row (triage row 47)
         return (
           <div key={endpoint} className="flex flex-wrap items-center gap-2">
             <span className="w-44 shrink-0 text-(--muted-foreground)">{label}</span>
@@ -701,17 +702,27 @@ function WebhookUrlRows({
             <button
               type="button"
               className={rowButtonClass}
-              onClick={() =>
-                void Promise.resolve(navigator.clipboard?.writeText(url))
-                  .then(() => setCopied(endpoint))
-                  .catch(() => undefined)
-              }
+              onClick={() => {
+                // Only celebrate a copy a real clipboard write actually
+                // performed — no clipboard API, no false "Copied".
+                void navigator.clipboard
+                  ?.writeText(url)
+                  .then(
+                    () => setCopied(endpoint),
+                    () => undefined,
+                  )
+                  .then(() => undefined);
+              }}
             >
               {copied === endpoint ? 'Copied' : 'Copy'}
             </button>
           </div>
         );
       })}
+      <p className="text-(--muted-foreground)">
+        Deliveries verify against the connection's webhook signing secret — a connection
+        rotated without it answers 401 until the secret is supplied (rotate again).
+      </p>
     </div>
   );
 }
@@ -1519,7 +1530,7 @@ function MappingEditor({
                       <tr>
                         <td colSpan={3} className="px-2 py-2 text-(--muted-foreground)">
                           No SKUs mapped to this channel — every order line it sends refuses
-                          (order-unmapped-sku).
+                          (400 validation-failed).
                         </td>
                       </tr>
                     )}

@@ -385,8 +385,16 @@ export function webhookUrlFromBase(
   provider: string,
   connectionId: string,
   endpoint: 'orders' | 'cancellations',
-): string {
-  const url = new URL(apiBaseUrl);
+): string | null {
+  // A relative or malformed base cannot compose a URL for the merchant —
+  // return null so the caller offers no copy row instead of crashing the
+  // render (code-review triage row 47).
+  let url: URL;
+  try {
+    url = new URL(apiBaseUrl);
+  } catch {
+    return null;
+  }
   url.pathname = url.pathname.replace(/\/api\/v1\/?$/, '');
   return `${url.origin}${url.pathname.replace(/\/$/, '')}/api/v1/tenants/${tenantId}/webhooks/channels/${provider}/${connectionId}/${endpoint}`;
 }
@@ -453,7 +461,7 @@ export function ingestWarehouseSavedSentence(warehouseCode: string | null): stri
 export function mappingsSavedSentence(count: number): string {
   return count === 0
     ? 'The mapping set is cleared — no channel SKU maps, and ingest refuses unmapped lines.'
-    : `${count} mapping${count === 1 ? '' : 's'} replaced — rows absent from this save are removed before the next publish cycle.`;
+    : `${count} mapping${count === 1 ? '' : 's'} replaced — rows absent from this save were removed by it, in the same transaction.`;
 }
 
 /** The disconnect's one-sentence acceptance. */
