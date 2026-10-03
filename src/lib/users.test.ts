@@ -36,8 +36,14 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // mirror catch-up rode 5-2's FE change; 5-3's rode 5-3's); story 5-4
     // adds `variances.resolve` — 30 became 31; story 6-1 adds
     // `replenishment.manage` — 31 became 32; story 7-1 adds `channel.manage`
-    // — 32 became 33.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(33);
+    // — 32 became 33; story 8-1 adds `invoice.generate` — 33 became 34.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(34);
+    // 8-1: invoice pricing is owner + ops_manager — never the floor, and
+    // never the accountant, who reads invoices but does not set prices.
+    expect(roleHasCapability('owner', 'invoice.generate')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'invoice.generate')).toBe(true);
+    expect(roleHasCapability('operator', 'invoice.generate')).toBe(false);
+    expect(roleHasCapability('accountant', 'invoice.generate')).toBe(false);
     expect(roleHasCapability('owner', 'warehouse.create')).toBe(true);
     expect(roleHasCapability('owner', 'zone.create')).toBe(true);
     expect(roleHasCapability('owner', 'bin.create')).toBe(true);
@@ -145,6 +151,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'carrier.manage',
         'secure.move',
         'excursion.record',
+        'invoice.generate',
         'labels.execute',
         'transfers.manage',
         'transfers.execute',

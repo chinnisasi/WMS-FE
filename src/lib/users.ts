@@ -136,6 +136,13 @@ export const CAPABILITIES = [
   // floor verb and not an accounting verb). The /channels surface is this
   // story's T4; the mirror keeps the drift guard honest either way.
   'channel.manage',
+  // Story 8-1 — the manual invoice generate/regenerate, carrying per-line
+  // rates for UNPRICED lines (a line priced at order acceptance keeps that
+  // frozen rate). Owner + Ops Manager only: pricing a line on a numbered tax
+  // document is a finance act, not a floor verb — the Accountant reads every
+  // invoice (reads are never gated) but does not set what a buyer is charged.
+  // Gates the /compliance Invoices section's pricing panel.
+  'invoice.generate',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

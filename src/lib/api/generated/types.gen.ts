@@ -18,11 +18,19 @@ export type RegisterTenantDto = {
     name: string;
     ownerEmail: string;
     password: string;
+    /**
+     * The tenant GSTIN, optional (story 8-1) — the invoicing default the warehouse GSTIN overrides. The settings-edit route is deferred (stamped at registration only).
+     */
+    gstin?: string;
 };
 
 export type TenantResponse = {
     id: string;
     name: string;
+    /**
+     * The tenant GSTIN (8-1); null when none registered.
+     */
+    gstin: string | null;
 };
 
 export type OwnerUserResponse = {
@@ -82,6 +90,10 @@ export type CreateWarehouseDto = {
      * The origin address — where shipments leave from (story 11-1). Required at create; carriers rate and label from it. There is no update endpoint (story 4-6d owns that decision).
      */
     origin: AddressDto;
+    /**
+     * The warehouse GSTIN, optional (story 8-1) — the invoicing supplier identity for dispatches leaving this warehouse, preferred over the tenant default.
+     */
+    gstin?: string;
 };
 
 export type WarehouseResponse = {
@@ -93,6 +105,10 @@ export type WarehouseResponse = {
      * The origin address (story 11-1); null on a pre-11.1 warehouse row
      */
     origin: AddressDto | null;
+    /**
+     * The warehouse GSTIN (8-1); null when none was given
+     */
+    gstin: string | null;
     createdAt: string;
 };
 
@@ -1591,6 +1607,10 @@ export type OrderLineInputDto = {
      * Ordered quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     quantity: number;
+    /**
+     * The line's selling rate in integer PAISE per this SKU's base UoM (story 8-1) — frozen at acceptance and priced from at invoicing. Optional: omit it on an unpriced (channel-ingested) line — the invoice parks awaiting-data until the operator prices it there.
+     */
+    ratePaise?: number;
 };
 
 export type CreateOrderDto = {
@@ -1615,6 +1635,10 @@ export type CreateOrderDto = {
      * Where the shipment goes (story 11-1). REQUIRED at create — manual and ingested alike; carriers rate, label and manifest from it. Atomic: every field is required except line2. The command re-validates everything behind its replay lookup (the adapter path bypasses this DTO).
      */
     destination: AddressDto;
+    /**
+     * The consignee's GSTIN (story 8-1), when the buyer is GST-registered. Place of supply resolves from its first two digits; optional — absent falls back to the destination state's name.
+     */
+    consigneeGstin?: string;
 };
 
 export type OrderLineDto = {
@@ -4140,6 +4164,181 @@ export type ChannelConnectionListEntryDto = {
 
 export type ChannelConnectionsResponse = {
     items: Array<ChannelConnectionListEntryDto>;
+};
+
+export type InvoiceRateInputDto = {
+    /**
+     * The order line being priced (must be a line of this order)
+     */
+    orderLineId: string;
+    /**
+     * The line's rate in integer PAISE per the SKU's base UoM — frozen into the invoice document (rateSource 'manual'); order_lines.rate_paise is never written
+     */
+    ratePaise: number;
+};
+
+export type GenerateInvoiceDto = {
+    /**
+     * The dispatched order to invoice (one invoice per order)
+     */
+    orderId: string;
+    /**
+     * Per-line rate overrides for UNPRICED lines only — a line priced at order acceptance keeps that frozen rate (an override naming it is refused 409 line-already-priced). Omit for a plain regenerate — manual rates already carried by the invoice hold.
+     */
+    rates?: Array<InvoiceRateInputDto>;
+};
+
+export type InvoiceLineDto = {
+    id: string;
+    orderLineId: string;
+    /**
+     * SKU code snapshot at generation
+     */
+    skuCode: string;
+    /**
+     * SKU name snapshot at generation
+     */
+    skuName: string;
+    /**
+     * HSN snapshot; null is the hsn-gap warning
+     */
+    hsn: string | null;
+    /**
+     * Dispatched quantity in milli-units of the base UoM (re-derived from picks)
+     */
+    qtyMilli: number;
+    /**
+     * Rate in paise per base unit
+     */
+    ratePaise: number;
+    /**
+     * 'order_line' = frozen at order acceptance; 'manual' = operator override
+     */
+    rateSource: 'order_line' | 'manual';
+    /**
+     * Taxable value, paise (half-up at the line boundary)
+     */
+    taxablePaise: number;
+    /**
+     * GST rate in basis points (1800 = 18%)
+     */
+    gstBps: number;
+    /**
+     * CGST, paise (intra-state only)
+     */
+    cgstPaise: number;
+    /**
+     * SGST/UTGST, paise (intra-state only; carries the odd remainder paise)
+     */
+    sgstPaise: number;
+    /**
+     * IGST, paise (inter-state only)
+     */
+    igstPaise: number;
+    hsnGap: boolean;
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+};
+
+export type InvoiceDto = {
+    id: string;
+    tenantId: string;
+    orderId: string;
+    warehouseId: string;
+    invoiceNo: string | null;
+    fyLabel: string | null;
+    /**
+     * Position in the tenant FY series; null until first issued
+     */
+    seriesSeq: number | null;
+    status: 'awaiting-data' | 'issued' | 'voided';
+    /**
+     * Supplier GSTIN snapshot (warehouse, else tenant)
+     */
+    originGstin: string | null;
+    /**
+     * Consignee GSTIN snapshot; null for B2C
+     */
+    consigneeGstin: string | null;
+    placeOfSupply: string | null;
+    supplyType: 'intra' | 'inter';
+    subtotalPaise: number;
+    gstPaise: number;
+    totalPaise: number;
+    revision: number;
+    /**
+     * The pinned, client-agnostic document snapshot: { header, seller, buyer, lines, totals, gaps, revision } — what the printable invoice renders. Each gap is { kind, detail, orderLineId? }; orderLineId is set on the line-scoped kinds (unpriced-line, hsn-gap) so a client can price exactly the unpriced lines without parsing detail prose
+     */
+    document: {
+        [key: string]: unknown;
+    };
+    lines: Array<InvoiceLineDto>;
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC
+     */
+    updatedAt: string;
+};
+
+export type InvoiceResponse = {
+    invoice: InvoiceDto;
+};
+
+export type InvoiceEntryDto = {
+    id: string;
+    orderId: string;
+    warehouseId: string;
+    /**
+     * FY-series number; null until first issued
+     */
+    invoiceNo: string | null;
+    /**
+     * e.g. 'FY-2627'; null until first issued
+     */
+    fyLabel: string | null;
+    status: 'awaiting-data' | 'issued' | 'voided';
+    /**
+     * null while place of supply is unresolved
+     */
+    supplyType: 'intra' | 'inter';
+    /**
+     * Two-digit GST state code; null while unresolved
+     */
+    placeOfSupply: string | null;
+    /**
+     * Sum of line taxable values, paise
+     */
+    subtotalPaise: number;
+    /**
+     * Sum of line CGST+SGST+IGST, paise
+     */
+    gstPaise: number;
+    /**
+     * subtotal + gst, paise (exact; no rupee rounding)
+     */
+    totalPaise: number;
+    /**
+     * Bumps only when a regenerate changes the content
+     */
+    revision: number;
+    /**
+     * Distinct gap kinds in the document (blocking and warning)
+     */
+    gapKinds: Array<'unpriced-line' | 'place-of-supply' | 'supplier-gstin' | 'hsn-gap' | 'pos-discrepancy'>;
+    /**
+     * Row creation time (the keyset cursor field), ISO-8601 UTC
+     */
+    createdAt: string;
+};
+
+export type InvoiceListResponse = {
+    items: Array<InvoiceEntryDto>;
+    nextCursor?: string | null;
 };
 
 export type ChannelWebhookOrderResponse = {
@@ -10715,6 +10914,149 @@ export type ChannelsControllerRetryConnectionResponses = {
 };
 
 export type ChannelsControllerRetryConnectionResponse = ChannelsControllerRetryConnectionResponses[keyof ChannelsControllerRetryConnectionResponses];
+
+export type InvoicingControllerListInvoicesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/invoices';
+};
+
+export type InvoicingControllerListInvoicesErrors = {
+    /**
+     * Malformed cursor or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type InvoicingControllerListInvoicesError = InvoicingControllerListInvoicesErrors[keyof InvoicingControllerListInvoicesErrors];
+
+export type InvoicingControllerListInvoicesResponses = {
+    /**
+     * The invoice page (newest first)
+     */
+    200: InvoiceListResponse;
+};
+
+export type InvoicingControllerListInvoicesResponse = InvoicingControllerListInvoicesResponses[keyof InvoicingControllerListInvoicesResponses];
+
+export type InvoicingControllerGenerateInvoiceData = {
+    body: GenerateInvoiceDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/invoices';
+};
+
+export type InvoicingControllerGenerateInvoiceErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, a negative or non-integer ratePaise, or a duplicate orderLineId in rates (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks invoice.generate (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No order with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not dispatched (order-not-dispatched), a rate override names a line that is not of this order (line-not-of-order) or a line already priced at order acceptance (line-already-priced), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InvoicingControllerGenerateInvoiceError = InvoicingControllerGenerateInvoiceErrors[keyof InvoicingControllerGenerateInvoiceErrors];
+
+export type InvoicingControllerGenerateInvoiceResponses = {
+    /**
+     * The order's invoice as it stands after generation (the idempotency snapshot)
+     */
+    200: InvoiceResponse;
+};
+
+export type InvoicingControllerGenerateInvoiceResponse = InvoicingControllerGenerateInvoiceResponses[keyof InvoicingControllerGenerateInvoiceResponses];
+
+export type InvoicingControllerGetInvoiceData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/invoices/{invoiceId}';
+};
+
+export type InvoicingControllerGetInvoiceErrors = {
+    /**
+     * A malformed invoiceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No invoice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InvoicingControllerGetInvoiceError = InvoicingControllerGetInvoiceErrors[keyof InvoicingControllerGetInvoiceErrors];
+
+export type InvoicingControllerGetInvoiceResponses = {
+    /**
+     * The invoice detail
+     */
+    200: InvoiceResponse;
+};
+
+export type InvoicingControllerGetInvoiceResponse = InvoicingControllerGetInvoiceResponses[keyof InvoicingControllerGetInvoiceResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;
