@@ -24,7 +24,8 @@ export function notifyInvoicesChanged(): void {
 /**
  * Integer paise → `₹1,234.56`. Integer arithmetic only: the server's money is
  * paise-exact and a `/ 100` float would print `0.30000000000000004`-class
- * dust for some values. No rupee rounding — the stored figure is the figure.
+ * dust for some values. The client never rounds — the rupee-rounded payable
+ * and its round-off are the SERVER's stored figures (story 8-1b).
  */
 export function formatRupees(paise: number): string {
   const negative = paise < 0;
@@ -32,6 +33,16 @@ export function formatRupees(paise: number): string {
   const rupees = Math.trunc(abs / 100);
   const fraction = String(abs % 100).padStart(2, '0');
   return `${negative ? '−' : ''}₹${rupees.toLocaleString('en-IN')}.${fraction}`;
+}
+
+/**
+ * The signed round-off line (story 8-1b): `+₹0.38`, `−₹0.49`, `₹0.00`. The
+ * sign is always shown on a non-zero figure — a round-off that silently reads
+ * as an amount would be misread as a charge.
+ */
+export function formatRoundOff(paise: number): string {
+  if (paise > 0) return `+${formatRupees(paise)}`;
+  return formatRupees(paise);
 }
 
 /** An exact percent from integer thousandths of a percent (18000 → `18%`, 6250 → `6.25%`, 125 → `0.125%`). */
@@ -228,13 +239,28 @@ export function documentHeading(status: InvoiceStatus): { title: string; notice:
 }
 
 /**
- * The pricing panel's note, by status. Regenerating an issued invoice keeps
- * its number; a changed result is a new revision of the same document.
+ * Story 8-1b: an issued (or voided) invoice is FROZEN — the backend never
+ * recomputes or rewrites it, so a regenerate is a guaranteed no-op and rates
+ * a guaranteed `409 invoice-frozen`. The pricing panel is offered for
+ * `awaiting-data` only (the state rule — never an action the row's own state
+ * rules out).
  */
-export function regenerateNote(status: InvoiceStatus): string {
-  return status === 'issued'
-    ? "Re-derive this invoice from the order's dispatch facts. It keeps its number; if the result differs (a catalog fix, for example) it becomes a new revision of the same invoice."
-    : "Re-derive this invoice from the order's dispatch facts. An unchanged result keeps the revision.";
+export function canRegenerate(status: InvoiceStatus): boolean {
+  return status === 'awaiting-data';
+}
+
+/** The pricing panel's note when nothing is unpriced (an awaiting invoice blocked by something else). */
+export function regenerateNote(): string {
+  return "Re-derive this invoice from the order's dispatch facts (after fixing the order, warehouse or tenant data that blocks it). An unchanged result keeps the revision; once it issues, the invoice is frozen.";
+}
+
+/**
+ * The list's Invoice cell (story 8-1b): numbering runs per supplier GSTIN, so
+ * two GSTINs in one state print the same `27/2627/000001` — the number alone
+ * does not identify an invoice; the GSTIN beside it does.
+ */
+export function invoiceNumberLabel(invoiceNo: string | null, originGstin: string | null): { number: string; gstin: string | null } {
+  return { number: invoiceNo ?? 'Unnumbered', gstin: invoiceNo === null ? null : originGstin };
 }
 
 // ── the document snapshot ────────────────────────────────────────────────────
@@ -289,7 +315,17 @@ export interface InvoiceDocument {
   readonly seller: { readonly name: string; readonly gstin: string | null };
   readonly buyer: { readonly name: string | null; readonly gstin: string | null };
   readonly lines: readonly DocumentLine[];
-  readonly totals: { readonly subtotal: number; readonly gst: number; readonly payAble: number };
+  /**
+   * Story 8-1b: `total` is the exact paise sum; `payable` the server's
+   * rupee-rounded amount due; `roundOff = payable − total` (signed).
+   */
+  readonly totals: {
+    readonly subtotal: number;
+    readonly gst: number;
+    readonly total: number;
+    readonly roundOff: number;
+    readonly payable: number;
+  };
   readonly gaps: readonly DocumentGap[];
   readonly revision: number;
 }
@@ -307,7 +343,13 @@ export function readInvoiceDocument(raw: unknown): InvoiceDocument | null {
   const { header, seller, buyer, lines, totals, gaps } = raw;
   if (!isObject(header) || !isObject(seller) || !isObject(buyer) || !isObject(totals)) return null;
   if (!Array.isArray(lines) || !Array.isArray(gaps)) return null;
-  if (typeof totals.subtotal !== 'number' || typeof totals.gst !== 'number' || typeof totals.payAble !== 'number') {
+  if (
+    typeof totals.subtotal !== 'number' ||
+    typeof totals.gst !== 'number' ||
+    typeof totals.total !== 'number' ||
+    typeof totals.roundOff !== 'number' ||
+    typeof totals.payable !== 'number'
+  ) {
     return null;
   }
   if (typeof seller.name !== 'string' || typeof header.orderRef !== 'string') return null;
@@ -443,7 +485,7 @@ export function generateOutcome(invoice: InvoiceDto): Outcome {
     return {
       tone: 'accepted',
       word: 'Invoice issued',
-      reason: `${invoice.invoiceNo ?? 'Unnumbered'} — total ${formatRupees(invoice.totalPaise)} (revision ${invoice.revision}).`,
+      reason: `${invoice.invoiceNo ?? 'Unnumbered'} — payable ${formatRupees(invoice.payablePaise)} (revision ${invoice.revision}).`,
     };
   }
   const document = readInvoiceDocument(invoice.document);
@@ -501,12 +543,25 @@ export function invoiceDetailReason(error: unknown): string {
 }
 
 /**
- * The two refusals whose recovery is a RE-READ: the line set the panel
- * offered is stale. The panel re-reads on exactly these (and the copy above
- * says so — a claim the caller must make true).
+ * The refusals whose recovery is a RE-READ: the line set the panel offered is
+ * stale, or (8-1b `invoice-frozen`) the invoice issued since it was read and
+ * the panel should not be on screen at all. The panel re-reads on exactly
+ * these (and the copy says so — a claim the caller must make true).
  */
 export function refusalNeedsReread(error: unknown): boolean {
-  return error instanceof ApiProblem && (error.code === 'line-already-priced' || error.code === 'line-not-of-order');
+  return (
+    error instanceof ApiProblem &&
+    (error.code === 'line-already-priced' || error.code === 'line-not-of-order' || error.code === 'invoice-frozen')
+  );
+}
+
+/**
+ * `invoice-frozen` (8-1b): the invoice issued since the panel read it. The
+ * re-read shows it `issued`, which unmounts the pricing panel — so this
+ * refusal's banner must live at the section level, not inside the panel.
+ */
+export function refusalIsFrozen(error: unknown): boolean {
+  return error instanceof ApiProblem && error.code === 'invoice-frozen';
 }
 
 export function generateReason(error: unknown): string {
@@ -520,6 +575,8 @@ export function generateReason(error: unknown): string {
         return 'One of those lines already carries the rate frozen when the order was accepted — only unpriced lines can be priced here. The invoice has been re-read.';
       case 'line-not-of-order':
         return 'One of those lines does not belong to this order — the invoice has been re-read.';
+      case 'invoice-frozen':
+        return 'This invoice has already issued and is frozen — an issued invoice is never re-priced (corrections need a credit or debit note). The invoice has been re-read.';
       case 'role-denied':
         return 'Your role cannot generate invoices.';
       case 'permission-denied':

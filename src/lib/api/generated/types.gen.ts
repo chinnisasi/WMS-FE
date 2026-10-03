@@ -4250,7 +4250,7 @@ export type InvoiceDto = {
     invoiceNo: string | null;
     fyLabel: string | null;
     /**
-     * Position in the tenant FY series; null until first issued
+     * Position in the supplier GSTIN's FY series; null until first issued
      */
     seriesSeq: number | null;
     status: 'awaiting-data' | 'issued' | 'voided';
@@ -4266,10 +4266,21 @@ export type InvoiceDto = {
     supplyType: 'intra' | 'inter';
     subtotalPaise: number;
     gstPaise: number;
+    /**
+     * subtotal + gst, paise (exact)
+     */
     totalPaise: number;
+    /**
+     * The amount due, rounded half-up to the whole rupee (paise, a multiple of 100)
+     */
+    payablePaise: number;
+    /**
+     * payablePaise − totalPaise: the signed round-off, −49…+50 paise
+     */
+    roundOffPaise: number;
     revision: number;
     /**
-     * The pinned, client-agnostic document snapshot: { header, seller, buyer, lines, totals, gaps, revision } — what the printable invoice renders. Each gap is { kind, detail, orderLineId? }; orderLineId is set on the line-scoped kinds (unpriced-line, hsn-gap) so a client can price exactly the unpriced lines without parsing detail prose
+     * The pinned, client-agnostic document snapshot: { header, seller, buyer, lines, totals, gaps, revision } — what the printable invoice renders. totals is { subtotal, gst, total, roundOff, payable } in paise (total exact; payable rupee-rounded). Frozen once issued. Each gap is { kind, detail, orderLineId? }; orderLineId is set on the line-scoped kinds (unpriced-line, hsn-gap) so a client can price exactly the unpriced lines without parsing detail prose
      */
     document: {
         [key: string]: unknown;
@@ -4294,13 +4305,17 @@ export type InvoiceEntryDto = {
     orderId: string;
     warehouseId: string;
     /**
-     * FY-series number; null until first issued
+     * The supplier GSTIN's own FY-series number, e.g. '29/2627/000001' (state code / FY digits / sequence; 8-1 invoices keep their 'FY-2627-000001' form); null until first issued. Unique per (tenant, originGstin) — never key on it alone
      */
     invoiceNo: string | null;
     /**
      * e.g. 'FY-2627'; null until first issued
      */
     fyLabel: string | null;
+    /**
+     * Supplier GSTIN the invoice is issued under (its numbering series); null while unresolved
+     */
+    originGstin: string | null;
     status: 'awaiting-data' | 'issued' | 'voided';
     /**
      * null while place of supply is unresolved
@@ -4319,9 +4334,17 @@ export type InvoiceEntryDto = {
      */
     gstPaise: number;
     /**
-     * subtotal + gst, paise (exact; no rupee rounding)
+     * subtotal + gst, paise (exact)
      */
     totalPaise: number;
+    /**
+     * The amount due, rounded half-up to the whole rupee (paise, a multiple of 100)
+     */
+    payablePaise: number;
+    /**
+     * payablePaise − totalPaise: the signed round-off, −49…+50 paise
+     */
+    roundOffPaise: number;
     /**
      * Bumps only when a regenerate changes the content
      */
@@ -10995,7 +11018,7 @@ export type InvoicingControllerGenerateInvoiceErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The order is not dispatched (order-not-dispatched), a rate override names a line that is not of this order (line-not-of-order) or a line already priced at order acceptance (line-already-priced), or a concurrent idempotent request (conflict)
+     * Rates sent to an issued or voided invoice (invoice-frozen — it outranks the line checks), the order is not dispatched (order-not-dispatched), a rate override names a line that is not of this order (line-not-of-order) or a line already priced at order acceptance (line-already-priced), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**

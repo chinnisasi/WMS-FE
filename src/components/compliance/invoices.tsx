@@ -10,7 +10,9 @@ import {
   STATUS_LABEL,
   addressLines,
   amountInWords,
+  canRegenerate,
   documentHeading,
+  formatRoundOff,
   formatRupees,
   gapLabel,
   gapPrefix,
@@ -19,11 +21,13 @@ import {
   generateReason,
   gstRateLabel,
   invoiceDateLabel,
+  invoiceNumberLabel,
   lineQuantityLabel,
   notifyInvoicesChanged,
   parseRateDraft,
   placeOfSupplyLabel,
   readInvoiceDocument,
+  refusalIsFrozen,
   refusalNeedsReread,
   regenerateNote,
   supplyLabel,
@@ -104,13 +108,24 @@ function InvoicesSessioned() {
     {
       key: 'invoiceNo',
       header: 'Invoice',
-      render: (row) =>
-        row.invoiceNo === null ? <span className="text-(--muted-foreground)">Unnumbered</span> : <span className="font-mono text-xs">{row.invoiceNo}</span>,
+      render: (row) => {
+        // Numbering is per supplier GSTIN (8-1b): two same-state GSTINs print
+        // the same number, so the GSTIN rides beside it.
+        const label = invoiceNumberLabel(row.invoiceNo, row.originGstin);
+        if (row.invoiceNo === null) return <span className="text-(--muted-foreground)">{label.number}</span>;
+        return (
+          <span className="flex flex-col">
+            <span className="font-mono text-xs">{label.number}</span>
+            {label.gstin !== null && <span className="font-mono text-xs text-(--muted-foreground)">GSTIN {label.gstin}</span>}
+          </span>
+        );
+      },
     },
     { key: 'status', header: 'Status', render: (row) => STATUS_LABEL[row.status] ?? row.status },
     { key: 'order', header: 'Order', render: (row) => <span className="font-mono text-xs">{row.orderId.slice(0, 8)}…</span> },
     { key: 'supply', header: 'Supply', render: (row) => supplyLabel(row.supplyType, row.placeOfSupply) },
-    { key: 'total', header: 'Total', numeric: true, render: (row) => formatRupees(row.totalPaise) },
+    // The amount due — the server's rupee-rounded payable (8-1b), never a client rounding.
+    { key: 'total', header: 'Payable', numeric: true, render: (row) => formatRupees(row.payablePaise) },
     {
       key: 'gaps',
       header: 'Gaps',
@@ -283,7 +298,7 @@ function InvoiceDetail({
         <span className="text-xs text-(--muted-foreground)">Revision {invoice.revision}</span>
       </div>
       <PrintableInvoice invoice={invoice} document={document} skuByCode={skuByCode} />
-      {canGenerate && invoice.status !== 'voided' && (
+      {canGenerate && canRegenerate(invoice.status) && (
         <PricingPanel
           key={`${invoice.id}-${invoice.revision}`}
           invoice={invoice}
@@ -409,10 +424,14 @@ function PrintableInvoice({
         <dd className="data text-right">{formatRupees(byTax.sgst)}</dd>
         <dt>IGST</dt>
         <dd className="data text-right">{formatRupees(byTax.igst)}</dd>
-        <dt className="font-medium">Total</dt>
-        <dd className="data text-right font-medium">{formatRupees(totals.payAble)}</dd>
+        <dt>Invoice total</dt>
+        <dd className="data text-right">{formatRupees(totals.total)}</dd>
+        <dt>Round off</dt>
+        <dd className="data text-right">{formatRoundOff(totals.roundOff)}</dd>
+        <dt className="font-medium">Payable</dt>
+        <dd className="data text-right font-medium">{formatRupees(totals.payable)}</dd>
       </dl>
-      <div className="text-xs">Amount in words: {amountInWords(totals.payAble)}</div>
+      <div className="text-xs">Amount in words: {amountInWords(totals.payable)}</div>
 
       {document.gaps.length > 0 && (
         <ul className="flex flex-col gap-0.5 text-xs" aria-label="Invoice gaps">
@@ -436,7 +455,8 @@ function PrintableInvoice({
 }
 
 /**
- * The `invoice.generate` panel: a rate input per line the SERVER lists as
+ * The `invoice.generate` panel, for an `awaiting-data` invoice only (an
+ * issued one is frozen — story 8-1b): a rate input per line the SERVER lists as
  * unpriced (`gap.orderLineId` — an acceptance-priced line is never offered,
  * its override is a guaranteed 409), and a plain regenerate when nothing is
  * unpriced. Per-draft key: reused across retries of the unchanged draft,
@@ -500,7 +520,15 @@ function PricingPanel({
       // draft it refused.
       onGenerated({ invoiceId: invoice.id, outcome: generateOutcome(settled) });
     } catch (error) {
-      setOutcome({ tone: 'rejected', word: 'Not generated', reason: generateReason(error) });
+      const refused: Outcome = { tone: 'rejected', word: 'Not generated', reason: generateReason(error) };
+      if (refusalIsFrozen(error)) {
+        // The invoice issued meanwhile: the re-read shows it `issued` and the
+        // gate unmounts this panel, so the refusal goes to the section-level
+        // outcome (keyed to this invoice), which also re-reads the list.
+        onGenerated({ invoiceId: invoice.id, outcome: refused });
+        return;
+      }
+      setOutcome(refused);
       // The refused line set is stale: re-read, as the refusal copy says
       // (the excursion-resolved precedent — the reload IS the recovery). The
       // detail refetch keeps this panel mounted (same revision), so the
@@ -535,7 +563,7 @@ function PricingPanel({
           ))}
         </>
       ) : (
-        <div className="text-xs text-(--muted-foreground)">{regenerateNote(invoice.status)}</div>
+        <div className="text-xs text-(--muted-foreground)">{regenerateNote()}</div>
       )}
       <div>
         <button type="submit" className={primaryClass} disabled={busy}>

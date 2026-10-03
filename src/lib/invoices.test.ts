@@ -6,7 +6,9 @@ import {
   GST_STATE_NAMES,
   addressLines,
   amountInWords,
+  canRegenerate,
   documentHeading,
+  formatRoundOff,
   formatRupees,
   gapLabel,
   gapPrefix,
@@ -17,6 +19,7 @@ import {
   invoiceDateLabel,
   invoiceDetailReason,
   invoiceListReason,
+  invoiceNumberLabel,
   isBlockingGap,
   lineQuantityLabel,
   parseRateDraft,
@@ -82,7 +85,7 @@ const DOCUMENT = {
       hsnGap: false,
     },
   ],
-  totals: { subtotal: 25000, gst: 1250, payAble: 26250 },
+  totals: { subtotal: 25000, gst: 1250, total: 26250, roundOff: 50, payable: 26300 },
   gaps: [
     { kind: 'unpriced-line', detail: 'line X has no rate', orderLineId: 'line-a' },
     { kind: 'hsn-gap', detail: 'line Y blank HSN', orderLineId: 'line-b' },
@@ -169,9 +172,26 @@ describe('vocabulary', () => {
     expect(documentHeading('voided').notice).not.toContain('no number');
   });
 
-  test('the regenerate note tells an issued invoice it keeps its number', () => {
-    expect(regenerateNote('issued')).toContain('keeps its number');
-    expect(regenerateNote('awaiting-data')).not.toContain('keeps its number');
+  test('only an awaiting-data invoice can be regenerated — an issued or voided one is frozen (8-1b)', () => {
+    expect(canRegenerate('awaiting-data')).toBe(true);
+    expect(canRegenerate('issued')).toBe(false);
+    expect(canRegenerate('voided')).toBe(false);
+    // The note no longer promises an issued invoice a new revision.
+    expect(regenerateNote()).not.toContain('new revision');
+    expect(regenerateNote()).toContain('frozen');
+  });
+
+  test('the list labels a number with its supplier GSTIN — two same-state GSTINs share numbers (8-1b)', () => {
+    expect(invoiceNumberLabel('27/2627/000001', '27NUMAA1111A1Z1')).toEqual({ number: '27/2627/000001', gstin: '27NUMAA1111A1Z1' });
+    expect(invoiceNumberLabel('27/2627/000001', '27NUMBB2222B2Z2')).not.toEqual(invoiceNumberLabel('27/2627/000001', '27NUMAA1111A1Z1'));
+    expect(invoiceNumberLabel(null, '27NUMAA1111A1Z1')).toEqual({ number: 'Unnumbered', gstin: null });
+  });
+
+  test('the round-off prints signed, from the stored figure', () => {
+    expect(formatRoundOff(38)).toBe('+₹0.38');
+    expect(formatRoundOff(-49)).toBe('−₹0.49');
+    expect(formatRoundOff(50)).toBe('+₹0.50');
+    expect(formatRoundOff(0)).toBe('₹0.00');
   });
 
   test('addressLines skips absent parts instead of printing undefined', () => {
@@ -208,6 +228,11 @@ describe('the document snapshot', () => {
     expect(readInvoiceDocument({ ...DOCUMENT, header: { ...DOCUMENT.header, supplyType: 'sideways' } })).toBeNull();
     expect(readInvoiceDocument({ ...DOCUMENT, lines: [without(DOCUMENT.lines[0]!, 'uom')] })).toBeNull();
     expect(readInvoiceDocument({ ...DOCUMENT, totals: { subtotal: 1, gst: 0 } })).toBeNull();
+    // The 8-1 shape (`payAble`, no round-off) is not this document any more.
+    expect(readInvoiceDocument({ ...DOCUMENT, totals: { subtotal: 25000, gst: 1250, payAble: 26250 } })).toBeNull();
+    expect(readInvoiceDocument({ ...DOCUMENT, totals: without(DOCUMENT.totals, 'roundOff') })).toBeNull();
+    expect(readInvoiceDocument({ ...DOCUMENT, totals: without(DOCUMENT.totals, 'payable') })).toBeNull();
+    expect(readInvoiceDocument({ ...DOCUMENT, totals: without(DOCUMENT.totals, 'total') })).toBeNull();
     expect(readInvoiceDocument({ ...DOCUMENT, lines: [{ orderLineId: 'x' }] })).toBeNull();
     expect(readInvoiceDocument({ ...DOCUMENT, gaps: [{ kind: 'unpriced-line' }] })).toBeNull();
   });
@@ -239,18 +264,20 @@ describe('outcomes and refusals', () => {
     ({
       id: 'inv-1',
       status: 'issued',
-      invoiceNo: 'FY-2627-000004',
+      invoiceNo: '27/2627/000004',
       totalPaise: 26250,
+      payablePaise: 26300,
+      roundOffPaise: 50,
       revision: 2,
       document: DOCUMENT,
       ...over,
     }) as InvoiceDto;
 
-  test('an issued response names its number, total and revision', () => {
+  test('an issued response names its number, the rupee-rounded PAYABLE and revision', () => {
     expect(generateOutcome(invoice({}))).toEqual({
       tone: 'accepted',
       word: 'Invoice issued',
-      reason: 'FY-2627-000004 — total ₹262.50 (revision 2).',
+      reason: '27/2627/000004 — payable ₹263.00 (revision 2).',
     });
   });
 
@@ -264,6 +291,8 @@ describe('outcomes and refusals', () => {
     expect(generateReason(problem('line-already-priced'))).toContain('already carries the rate frozen');
     expect(generateReason(problem('order-not-dispatched'))).toContain('not dispatched');
     expect(generateReason(problem('line-not-of-order'))).toContain('does not belong');
+    expect(generateReason(problem('invoice-frozen'))).toContain('frozen');
+    expect(generateReason(problem('invoice-frozen'))).toContain('has been re-read');
     expect(generateReason(problem('not-found', 404))).toContain('No order');
     expect(generateReason(problem('role-denied', 403))).toBe('Your role cannot generate invoices.');
     expect(generateReason(problem('something-new', 409, 'Server says so.'))).toBe('Server says so.');
@@ -321,9 +350,10 @@ describe('GST Rule 46 particulars', () => {
 });
 
 describe('the refusal re-read', () => {
-  test('exactly the two stale-line-set refusals re-read', () => {
+  test('exactly the stale-line-set refusals and invoice-frozen re-read', () => {
     expect(refusalNeedsReread(problem('line-already-priced'))).toBe(true);
     expect(refusalNeedsReread(problem('line-not-of-order'))).toBe(true);
+    expect(refusalNeedsReread(problem('invoice-frozen'))).toBe(true);
     expect(refusalNeedsReread(problem('order-not-dispatched'))).toBe(false);
     expect(refusalNeedsReread(new Error('down'))).toBe(false);
   });
