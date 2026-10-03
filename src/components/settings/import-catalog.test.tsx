@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
+import { act } from 'react';
+
 import { render, type Rendered } from '../../lib/test/render';
 import type { CatalogImportErrorResponse, CatalogImportResponse } from '../../lib/api/generated';
 import { ImportResult } from './import-catalog';
@@ -108,5 +110,38 @@ describe('ImportResult: the per-row error table', () => {
     const banner = view.container.textContent ?? '';
     expect(banner).toContain('13 committed · 10 failed');
     expect(banner).toContain('compose it with the Kit action on the SKUs table');
+  });
+});
+
+describe('ImportResult: the error-report download (csvField / downloadText, moved to src/lib/csv.ts in 8-2a)', () => {
+  test('downloads import-<id>-errors.csv, BOM-led, with a leading = cell guarded', async () => {
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    const originalClick = HTMLAnchorElement.prototype.click;
+    const blobs = new Map<string, Blob>();
+    const downloads: { name: string; text: Promise<string> }[] = [];
+    URL.createObjectURL = ((blob: Blob) => {
+      const href = `blob:test/${blobs.size}`;
+      blobs.set(href, blob);
+      return href;
+    }) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      downloads.push({ name: this.download, text: blobs.get(this.getAttribute('href') ?? '')!.text() });
+    };
+    try {
+      const report = result([error({ skuCode: '=HYPERLINK("x")', detail: 'plain' })]);
+      view = render(<ImportResult result={report} />);
+      const button = [...view.container.querySelectorAll('button')].find((b) => b.textContent?.includes('Download error report'))!;
+      act(() => button.click());
+      expect(downloads.map((d) => d.name)).toEqual([`import-${report.importId}-errors.csv`]);
+      const text = await downloads[0]!.text;
+      expect(text.charCodeAt(0)).toBe(0xfeff);
+      expect(text.slice(1)).toBe('row_number,sku_code,code,detail\n7,"\'=HYPERLINK(""x"")","validation-failed","plain"');
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+      HTMLAnchorElement.prototype.click = originalClick;
+    }
   });
 });

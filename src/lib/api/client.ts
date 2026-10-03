@@ -25,6 +25,8 @@ import {
   complianceControllerResolveExcursion,
   invoicingControllerGenerateInvoice,
   invoicingControllerGetInvoice,
+  invoicingControllerHsnSummary,
+  invoicingControllerHsnSummaryGstins,
   invoicingControllerListInvoices,
   devicesControllerListDevices,
   devicesControllerListRejectedOps,
@@ -129,6 +131,8 @@ import type {
   LedgerEventListResponse,
   ExcursionResponse,
   GenerateInvoiceDto,
+  HsnSummaryGstinsResponse,
+  HsnSummaryResponse,
   InvoiceListResponse,
   InvoiceResponse,
   GenerateBinsDto,
@@ -1635,6 +1639,42 @@ export async function fetchApiGetInvoice(
 ): Promise<InvoiceResponse> {
   const { data, error } = await invoicingControllerGetInvoice({
     path: { tenantId, invoiceId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The HSN summary (story 8-2a) of one supplier GSTIN for one period — a month
+ * `YYYY-MM` or an FY quarter `FY-yyyy-Qn`. Open to any member; both query
+ * parameters are required (400 validation-failed otherwise).
+ */
+export async function fetchApiHsnSummary(
+  tenantId: string,
+  query: { gstin: string; period: string },
+  options?: { signal?: AbortSignal },
+): Promise<HsnSummaryResponse> {
+  const { data, error } = await invoicingControllerHsnSummary({
+    path: { tenantId },
+    query: { gstin: query.gstin, period: query.period },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Every supplier GSTIN with issued invoices, with its first/last issue instant (story 8-2a). */
+export async function fetchApiHsnSummaryGstins(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<HsnSummaryGstinsResponse> {
+  const { data, error } = await invoicingControllerHsnSummaryGstins({
+    path: { tenantId },
     signal: options?.signal,
   });
   if (error || !data) {
