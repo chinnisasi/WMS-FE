@@ -1,10 +1,12 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import { ApiProblem, fetchApiAcceptInvite, fetchApiRegisterTenant, fetchApiSignIn } from '@/lib/api/client';
 import { writeSession } from '@/lib/auth';
+import { GSTIN_HELP } from '@/lib/gstin';
+import { registerTenantBody } from '@/lib/tenancy-forms';
 import { ulid } from '@/lib/ulid';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -24,18 +26,25 @@ export function RegisterForm() {
   const [name, setName] = useState('');
   const [ownerEmail, setOwnerEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Story 8-1c: the business GSTIN, optional — blank sends no `gstin` key.
+  const [gstin, setGstin] = useState('');
+  const gstinHelpId = useId();
   const [pending, setPending] = useState(false);
   const [rejection, setRejection] = useState<string | null>(null);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setPending(true);
     setRejection(null);
+    // The GSTIN's shape is decided before anything is requested — and before
+    // setPending(true), so a refused shape leaves the button enabled.
+    const built = registerTenantBody({ name, ownerEmail, password, gstinText: gstin });
+    if ('problem' in built) {
+      setRejection(built.problem);
+      return;
+    }
+    setPending(true);
     try {
-      const registration = await fetchApiRegisterTenant(
-        { name, ownerEmail, password },
-        ulid(),
-      );
+      const registration = await fetchApiRegisterTenant(built.body, ulid());
       // Registration returns no session token (sign-in mints it), so route
       // to /login with the new owner email prefilled — honest, no fake
       // session.
@@ -59,6 +68,24 @@ export function RegisterForm() {
           maxLength={200}
           autoComplete="organization"
         />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className={labelClass}>Business GSTIN (optional)</span>
+        <input
+          className={inputClass}
+          value={gstin}
+          onChange={(e) => setGstin(e.target.value)}
+          // No `pattern`: `parseGstinField` is the only shape gate (a native
+          // pattern would block a padded paste the parser trims). The cap is
+          // loose for the same reason — 15 characters plus padding.
+          maxLength={20}
+          autoCapitalize="characters"
+          spellCheck={false}
+          autoComplete="off"
+          placeholder="29AAPCD1234K1Z5"
+          aria-describedby={gstinHelpId}
+        />
+        <span id={gstinHelpId} className="text-xs text-(--muted-foreground)">{GSTIN_HELP}</span>
       </label>
       <label className="flex flex-col gap-1">
         <span className={labelClass}>Owner email</span>
