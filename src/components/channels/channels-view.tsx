@@ -5,11 +5,14 @@ import { useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   ApiProblem,
+  API_BASE_URL,
   fetchApiConnectChannel,
   fetchApiDisconnectChannel,
+  fetchApiListConnectionMappings,
   fetchApiRetryChannelConnection,
   fetchApiRotateChannelCredentials,
   fetchApiSetChannelBuffers,
+  fetchApiSetConnectionMappings,
   fetchApiUpdateChannelConnectionConfig,
 } from '@/lib/api/client';
 import type {
@@ -28,6 +31,7 @@ import {
   CHANNEL_MANAGE_CAPABILITY,
   CHANNEL_PROVIDER_LABEL,
   CHANNEL_PROVIDERS,
+  CHANNEL_WEBHOOK_PROVIDERS,
   backorderPolicySavedSentence,
   buffersSavedSentence,
   connectAcceptedSentence,
@@ -36,13 +40,18 @@ import {
   disconnectAcceptedSentence,
   disconnectReason,
   entryBuckets,
+  ingestWarehouseSavedSentence,
   lagLabel,
+  listMappingsReason,
+  mappingsSavedSentence,
   notifyChannelsChanged,
   retryAcceptedSentence,
   retryConnectionReason,
   rotateCredentialsReason,
   setBuffersReason,
+  setMappingsReason,
   updateConnectionConfigReason,
+  webhookUrlFromBase,
   type BackorderPolicy,
   type ChannelCredentialFieldSpec,
   type ChannelProvider,
@@ -388,11 +397,21 @@ function ConnectionCard({
           {entryBuckets(entry).length === 0 ? '' : ' (see editor below)'}
         </span>
       </div>
+      {canManage && <WebhookUrlRows tenantId={tenantId} entry={entry} />}
       {canManage && (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <BackorderPolicySelect
             tenantId={tenantId}
             entry={entry}
+            working={working}
+            setWorking={setWorking}
+            onOutcome={onOutcome}
+            onMutated={onMutated}
+          />
+          <IngestWarehouseSelect
+            tenantId={tenantId}
+            entry={entry}
+            warehouses={warehouses}
             working={working}
             setWorking={setWorking}
             onOutcome={onOutcome}
@@ -442,6 +461,17 @@ function ConnectionCard({
         <RotateCredentialForm
           tenantId={tenantId}
           entry={entry}
+          working={working}
+          setWorking={setWorking}
+          onOutcome={onOutcome}
+          onMutated={onMutated}
+        />
+      )}
+      {canManage && (
+        <MappingEditor
+          tenantId={tenantId}
+          entry={entry}
+          skus={skus}
           working={working}
           setWorking={setWorking}
           onOutcome={onOutcome}
@@ -535,6 +565,165 @@ function BackorderPolicySelect({
         ))}
       </select>
     </label>
+  );
+}
+
+/**
+ * The ingest-warehouse select (story 7-2): the ONE warehouse channel orders
+ * land on through THE order path. Saving PUTs the connection config with a
+ * fresh key and the WHOLE config shape — `backorderPolicy` rides whatever
+ * stands (an omitted field leaves a sibling unchanged). The empty sentinel
+ * clears to `null` on the wire, and while cleared the order path refuses
+ * every webhook (`ingest-warehouse-unset`) — the option's own words name
+ * that.
+ */
+function IngestWarehouseSelect({
+  tenantId,
+  entry,
+  warehouses,
+  working,
+  setWorking,
+  onOutcome,
+  onMutated,
+}: {
+  tenantId: string;
+  entry: ChannelConnectionListEntryDto;
+  warehouses: readonly WarehouseResponse[];
+  working: string | null;
+  setWorking: (value: string | null) => void;
+  onOutcome: (outcome: Exclude<Outcome, null>) => void;
+  onMutated: () => void;
+}) {
+  const busy = useRef(false);
+
+  function save(value: string) {
+    void (async () => {
+      if (busy.current) return;
+      busy.current = true;
+      setWorking('ingest');
+      try {
+        const cleared = value === '';
+        await fetchApiUpdateChannelConnectionConfig(
+          tenantId,
+          entry.id,
+          { backorderPolicy: entry.backorderPolicy, ingestWarehouseId: cleared ? null : value },
+          ulid(),
+        );
+        onOutcome({
+          tone: 'accepted',
+          word: 'Ingest warehouse saved',
+          reason: ingestWarehouseSavedSentence(
+            cleared
+              ? null
+              : warehouses.find((w) => w.id === value)?.code ?? null,
+          ),
+        });
+        onMutated();
+      } catch (error) {
+        onOutcome({
+          tone: 'rejected',
+          word: 'Not saved',
+          reason: updateConnectionConfigReason(error),
+        });
+      } finally {
+        busy.current = false;
+        setWorking(null);
+      }
+    })();
+  }
+
+  const standing = warehouses.find((w) => w.id === entry.ingestWarehouseId);
+  return (
+    <label className="flex items-center gap-2 text-xs">
+      <span className="text-(--muted-foreground)">Ingest warehouse</span>
+      <select
+        className={`${selectClass} w-auto py-1 text-xs`}
+        value={entry.ingestWarehouseId ?? ''}
+        disabled={working !== null}
+        onChange={(e) => {
+          const value = e.target.value;
+          if (value === (entry.ingestWarehouseId ?? '')) return;
+          save(value);
+        }}
+        aria-label={`Ingest warehouse for ${entry.providerName}`}
+      >
+        <option value="">None — every order webhook refuses (ingest-warehouse-unset)</option>
+        {entry.ingestWarehouseId !== null && standing === undefined && (
+          <option value={entry.ingestWarehouseId}>
+            {entry.ingestWarehouseId.slice(0, 8)}… (no longer listed)
+          </option>
+        )}
+        {warehouses.map((w) => (
+          <option key={w.id} value={w.id}>
+            {w.code} — {w.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/**
+ * The webhook endpoint rows (story 7-2): for a provider whose ingest is
+ * wired, the two URLs the merchant-side app must point its new-order and
+ * cancellation webhooks at, each with a one-click copy. The URLs are
+ * composed from the CONFIGURED API base origin — never the page's origin
+ * (bl-16: behind a proxy, on a LAN box or another host the two differ, and
+ * only the configured base is the one the backend serves on).
+ */
+function WebhookUrlRows({
+  tenantId,
+  entry,
+}: {
+  tenantId: string;
+  entry: ChannelConnectionListEntryDto;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  if (!(CHANNEL_WEBHOOK_PROVIDERS as readonly string[]).includes(entry.provider)) return null;
+  const rows = [
+    { endpoint: 'orders' as const, label: 'New-order webhook' },
+    { endpoint: 'cancellations' as const, label: 'Order-cancellation webhook' },
+  ];
+  return (
+    <div className="flex flex-col gap-1 text-xs">
+      {rows.map(({ endpoint, label }) => {
+        const url = webhookUrlFromBase(API_BASE_URL, tenantId, entry.provider, entry.id, endpoint);
+        if (url === null) return null; // an uncomposable base offers no row (triage row 47)
+        return (
+          <div key={endpoint} className="flex flex-wrap items-center gap-2">
+            <span className="w-44 shrink-0 text-(--muted-foreground)">{label}</span>
+            <input
+              readOnly
+              value={url}
+              aria-label={`${label} URL for ${entry.providerName}`}
+              className={`${inputClass} max-w-full flex-1 py-1 font-mono text-[11px]`}
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <button
+              type="button"
+              className={rowButtonClass}
+              onClick={() => {
+                // Only celebrate a copy a real clipboard write actually
+                // performed — no clipboard API, no false "Copied".
+                void navigator.clipboard
+                  ?.writeText(url)
+                  .then(
+                    () => setCopied(endpoint),
+                    () => undefined,
+                  )
+                  .then(() => undefined);
+              }}
+            >
+              {copied === endpoint ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        );
+      })}
+      <p className="text-(--muted-foreground)">
+        Deliveries verify against the connection's webhook signing secret — a connection
+        rotated without it answers 401 until the secret is supplied (rotate again).
+      </p>
+    </div>
   );
 }
 
@@ -772,8 +961,10 @@ function CredentialFieldInput({
         {field.label}
         {field.required ? ' — required' : ' — optional'}
       </span>
+      {/* Secret material hides behind dots; a non-secret identifier (story
+          7-2's `locationId`) is typed openly — it is looked up, not hidden. */}
       <input
-        type="password"
+        type={field.sensitive === false ? 'text' : 'password'}
         className={`${inputClass} py-1 text-xs`}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -796,6 +987,9 @@ function fieldSpecs(provider: ChannelProvider): readonly ChannelCredentialFieldS
 
 /** The buffer save's per-request bound (the backend's `MAX_BUFFER_ITEMS`). */
 const MAX_BUFFER_ITEMS = 200;
+
+/** The mappings save's per-request bound (the backend's `ArrayMaxSize` again — 200). */
+const MAX_MAPPING_ITEMS = 200;
 
 /**
  * One buffer editor row's state — a (warehouse, SKU) pair and a raw decimal
@@ -1086,6 +1280,278 @@ function BufferEditor({
         <div className="text-[10px] text-(--muted-foreground)">
           {cleared.length} standing buffer{cleared.length === 1 ? '' : 's'} marked to clear with
           the next save.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── the SKU-mapping editor (story 7-2) ────────────────────────────────── */
+
+interface MappingRowState {
+  readonly key: string;
+  externalRef: string;
+  skuId: string;
+}
+
+/**
+ * One connection's SKU-mapping editor: the channel-side SKU code a channel
+ * order line carries translated to a warehouse SKU — the look-up the ingest
+ * walks per line (an unmapped `externalRef` refuses THAT LINE's ingest).
+ * The save is a FULL replacement (rows absent from the save are removed
+ * server-side, per T6's surface contract), so the editor always PUTs every
+ * row it holds. Local refusals — a blank field, a duplicate channel code, a
+ * row count over the per-request bound — send nothing; the server's own
+ * rejections name themselves through the mappers, 403 included.
+ */
+function MappingEditor({
+  tenantId,
+  entry,
+  skus,
+  working,
+  setWorking,
+  onOutcome,
+  onMutated,
+}: {
+  tenantId: string;
+  entry: ChannelConnectionListEntryDto;
+  skus: Readonly<Record<string, SkuResponse>> | null;
+  working: string | null;
+  setWorking: (value: string | null) => void;
+  onOutcome: (outcome: Exclude<Outcome, null>) => void;
+  onMutated: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+  const [failReason, setFailReason] = useState<string | null>(null);
+  const [rows, setRows] = useState<MappingRowState[]>([]);
+  // This editor's own synchronous re-entry guard.
+  const busy = useRef(false);
+  // Monotonic per-editor key source (the BufferEditor discipline — a
+  // positional `new-${prev.length}` collides after a removal).
+  const keySeq = useRef(0);
+  // The read's generation: a response from a superseded load (the panel was
+  // toggled closed and re-opened mid-flight) is dropped.
+  const loadSeq = useRef(0);
+
+  function load() {
+    setState('loading');
+    setFailReason(null);
+    const seq = ++loadSeq.current;
+    fetchApiListConnectionMappings(tenantId, entry.id)
+      .then((response) => {
+        if (loadSeq.current !== seq) return;
+        setRows(
+          response.items.map((item, index) => ({
+            key: `row-${index}`,
+            externalRef: item.externalRef,
+            skuId: item.skuId,
+          })),
+        );
+        keySeq.current = response.items.length;
+        setState('ready');
+      })
+      .catch((error: unknown) => {
+        if (loadSeq.current !== seq) return;
+        setFailReason(listMappingsReason(error));
+        setState('failed');
+      });
+  }
+
+  function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    load();
+  }
+
+  const skuList =
+    skus === null ? [] : Object.values(skus).sort((a, b) => a.code.localeCompare(b.code));
+  const inFlight = working !== null;
+
+  function addRow() {
+    keySeq.current += 1;
+    const nextId = keySeq.current;
+    setRows((prev) => [
+      ...prev,
+      { key: `new-${nextId}`, externalRef: '', skuId: skuList[0]?.id ?? '' },
+    ]);
+  }
+
+  function patch(key: string, patchPart: Partial<MappingRowState>) {
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patchPart } : r)));
+  }
+
+  function removeRow(key: string) {
+    setRows((prev) => prev.filter((r) => r.key !== key));
+  }
+
+  function save() {
+    if (busy.current) return;
+    for (const row of rows) {
+      if (row.externalRef.trim() === '' || row.skuId === '') {
+        onOutcome({
+          tone: 'rejected',
+          word: 'Not saved',
+          reason:
+            'Every mapping row needs a channel SKU code and a warehouse SKU — nothing was sent.',
+        });
+        return;
+      }
+    }
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const ref = row.externalRef.trim();
+      if (seen.has(ref)) {
+        onOutcome({
+          tone: 'rejected',
+          word: 'Not saved',
+          reason: `The channel SKU code ${ref} appears on two rows — one code maps to one SKU. Nothing was sent.`,
+        });
+        return;
+      }
+      seen.add(ref);
+    }
+    if (rows.length > MAX_MAPPING_ITEMS) {
+      onOutcome({
+        tone: 'rejected',
+        word: 'Not saved',
+        reason: `This save carries ${rows.length} mappings; at most ${MAX_MAPPING_ITEMS} rows per connection — nothing was sent.`,
+      });
+      return;
+    }
+    void (async () => {
+      if (busy.current) return;
+      busy.current = true;
+      setWorking('mappings');
+      try {
+        const response = await fetchApiSetConnectionMappings(
+          tenantId,
+          entry.id,
+          { items: rows.map((row) => ({ externalRef: row.externalRef.trim(), skuId: row.skuId })) },
+          ulid(),
+        );
+        onOutcome({
+          tone: 'accepted',
+          word: 'Mappings saved',
+          reason: mappingsSavedSentence(response.items.length),
+        });
+        setRows(
+          response.items.map((item, index) => ({
+            key: `row-${index}`,
+            externalRef: item.externalRef,
+            skuId: item.skuId,
+          })),
+        );
+        keySeq.current = response.items.length;
+        onMutated();
+      } catch (error) {
+        onOutcome({
+          tone: 'rejected',
+          word: 'Not saved',
+          reason: setMappingsReason(error),
+        });
+      } finally {
+        busy.current = false;
+        setWorking(null);
+      }
+    })();
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--background) p-2 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-(--muted-foreground)">
+          SKU mappings — the channel-side code each channel order line carries, translated to a
+          warehouse SKU.
+        </div>
+        <button type="button" className={rowButtonClass} onClick={toggle}>
+          {open ? 'Hide SKU mappings' : 'Edit SKU mappings'}
+        </button>
+      </div>
+      {open && (
+        <div className="flex flex-col gap-2">
+          {state === 'loading' && <div className="text-(--muted-foreground)">Loading mappings…</div>}
+          {state === 'failed' && <div className="text-(--destructive)">{failReason}</div>}
+          {state === 'ready' && (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-(--border) text-left text-(--muted-foreground)">
+                      <th className="px-2 py-1.5 font-medium">Channel SKU code</th>
+                      <th className="px-2 py-1.5 font-medium">Warehouse SKU</th>
+                      <th className="px-2 py-1.5" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.key} className="border-b border-(--border)/60">
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="text"
+                            className={`${inputClass} py-1 font-mono text-xs`}
+                            value={row.externalRef}
+                            onChange={(e) => patch(row.key, { externalRef: e.target.value })}
+                            aria-label={`Channel SKU for row ${row.key}`}
+                            placeholder="e.g. 14-char variant id"
+                          />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <select
+                            className={`${selectClass} w-auto py-1 text-xs`}
+                            value={row.skuId}
+                            onChange={(e) => patch(row.key, { skuId: e.target.value })}
+                            aria-label={`Warehouse SKU for row ${row.key}`}
+                          >
+                            {skuList.length === 0 && <option value="">no SKU</option>}
+                            {skuList.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.code}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          <button
+                            type="button"
+                            disabled={inFlight}
+                            onClick={() => removeRow(row.key)}
+                            className={rowButtonClass}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {rows.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-2 py-2 text-(--muted-foreground)">
+                          No SKUs mapped to this channel — every order line it sends refuses
+                          (400 validation-failed).
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex justify-end gap-1">
+                <button type="button" disabled={inFlight} onClick={addRow} className={rowButtonClass}>
+                  Add row
+                </button>
+                <button
+                  type="button"
+                  disabled={inFlight}
+                  onClick={save}
+                  className={primaryClass}
+                >
+                  {working === 'mappings' ? 'Saving…' : 'Save mappings'}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

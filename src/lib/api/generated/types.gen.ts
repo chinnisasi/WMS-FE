@@ -4030,6 +4030,7 @@ export type ChannelConnectionResponse = {
     backorderPolicy: 'accept' | 'reject';
     credentialVersion: number;
     connectedBy: string;
+    ingestWarehouseId: string | null;
     rotatedAt: string | null;
     rotatedBy: string | null;
     lastAttemptAt: string | null;
@@ -4054,6 +4055,10 @@ export type UpdateConnectionConfigDto = {
      * The channel's backorder policy (consumed by 7-2's ingestion acceptance)
      */
     backorderPolicy: 'accept' | 'reject';
+    /**
+     * The ONE warehouse the channel ingests orders onto — absent leaves it, null clears it
+     */
+    ingestWarehouseId?: string | null;
 };
 
 export type ChannelBufferItemDto = {
@@ -4088,12 +4093,33 @@ export type ChannelBuffersSetResponse = {
     verdicts: Array<ChannelBufferVerdictDto>;
 };
 
+export type ChannelMappingItemDto = {
+    /**
+     * The channel-side SKU code (the externalRef an ingest / writeback line carries)
+     */
+    externalRef: string;
+    skuId: string;
+};
+
+export type ChannelConnectionMappingsResponse = {
+    connectionId: string;
+    items: Array<ChannelMappingItemDto>;
+};
+
+export type SetChannelMappingsDto = {
+    /**
+     * The FULL replacement mapping set (≤ 200 SKUs; an empty list clears the set)
+     */
+    items: Array<ChannelMappingItemDto>;
+};
+
 export type ChannelConnectionListEntryDto = {
     id: string;
     provider: string;
     providerName: string;
     status: string;
     backorderPolicy: 'accept' | 'reject';
+    ingestWarehouseId: string | null;
     credentialVersion: number;
     health: 'ok' | 'degraded' | 'error';
     lastSyncedAt: string | null;
@@ -4114,6 +4140,18 @@ export type ChannelConnectionListEntryDto = {
 
 export type ChannelConnectionsResponse = {
     items: Array<ChannelConnectionListEntryDto>;
+};
+
+export type ChannelWebhookOrderResponse = {
+    outcome: 'accepted' | 'backordered' | 'replayed';
+    /**
+     * The order this delivery resolved to (accepted, backordered and replayed alike)
+     */
+    orderId: string;
+};
+
+export type ChannelWebhookCancellationResponse = {
+    outcome: 'released' | 'ignored';
 };
 
 export type TenancyControllerRegisterData = {
@@ -10393,6 +10431,14 @@ export type ChannelsControllerDisconnectErrors = {
      * No such connection in this tenant, or it was already disconnected (not-found)
      */
     404: ProblemDetailsDto;
+    /**
+     * The same Idempotency-Key is being processed concurrently (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
 };
 
 export type ChannelsControllerDisconnectError = ChannelsControllerDisconnectErrors[keyof ChannelsControllerDisconnectErrors];
@@ -10427,7 +10473,7 @@ export type ChannelsControllerUpdateConnectionConfigData = {
 
 export type ChannelsControllerUpdateConnectionConfigErrors = {
     /**
-     * Missing or malformed Idempotency-Key, malformed connectionId, or an unknown backorderPolicy (validation-failed)
+     * Missing or malformed Idempotency-Key, malformed connectionId, an unknown backorderPolicy, or a non-uuid ingestWarehouseId (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -10439,7 +10485,7 @@ export type ChannelsControllerUpdateConnectionConfigErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * No such connection in this tenant (not-found)
+     * No such connection, or an unknown/foreign ingest warehouse (not-found)
      */
     404: ProblemDetailsDto;
     /**
@@ -10518,6 +10564,100 @@ export type ChannelsControllerSetConnectionBuffersResponses = {
 
 export type ChannelsControllerSetConnectionBuffersResponse = ChannelsControllerSetConnectionBuffersResponses[keyof ChannelsControllerSetConnectionBuffersResponses];
 
+export type ChannelsControllerListConnectionMappingsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/channels/connections/{connectionId}/mappings';
+};
+
+export type ChannelsControllerListConnectionMappingsErrors = {
+    /**
+     * Malformed connectionId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks channel.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such connection in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ChannelsControllerListConnectionMappingsError = ChannelsControllerListConnectionMappingsErrors[keyof ChannelsControllerListConnectionMappingsErrors];
+
+export type ChannelsControllerListConnectionMappingsResponses = {
+    200: ChannelConnectionMappingsResponse;
+};
+
+export type ChannelsControllerListConnectionMappingsResponse = ChannelsControllerListConnectionMappingsResponses[keyof ChannelsControllerListConnectionMappingsResponses];
+
+export type ChannelsControllerSetConnectionMappingsData = {
+    body: SetChannelMappingsDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/channels/connections/{connectionId}/mappings';
+};
+
+export type ChannelsControllerSetConnectionMappingsErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, malformed connectionId, an over-cap items list, a duplicate externalRef, or a scope count above the publish ceiling — the 400 names the sku × warehouse arithmetic (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks channel.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such connection or a mapped SKU outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The same Idempotency-Key is being processed concurrently (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ChannelsControllerSetConnectionMappingsError = ChannelsControllerSetConnectionMappingsErrors[keyof ChannelsControllerSetConnectionMappingsErrors];
+
+export type ChannelsControllerSetConnectionMappingsResponses = {
+    200: ChannelConnectionMappingsResponse;
+};
+
+export type ChannelsControllerSetConnectionMappingsResponse = ChannelsControllerSetConnectionMappingsResponses[keyof ChannelsControllerSetConnectionMappingsResponses];
+
 export type ChannelsControllerRetryConnectionData = {
     body?: never;
     headers: {
@@ -10575,3 +10715,115 @@ export type ChannelsControllerRetryConnectionResponses = {
 };
 
 export type ChannelsControllerRetryConnectionResponse = ChannelsControllerRetryConnectionResponses[keyof ChannelsControllerRetryConnectionResponses];
+
+export type WebhooksControllerIngestOrderData = {
+    body?: never;
+    path: {
+        /**
+         * The owning tenant path
+         */
+        tenantId: string;
+        /**
+         * The channel provider code
+         */
+        provider: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/webhooks/channels/{provider}/{connectionId}/orders';
+};
+
+export type WebhooksControllerIngestOrderErrors = {
+    /**
+     * A verified body that carries no mappable order shape (validation-failed — ordered AFTER verification)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Signature invalid, the signing secret absent/unopenable, or the topic does not bind this endpoint (webhook-signature-invalid, empty detail)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * The connection’s ingest actor has lost orders.manage (order-actor-unprivileged) — NACK; retry heals after a reconnect
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown or foreign connection (not-found), or an unregistered provider
+     */
+    404: ProblemDetailsDto;
+    /**
+     * backorder_policy reject and some line could not fully reserve (order-backorder-rejected) — nothing written, every hold released
+     */
+    409: ProblemDetailsDto;
+    /**
+     * A divergent payload on a known order ref (order-source-conflict), no ingest warehouse set (ingest-warehouse-unset), or config referencing deleted master data (ingest-config-invalid)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The provider declares no webhook transport on this deployment (channel-transport-unconfigured)
+     */
+    501: ProblemDetailsDto;
+    /**
+     * The grant store failed closed (reservation-store-unavailable) — nothing written, the channel retries
+     */
+    503: ProblemDetailsDto;
+};
+
+export type WebhooksControllerIngestOrderError = WebhooksControllerIngestOrderErrors[keyof WebhooksControllerIngestOrderErrors];
+
+export type WebhooksControllerIngestOrderResponses = {
+    200: ChannelWebhookOrderResponse;
+};
+
+export type WebhooksControllerIngestOrderResponse = WebhooksControllerIngestOrderResponses[keyof WebhooksControllerIngestOrderResponses];
+
+export type WebhooksControllerIngestCancellationData = {
+    body?: never;
+    path: {
+        /**
+         * The owning tenant path
+         */
+        tenantId: string;
+        /**
+         * The channel provider code
+         */
+        provider: string;
+        connectionId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/webhooks/channels/{provider}/{connectionId}/cancellations';
+};
+
+export type WebhooksControllerIngestCancellationErrors = {
+    /**
+     * A verified body that carries no cancellable shape (validation-failed — ordered AFTER verification)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Signature invalid, the signing secret absent/unopenable, or the topic does not bind this endpoint (webhook-signature-invalid, empty detail)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * The connection’s ingest actor has lost orders.manage (order-actor-unprivileged)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown or foreign connection (not-found), or an unregistered provider
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The provider declares no webhook transport on this deployment (channel-transport-unconfigured)
+     */
+    501: ProblemDetailsDto;
+    /**
+     * No order for this connection carries the ref yet (cancellation-unresolved — NACK; the retry lands after the create commits), or the grant store failed closed
+     */
+    503: ProblemDetailsDto;
+};
+
+export type WebhooksControllerIngestCancellationError = WebhooksControllerIngestCancellationErrors[keyof WebhooksControllerIngestCancellationErrors];
+
+export type WebhooksControllerIngestCancellationResponses = {
+    200: ChannelWebhookCancellationResponse;
+};
+
+export type WebhooksControllerIngestCancellationResponse = WebhooksControllerIngestCancellationResponses[keyof WebhooksControllerIngestCancellationResponses];
