@@ -11,6 +11,7 @@ import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
+import { csvField, downloadText } from '@/lib/csv';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 
@@ -252,26 +253,9 @@ function downloadErrorReport(result: CatalogImportResponse): void {
     ].join(','),
   );
   // UTF-8 BOM so Excel opens the report as UTF-8 instead of mojibake.
-  const blob = new Blob([`\uFEFF${[header, ...lines].join('\n')}`], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `import-${result.importId}-errors.csv`;
-  // Firefox needs the anchor in the document before click(); Safari can
-  // reclaim the object URL before the click lands, so revoke on a timer
-  // instead of inline.
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  downloadText(`import-${result.importId}-errors.csv`, `\uFEFF${[header, ...lines].join('\n')}`);
 }
 
-function csvField(value: string): string {
-  // Spreadsheet applications execute a leading =, +, - or @ as a formula —
-  // neutralize it so row detail can never become an injection vector.
-  const guarded = /^[=+\-@]/.test(value) ? `'${value}` : value;
-  return `"${guarded.replaceAll('"', '""')}"`;
-}
 
 /**
  * Clients branch on the machine-readable problem `code`, never on prose —

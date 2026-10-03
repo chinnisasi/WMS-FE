@@ -28,6 +28,8 @@ import {
   fetchApiInviteUser,
   fetchApiGenerateInvoice,
   fetchApiGetInvoice,
+  fetchApiHsnSummary,
+  fetchApiHsnSummaryGstins,
   fetchApiListExcursions,
   fetchApiListInvoices,
   fetchApiListKits,
@@ -1039,6 +1041,45 @@ describe('compliance and segregation wrappers (story 12-7)', () => {
     const url = new URL(lastRequest!.url);
     expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/invoices/${EXCURSION_ID}`);
     expect(lastRequest!.method).toBe('GET');
+    clearSession();
+  });
+
+  test('the HSN summary read sends gstin and period as the query on the summary path, with no key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { summary: {} });
+    await fetchApiHsnSummary(SESSION.tenant.id, { gstin: '29AAAPZ1234C1ZV', period: 'FY-2627-Q2' });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/invoices/hsn-summary`);
+    expect(url.searchParams.get('gstin')).toBe('29AAAPZ1234C1ZV');
+    expect(url.searchParams.get('period')).toBe('FY-2627-Q2');
+    expect([...url.searchParams.keys()].sort()).toEqual(['gstin', 'period']);
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    clearSession();
+  });
+
+  test('the HSN summary GSTIN list hits its own two-segment path with no query', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [] });
+    await fetchApiHsnSummaryGstins(SESSION.tenant.id);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/invoices/hsn-summary/gstins`);
+    expect(url.search).toBe('');
+    expect(lastRequest!.method).toBe('GET');
+    clearSession();
+  });
+
+  test('an HSN summary refusal surfaces as an ApiProblem carrying its code', async () => {
+    writeSession(SESSION);
+    stubFetch(400, { type: 'about:blank', title: 'Invalid HSN summary period', status: 400, code: 'validation-failed', detail: 'month 13' });
+    let caught: unknown;
+    try {
+      await fetchApiHsnSummary(SESSION.tenant.id, { gstin: '29AAAPZ1234C1ZV', period: '2026-13' });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiProblem);
+    expect((caught as ApiProblem).code).toBe('validation-failed');
     clearSession();
   });
 

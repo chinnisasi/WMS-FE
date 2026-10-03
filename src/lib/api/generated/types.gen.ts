@@ -4364,6 +4364,177 @@ export type InvoiceListResponse = {
     nextCursor?: string | null;
 };
 
+export type HsnSummaryPeriodDto = {
+    label: string;
+    kind: 'month' | 'quarter';
+    /**
+     * Inclusive lower bound: the UTC instant of the first IST midnight of the period
+     */
+    from: string;
+    /**
+     * EXCLUSIVE upper bound: the UTC instant of the first IST midnight after the period
+     */
+    to: string;
+    /**
+     * Always true — `to` is exclusive
+     */
+    toExclusive: true;
+};
+
+export type HsnSummaryRowDto = {
+    /**
+     * The trimmed HSN as frozen on the lines; null = blank
+     */
+    hsn: string | null;
+    /**
+     * Blank or malformed HSN (not 4, 6 or 8 digits). Included in the totals so they reconcile; excluded from the Table 12 CSV (the portal accepts master HSNs only)
+     */
+    hsnIssue: boolean;
+    /**
+     * GST Unit Quantity Code — no quantity is ever scaled to fit one; OTH where none means the same unit
+     */
+    uqc: 'NOS' | 'BOX' | 'CTN' | 'PAC' | 'BAG' | 'DRM' | 'ROL' | 'BDL' | 'PRS' | 'DOZ' | 'BTL' | 'CAN' | 'TUB' | 'SET' | 'GMS' | 'KGS' | 'TON' | 'MLT' | 'LTR' | 'KLR' | 'CMS' | 'MTR' | 'SQM' | 'SQF' | 'OTH';
+    /**
+     * The distinct catalog units merged into this row (sorted)
+     */
+    sourceUoms: Array<string>;
+    /**
+     * More than one catalog unit merged under one UQC (only OTH can) — the quantity mixes units
+     */
+    mixedUnits: boolean;
+    /**
+     * GST rate in basis points (1800 = 18%)
+     */
+    gstBps: number;
+    /**
+     * Σ dispatched quantity in milli-units — unrounded
+     */
+    qtyMilli: number;
+    /**
+     * Invoice lines summed into this row
+     */
+    lineCount: number;
+    /**
+     * Σ taxable value, paise (exact)
+     */
+    taxablePaise: number;
+    /**
+     * Σ IGST, paise
+     */
+    igstPaise: number;
+    /**
+     * Σ CGST, paise
+     */
+    cgstPaise: number;
+    /**
+     * Σ SGST/UTGST, paise
+     */
+    sgstPaise: number;
+    /**
+     * Taxable + every tax, paise (Table 12 "Total Value")
+     */
+    totalValuePaise: number;
+};
+
+export type HsnSummaryTotalsDto = {
+    /**
+     * Issued invoices in scope (an invoice with no lines still counts)
+     */
+    invoiceCount: number;
+    taxablePaise: number;
+    igstPaise: number;
+    cgstPaise: number;
+    sgstPaise: number;
+    /**
+     * IGST + CGST + SGST, paise
+     */
+    gstPaise: number;
+    /**
+     * Taxable + GST, paise
+     */
+    totalValuePaise: number;
+};
+
+export type HsnSummarySectionDto = {
+    /**
+     * HSN ascending (issue rows last), then UQC, then rate
+     */
+    rows: Array<HsnSummaryRowDto>;
+    /**
+     * Over every row, issue rows included
+     */
+    totals: HsnSummaryTotalsDto;
+};
+
+export type HsnIssueLineDto = {
+    section: 'b2b' | 'b2c';
+    invoiceId: string;
+    /**
+     * The invoice number (unique per supplier GSTIN), e.g. '29/2627/000001'
+     */
+    invoiceNo: string;
+    skuCode: string;
+    /**
+     * The HSN frozen on the line (trimmed); null = blank
+     */
+    hsn: string | null;
+    taxablePaise: number;
+    gstPaise: number;
+    /**
+     * Taxable + GST, paise — what leaving this line out of the CSV leaves Table 12 short by
+     */
+    valuePaise: number;
+    /**
+     * The SKU's CURRENT catalog HSN — a hint for the correction; the issued invoice is never rewritten from it
+     */
+    catalogHsn: string | null;
+};
+
+export type HsnSummaryDto = {
+    gstin: string;
+    period: HsnSummaryPeriodDto;
+    /**
+     * Invoices to registered recipients (a consignee GSTIN)
+     */
+    b2b: HsnSummarySectionDto;
+    /**
+     * Invoices to unregistered recipients (no consignee GSTIN)
+     */
+    b2c: HsnSummarySectionDto;
+    /**
+     * B2B + B2C — equals the included invoices’ subtotal and GST to the paisa
+     */
+    totals: HsnSummaryTotalsDto;
+    /**
+     * Every line behind an hsnIssue row
+     */
+    issueLines: Array<HsnIssueLineDto>;
+};
+
+export type HsnSummaryResponse = {
+    summary: HsnSummaryDto;
+};
+
+export type HsnSummaryGstinDto = {
+    gstin: string;
+    /**
+     * Earliest issue instant under this GSTIN, ISO-8601 UTC
+     */
+    firstIssuedAt: string;
+    /**
+     * Latest issue instant under this GSTIN, ISO-8601 UTC
+     */
+    lastIssuedAt: string;
+    invoiceCount: number;
+};
+
+export type HsnSummaryGstinsResponse = {
+    /**
+     * Every supplier GSTIN with issued invoices, GSTIN ascending
+     */
+    items: Array<HsnSummaryGstinDto>;
+};
+
 export type ChannelWebhookOrderResponse = {
     outcome: 'accepted' | 'backordered' | 'replayed';
     /**
@@ -11037,6 +11208,87 @@ export type InvoicingControllerGenerateInvoiceResponses = {
 };
 
 export type InvoicingControllerGenerateInvoiceResponse = InvoicingControllerGenerateInvoiceResponses[keyof InvoicingControllerGenerateInvoiceResponses];
+
+export type InvoicingControllerHsnSummaryData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query: {
+        /**
+         * The supplier GSTIN whose return this is — matched exactly (canonical uppercase), no case folding
+         */
+        gstin: string;
+        /**
+         * The accounting period, by IST issue date: a month 'YYYY-MM' (e.g. '2026-09') or an FY quarter 'FY-yyyy-Qn' (Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar; e.g. 'FY-2627-Q2')
+         */
+        period: string;
+    };
+    url: '/tenants/{tenantId}/invoices/hsn-summary';
+};
+
+export type InvoicingControllerHsnSummaryErrors = {
+    /**
+     * A missing or malformed gstin, or a missing or invalid period — month 13, Q5, non-consecutive FY years (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type InvoicingControllerHsnSummaryError = InvoicingControllerHsnSummaryErrors[keyof InvoicingControllerHsnSummaryErrors];
+
+export type InvoicingControllerHsnSummaryResponses = {
+    /**
+     * The summary
+     */
+    200: HsnSummaryResponse;
+};
+
+export type InvoicingControllerHsnSummaryResponse = InvoicingControllerHsnSummaryResponses[keyof InvoicingControllerHsnSummaryResponses];
+
+export type InvoicingControllerHsnSummaryGstinsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/invoices/hsn-summary/gstins';
+};
+
+export type InvoicingControllerHsnSummaryGstinsErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type InvoicingControllerHsnSummaryGstinsError = InvoicingControllerHsnSummaryGstinsErrors[keyof InvoicingControllerHsnSummaryGstinsErrors];
+
+export type InvoicingControllerHsnSummaryGstinsResponses = {
+    /**
+     * GSTIN ascending
+     */
+    200: HsnSummaryGstinsResponse;
+};
+
+export type InvoicingControllerHsnSummaryGstinsResponse = InvoicingControllerHsnSummaryGstinsResponses[keyof InvoicingControllerHsnSummaryGstinsResponses];
 
 export type InvoicingControllerGetInvoiceData = {
     body?: never;
