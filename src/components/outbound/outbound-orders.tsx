@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
 import type { OrderEntryDto, SkuResponse } from '@/lib/api/generated';
 import { quantityInputLabel, sharedQuantityUom } from '@/lib/format-quantity';
+import { GSTIN_HELP, parseGstinField } from '@/lib/gstin';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import {
   canCancelOrder,
@@ -28,6 +29,7 @@ import {
   pageFilterCount,
   parseDestinationFields,
   parseDraftLines,
+  RATE_HELP,
   type DestinationFields,
   type DraftLine,
   type Outcome,
@@ -95,7 +97,7 @@ interface DraftRow extends DraftLine {
 }
 
 function emptyRow(): DraftRow {
-  return { id: ulid(), skuId: '', quantity: '' };
+  return { id: ulid(), skuId: '', quantity: '', rate: '' };
 }
 
 /**
@@ -117,10 +119,15 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   // Story 11-1: the destination is required at create, so the form owns one
   // fieldset shared by every line — one shipment, one address.
   const [destination, setDestination] = useState<DestinationFields>(emptyDestinationFields());
+  // Story 8-1c: the buyer's GSTIN, in its OWN state — `DestinationFields` is
+  // shared with the warehouse origin form, which has no buyer.
+  const [consigneeGstin, setConsigneeGstin] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
+  const rateHelpId = useId();
+  const gstinHelpId = useId();
   const skuMap = skus.state === 'ready' ? skus.data : null;
   const skuList: readonly SkuResponse[] =
     skuMap === null ? [] : Object.values(skuMap).sort((a, b) => a.code.localeCompare(b.code));
@@ -138,6 +145,13 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     setDestination(next);
   }
 
+  /** `consigneeGstin` is in the backend's request hash too — an edit mints a
+   * fresh key, exactly as a line or address edit does. */
+  function editConsigneeGstin(next: string) {
+    setIdempotencyKey(null);
+    setConsigneeGstin(next);
+  }
+
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const parsed = parseDraftLines(draft);
@@ -153,6 +167,13 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
       setOutcome({ tone: 'rejected', word: 'Not created', reason: address.problem });
       return;
     }
+    // Lines → address → GSTIN, all before the key is minted and before
+    // setPending(true): a refused shape sends nothing and keeps the button.
+    const buyer = parseGstinField(consigneeGstin, 'Buyer GSTIN');
+    if (buyer.problem !== null) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: buyer.problem });
+      return;
+    }
     // Reused across retries of an unchanged draft; minted afresh otherwise.
     const key = idempotencyKey ?? ulid();
     setIdempotencyKey(key);
@@ -161,13 +182,21 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     try {
       const { order } = await fetchApiCreateOrder(
         tenantId,
-        { warehouseId, source: 'manual', lines: [...parsed.lines], destination: address.destination! },
+        {
+          warehouseId,
+          source: 'manual',
+          lines: [...parsed.lines],
+          destination: address.destination!,
+          // Blank = absent: no key at all, never `''`.
+          ...(buyer.gstin === undefined ? {} : { consigneeGstin: buyer.gstin }),
+        },
         key,
       );
       setDraft([emptyRow()]);
       setDestination(emptyDestinationFields());
+      setConsigneeGstin('');
       setIdempotencyKey(null);
-      setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId]));
+      setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId], parsed.lines));
       notifyOutboundChanged();
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not created', reason: createReason(error) });
@@ -288,6 +317,22 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
             />
           </label>
         </div>
+        <label className="flex flex-col gap-1 sm:max-w-xs">
+          <span className={labelClass}>Buyer GSTIN (optional, B2B)</span>
+          <input
+            className={inputClass}
+            value={consigneeGstin}
+            onChange={(e) => editConsigneeGstin(e.target.value)}
+            // No `pattern`: `parseGstinField` is the only shape gate.
+            maxLength={20}
+            autoCapitalize="characters"
+            spellCheck={false}
+            autoComplete="off"
+            placeholder="27AAPCD1234K1Z5"
+            aria-describedby={gstinHelpId}
+          />
+          <span id={gstinHelpId} className="text-xs text-(--muted-foreground)">{GSTIN_HELP}</span>
+        </label>
       </fieldset>
       <div className="flex flex-col gap-2">
         {draft.map((row, index) => (
@@ -339,6 +384,24 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
                 title={quantityInputLabel(skuMap?.[row.skuId]?.uomPrecision ?? 0)}
               />
             </label>
+            <label className="flex flex-1 flex-col gap-1">
+              <span className={labelClass}>Rate ₹ (optional)</span>
+              <input
+                className={inputClass}
+                // Text, not a number input: `parseRupees` is the one rupee
+                // grammar, and a blank must stay blank (unpriced).
+                type="text"
+                inputMode="decimal"
+                value={row.rate ?? ''}
+                onChange={(e) =>
+                  editDraft((rows) =>
+                    rows.map((r) => (r.id === row.id ? { ...r, rate: e.target.value } : r)),
+                  )
+                }
+                placeholder="125.50"
+                aria-describedby={rateHelpId}
+              />
+            </label>
             <button
               type="button"
               aria-label={`Remove line ${index + 1}`}
@@ -350,6 +413,9 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
             </button>
           </div>
         ))}
+        <p id={rateHelpId} className="text-xs text-(--muted-foreground)">
+          {RATE_HELP}
+        </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button

@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useSyncExternalStore } from 'react';
+import { useId, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiCreateWarehouse } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { emptyDestinationFields, parseDestinationFields, type DestinationFields } from '@/lib/outbound-orders';
+import { GSTIN_HELP } from '@/lib/gstin';
+import { emptyDestinationFields, type DestinationFields } from '@/lib/outbound-orders';
+import { warehouseBody, warehouseCreatedReason } from '@/lib/tenancy-forms';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
@@ -36,6 +38,10 @@ export function WarehouseCreateForm() {
   // create; carriers rate and label from it. There is no update endpoint
   // yet (story 4-6d owns that decision), so this is the one chance to set it.
   const [origin, setOrigin] = useState<DestinationFields>(emptyDestinationFields());
+  // Story 8-1c: the warehouse GSTIN — the preferred supplier GSTIN on its
+  // invoices. Optional; create-only like the origin.
+  const [gstin, setGstin] = useState('');
+  const gstinHelpId = useId();
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<
     { tone: 'accepted'; word: string; reason: string } | { tone: 'rejected'; word: string; reason: string } | null
@@ -73,26 +79,29 @@ export function WarehouseCreateForm() {
     // origin's shape is decided here first (the server re-checks it behind
     // its replay lookup) — and BEFORE setPending(true), so a refused shape
     // leaves the submit button enabled (the order form's order).
-    const address = parseDestinationFields(origin, 'origin');
-    if (address.problem !== null) {
-      setOutcome({ tone: 'rejected', word: 'Not created', reason: address.problem });
+    // Address first, then the GSTIN (story 8-1c) — `warehouseBody` builds
+    // the body from the parse, omitting a blank GSTIN.
+    const built = warehouseBody({ code, name, origin, gstinText: gstin });
+    if ('problem' in built) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: built.problem });
       return;
     }
     setPending(true);
     try {
       const warehouse = await fetchApiCreateWarehouse(
         session.tenant.id,
-        { code, name, origin: address.destination! },
+        built.body,
         // Fresh key per submit: retries replay, new submissions don't.
         ulid(),
       );
       setCode('');
       setName('');
       setOrigin(emptyDestinationFields());
+      setGstin('');
       setOutcome({
         tone: 'accepted',
         word: 'Warehouse created',
-        reason: `${warehouse.code} ${warehouse.name} now appears in the sidebar switcher.`,
+        reason: warehouseCreatedReason(warehouse),
       });
       notifyWarehousesChanged();
     } catch (error) {
@@ -224,6 +233,22 @@ export function WarehouseCreateForm() {
           </label>
         </div>
       </fieldset>
+      <label className="flex flex-col gap-1 sm:max-w-xs">
+        <span className={labelClass}>Warehouse GSTIN (optional)</span>
+        <input
+          className={inputClass}
+          value={gstin}
+          onChange={(e) => setGstin(e.target.value)}
+          // No `pattern`: `parseGstinField` is the only shape gate.
+          maxLength={20}
+          autoCapitalize="characters"
+          spellCheck={false}
+          autoComplete="off"
+          placeholder="29AAPCD1234K1Z5"
+          aria-describedby={gstinHelpId}
+        />
+        <span id={gstinHelpId} className="text-xs text-(--muted-foreground)">{GSTIN_HELP}</span>
+      </label>
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
       <button
         type="submit"

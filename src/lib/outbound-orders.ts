@@ -1,6 +1,7 @@
 import { ApiProblem } from '@/lib/api/client';
 import type { AddressDto, OrderDto, OrderEntryDto, OrderLineDto } from '@/lib/api/generated';
 import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
+import { parseRupees } from '@/lib/rupees';
 
 /**
  * Pure copy and derivation for the Outbound orders surface (story 4.2b) —
@@ -227,19 +228,54 @@ export interface Outcome {
  */
 export const MAX_NAMED_SHORT_LINES = 5;
 
+/**
+ * The invoice-readiness notes appended to the create outcome (story 8-1c).
+ * `OrderLineDto` carries no rate, so the priced/unpriced split is read from
+ * the lines that were SENT (`sent`); the kits are read from the RESPONSE, the
+ * only place an exploded kit is visible. A kit PARENT is a response line some
+ * other line names as its `parentLineId`; its sent line is matched by skuId.
+ * A kit parent's rate is inert (its components explode unpriced — PENDING),
+ * so kit parents are left out of the "N of M" count entirely — the kit note
+ * covers them — and when there are any, the count says "non-kit lines" so it
+ * never reads as a second total beside the header's response-line count.
+ */
+export function pricingNotes(order: OrderDto, sent: readonly ParsedLine[] | undefined): string {
+  const notes: string[] = [];
+  const parentIds = new Set(
+    order.lines.flatMap((line) => (line.parentLineId === null ? [] : [line.parentLineId])),
+  );
+  const kitSkus = new Set(order.lines.filter((line) => parentIds.has(line.id)).map((line) => line.skuId));
+  const hasKits = parentIds.size > 0;
+  if (sent !== undefined) {
+    const plain = sent.filter((line) => !kitSkus.has(line.skuId));
+    const unpriced = plain.filter((line) => line.ratePaise === undefined).length;
+    if (unpriced > 0 && unpriced < plain.length) {
+      notes.push(
+        `${unpriced} of ${plain.length} ${hasKits ? 'non-kit ' : ''}lines unpriced — the invoice will wait for pricing.`,
+      );
+    }
+  }
+  if (hasKits) {
+    notes.push('Kit lines are priced per component on the invoice.');
+  }
+  return notes.length === 0 ? '' : ` ${notes.join(' ')}`;
+}
+
 export function createOutcome(
   order: OrderDto,
   skuOf: (skuId: string) => (QuantityUom & { readonly code: string }) | undefined,
+  sent?: readonly ParsedLine[],
 ): Outcome {
   const totals = lineTotals(order.lines);
   const code = (skuId: string) => skuOf(skuId)?.code ?? skuId;
   const shared = sharedQuantityUom(order.lines, skuOf);
   const q = (value: number) => quantityLabel(value, shared);
+  const notes = pricingNotes(order, sent);
   if (totals.shortfallQty === 0) {
     return {
       tone: 'accepted',
       word: 'Order accepted',
-      reason: `${totals.lines} ${totals.lines === 1 ? 'line' : 'lines'}, ${q(totals.qty)} reserved in full.`,
+      reason: `${totals.lines} ${totals.lines === 1 ? 'line' : 'lines'}, ${q(totals.qty)} reserved in full.${notes}`,
     };
   }
   const shortLines = order.lines.filter((line) => line.shortfallQty > 0);
@@ -259,7 +295,7 @@ export function createOutcome(
   return {
     tone: 'accepted',
     word: 'Accepted with a shortfall',
-    reason: `${q(totals.reservedQty)} of ${q(totals.qty)} reserved; ${totals.backorderedLines} of ${totals.lines} lines backordered — ${short}.`,
+    reason: `${q(totals.reservedQty)} of ${q(totals.qty)} reserved; ${totals.backorderedLines} of ${totals.lines} lines backordered — ${short}.${notes}`,
   };
 }
 
@@ -428,14 +464,37 @@ export function pageFilterCount(shown: number, total: number): string {
 export interface DraftLine {
   readonly skuId: string;
   readonly quantity: string;
+  /**
+   * The line's rate in RUPEES as typed (story 8-1c), optional so a draft
+   * without one stands. Blank = unpriced: the line is sent with no
+   * `ratePaise` key and the invoice waits for pricing.
+   */
+  readonly rate?: string;
 }
+
+/** One request line — `ratePaise` is present only when the viewer priced it. */
+export interface ParsedLine {
+  readonly skuId: string;
+  readonly quantity: number;
+  readonly ratePaise?: number;
+}
+
+/**
+ * The help line under the rate inputs. A rate is frozen at order creation
+ * (`order_lines.rate_paise` is never written after create) and an issued
+ * invoice cannot be corrected without credit notes, so the permanence is
+ * said up front; a kit parent's rate is inert by design (PENDING: kits are
+ * priced per component on the invoice), so that is said too.
+ */
+export const RATE_HELP =
+  "₹ per base unit, before GST. Once set it can't be changed and the invoice prices from it — leave blank to price it on the invoice instead. Kit lines are priced per component on the invoice.";
 
 export const MAX_ORDER_LINES = 200;
 /** The backend's `@Max` on a line quantity (int32). */
 export const MAX_LINE_QUANTITY = 2147483647;
 
 export interface ParsedLines {
-  readonly lines: readonly { skuId: string; quantity: number }[];
+  readonly lines: readonly ParsedLine[];
   /** Non-null when the draft cannot be sent — nothing is requested. */
   readonly problem: string | null;
 }
@@ -447,15 +506,23 @@ export interface ParsedLines {
  * quantity) from being sent at all.
  */
 export function parseDraftLines(draft: readonly DraftLine[]): ParsedLines {
-  const filled = draft.filter((line) => line.skuId !== '' || line.quantity.trim() !== '');
+  // A row with ANY of SKU, quantity or rate counts as filled — a rate typed
+  // on an otherwise empty row is refused (it needs a SKU), never silently
+  // dropped. Each row keeps its 1-based RENDERED position for the copy.
+  const filled = draft
+    .map((line, index) => ({ line, row: index + 1 }))
+    .filter(
+      ({ line }) =>
+        line.skuId !== '' || line.quantity.trim() !== '' || (line.rate ?? '').trim() !== '',
+    );
   if (filled.length === 0) {
     return { lines: [], problem: 'Add at least one line — a SKU and a quantity.' };
   }
   if (filled.length > MAX_ORDER_LINES) {
     return { lines: [], problem: `An order carries at most ${MAX_ORDER_LINES} lines.` };
   }
-  const lines: { skuId: string; quantity: number }[] = [];
-  for (const line of filled) {
+  const lines: ParsedLine[] = [];
+  for (const { line, row } of filled) {
     if (line.skuId === '') {
       return { lines: [], problem: 'Every line needs a SKU.' };
     }
@@ -479,7 +546,27 @@ export function parseDraftLines(draft: readonly DraftLine[]): ParsedLines {
     if (quantity > MAX_LINE_QUANTITY) {
       return { lines: [], problem: `A line quantity is at most ${MAX_LINE_QUANTITY}.` };
     }
-    lines.push({ skuId: line.skuId, quantity });
+    const rateText = (line.rate ?? '').trim();
+    if (rateText === '') {
+      // Unpriced: NO `ratePaise` key (never `null`, never 0).
+      lines.push({ skuId: line.skuId, quantity });
+      continue;
+    }
+    // The one rupee grammar — exact paise, no float, no exponent, no sign.
+    const rate = parseRupees(rateText);
+    if ('problem' in rate) {
+      return { lines: [], problem: `Line ${row}: ${rate.problem}` };
+    }
+    // Human decision (8-1c): ₹0 is refused. A typed rate is frozen at order
+    // creation and an issued invoice cannot be corrected without credit
+    // notes, so a zero is far more likely a slip than a free line.
+    if (rate.paise === 0) {
+      return {
+        lines: [],
+        problem: `Line ${row}: ₹0 is not a rate — leave blank to price it on the invoice later.`,
+      };
+    }
+    lines.push({ skuId: line.skuId, quantity, ratePaise: rate.paise });
   }
   return { lines, problem: null };
 }

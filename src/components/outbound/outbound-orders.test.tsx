@@ -5,7 +5,7 @@ import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { KIT_PARENT_HOLDS_LABEL } from '../../lib/outbound-orders';
-import { OrderDetailPanel } from './outbound-orders';
+import { OrderDetailPanel, OutboundOrders } from './outbound-orders';
 
 /**
  * The order detail's kit parent/child rendering (story 11-6). The claims a
@@ -32,6 +32,10 @@ const SESSION: StoredSession = {
 
 let requests: { method: string; pathname: string }[] = [];
 let order: Record<string, unknown> | null = null;
+/** Story 8-1c: every order-create POST, with its JSON body and key. */
+let creates: { body: Record<string, unknown>; key: string | null }[] = [];
+/** The status the next create answers with — 201 unless a test fails it. */
+let createStatus = 201;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -93,6 +97,38 @@ function stubRouter(): void {
     const { pathname } = url;
     const method = request.method.toUpperCase();
     requests.push({ method, pathname });
+    if (method === 'POST' && pathname.endsWith(`/tenants/${TENANT_ID}/outbound/orders`)) {
+      const body = (await request.json()) as Record<string, unknown>;
+      creates.push({ body, key: request.headers.get('Idempotency-Key') });
+      if (createStatus !== 201) {
+        return json(createStatus, {
+          code: 'reservation-store-unavailable',
+          title: 'Reservation store unavailable',
+          status: createStatus,
+        });
+      }
+      const sent = body.lines as { skuId: string; quantity: number }[];
+      return json(201, {
+        order: {
+          id: 'order-new',
+          tenantId: TENANT_ID,
+          warehouseId: 'wh-1',
+          status: 'accepted',
+          source: 'manual',
+          integrationId: null,
+          externalEventId: null,
+          destination: body.destination,
+          createdAt: '2026-10-03T00:00:00.000Z',
+          updatedAt: '2026-10-03T00:00:00.000Z',
+          lines: sent.map((l, i) =>
+            line({ id: `new-${i}`, orderId: 'order-new', skuId: l.skuId, qty: l.quantity, reservedQty: l.quantity }),
+          ),
+        },
+      });
+    }
+    if (method === 'GET' && /\/warehouses\/[^/]+\/outbound\/orders$/.test(pathname)) {
+      return json(200, { items: [], nextCursor: null });
+    }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname)) {
       if (order === null) {
         return json(404, { code: 'not-found', title: 'No such order', status: 404 });
@@ -118,6 +154,8 @@ let view: Rendered | undefined;
 
 beforeEach(() => {
   requests = [];
+  creates = [];
+  createStatus = 201;
   stubRouter();
   writeSession(SESSION);
 });
@@ -376,5 +414,185 @@ describe('OrderDetailPanel: kit parent/child rendering (story 11-6)', () => {
     act(() => retry!.click());
     await settle();
     expect(view.container.textContent).toContain('GLOVE-01');
+  });
+});
+/* ------------------------------------------------------------------ */
+/* Story 8-1c: the order form's rate and buyer-GSTIN inputs             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The create form is reached by rendering the whole `OutboundOrders` surface
+ * as an `orders.manage` role, through the same stubbed `fetch`, so the body
+ * asserted is the one the shipped wrapper sends. Pins:
+ *   1. a typed rate rides the line as exact `ratePaise`; a blank one sends no key,
+ *   2. a typed buyer GSTIN rides as `consigneeGstin`; a blank one sends no key,
+ *   3. a bad rate or GSTIN sends nothing,
+ *   4. the per-draft key: reused across a retry of an unchanged draft, fresh
+ *      after a rate (or buyer GSTIN) edit following a failed submit.
+ */
+
+function setInput(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/** The `<select>` twin: React reads a select's `change` event. */
+function setSelect(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
+function labelled(container: HTMLElement, text: string): HTMLLabelElement[] {
+  return [...container.querySelectorAll('label')].filter(
+    (l) => l.querySelector('span')?.textContent === text,
+  );
+}
+
+function input(container: HTMLElement, text: string, index = 0): HTMLInputElement {
+  const found = labelled(container, text)[index];
+  expect(found).toBeDefined();
+  return found!.querySelector('input')!;
+}
+
+async function mountForm(): Promise<Rendered> {
+  const rendered = render(
+    <OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01 Whitefield" role="owner" />,
+  );
+  await settle();
+  return rendered;
+}
+
+function fillDestination(container: HTMLElement): void {
+  setInput(input(container, 'Contact name'), 'Asha Rao');
+  setInput(input(container, 'Phone'), '+91 98200 11111');
+  setInput(input(container, 'Address line 1'), '4, Linking Road');
+  setInput(input(container, 'City'), 'Mumbai');
+  setInput(input(container, 'State'), 'Maharashtra');
+  setInput(input(container, 'Pincode'), '400050');
+}
+
+function fillLine(container: HTMLElement, index: number, skuId: string, quantity: string, rate: string): void {
+  setSelect(labelled(container, 'SKU')[index]!.querySelector('select')!, skuId);
+  setInput(input(container, 'Quantity', index), quantity);
+  setInput(input(container, 'Rate ₹ (optional)', index), rate);
+}
+
+function addLine(container: HTMLElement): void {
+  const add = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Add line')!;
+  act(() => add.click());
+}
+
+async function submitCreate(container: HTMLElement): Promise<void> {
+  const form = labelled(container, 'Buyer GSTIN (optional, B2B)')[0]!.closest('form')!;
+  act(() => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await settle();
+}
+
+describe('OrderCreateForm: rates and the buyer GSTIN (story 8-1c)', () => {
+  test('a priced line sends exact paise, a blank rate sends no key, and the buyer GSTIN rides uppercased', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '2', '125.50');
+    addLine(view.container);
+    fillLine(view.container, 1, 'pad-sku', '3', '');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), ' 27aapcd1234k1z5 ');
+    await submitCreate(view.container);
+
+    expect(creates).toHaveLength(1);
+    const lines = creates[0]!.body.lines as Record<string, unknown>[];
+    expect(lines[0]).toEqual({ skuId: 'glove-sku', quantity: 2, ratePaise: 12550 });
+    expect('ratePaise' in lines[1]!).toBe(false);
+    expect(creates[0]!.body.consigneeGstin).toBe('27AAPCD1234K1Z5');
+    // The outcome names the unpriced line, and the form resets.
+    expect(view.container.querySelector('[role="status"]')!.textContent).toContain(
+      '1 of 2 lines unpriced — the invoice will wait for pricing.',
+    );
+    expect(input(view.container, 'Buyer GSTIN (optional, B2B)').value).toBe('');
+    expect(input(view.container, 'Rate ₹ (optional)').value).toBe('');
+  });
+
+  test('a blank buyer GSTIN sends no consigneeGstin key', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '   ');
+    await submitCreate(view.container);
+
+    expect(creates).toHaveLength(1);
+    expect('consigneeGstin' in creates[0]!.body).toBe(false);
+  });
+
+  test('a bad rate or a malformed buyer GSTIN sends nothing and names the problem', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '0');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(0);
+    expect(view.container.querySelector('[role="alert"]')!.textContent).toContain(
+      'Line 1: ₹0 is not a rate — leave blank to price it on the invoice later.',
+    );
+
+    setInput(input(view.container, 'Rate ₹ (optional)'), '10');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27ABC');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(0);
+    expect(view.container.querySelector('[role="alert"]')!.textContent).toContain('Buyer GSTIN is 15 characters');
+  });
+
+  test('refusal order is lines → address → GSTIN: an incomplete address outranks a malformed GSTIN', async () => {
+    view = await mountForm();
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Contact name'), 'Asha Rao');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27ABC');
+    await submitCreate(view.container);
+
+    expect(creates).toHaveLength(0);
+    const alert = view.container.querySelector('[role="alert"]')!.textContent;
+    expect(alert).toContain('The destination needs');
+    expect(alert).not.toContain('Buyer GSTIN');
+  });
+
+  test('a retry of an unchanged draft reuses the key; a rate edit after a failed submit mints a fresh one', async () => {
+    createStatus = 503;
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    await submitCreate(view.container);
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(2);
+    expect(creates[0]!.key).not.toBeNull();
+    expect(creates[1]!.key).toBe(creates[0]!.key);
+
+    setInput(input(view.container, 'Rate ₹ (optional)'), '12');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(3);
+    expect((creates[2]!.body.lines as Record<string, unknown>[])[0]!.ratePaise).toBe(1200);
+    expect(creates[2]!.key).not.toBe(creates[1]!.key);
+
+    // The buyer GSTIN is in the request hash too.
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(4);
+    expect(creates[3]!.key).not.toBe(creates[2]!.key);
+  });
+
+  test('the rate inputs carry the permanence copy; the GSTIN input has no pattern', async () => {
+    view = await mountForm();
+    const gstin = input(view.container, 'Buyer GSTIN (optional, B2B)');
+    expect(gstin.hasAttribute('pattern')).toBe(false);
+    expect(gstin.maxLength).toBe(20);
+    expect(gstin.getAttribute('autocapitalize')).toBe('characters');
+    expect(gstin.getAttribute('spellcheck')).toBe('false');
+    const gstinHelp = view.container.querySelector(`#${CSS.escape(gstin.getAttribute('aria-describedby')!)}`);
+    expect(gstinHelp!.textContent).toBe("Can't be changed after creation yet.");
+    const rate = input(view.container, 'Rate ₹ (optional)');
+    const help = view.container.querySelector(`#${CSS.escape(rate.getAttribute('aria-describedby')!)}`);
+    expect(help!.textContent).toContain("Once set it can't be changed");
   });
 });

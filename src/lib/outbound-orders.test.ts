@@ -27,6 +27,8 @@ import {
   pageFilterCount,
   parseDestinationFields,
   parseDraftLines,
+  pricingNotes,
+  RATE_HELP,
   destinationSummary,
   emptyDestinationFields,
   UNREACHABLE_REASON,
@@ -562,6 +564,184 @@ describe('parseDraftLines (nothing is sent that the backend would only 400)', ()
 
   test('a quantity without a SKU is refused before any request', () => {
     expect(parseDraftLines([{ skuId: '', quantity: '4' }]).problem).toBe('Every line needs a SKU.');
+  });
+});
+
+describe('parseDraftLines: per-line rates (story 8-1c)', () => {
+  test('a priced line carries exact paise', () => {
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '2', rate: '125.50' }])).toEqual({
+      lines: [{ skuId: 'sku-1', quantity: 2, ratePaise: 12550 }],
+      problem: null,
+    });
+    // Never a float: 0.07 rupees is 7 paise, not 7.000000000000001.
+    expect(parseDraftLines([{ skuId: 'sku-1', quantity: '1', rate: ' 0.07 ' }]).lines[0]!.ratePaise).toBe(7);
+  });
+
+  test('a blank (or absent) rate sends NO ratePaise key — never null, never 0', () => {
+    for (const draft of [
+      { skuId: 'sku-1', quantity: '2', rate: '' },
+      { skuId: 'sku-1', quantity: '2', rate: '   ' },
+      { skuId: 'sku-1', quantity: '2' },
+    ]) {
+      const parsed = parseDraftLines([draft]);
+      expect(parsed.problem).toBeNull();
+      expect(parsed.lines).toHaveLength(1);
+      expect('ratePaise' in parsed.lines[0]!).toBe(false);
+    }
+  });
+
+  test('a priced and an unpriced line ride together', () => {
+    const parsed = parseDraftLines([
+      { skuId: 'sku-1', quantity: '2', rate: '10' },
+      { skuId: 'sku-2', quantity: '3', rate: '' },
+    ]);
+    expect(parsed.problem).toBeNull();
+    expect(parsed.lines[0]!.ratePaise).toBe(1000);
+    expect('ratePaise' in parsed.lines[1]!).toBe(false);
+  });
+
+  test('a bad rate is refused, naming its 1-based rendered row', () => {
+    for (const bad of ['1e3', '12.505', '-5', '0x10', 'abc', '₹10']) {
+      const parsed = parseDraftLines([
+        { skuId: 'sku-1', quantity: '1', rate: '10' },
+        { skuId: 'sku-2', quantity: '1', rate: bad },
+      ]);
+      expect(parsed.lines).toEqual([]);
+      expect(parsed.problem).toBe(
+        'Line 2: Enter a rupee amount like 125 or 125.50 (at most two decimal places).',
+      );
+    }
+  });
+
+  test('the row number is the RENDERED position — a blank row above still counts', () => {
+    const parsed = parseDraftLines([
+      { skuId: '', quantity: '', rate: '' },
+      { skuId: 'sku-1', quantity: '1', rate: '' },
+      { skuId: 'sku-2', quantity: '1', rate: '12.505' },
+    ]);
+    expect(parsed.problem).toStartWith('Line 3: ');
+  });
+
+  test('₹0 is refused with the leave-blank copy (human decision, 8-1c)', () => {
+    for (const zero of ['0', '0.00', '00.0']) {
+      const parsed = parseDraftLines([{ skuId: 'sku-1', quantity: '1', rate: zero }]);
+      expect(parsed.lines).toEqual([]);
+      expect(parsed.problem).toBe(
+        'Line 1: ₹0 is not a rate — leave blank to price it on the invoice later.',
+      );
+    }
+  });
+
+  test('a rate on an otherwise empty row counts as filled and is refused — it needs a SKU', () => {
+    expect(parseDraftLines([{ skuId: '', quantity: '', rate: '10' }]).problem).toBe(
+      'Every line needs a SKU.',
+    );
+    // …even beside a valid line: never silently dropped.
+    expect(
+      parseDraftLines([
+        { skuId: 'sku-1', quantity: '1' },
+        { skuId: '', quantity: '', rate: '10' },
+      ]).problem,
+    ).toBe('Every line needs a SKU.');
+  });
+
+  test('the rate help copy states the permanence and the kit rule', () => {
+    expect(RATE_HELP).toBe(
+      "₹ per base unit, before GST. Once set it can't be changed and the invoice prices from it — leave blank to price it on the invoice instead. Kit lines are priced per component on the invoice.",
+    );
+  });
+});
+
+describe('createOutcome: invoice-readiness notes (story 8-1c)', () => {
+  const twoLines = order({
+    lines: [line({ qty: 10 }), line({ id: 'line-2', skuId: 'sku-2', qty: 5, reservedQty: 5 })],
+  });
+
+  test('a partly priced order says how many lines the invoice will wait on', () => {
+    const outcome = createOutcome(twoLines, skuOf, [
+      { skuId: 'sku-1', quantity: 10, ratePaise: 1000 },
+      { skuId: 'sku-2', quantity: 5 },
+    ]);
+    expect(outcome.reason).toBe(
+      '2 lines, 15 each reserved in full. 1 of 2 lines unpriced — the invoice will wait for pricing.',
+    );
+  });
+
+  test('a fully priced or wholly unpriced order adds no pricing note', () => {
+    expect(
+      createOutcome(twoLines, skuOf, [
+        { skuId: 'sku-1', quantity: 10, ratePaise: 1000 },
+        { skuId: 'sku-2', quantity: 5, ratePaise: 1 },
+      ]).reason,
+    ).toBe('2 lines, 15 each reserved in full.');
+    expect(
+      createOutcome(twoLines, skuOf, [
+        { skuId: 'sku-1', quantity: 10 },
+        { skuId: 'sku-2', quantity: 5 },
+      ]).reason,
+    ).toBe('2 lines, 15 each reserved in full.');
+  });
+
+  test('an exploded kit in the response adds the per-component note', () => {
+    const kit = order({
+      lines: [
+        line({ id: 'parent', qty: 1, reservedQty: 0, reservationId: null }),
+        line({ id: 'child', skuId: 'sku-2', qty: 2, reservedQty: 2, parentLineId: 'parent' }),
+      ],
+    });
+    expect(pricingNotes(kit, [{ skuId: 'sku-1', quantity: 1, ratePaise: 5000 }])).toBe(
+      ' Kit lines are priced per component on the invoice.',
+    );
+    expect(pricingNotes(twoLines, undefined)).toBe('');
+  });
+
+  test('a priced kit parent is not counted as priced — its rate is inert', () => {
+    // sku-1 is the kit parent (line "parent"), sku-2 a plain line.
+    const kitAndPlain = order({
+      lines: [
+        line({ id: 'parent', qty: 1, reservedQty: 0, reservationId: null }),
+        line({ id: 'child', skuId: 'sku-kg', qty: 2, reservedQty: 2, parentLineId: 'parent' }),
+        line({ id: 'plain', skuId: 'sku-2', qty: 5, reservedQty: 5 }),
+      ],
+    });
+    // Kit priced, plain unpriced: the plain line is the whole non-kit count.
+    expect(
+      pricingNotes(kitAndPlain, [
+        { skuId: 'sku-1', quantity: 1, ratePaise: 5000 },
+        { skuId: 'sku-2', quantity: 5 },
+      ]),
+    ).toBe(' Kit lines are priced per component on the invoice.');
+    // Two plain lines, one priced, beside a priced kit: counted over non-kit lines only.
+    const kitAndTwo = order({
+      lines: [
+        ...kitAndPlain.lines,
+        line({ id: 'plain-2', skuId: 'sku-kg', qty: 1, reservedQty: 1 }),
+      ],
+    });
+    expect(
+      pricingNotes(kitAndTwo, [
+        { skuId: 'sku-1', quantity: 1, ratePaise: 5000 },
+        { skuId: 'sku-2', quantity: 5, ratePaise: 100 },
+        { skuId: 'sku-kg', quantity: 1 },
+      ]),
+    ).toBe(
+      ' 1 of 2 non-kit lines unpriced — the invoice will wait for pricing. Kit lines are priced per component on the invoice.',
+    );
+  });
+
+  test('the notes ride a shortfall outcome too', () => {
+    const short = order({
+      lines: [
+        line({ qty: 10 }),
+        line({ id: 'line-2', skuId: 'sku-2', qty: 8, reservedQty: 3, shortfallQty: 5, status: 'backordered' }),
+      ],
+    });
+    expect(
+      createOutcome(short, skuOf, [
+        { skuId: 'sku-1', quantity: 10 },
+        { skuId: 'sku-2', quantity: 8, ratePaise: 100 },
+      ]).reason,
+    ).toEndWith('SPICE-02 short 5 each. 1 of 2 lines unpriced — the invoice will wait for pricing.');
   });
 });
 
