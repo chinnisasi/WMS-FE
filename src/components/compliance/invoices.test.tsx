@@ -16,7 +16,11 @@ import { Invoices } from './invoices';
  *   3. a malformed rupee entry sends NOTHING;
  *   4. an un-issued invoice prints as a DRAFT, an issued one as a tax invoice;
  *   5. a role without `invoice.generate` reads every invoice and is offered
- *      no mutating affordance at all (hidden, not disabled).
+ *      no mutating affordance at all (hidden, not disabled);
+ *   6. (8-1b) an ISSUED invoice offers no pricing/regenerate panel even to a
+ *      capable role — it is frozen; the print carries Invoice total, Round off
+ *      and Payable with the words from the payable; the list shows each
+ *      number's supplier GSTIN.
  */
 
 const TENANT_ID = '0198f7a2-1b3c-7d4e-8f90-112233445566';
@@ -45,13 +49,15 @@ interface Recorded {
 let requests: Recorded[] = [];
 let status: 'awaiting-data' | 'issued' = 'awaiting-data';
 /** Queued answers for the next POSTs (default: 200, the invoice issues). */
-let postAnswers: { status: number; code: string }[] = [];
+let postAnswers: { status: number; code: string; thenStatus?: 'awaiting-data' | 'issued' }[] = [];
 /** Makes the list read answer 500 until cleared (the read-failure arm). */
 let listFails = false;
 /** The first list page carries a next cursor (the page-one-after-generate pin). */
 let listPaged = false;
 /** Replaces the detail's document (the unreadable-document arm). */
 let documentOverride: unknown = undefined;
+/** Awaiting-data gaps (default: one unpriced line). */
+let awaitingGaps: Record<string, unknown>[] = [];
 
 function json(code: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status: code, headers: { 'content-type': 'application/json' } });
@@ -61,7 +67,7 @@ function documentFor(current: typeof status): Record<string, unknown> {
   const issued = current === 'issued';
   return {
     header: {
-      invoiceNo: issued ? 'FY-2627-000007' : null,
+      invoiceNo: issued ? '27/2627/000007' : null,
       fyLabel: issued ? 'FY-2627' : null,
       orderRef: ORDER_ID,
       issuedAt: issued ? '2026-10-03T06:00:00.000Z' : null,
@@ -92,8 +98,9 @@ function documentFor(current: typeof status): Record<string, unknown> {
         hsnGap: false,
       },
     ],
-    totals: { subtotal: 20000, gst: 1000, payAble: 21000 },
-    gaps: issued ? [] : [{ kind: 'unpriced-line', detail: 'line SPICE-01 has no rate', orderLineId: LINE_UNPRICED }],
+    // ₹210.49 → payable ₹210.00, round off −₹0.49.
+    totals: { subtotal: 20049, gst: 1000, total: 21049, roundOff: -49, payable: 21000 },
+    gaps: issued ? [] : awaitingGaps,
     revision: 1,
   };
 }
@@ -105,7 +112,7 @@ function invoiceDto(): Record<string, unknown> {
     tenantId: TENANT_ID,
     orderId: ORDER_ID,
     warehouseId: 'wh-1',
-    invoiceNo: issued ? 'FY-2627-000007' : null,
+    invoiceNo: issued ? '27/2627/000007' : null,
     fyLabel: issued ? 'FY-2627' : null,
     seriesSeq: issued ? 7 : null,
     status,
@@ -113,9 +120,11 @@ function invoiceDto(): Record<string, unknown> {
     consigneeGstin: null,
     placeOfSupply: '27',
     supplyType: 'intra',
-    subtotalPaise: 20000,
+    subtotalPaise: 20049,
     gstPaise: 1000,
-    totalPaise: 21000,
+    totalPaise: 21049,
+    payablePaise: 21000,
+    roundOffPaise: -49,
     revision: 1,
     document: documentFor(status),
     lines: [],
@@ -132,14 +141,17 @@ function entry(): Record<string, unknown> {
     warehouseId: dto.warehouseId,
     invoiceNo: dto.invoiceNo,
     fyLabel: dto.fyLabel,
+    originGstin: dto.originGstin,
     status: dto.status,
     supplyType: dto.supplyType,
     placeOfSupply: dto.placeOfSupply,
     subtotalPaise: dto.subtotalPaise,
     gstPaise: dto.gstPaise,
     totalPaise: dto.totalPaise,
+    payablePaise: dto.payablePaise,
+    roundOffPaise: dto.roundOffPaise,
     revision: dto.revision,
-    gapKinds: status === 'issued' ? [] : ['unpriced-line'],
+    gapKinds: status === 'issued' ? [] : [...new Set(awaitingGaps.map((gap) => gap.kind as string))],
     createdAt: dto.createdAt,
   };
 }
@@ -168,6 +180,8 @@ function stubRouter(): void {
     if (method === 'POST' && pathname.endsWith('/invoices')) {
       const answer = postAnswers.shift();
       if (answer !== undefined) {
+        // A refusal whose server state moved on (invoice-frozen: it issued meanwhile).
+        if (answer.thenStatus !== undefined) status = answer.thenStatus;
         return json(answer.status, { code: answer.code, title: 'Refused', status: answer.status });
       }
       status = 'issued';
@@ -200,6 +214,7 @@ beforeEach(() => {
   listFails = false;
   listPaged = false;
   documentOverride = undefined;
+  awaitingGaps = [{ kind: 'unpriced-line', detail: 'line SPICE-01 has no rate', orderLineId: LINE_UNPRICED }];
   stubRouter();
 });
 
@@ -259,7 +274,8 @@ describe('Invoices: reading (story 8-1)', () => {
     const row = view.container.querySelector('tbody tr')!;
     expect(row.textContent).toContain('Unnumbered');
     expect(row.textContent).toContain('Awaiting data');
-    expect(row.textContent).toContain('₹210.00');
+    expect(row.textContent).toContain('₹210.00'); // the list shows the rounded PAYABLE (8-1b)
+    expect(row.textContent).not.toContain('₹210.49');
     expect(row.textContent).toContain('Unpriced line');
 
     await open(view.container);
@@ -275,9 +291,32 @@ describe('Invoices: reading (story 8-1)', () => {
     await open(view.container);
     const printable = view.container.querySelector('[data-print-root]')!;
     expect(printable.textContent).toContain('Tax invoice');
-    expect(printable.textContent).toContain('FY-2627-000007');
+    expect(printable.textContent).toContain('27/2627/000007');
     expect(printable.textContent).toContain('2 each'); // 2000 milli at 0 places
     expect(printable.textContent).toContain('₹210.00');
+  });
+
+  test('the list shows each issued number with its supplier GSTIN beside it (8-1b)', async () => {
+    status = 'issued';
+    view = await mountAs('accountant');
+    const row = view.container.querySelector('tbody tr')!;
+    expect(row.textContent).toContain('27/2627/000007');
+    expect(row.textContent).toContain('GSTIN 27AAAPZ1234C1ZV');
+  });
+
+  test('the print carries Invoice total, a signed Round off and the Payable, in that order (8-1b)', async () => {
+    status = 'issued';
+    view = await mountAs('accountant');
+    await open(view.container);
+    const totals = [...view.container.querySelectorAll('[data-print-root] dl dt')].map((dt) => [
+      dt.textContent,
+      dt.nextElementSibling?.textContent,
+    ]);
+    expect(totals.slice(-3)).toEqual([
+      ['Invoice total', '₹210.49'],
+      ['Round off', '−₹0.49'],
+      ['Payable', '₹210.00'],
+    ]);
   });
 
   test('a role without invoice.generate reads everything and is offered NO mutating affordance', async () => {
@@ -326,8 +365,18 @@ describe('Invoices: pricing and generating (story 8-1)', () => {
     expect(view.container.textContent).toContain('SPICE-01 — Turmeric: Enter a rupee amount');
   });
 
-  test('with nothing unpriced the panel is a plain Regenerate that sends NO rates', async () => {
+  test('an ISSUED invoice is frozen: even a capable role is offered no pricing or Regenerate panel (8-1b)', async () => {
     status = 'issued';
+    view = await mountAs('owner');
+    await open(view.container);
+    expect(view.container.querySelector('[data-print-root]')).not.toBeNull();
+    expect(button(view.container, 'Regenerate')).toBeUndefined();
+    expect(button(view.container, 'Save prices and regenerate')).toBeUndefined();
+    expect(view.container.querySelector('input[aria-label^="Rate for"]')).toBeNull();
+  });
+
+  test('an awaiting invoice with nothing unpriced offers a plain Regenerate that sends NO rates', async () => {
+    awaitingGaps = [{ kind: 'place-of-supply', detail: 'place of supply unresolvable' }];
     view = await mountAs('owner');
     await open(view.container);
     expect(view.container.querySelector('input[aria-label^="Rate for"]')).toBeNull();
@@ -360,13 +409,34 @@ describe('Invoices: Rule 46 particulars on the printed invoice (story 8-1)', () 
     const printable = view.container.querySelector('[data-print-root]')!;
     expect(printable.textContent).toContain('27 — Maharashtra');
     expect(printable.textContent).toContain('@ 2.5%'); // 5% intra → CGST and SGST at 2.5% each
+    // The words are the PAYABLE's (₹210.00), not the exact total's ₹210.49.
     expect(printable.textContent).toContain('Indian Rupees Two Hundred Ten Only');
+    expect(printable.textContent).not.toContain('Forty-Nine Paise');
     expect(printable.textContent).toContain('Authorised signatory');
     expect(printable.textContent).toContain('For Priya Spices');
   });
 });
 
 describe('Invoices: refusals, keys and recovery (story 8-1)', () => {
+  test('an invoice-frozen refusal (it issued meanwhile) re-reads the invoice, drops the panel, and its banner SURVIVES (8-1b)', async () => {
+    postAnswers = [{ status: 409, code: 'invoice-frozen', thenStatus: 'issued' }];
+    view = await mountAs('owner');
+    await open(view.container);
+    const input = view.container.querySelector('input[aria-label^="Rate for"]') as HTMLInputElement;
+    setInput(input, '125.50');
+    const readsBefore = detailReads();
+    await submit(input.closest('form')!);
+    expect(posts()).toHaveLength(1);
+    expect(detailReads()).toBeGreaterThan(readsBefore);
+    // The re-read shows the invoice issued: the pricing panel is gone…
+    expect(view.container.querySelector('[data-print-root]')!.textContent).toContain('Tax invoice');
+    expect(view.container.querySelector('input[aria-label^="Rate for"]')).toBeNull();
+    expect(button(view.container, 'Save prices and regenerate')).toBeUndefined();
+    // …and the refusal banner, lifted to the section, is still on screen.
+    expect(view.container.textContent).toContain('Not generated');
+    expect(view.container.textContent).toContain('already issued and is frozen');
+  });
+
   test('a pricing refusal banners beside the KEPT draft, and a stale-line refusal re-reads the invoice', async () => {
     postAnswers = [{ status: 409, code: 'line-already-priced' }];
     view = await mountAs('owner');
