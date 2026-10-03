@@ -72,7 +72,7 @@ function installShims(): void {
 
 const SESSION: StoredSession = {
   token: 'header.payload.signature',
-  tenant: { id: '0198f7a2-1b3c-7d4e-8f90-112233445566', name: 'Priya Spices' },
+  tenant: { id: '0198f7a2-1b3c-7d4e-8f90-112233445566', name: 'Priya Spices', gstin: null },
   // Story 1.5: every stored session carries the signed-in user — the role
   // feeds the surface gating (hide surfaces, never "blocked" screens).
   user: {

@@ -61,7 +61,7 @@ function stubRouter(): void {
 function sessionFor(role: 'owner' | 'ops_manager' | 'operator' | 'accountant'): StoredSession {
   return {
     token: 'header.payload.signature',
-    tenant: { id: TENANT_ID, name: 'Priya Spices' },
+    tenant: { id: TENANT_ID, name: 'Priya Spices', gstin: null },
     user: { id: 'u-1', email: 'priya@example.com', role, status: 'active' },
     expiresAt: Date.now() + 15 * 60_000,
   };

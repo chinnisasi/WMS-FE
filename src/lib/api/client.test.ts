@@ -26,7 +26,10 @@ import {
   fetchApiGetSegregationMatrix,
   fetchApiGetWave,
   fetchApiInviteUser,
+  fetchApiGenerateInvoice,
+  fetchApiGetInvoice,
   fetchApiListExcursions,
+  fetchApiListInvoices,
   fetchApiListKits,
   fetchApiListOrders,
   fetchApiListProducts,
@@ -101,7 +104,7 @@ const TEST_ORIGIN = {
 
 const SESSION: StoredSession = {
   token: 'header.payload.signature',
-  tenant: { id: '0198f7a2-1b3c-7d4e-8f90-112233445566', name: 'Priya Spices' },
+  tenant: { id: '0198f7a2-1b3c-7d4e-8f90-112233445566', name: 'Priya Spices', gstin: null },
   // Story 1.5: the session carries the signed-in user (role → surface gating).
   user: {
     id: '0198f7a2-1b3c-7d4e-8f90-aabbccddeeff',
@@ -1011,6 +1014,58 @@ describe('compliance and segregation wrappers (story 12-7)', () => {
     // The endpoint declares no body — sending one would be a contract drift
     // (the release-wave precedent).
     expect(await lastRequest!.text()).toBe('');
+    clearSession();
+  });
+
+  test('the invoice list sends no query on a first page, and only the cursor after', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListInvoices(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/invoices`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListInvoices(SESSION.tenant.id, { cursor: 'opaque-cursor' });
+    const url = new URL(lastRequest!.url);
+    expect(url.searchParams.get('cursor')).toBe('opaque-cursor');
+    expect([...url.searchParams.keys()]).toEqual(['cursor']);
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    clearSession();
+  });
+
+  test('the invoice detail read hits the invoice-scoped path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { invoice: { id: EXCURSION_ID } });
+    await fetchApiGetInvoice(SESSION.tenant.id, EXCURSION_ID);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/invoices/${EXCURSION_ID}`);
+    expect(lastRequest!.method).toBe('GET');
+    clearSession();
+  });
+
+  test('generate POSTs the order id and rates as the body, with the Idempotency-Key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { invoice: { id: EXCURSION_ID, status: 'issued' } });
+    const body = { orderId: ORDER_ID, rates: [{ orderLineId: EXCURSION_ID, ratePaise: 12550 }] };
+    await fetchApiGenerateInvoice(SESSION.tenant.id, body, KEY);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/invoices`);
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(JSON.parse(await lastRequest!.text())).toEqual(body);
+    clearSession();
+  });
+
+  test('a generate refusal surfaces as an ApiProblem carrying the 8-1 code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { code: 'line-already-priced', title: 'Rate line is already priced', status: 409 });
+    let caught: unknown;
+    try {
+      await fetchApiGenerateInvoice(SESSION.tenant.id, { orderId: ORDER_ID }, KEY);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiProblem);
+    expect((caught as ApiProblem).code).toBe('line-already-priced');
     clearSession();
   });
 

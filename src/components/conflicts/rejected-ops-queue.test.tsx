@@ -41,7 +41,7 @@ const PLACEMENT_OP_ID = '01989f7a-1b3c-7d4e-8f90-777777777777';
 
 const OWNER_SESSION: StoredSession = {
   token: 'header.payload.signature',
-  tenant: { id: TENANT_ID, name: 'Priya Spices' },
+  tenant: { id: TENANT_ID, name: 'Priya Spices', gstin: null },
   user: { id: 'u-1', email: 'priya@example.com', role: 'owner', status: 'active' },
   expiresAt: Date.now() + 15 * 60_000,
 };

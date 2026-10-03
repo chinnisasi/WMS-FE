@@ -23,6 +23,9 @@ import {
   complianceControllerGetOrderColdChainTrace,
   complianceControllerListExcursions,
   complianceControllerResolveExcursion,
+  invoicingControllerGenerateInvoice,
+  invoicingControllerGetInvoice,
+  invoicingControllerListInvoices,
   devicesControllerListDevices,
   devicesControllerListRejectedOps,
   devicesControllerMintEnrollmentCode,
@@ -125,6 +128,9 @@ import type {
   ExcursionListResponse,
   LedgerEventListResponse,
   ExcursionResponse,
+  GenerateInvoiceDto,
+  InvoiceListResponse,
+  InvoiceResponse,
   GenerateBinsDto,
   GoodsReceiptListResponse,
   HealthResponse,
@@ -1594,6 +1600,63 @@ export async function fetchApiResolveExcursion(
 ): Promise<ExcursionResponse> {
   const { data, error } = await complianceControllerResolveExcursion({
     path: { tenantId, excursionId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The tenant's GST invoices (story 8-1), newest first — header rows only (no
+ * lines, no document). Open to any member. A first page sends no query.
+ */
+export async function fetchApiListInvoices(
+  tenantId: string,
+  options?: { cursor?: string; signal?: AbortSignal },
+): Promise<InvoiceListResponse> {
+  const { data, error } = await invoicingControllerListInvoices({
+    path: { tenantId },
+    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** One invoice's detail: the row, its priced lines and the document snapshot. */
+export async function fetchApiGetInvoice(
+  tenantId: string,
+  invoiceId: string,
+  options?: { signal?: AbortSignal },
+): Promise<InvoiceResponse> {
+  const { data, error } = await invoicingControllerGetInvoice({
+    path: { tenantId, invoiceId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Generates or re-derives a dispatched order's ONE invoice (capability
+ * `invoice.generate`). `rates` prices UNPRICED lines only — the backend
+ * refuses an override on an acceptance-priced line (409
+ * line-already-priced). Answers 200 with the invoice as it stands.
+ */
+export async function fetchApiGenerateInvoice(
+  tenantId: string,
+  body: GenerateInvoiceDto,
+  idempotencyKey: string,
+): Promise<InvoiceResponse> {
+  const { data, error } = await invoicingControllerGenerateInvoice({
+    path: { tenantId },
+    body,
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {

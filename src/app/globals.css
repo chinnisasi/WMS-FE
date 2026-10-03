@@ -125,3 +125,37 @@ body {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+
+/* print — when a printable document is on the page (story 8-1's invoice,
+   marked `data-print-root`), the print shows that document alone. Everything
+   that neither IS, CONTAINS, nor sits INSIDE the root is removed from layout
+   (display:none — visibility:hidden would keep its height and print blank
+   trailing pages); the root's ancestors stay, so the document flows from the
+   top of the page. The line table is unclipped (its scroll wrapper would cut
+   wide rows on paper) and the root prints light whatever the theme — browsers
+   drop backgrounds, so dark-theme text would print pale. A page with no print
+   root prints as-is. */
+@media print {
+  body:has([data-print-root]) *:not([data-print-root]):not(:has([data-print-root])):not([data-print-root] *) {
+    display: none !important;
+  }
+  body:has([data-print-root]) *:has([data-print-root]) {
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: none !important;
+    overflow: visible !important;
+  }
+  [data-print-root] {
+    color-scheme: light;
+    color: black;
+    background: white;
+    border: none;
+  }
+  [data-print-root] * {
+    color: inherit;
+  }
+  [data-print-root] .overflow-x-auto {
+    overflow: visible;
+  }
+}

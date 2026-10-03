@@ -44,7 +44,7 @@ const NOW_ISO = '2026-09-16T12:00:00.000Z';
 function session(role: StoredSession['user']['role']): StoredSession {
   return {
     token: 'header.payload.signature',
-    tenant: { id: TENANT_ID, name: 'Priya Spices' },
+    tenant: { id: TENANT_ID, name: 'Priya Spices', gstin: null },
     user: { id: 'u-1', email: 'priya@example.com', role, status: 'active' },
     expiresAt: NOW.getTime() + 15 * 60_000,
   };

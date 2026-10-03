@@ -45,7 +45,7 @@ const BIN_ID = '0198f7a2-1b3c-7d4e-8f90-131313131313';
 
 const OWNER_SESSION: StoredSession = {
   token: 'header.payload.signature',
-  tenant: { id: TENANT_ID, name: 'Priya Spices' },
+  tenant: { id: TENANT_ID, name: 'Priya Spices', gstin: null },
   user: { id: 'u-1', email: 'priya@example.com', role: 'owner', status: 'active' },
   expiresAt: Date.now() + 15 * 60_000,
 };
