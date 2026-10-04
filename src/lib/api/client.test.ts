@@ -27,6 +27,16 @@ import {
   fetchApiGetWave,
   fetchApiInviteUser,
   fetchApiGenerateInvoice,
+  fetchApiAppendEwayStateThreshold,
+  fetchApiDismissEwayBill,
+  fetchApiExportEwayBills,
+  fetchApiGenerateEwayBill,
+  fetchApiListEwayBills,
+  fetchApiListEwayGstinSettings,
+  fetchApiListEwayStateThresholds,
+  fetchApiPutEwayGstinSetting,
+  fetchApiRecordEwayBill,
+  fetchApiUpdateEwayTransport,
   fetchApiGetInvoice,
   fetchApiHsnSummary,
   fetchApiHsnSummaryGstins,
@@ -1299,5 +1309,106 @@ describe('5-5 wrappers (variances, pendings, ledger events)', () => {
       expect((error as ApiProblem).status).toBe(409);
     }
     clearSession();
+  });
+});
+
+describe('e-way bill wrappers (story 8-2b)', () => {
+  const EKEY = '01ARZ3NDEKTSV4RRFFQ69G5FAW';
+  const BILL = '0198f7a2-1b3c-7d4e-8f90-0000000000e1';
+  const base = (): string => `/api/v1/tenants/${SESSION.tenant.id}/eway`;
+
+  afterEach(() => clearSession());
+
+  test('the bill list sends no query on an unfiltered first page, then exactly the filters set', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListEwayBills(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/bills`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListEwayBills(SESSION.tenant.id, { status: 'pending', gstin: '29AAAPZ1234C1ZV', cursor: 'c-2' });
+    const url = new URL(lastRequest!.url);
+    expect(Object.fromEntries(url.searchParams)).toEqual({ status: 'pending', gstin: '29AAAPZ1234C1ZV', cursor: 'c-2' });
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+  });
+
+  test('export POSTs the ids with the key; a 409 keeps the per-bill reasons in extensions', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { file: { version: '1.0.0621', billLists: [] } });
+    await fetchApiExportEwayBills(SESSION.tenant.id, [BILL], EKEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/bills/export`);
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(EKEY);
+    expect(JSON.parse(await lastRequest!.text())).toEqual({ ids: [BILL] });
+
+    stubFetch(409, {
+      type: 'x', title: 'E-way bills cannot be exported', status: 409, code: 'eway-not-exportable', detail: 'Refused', instance: '/x',
+      bills: [{ id: BILL, reasons: ['mixed-gstin'] }],
+    });
+    let caught: unknown;
+    try {
+      await fetchApiExportEwayBills(SESSION.tenant.id, [BILL], EKEY);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiProblem);
+    expect((caught as ApiProblem).code).toBe('eway-not-exportable');
+    expect((caught as ApiProblem).extensions).toEqual({ bills: [{ id: BILL, reasons: ['mixed-gstin'] }] });
+  });
+
+  test('a problem without extension members carries an empty extensions object', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { type: 'x', title: 't', status: 409, code: 'eway-claimed', detail: 'd' });
+    const caught = await fetchApiGenerateEwayBill(SESSION.tenant.id, BILL, EKEY).catch((error: unknown) => error);
+    expect((caught as ApiProblem).extensions).toEqual({});
+  });
+
+  test('transport PATCHes the bill path; record, dismiss and generate POST theirs — each with the key and its body', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { bill: { id: BILL } });
+    await fetchApiUpdateEwayTransport(SESSION.tenant.id, BILL, { transMode: 1, vehicleNo: 'KA01AB1234', vehicleType: 'R' }, EKEY);
+    expect([lastRequest!.method, new URL(lastRequest!.url).pathname]).toEqual(['PATCH', `${base()}/bills/${BILL}/transport`]);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(EKEY);
+    expect(JSON.parse(await lastRequest!.text())).toEqual({ transMode: 1, vehicleNo: 'KA01AB1234', vehicleType: 'R' });
+
+    await fetchApiRecordEwayBill(SESSION.tenant.id, BILL, { ewbNo: '141234567890', generatedAt: '2026-10-04T05:00:00.000Z' }, EKEY);
+    expect([lastRequest!.method, new URL(lastRequest!.url).pathname]).toEqual(['POST', `${base()}/bills/${BILL}/record`]);
+    expect(JSON.parse(await lastRequest!.text())).toEqual({ ewbNo: '141234567890', generatedAt: '2026-10-04T05:00:00.000Z' });
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(EKEY);
+
+    await fetchApiDismissEwayBill(SESSION.tenant.id, BILL, 'Collected in person', EKEY);
+    expect([lastRequest!.method, new URL(lastRequest!.url).pathname]).toEqual(['POST', `${base()}/bills/${BILL}/dismiss`]);
+    expect(JSON.parse(await lastRequest!.text())).toEqual({ reason: 'Collected in person' });
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(EKEY);
+
+    await fetchApiGenerateEwayBill(SESSION.tenant.id, BILL, EKEY);
+    expect([lastRequest!.method, new URL(lastRequest!.url).pathname]).toEqual(['POST', `${base()}/bills/${BILL}/generate`]);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(EKEY);
+  });
+
+  test('state thresholds: GET the history with no key; POST appends with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [] });
+    await fetchApiListEwayStateThresholds(SESSION.tenant.id);
+    expect([lastRequest!.method, new URL(lastRequest!.url).pathname, new URL(lastRequest!.url).search]).toEqual(['GET', `${base()}/state-thresholds`, '']);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    stubFetch(201, { threshold: {} });
+    const body = { stateCode: '27', thresholdPaise: null, effectiveFrom: '2026-04-01' };
+    await fetchApiAppendEwayStateThreshold(SESSION.tenant.id, body, EKEY);
+    expect([lastRequest!.method, new URL(lastRequest!.url).pathname]).toEqual(['POST', `${base()}/state-thresholds`]);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(EKEY);
+    expect(JSON.parse(await lastRequest!.text())).toEqual(body);
+  });
+
+  test('GSTIN settings: GET the list; PUT one GSTIN with the flag and the key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [] });
+    await fetchApiListEwayGstinSettings(SESSION.tenant.id);
+    expect([lastRequest!.method, new URL(lastRequest!.url).pathname]).toEqual(['GET', `${base()}/gstin-settings`]);
+    stubFetch(200, { setting: {} });
+    await fetchApiPutEwayGstinSetting(SESSION.tenant.id, '29AAAPZ1234C1ZV', true, EKEY);
+    expect([lastRequest!.method, new URL(lastRequest!.url).pathname]).toEqual(['PUT', `${base()}/gstin-settings/29AAAPZ1234C1ZV`]);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(EKEY);
+    expect(JSON.parse(await lastRequest!.text())).toEqual({ eInvoiceApplies: true });
   });
 });

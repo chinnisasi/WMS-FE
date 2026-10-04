@@ -4535,6 +4535,228 @@ export type HsnSummaryGstinsResponse = {
     items: Array<HsnSummaryGstinDto>;
 };
 
+export type EwayTransportDto = {
+    transMode: 1 | 2 | 3 | 4 | null;
+    vehicleNo: string | null;
+    vehicleType: string | null;
+    transporterId: string | null;
+    transporterName: string | null;
+    transDocNo: string | null;
+    /**
+     * YYYY-MM-DD
+     */
+    transDocDate: string | null;
+    distanceKm: number | null;
+};
+
+export type EwayBlockerDto = {
+    code: 'invoice-unavailable' | 'hsn-issue' | 'doc-too-old' | 'too-many-lines' | 'address-incomplete' | 'state-unresolved' | 'ship-to-differs' | 'unsupported-supply' | 'rate-not-standard' | 'needs-irn' | 'transport-incomplete';
+    /**
+     * Terminal: the invoice is frozen — generate on the portal and record the number here. Otherwise fixable.
+     */
+    terminal: boolean;
+};
+
+export type EwayBillDto = {
+    id: string;
+    invoiceId: string;
+    invoiceNo: string | null;
+    /**
+     * Invoice issue instant, ISO-8601 UTC
+     */
+    invoiceIssuedAt: string | null;
+    /**
+     * Supplier GSTIN (bill-from)
+     */
+    originGstin: string;
+    consigneeGstin: string | null;
+    /**
+     * The consignee is registered (a GSTIN on the invoice)
+     */
+    b2b: boolean;
+    status: 'pending' | 'generated' | 'dismissed';
+    /**
+     * Σ (taxable + CGST + SGST + IGST) over taxable lines, paise
+     */
+    consignmentValuePaise: number;
+    /**
+     * The threshold the value exceeded, paise
+     */
+    thresholdPaise: number;
+    /**
+     * 'national' or 'state:<code>'
+     */
+    thresholdRule: string;
+    transport: EwayTransportDto;
+    ewbNo: string | null;
+    ewbGeneratedAt: string | null;
+    ewbValidUntil: string | null;
+    source: 'manual' | 'gateway' | null;
+    dismissedReason: string | null;
+    /**
+     * The gateway's last refusal
+     */
+    lastError: string | null;
+    gatewayClaimedAt: string | null;
+    /**
+     * Last NIC JSON download that included this bill
+     */
+    lastExportedAt: string | null;
+    lastExportedBy: string | null;
+    /**
+     * Computed at read time (pending bills only)
+     */
+    blockers: Array<EwayBlockerDto>;
+    /**
+     * A gateway is configured for this GSTIN and the bill is pending (offer Generate)
+     */
+    gatewayAvailable: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type EwayBillListResponse = {
+    items: Array<EwayBillDto>;
+    nextCursor?: string | null;
+};
+
+export type ExportEwayDto = {
+    /**
+     * Ready bills of ONE supplier GSTIN, no repeats
+     */
+    ids: Array<string>;
+};
+
+export type EwayExportResponse = {
+    /**
+     * The NIC bulk-upload file: { version, billLists: [bill objects] } — upload it as-is on the e-way portal's bulk generation
+     */
+    file: {
+        [key: string]: unknown;
+    };
+};
+
+export type UpdateEwayTransportDto = {
+    /**
+     * 1 Road, 2 Rail, 3 Air, 4 Ship — required when any field is set
+     */
+    transMode?: 1 | 2 | 3 | 4 | null;
+    /**
+     * Road only: 4–15 letters or digits (uppercased, spaces removed)
+     */
+    vehicleNo?: string | null;
+    /**
+     * R regular / O over-dimensional — required with a vehicle
+     */
+    vehicleType?: 'R' | 'O' | null;
+    /**
+     * The transporter's GSTIN or TRANSIN (15 characters) — enough on its own for a Part-A-only bill
+     */
+    transporterId?: string | null;
+    /**
+     * At most 25 characters
+     */
+    transporterName?: string | null;
+    /**
+     * Rail/Air/Ship: required, at most 15 characters
+     */
+    transDocNo?: string | null;
+    /**
+     * YYYY-MM-DD, on or after the invoice date; Rail/Air/Ship: required
+     */
+    transDocDate?: string | null;
+    /**
+     * Approximate distance in km (0 lets NIC compute it; at most 100 when both pincodes are equal)
+     */
+    distanceKm?: number | null;
+};
+
+export type EwayBillResponse = {
+    bill: EwayBillDto;
+};
+
+export type RecordEwayDto = {
+    /**
+     * The 12-digit EWB number the portal returned
+     */
+    ewbNo: string;
+    /**
+     * When the portal generated it — ISO-8601 UTC, between the invoice issue and now (+5 min)
+     */
+    generatedAt: string;
+    /**
+     * Validity end, ISO-8601 UTC, ≥ generatedAt (absent for a Part-A-only bill)
+     */
+    validUntil?: string | null;
+};
+
+export type DismissEwayDto = {
+    /**
+     * Why no e-way bill is needed (1–200 characters)
+     */
+    reason: string;
+};
+
+export type EwayStateThresholdDto = {
+    id: string;
+    stateCode: string;
+    /**
+     * null = no e-way bill required
+     */
+    thresholdPaise: number | null;
+    /**
+     * YYYY-MM-DD
+     */
+    effectiveFrom: string;
+    createdBy: string;
+    createdAt: string;
+};
+
+export type EwayStateThresholdListResponse = {
+    items: Array<EwayStateThresholdDto>;
+};
+
+export type AppendEwayStateThresholdDto = {
+    /**
+     * Two-digit GST state code (not 97 or 99)
+     */
+    stateCode: string;
+    /**
+     * Intra-state threshold in paise; null = no e-way bill required for intra-state supply
+     */
+    thresholdPaise: number | null;
+    /**
+     * YYYY-MM-DD — applies to invoices issued (IST) on or after this date
+     */
+    effectiveFrom: string;
+};
+
+export type EwayStateThresholdResponse = {
+    threshold: EwayStateThresholdDto;
+};
+
+export type EwayGstinSettingDto = {
+    gstin: string;
+    eInvoiceApplies: boolean;
+    updatedBy: string | null;
+    updatedAt: string | null;
+};
+
+export type EwayGstinSettingListResponse = {
+    items: Array<EwayGstinSettingDto>;
+};
+
+export type PutEwayGstinSettingDto = {
+    /**
+     * E-invoicing applies to this GSTIN: its B2B bills are held as needs-irn
+     */
+    eInvoiceApplies: boolean;
+};
+
+export type EwayGstinSettingResponse = {
+    setting: EwayGstinSettingDto;
+};
+
 export type ChannelWebhookOrderResponse = {
     outcome: 'accepted' | 'backordered' | 'replayed';
     /**
@@ -11332,6 +11554,511 @@ export type InvoicingControllerGetInvoiceResponses = {
 };
 
 export type InvoicingControllerGetInvoiceResponse = InvoicingControllerGetInvoiceResponses[keyof InvoicingControllerGetInvoiceResponses];
+
+export type EwayControllerListBillsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Only bills in this status
+         */
+        status?: 'pending' | 'generated' | 'dismissed';
+        /**
+         * Only bills of this supplier GSTIN (exact)
+         */
+        gstin?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/eway/bills';
+};
+
+export type EwayControllerListBillsErrors = {
+    /**
+     * Malformed status, gstin, cursor or limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type EwayControllerListBillsError = EwayControllerListBillsErrors[keyof EwayControllerListBillsErrors];
+
+export type EwayControllerListBillsResponses = {
+    200: EwayBillListResponse;
+};
+
+export type EwayControllerListBillsResponse = EwayControllerListBillsResponses[keyof EwayControllerListBillsResponses];
+
+export type EwayControllerExportBillsData = {
+    body: ExportEwayDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/eway/bills/export';
+};
+
+export type EwayControllerExportBillsErrors = {
+    /**
+     * Missing Idempotency-Key, or ids empty, over 100, repeated or not uuids (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Another tenant (permission-denied), or the caller lacks eway.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A bill cannot be exported (eway-not-exportable — `bills: [{id, reasons}]`, reasons among not-found, not-pending, claimed, mixed-gstin and the blocker codes), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type EwayControllerExportBillsError = EwayControllerExportBillsErrors[keyof EwayControllerExportBillsErrors];
+
+export type EwayControllerExportBillsResponses = {
+    200: EwayExportResponse;
+};
+
+export type EwayControllerExportBillsResponse = EwayControllerExportBillsResponses[keyof EwayControllerExportBillsResponses];
+
+export type EwayControllerUpdateTransportData = {
+    body: UpdateEwayTransportDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The e-way bill
+         */
+        billId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/eway/bills/{billId}/transport';
+};
+
+export type EwayControllerUpdateTransportErrors = {
+    /**
+     * Missing Idempotency-Key, a malformed billId, or a Part B rule broken — each named (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Another tenant (permission-denied), or the caller lacks eway.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such bill in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The bill is not pending (eway-not-pending), a gateway generation is in flight (eway-claimed), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type EwayControllerUpdateTransportError = EwayControllerUpdateTransportErrors[keyof EwayControllerUpdateTransportErrors];
+
+export type EwayControllerUpdateTransportResponses = {
+    200: EwayBillResponse;
+};
+
+export type EwayControllerUpdateTransportResponse = EwayControllerUpdateTransportResponses[keyof EwayControllerUpdateTransportResponses];
+
+export type EwayControllerRecordData = {
+    body: RecordEwayDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The e-way bill
+         */
+        billId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/eway/bills/{billId}/record';
+};
+
+export type EwayControllerRecordErrors = {
+    /**
+     * Missing Idempotency-Key, a malformed billId, ewbNo not 12 digits, generatedAt not an instant between the invoice issue and now (+5 min), or validUntil before generatedAt (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Another tenant (permission-denied), or the caller lacks eway.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such bill in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Not pending (eway-not-pending), a gateway generation in flight (eway-claimed), the number already recorded (ewb-no-taken), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type EwayControllerRecordError = EwayControllerRecordErrors[keyof EwayControllerRecordErrors];
+
+export type EwayControllerRecordResponses = {
+    200: EwayBillResponse;
+};
+
+export type EwayControllerRecordResponse = EwayControllerRecordResponses[keyof EwayControllerRecordResponses];
+
+export type EwayControllerDismissData = {
+    body: DismissEwayDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The e-way bill
+         */
+        billId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/eway/bills/{billId}/dismiss';
+};
+
+export type EwayControllerDismissErrors = {
+    /**
+     * Missing Idempotency-Key, a malformed billId, or a reason not 1–200 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Another tenant (permission-denied), or the caller lacks eway.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such bill in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Not pending (eway-not-pending), a gateway generation in flight (eway-claimed), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type EwayControllerDismissError = EwayControllerDismissErrors[keyof EwayControllerDismissErrors];
+
+export type EwayControllerDismissResponses = {
+    200: EwayBillResponse;
+};
+
+export type EwayControllerDismissResponse = EwayControllerDismissResponses[keyof EwayControllerDismissResponses];
+
+export type EwayControllerGenerateData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The e-way bill
+         */
+        billId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/eway/bills/{billId}/generate';
+};
+
+export type EwayControllerGenerateErrors = {
+    /**
+     * Missing Idempotency-Key or a malformed billId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Another tenant (permission-denied), or the caller lacks eway.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such bill in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Not pending (eway-not-pending), blocked (eway-not-exportable, with `bills`), already being generated (eway-claimed), the returned number already recorded (ewb-no-taken), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The gateway refused the bill (eway-gateway-refused — also stored as lastError), or the key was reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * No gateway is configured on this deployment (gateway-unconfigured)
+     */
+    501: ProblemDetailsDto;
+    /**
+     * The gateway is unreachable (eway-gateway-unavailable) — the claim expires in two minutes
+     */
+    503: ProblemDetailsDto;
+};
+
+export type EwayControllerGenerateError = EwayControllerGenerateErrors[keyof EwayControllerGenerateErrors];
+
+export type EwayControllerGenerateResponses = {
+    200: EwayBillResponse;
+};
+
+export type EwayControllerGenerateResponse = EwayControllerGenerateResponses[keyof EwayControllerGenerateResponses];
+
+export type EwayControllerListStateThresholdsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/eway/state-thresholds';
+};
+
+export type EwayControllerListStateThresholdsErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type EwayControllerListStateThresholdsError = EwayControllerListStateThresholdsErrors[keyof EwayControllerListStateThresholdsErrors];
+
+export type EwayControllerListStateThresholdsResponses = {
+    200: EwayStateThresholdListResponse;
+};
+
+export type EwayControllerListStateThresholdsResponse = EwayControllerListStateThresholdsResponses[keyof EwayControllerListStateThresholdsResponses];
+
+export type EwayControllerAppendStateThresholdData = {
+    body: AppendEwayStateThresholdDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/eway/state-thresholds';
+};
+
+export type EwayControllerAppendStateThresholdErrors = {
+    /**
+     * Missing Idempotency-Key, a state not on the CBIC list or 97/99, a malformed date or a negative amount (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Another tenant (permission-denied), or the caller lacks eway.configure (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type EwayControllerAppendStateThresholdError = EwayControllerAppendStateThresholdErrors[keyof EwayControllerAppendStateThresholdErrors];
+
+export type EwayControllerAppendStateThresholdResponses = {
+    /**
+     * The appended override
+     */
+    201: EwayStateThresholdResponse;
+};
+
+export type EwayControllerAppendStateThresholdResponse = EwayControllerAppendStateThresholdResponses[keyof EwayControllerAppendStateThresholdResponses];
+
+export type EwayControllerListGstinSettingsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/eway/gstin-settings';
+};
+
+export type EwayControllerListGstinSettingsErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type EwayControllerListGstinSettingsError = EwayControllerListGstinSettingsErrors[keyof EwayControllerListGstinSettingsErrors];
+
+export type EwayControllerListGstinSettingsResponses = {
+    200: EwayGstinSettingListResponse;
+};
+
+export type EwayControllerListGstinSettingsResponse = EwayControllerListGstinSettingsResponses[keyof EwayControllerListGstinSettingsResponses];
+
+export type EwayControllerPutGstinSettingData = {
+    body: PutEwayGstinSettingDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * One of the tenant's GSTINs (exact, uppercase)
+         */
+        gstin: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/eway/gstin-settings/{gstin}';
+};
+
+export type EwayControllerPutGstinSettingErrors = {
+    /**
+     * Missing Idempotency-Key, or a malformed gstin (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Another tenant (permission-denied), or the caller lacks eway.configure (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The GSTIN is neither the tenant's nor a warehouse's (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type EwayControllerPutGstinSettingError = EwayControllerPutGstinSettingErrors[keyof EwayControllerPutGstinSettingErrors];
+
+export type EwayControllerPutGstinSettingResponses = {
+    200: EwayGstinSettingResponse;
+};
+
+export type EwayControllerPutGstinSettingResponse = EwayControllerPutGstinSettingResponses[keyof EwayControllerPutGstinSettingResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;

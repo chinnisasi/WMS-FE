@@ -143,6 +143,15 @@ export const CAPABILITIES = [
   // invoice (reads are never gated) but does not set what a buyer is charged.
   // Gates the /compliance Invoices section's pricing panel.
   'invoice.generate',
+  // Story 8-2b — the e-way bill paperwork: Part B, the NIC JSON export,
+  // recording a returned EWB number, dismiss and gateway generate. Owner +
+  // Ops Manager + ACCOUNTANT — the accountant's first write capability, a
+  // deliberate exception (e-way paperwork is finance work). Gates the
+  // /compliance E-way bills section's row actions and selection.
+  'eway.manage',
+  // Story 8-2b — the e-way configuration (the per-state threshold overrides
+  // and the per-GSTIN e-invoicing flag). OWNER-ONLY.
+  'eway.configure',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -159,6 +168,9 @@ const OWNER_ONLY_CAPABILITIES: readonly Capability[] = [
   // Story 5-2 — the adjustment approval gate: owner-only by the same
   // segregation-of-duties rationale as the user-management verbs.
   'adjustments.approve',
+  // Story 8-2b — the e-way thresholds decide which consignments need a bill:
+  // the person who sets the bar is the owner.
+  'eway.configure',
 ];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
@@ -184,7 +196,8 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     // rationale). Planning stays above: an operator never schedules counts.
     'counts.execute',
   ],
-  accountant: [],
+  // Story 8-2b: read-only except the e-way paperwork (finance work).
+  accountant: ['eway.manage'],
 };
 
 /**
