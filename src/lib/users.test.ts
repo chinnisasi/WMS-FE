@@ -36,8 +36,11 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // mirror catch-up rode 5-2's FE change; 5-3's rode 5-3's); story 5-4
     // adds `variances.resolve` — 30 became 31; story 6-1 adds
     // `replenishment.manage` — 31 became 32; story 7-1 adds `channel.manage`
-    // — 32 became 33; story 8-1 adds `invoice.generate` — 33 became 34.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(34);
+    // — 32 became 33; story 8-1 adds `invoice.generate` — 33 became 34;
+    // story 8-2b adds `eway.manage` and `eway.configure` — 34 became 36.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(36);
+    expect(roleHasCapability('owner', 'eway.manage')).toBe(true);
+    expect(roleHasCapability('owner', 'eway.configure')).toBe(true);
     // 8-1: invoice pricing is owner + ops_manager — never the floor, and
     // never the accountant, who reads invoices but does not set prices.
     expect(roleHasCapability('owner', 'invoice.generate')).toBe(true);
@@ -161,13 +164,15 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'replenishment.manage',
         // Story 7-1 — the channels surface's mutations are manager verbs too.
         'channel.manage',
+        // Story 8-2b — the e-way paperwork (NOT its owner-only configuration).
+        'eway.manage',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
     );
   });
 
-  test('operator holds exactly the floor verbs; accountant is read-only', () => {
+  test('operator holds exactly the floor verbs; accountant holds only the e-way paperwork', () => {
     // Story 3.5 opened the operator column with `putaway.execute`; stories
     // 4.3 / 4.5 / 4.6 added pick, pack and dispatch; story 12-5 added the
     // excursion record (the floor records what it observes); story 4.6c added
@@ -207,7 +212,12 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(roleHasCapability('operator', 'counts.manage')).toBe(false);
     // Story 5-4 — the floor never resolves variances.
     expect(roleHasCapability('operator', 'variances.resolve')).toBe(false);
-    expect(ROLE_CAPABILITIES.accountant.length).toBe(0);
+    expect(roleHasCapability('operator', 'eway.manage')).toBe(false);
+    // Story 8-2b — the accountant's first (and only) write: the e-way
+    // paperwork. Its configuration stays owner-only.
+    expect(ROLE_CAPABILITIES.accountant).toEqual(['eway.manage']);
+    expect(roleHasCapability('accountant', 'eway.configure')).toBe(false);
+    expect(roleHasCapability('ops_manager', 'eway.configure')).toBe(false);
     expect(roleHasCapability('accountant', 'putaway.execute')).toBe(false);
     expect(roleHasCapability('accountant', 'users.invite')).toBe(false);
     expect(roleHasCapability('accountant', 'orders.manage')).toBe(false);

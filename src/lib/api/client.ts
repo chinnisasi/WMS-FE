@@ -24,6 +24,16 @@ import {
   complianceControllerListExcursions,
   complianceControllerResolveExcursion,
   invoicingControllerGenerateInvoice,
+  ewayControllerAppendStateThreshold,
+  ewayControllerDismiss,
+  ewayControllerExportBills,
+  ewayControllerGenerate,
+  ewayControllerListBills,
+  ewayControllerListGstinSettings,
+  ewayControllerListStateThresholds,
+  ewayControllerPutGstinSetting,
+  ewayControllerRecord,
+  ewayControllerUpdateTransport,
   invoicingControllerGetInvoice,
   invoicingControllerHsnSummary,
   invoicingControllerHsnSummaryGstins,
@@ -131,6 +141,16 @@ import type {
   LedgerEventListResponse,
   ExcursionResponse,
   GenerateInvoiceDto,
+  AppendEwayStateThresholdDto,
+  EwayBillListResponse,
+  EwayBillResponse,
+  EwayExportResponse,
+  EwayGstinSettingListResponse,
+  EwayGstinSettingResponse,
+  EwayStateThresholdListResponse,
+  EwayStateThresholdResponse,
+  RecordEwayDto,
+  UpdateEwayTransportDto,
   HsnSummaryGstinsResponse,
   HsnSummaryResponse,
   InvoiceListResponse,
@@ -277,14 +297,28 @@ export class ApiProblem extends Error {
    * server's own words, so the title is carried rather than dropped.
    */
   readonly title?: string;
+  /**
+   * The problem's RFC 9457 EXTENSION members (story 8-2b) — everything
+   * beyond the standard `type/title/status/detail/instance/code`. Structured
+   * data a refusal carries for the client to act on, e.g. the e-way export's
+   * per-bill `bills: [{id, reasons}]`. Empty when the problem has none.
+   */
+  readonly extensions: Readonly<Record<string, unknown>>;
 
-  constructor(code: string, status: number, detail?: string, title?: string) {
+  constructor(code: string, status: number, detail?: string, title?: string, extensions: Record<string, unknown> = {}) {
     super(detail ?? code);
     this.code = code;
     this.status = status;
     this.detail = detail;
     this.title = title;
+    this.extensions = extensions;
   }
+}
+
+const STANDARD_PROBLEM_MEMBERS = new Set(['type', 'title', 'status', 'detail', 'instance', 'code', 'errors', 'message']);
+
+function problemExtensions(error: object): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(error).filter(([key]) => !STANDARD_PROBLEM_MEMBERS.has(key)));
 }
 
 /**
@@ -306,7 +340,7 @@ export class ApiProblem extends Error {
  */
 function unwrapError(error: unknown, fallbackStatus: number): Error {
   if (isProblemDetails(error)) {
-    return new ApiProblem(error.code, error.status ?? fallbackStatus, error.detail, error.title);
+    return new ApiProblem(error.code, error.status ?? fallbackStatus, error.detail, error.title, problemExtensions(error));
   }
   if (error instanceof Error) {
     return error;
@@ -1702,6 +1736,160 @@ export async function fetchApiGenerateInvoice(
   if (error || !data) {
     throw unwrapError(error, 400);
   }
+  return data;
+}
+
+// ── e-way bills (story 8-2b) ─────────────────────────────────────────────────
+
+export interface EwayBillListOptions {
+  status?: 'pending' | 'generated' | 'dismissed';
+  gstin?: string;
+  cursor?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * One page of e-way bills, newest first (open to any member). Only the
+ * filters the caller set ride the query — a first page with no filter sends
+ * no query at all.
+ */
+export async function fetchApiListEwayBills(tenantId: string, options: EwayBillListOptions = {}): Promise<EwayBillListResponse> {
+  const query: NonNullable<Parameters<typeof ewayControllerListBills>[0]['query']> = {};
+  if (options.status !== undefined) query.status = options.status;
+  if (options.gstin !== undefined) query.gstin = options.gstin;
+  if (options.cursor !== undefined) query.cursor = options.cursor;
+  if (options.limit !== undefined) query.limit = options.limit;
+  const { data, error } = await ewayControllerListBills({
+    path: { tenantId },
+    query: Object.keys(query).length === 0 ? undefined : query,
+    signal: options.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * The NIC bulk-upload JSON over ready pending bills of ONE GSTIN
+ * (`eway.manage`). All or nothing: a 409 `eway-not-exportable` carries
+ * `bills: [{id, reasons}]` in `ApiProblem.extensions`.
+ */
+export async function fetchApiExportEwayBills(tenantId: string, ids: readonly string[], idempotencyKey: string): Promise<EwayExportResponse> {
+  const { data, error } = await ewayControllerExportBills({
+    path: { tenantId },
+    body: { ids: [...ids] },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Replaces a pending bill's whole Part B (`eway.manage`); an absent field clears it. */
+export async function fetchApiUpdateEwayTransport(
+  tenantId: string,
+  billId: string,
+  body: UpdateEwayTransportDto,
+  idempotencyKey: string,
+): Promise<EwayBillResponse> {
+  const { data, error } = await ewayControllerUpdateTransport({
+    path: { tenantId, billId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Records the EWB number the portal returned (`eway.manage`) — final. */
+export async function fetchApiRecordEwayBill(
+  tenantId: string,
+  billId: string,
+  body: RecordEwayDto,
+  idempotencyKey: string,
+): Promise<EwayBillResponse> {
+  const { data, error } = await ewayControllerRecord({
+    path: { tenantId, billId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Dismisses a pending bill with a reason (`eway.manage`). */
+export async function fetchApiDismissEwayBill(
+  tenantId: string,
+  billId: string,
+  reason: string,
+  idempotencyKey: string,
+): Promise<EwayBillResponse> {
+  const { data, error } = await ewayControllerDismiss({
+    path: { tenantId, billId },
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Generates a ready bill through the configured gateway (`eway.manage`) — no body. */
+export async function fetchApiGenerateEwayBill(tenantId: string, billId: string, idempotencyKey: string): Promise<EwayBillResponse> {
+  const { data, error } = await ewayControllerGenerate({
+    path: { tenantId, billId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** The tenant's intra-state threshold overrides — the full append-only history. */
+export async function fetchApiListEwayStateThresholds(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<EwayStateThresholdListResponse> {
+  const { data, error } = await ewayControllerListStateThresholds({ path: { tenantId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Appends an intra-state threshold override (`eway.configure`, owner). Answers 201. */
+export async function fetchApiAppendEwayStateThreshold(
+  tenantId: string,
+  body: AppendEwayStateThresholdDto,
+  idempotencyKey: string,
+): Promise<EwayStateThresholdResponse> {
+  const { data, error } = await ewayControllerAppendStateThreshold({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** The e-way settings of every GSTIN the tenant holds. */
+export async function fetchApiListEwayGstinSettings(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<EwayGstinSettingListResponse> {
+  const { data, error } = await ewayControllerListGstinSettings({ path: { tenantId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Sets whether e-invoicing applies to one of the tenant's GSTINs (`eway.configure`, owner). */
+export async function fetchApiPutEwayGstinSetting(
+  tenantId: string,
+  gstin: string,
+  eInvoiceApplies: boolean,
+  idempotencyKey: string,
+): Promise<EwayGstinSettingResponse> {
+  const { data, error } = await ewayControllerPutGstinSetting({
+    path: { tenantId, gstin },
+    body: { eInvoiceApplies },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
   return data;
 }
 
