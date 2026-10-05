@@ -26,6 +26,10 @@ import {
   orderStatusLabel,
   pageFilterCount,
   parseDestinationFields,
+  legalNameBody,
+  legalNameProblem,
+  showsLegalName,
+  MAX_CONSIGNEE_LEGAL_NAME_LENGTH,
   parseDraftLines,
   pricingNotes,
   RATE_HELP,
@@ -876,5 +880,33 @@ describe('kitParentHoldLabel (story 11-6 — the parent hold span stays honest)'
     const parent = line({ id: 'parent', reservationId: null, reservedQty: 0 });
     expect(kitParentHoldLabel(parent, 'dispatched')).toBe('Kit — dispatched in its components; holds retired');
     expect(kitParentHoldLabel(parent, 'cancelled')).toBe('Kit — order cancelled; holds released');
+  });
+});
+
+describe('the buyer legal name (story 8-1d)', () => {
+  test('the input is offered once a buyer GSTIN is typed (non-blank)', () => {
+    expect(showsLegalName('')).toBe(false);
+    expect(showsLegalName('   ')).toBe(false);
+    expect(showsLegalName('2')).toBe(true);
+    expect(showsLegalName('29AAPCD1234K1Z5')).toBe(true);
+  });
+
+  test('sent only beside a GSTIN, trimmed; blank is absent (no key at all); kept-not-sent while the GSTIN is blank', () => {
+    expect(legalNameBody('29AAPCD1234K1Z5', '  Mysore Spices Pvt Ltd ')).toEqual({ consigneeLegalName: 'Mysore Spices Pvt Ltd' });
+    expect(legalNameBody('29AAPCD1234K1Z5', '   ')).toEqual({});
+    expect('consigneeLegalName' in legalNameBody('29AAPCD1234K1Z5', '')).toBe(false);
+    expect(legalNameBody(undefined, 'Mysore Spices Pvt Ltd')).toEqual({});
+  });
+
+  test('the cap mirrors the backend (100 code points)', () => {
+    expect(MAX_CONSIGNEE_LEGAL_NAME_LENGTH).toBe(100);
+  });
+
+  test('the length check counts code points after the trim, and only when the name would be sent', () => {
+    const astral = '𝐀';
+    expect(legalNameProblem('29AAPCD1234K1Z5', astral.repeat(100))).toBeNull();
+    expect(legalNameProblem('29AAPCD1234K1Z5', `  ${'x'.repeat(100)}  `)).toBeNull();
+    expect(legalNameProblem('29AAPCD1234K1Z5', astral.repeat(101))).toBe('Buyer legal name is at most 100 characters (got 101).');
+    expect(legalNameProblem(undefined, astral.repeat(101))).toBeNull();
   });
 });

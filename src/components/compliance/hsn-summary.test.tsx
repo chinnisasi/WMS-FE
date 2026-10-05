@@ -45,6 +45,7 @@ function rowOf(overrides: Record<string, unknown>): Record<string, unknown> {
   return {
     hsn: '0910',
     hsnIssue: false,
+    rateIssue: false,
     uqc: 'KGS',
     sourceUoms: ['kg'],
     mixedUnits: false,
@@ -78,7 +79,7 @@ function summaryBody(gstin: string, period: string, empty = false): Record<strin
       gstin,
       period: { label: period, kind: 'month', from: 'x', to: 'y', toExclusive: true },
       b2b: {
-        rows: [rowOf({})],
+        rows: [rowOf({}), ...extraB2bRows],
         totals: { invoiceCount: 1, taxablePaise: 100_000, igstPaise: 0, cgstPaise: 2_500, sgstPaise: 2_500, gstPaise: 5_000, totalValuePaise: 105_000 },
       },
       b2c: {
@@ -97,6 +98,8 @@ function summaryBody(gstin: string, period: string, empty = false): Record<strin
 }
 
 let requests: { pathname: string; query: URLSearchParams }[] = [];
+/** Story 8-1d: rows a test adds to the B2B section (a rate-issue row). */
+let extraB2bRows: Record<string, unknown>[] = [];
 let gstinItems: unknown[] = [];
 let summaryFails = false;
 let emptyPeriods = new Set<string>();
@@ -126,6 +129,7 @@ let view: Rendered | undefined;
 
 beforeEach(() => {
   requests = [];
+  extraB2bRows = [];
   summaryFails = false;
   emptyPeriods = new Set();
   downloads = [];
@@ -299,5 +303,48 @@ describe('HsnSummary', () => {
     view = await mount();
     expect(view.container.querySelector('[data-testid="hsn-b2b"]')).not.toBeNull();
     expect(view.container.querySelector('[data-testid="hsn-issue-lines"]')).not.toBeNull();
+  });
+});
+
+describe('HsnSummary: rates off the GST rate master (story 8-1d)', () => {
+  test('a 12.5 % row is flagged on screen, left out of the CSV, and added once to the shortfall', async () => {
+    extraB2bRows = [
+      rowOf({ gstBps: 1250, rateIssue: true, taxablePaise: 10_000, igstPaise: 1_250, cgstPaise: 0, sgstPaise: 0, totalValuePaise: 11_250 }),
+    ];
+    view = await mount();
+    const c = view.container;
+    const flagged = [...c.querySelectorAll('tr[data-rate-issue="true"]')];
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0]!.textContent).toContain('12.5');
+    expect(c.querySelectorAll('[data-testid="hsn-rate-flag"]')).toHaveLength(1);
+    expect(c.querySelector('[data-testid="hsn-rate-flag"]')!.textContent).toContain('Not on the GST rate master');
+    // ₹118.00 (the blank-HSN line) + ₹112.50 (the 12.5 % row) — each counted once.
+    expect(c.textContent).toContain('₹230.50 short of the invoice total');
+    expect(c.textContent).toContain('1 row has a GST rate not on the GST rate master (12.5%)');
+
+    const b2bButton = [...c.querySelectorAll('button')].find((b) => b.textContent === 'Download B2B CSV')!;
+    act(() => b2bButton.click());
+    const b2b = await downloads[0]!.text;
+    expect(b2b.trim().split('\n')).toHaveLength(2); // the header + the 5 % row only
+    expect(b2b).not.toContain('"12.5"');
+  });
+
+  test('a section whose only rows are flagged offers no CSV', async () => {
+    extraB2bRows = [];
+    view = await mount();
+    // Swap the B2B section to rate rows only, through the response.
+    view.unmount();
+    view = undefined;
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      const request = input instanceof Request ? input : new Request(input.toString());
+      const url = new URL(request.url);
+      if (url.pathname.endsWith('/invoices/hsn-summary/gstins')) return json(200, { items: gstinItems });
+      const body = summaryBody(url.searchParams.get('gstin')!, url.searchParams.get('period')!) as { summary: { b2b: { rows: unknown[] } } };
+      body.summary.b2b.rows = [rowOf({ gstBps: 1250, rateIssue: true })];
+      return json(200, body);
+    }) as unknown as typeof fetch);
+    view = await mount();
+    const b2bButton = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Download B2B CSV')!;
+    expect(b2bButton.disabled).toBe(true);
   });
 });

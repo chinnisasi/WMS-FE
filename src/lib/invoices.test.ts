@@ -332,6 +332,17 @@ describe('GST Rule 46 particulars', () => {
     expect(amountInWords(1_000_000_000_000_00)).toBe('Indian Rupees One Lakh Crore Only'); // 10¹⁴ paise = ₹10¹²
   });
 
+  test('8-1d: the new warning kinds have labels, and none of them blocks', () => {
+    expect(gapLabel('hsn-invalid')).toBe('HSN malformed');
+    expect(gapLabel('state-text-unknown')).toBe('State not recognised');
+    expect(gapLabel('gstin-prefix-unknown')).toBe('GSTIN state code unknown');
+    expect(gapLabel('party-name-unprintable')).toBe('Name not printable for e-way');
+    for (const kind of ['hsn-invalid', 'state-text-unknown', 'gstin-prefix-unknown', 'party-name-unprintable']) {
+      expect(isBlockingGap(kind)).toBe(false);
+      expect(gapPrefix(kind)).toBe('Warning');
+    }
+  });
+
   test('the place of supply prints by name from the CBIC list (38 entries, mirroring the wms-be seed)', () => {
     expect(Object.keys(GST_STATE_NAMES)).toHaveLength(38);
     expect(GST_STATE_NAMES['25']).toBeUndefined(); // the pre-merger code

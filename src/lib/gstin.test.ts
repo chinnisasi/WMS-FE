@@ -32,6 +32,21 @@ describe('gstin (story 8-1c)', () => {
     }
   });
 
+  test('8-1d: a prefix that is not a GST registration state code is a problem naming the field and the prefix', () => {
+    for (const prefix of ['92', '25', '28', '99']) {
+      const parsed = parseGstinField(`${prefix}AAPCD1234K1Z5`, 'Warehouse GSTIN');
+      expect(parsed.problem).toStartWith(`Warehouse GSTIN begins "${prefix}"`);
+      expect(parsed.problem).toContain('which is not a GST registration state code');
+      expect('gstin' in parsed).toBe(false);
+    }
+    // The code only — never the seed's wrong "Other Country" label for 99.
+    expect(parseGstinField('99AAPCD1234K1Z5', 'Buyer GSTIN').problem).toStartWith('Buyer GSTIN begins "99", which is not a GST registration state code');
+    expect(parseGstinField('99AAPCD1234K1Z5', 'Buyer GSTIN').problem).not.toContain('Other Country');
+    for (const prefix of ['29', '97', '26', '38']) {
+      expect(parseGstinField(`${prefix}AAPCD1234K1Z5`, 'Buyer GSTIN')).toEqual({ gstin: `${prefix}AAPCD1234K1Z5`, problem: null });
+    }
+  });
+
   test('the help copy says the value is create-only', () => {
     expect(GSTIN_HELP).toBe("Can't be changed after creation yet.");
   });

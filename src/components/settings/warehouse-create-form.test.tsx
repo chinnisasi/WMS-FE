@@ -81,6 +81,21 @@ async function settle(): Promise<void> {
   }
 }
 
+/** The `<select>` twin (story 8-1d — State is a select): React reads a select's `change` event. */
+function setSelect(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
+function stateSelect(container: HTMLElement): HTMLSelectElement {
+  const found = [...container.querySelectorAll('label')].find((l) => l.querySelector('span')?.textContent === 'State');
+  expect(found).toBeDefined();
+  return found!.querySelector('select')!;
+}
+
 /** A controlled React input needs the native setter or React never sees it. */
 function setInput(input: HTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -98,14 +113,14 @@ function field(container: HTMLElement, label: string): HTMLInputElement {
   return found!.querySelector('input')!;
 }
 
-function fill(container: HTMLElement, gstin: string): void {
+function fill(container: HTMLElement, gstin: string, state = 'Karnataka'): void {
   setInput(field(container, 'Code'), 'BLR-01');
   setInput(field(container, 'Name'), 'Whitefield');
   setInput(field(container, 'Contact name'), 'Priya Sharma');
   setInput(field(container, 'Phone'), '+91 98450 12345');
   setInput(field(container, 'Address line 1'), '12, Peenya Industrial Area');
   setInput(field(container, 'City'), 'Bengaluru');
-  setInput(field(container, 'State'), 'Karnataka');
+  setSelect(stateSelect(container), state);
   setInput(field(container, 'Pincode'), '560066');
   setInput(field(container, 'Warehouse GSTIN (optional)'), gstin);
 }
@@ -182,5 +197,86 @@ describe('WarehouseCreateForm: the GSTIN input (story 8-1c)', () => {
     const banner = view.container.querySelector('[role="status"]')!.textContent;
     expect(banner).toContain('GSTIN 29ZZZZZ9999Z9Z9');
     expect(banner).not.toContain('29AAPCD1234K1Z5');
+  });
+});
+
+describe('WarehouseCreateForm: the State select and the GSTIN state (story 8-1d)', () => {
+  test('State is a required select: a blank placeholder, then the official names — no free text, no 99', async () => {
+    view = render(<WarehouseCreateForm />);
+    await settle();
+    const select = stateSelect(view.container);
+    expect(select.required).toBe(true);
+    const options = [...select.options].map((o) => o.value);
+    expect(options[0]).toBe('');
+    expect(options).toHaveLength(38); // the placeholder + 37 names
+    expect(options).toContain('Karnataka');
+    expect(options).toContain('Other Territory');
+    expect(options).not.toContain('Other Country');
+    expect([...view.container.querySelectorAll('label')].some((l) => l.querySelector('span')?.textContent === 'State' && l.querySelector('input') !== null)).toBe(false);
+  });
+
+  test('the chosen official name is what the origin sends', async () => {
+    view = render(<WarehouseCreateForm />);
+    await settle();
+    fill(view.container, '', 'Tamil Nadu');
+    await submit(view.container);
+    expect((posts[0]!.body.origin as { state: string }).state).toBe('Tamil Nadu');
+  });
+
+  test('a GSTIN registered in another state warns inline — and the warning never blocks the create', async () => {
+    view = render(<WarehouseCreateForm />);
+    await settle();
+    fill(view.container, '27AAPCD1234K1Z5', 'Karnataka');
+    const warning = view.container.querySelector('[data-testid="gstin-state-mismatch"]');
+    expect(warning).not.toBeNull();
+    expect(warning!.textContent).toContain('registered in Maharashtra');
+    expect(warning!.textContent).toContain('origin state is Karnataka');
+    const input = field(view.container, 'Warehouse GSTIN (optional)');
+    expect(input.getAttribute('aria-describedby')).toContain(warning!.id);
+    const button = view.container.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+
+    await submit(view.container);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body.gstin).toBe('27AAPCD1234K1Z5');
+  });
+
+  test('no warning when the GSTIN state matches, or before either is chosen', async () => {
+    view = render(<WarehouseCreateForm />);
+    await settle();
+    expect(view.container.querySelector('[data-testid="gstin-state-mismatch"]')).toBeNull();
+    fill(view.container, '29AAPCD1234K1Z5', 'Karnataka');
+    expect(view.container.querySelector('[data-testid="gstin-state-mismatch"]')).toBeNull();
+  });
+
+  test('a GSTIN whose prefix is not a GST state code sends nothing and names the prefix', async () => {
+    view = render(<WarehouseCreateForm />);
+    await settle();
+    fill(view.container, '92AAPCD1234K1Z5');
+    await submit(view.container);
+    expect(posts).toHaveLength(0);
+    expect(view.container.querySelector('[role="alert"]')!.textContent).toContain('Warehouse GSTIN begins "92"');
+  });
+
+  test('a BLANK warehouse GSTIN compares the tenant GSTIN instead: another state warns, and never blocks', async () => {
+    writeSession({ ...SESSION, tenant: { ...SESSION.tenant, gstin: '27AAPCD1234K1Z5' } });
+    view = render(<WarehouseCreateForm />);
+    await settle();
+    fill(view.container, '', 'Karnataka');
+    const warning = view.container.querySelector('[data-testid="gstin-state-mismatch"]')!;
+    expect(warning).not.toBeNull();
+    expect(warning.textContent).toContain('invoices will use the tenant GSTIN (state Maharashtra)');
+    expect(warning.textContent).toContain('e-way bills from this warehouse will be blocked');
+    await submit(view.container);
+    expect(posts).toHaveLength(1);
+    expect('gstin' in posts[0]!.body).toBe(false);
+  });
+
+  test('a blank warehouse GSTIN with a same-state (or no) tenant GSTIN warns nothing', async () => {
+    writeSession({ ...SESSION, tenant: { ...SESSION.tenant, gstin: '29AAPCD1234K1Z5' } });
+    view = render(<WarehouseCreateForm />);
+    await settle();
+    fill(view.container, '', 'Karnataka');
+    expect(view.container.querySelector('[data-testid="gstin-state-mismatch"]')).toBeNull();
   });
 });

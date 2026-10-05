@@ -283,6 +283,9 @@ describe('Invoices: reading (story 8-1)', () => {
     expect(printable.textContent).toContain('Draft — not a tax invoice');
     expect(printable.textContent).not.toContain('Tax invoice');
     expect(printable.textContent).toContain('Blocking — Unpriced line');
+    // 8-1d: the gaps render on screen but are hidden in print (internal advice, never on the customer's copy).
+    const gaps = printable.querySelector('[aria-label="Invoice gaps"]')!;
+    expect(gaps.classList.contains('print:hidden')).toBe(true);
   });
 
   test('an issued invoice prints as a tax invoice with its number, at the unit precision', async () => {

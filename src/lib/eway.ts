@@ -60,6 +60,14 @@ const BLOCKER_FIX: Readonly<Record<'needs-irn' | 'transport-incomplete', string>
   'transport-incomplete': 'Enter Part B (a vehicle, or a transport document), or at least the transporter id for a Part-A-only bill.',
 };
 
+/**
+ * The `needs-irn` fix for a viewer who CANNOT change the flag (story 8-1d):
+ * the e-invoicing flag is `eway.configure` (owner-only), so telling an
+ * accountant to "turn the flag off" names an action their role lacks.
+ */
+const NEEDS_IRN_FIX_UNCONFIGURABLE =
+  'E-invoicing applies to this GSTIN: NIC will not take a B2B bill without an IRN. If it no longer applies, ask an owner to turn the flag off.';
+
 /** What a terminal blocker tells the user: the invoice is frozen, so the portal is the only path. */
 export const TERMINAL_BLOCKER_HINT =
   'The invoice is frozen, so this cannot be fixed here — generate this e-way bill on the NIC portal by hand, then record its number here.';
@@ -68,9 +76,14 @@ export function blockerLabel(code: string): string {
   return BLOCKER_LABEL[code as EwayBlockerCode] ?? code;
 }
 
-/** The hover/inline explanation of one blocker. */
-export function blockerHint(blocker: { code: string; terminal: boolean }): string {
+/**
+ * The hover/inline explanation of one blocker. `canConfigure` is whether the
+ * viewer holds `eway.configure` — the capability that changes the e-invoicing
+ * flag — so the `needs-irn` fix follows what the viewer can actually do.
+ */
+export function blockerHint(blocker: { code: string; terminal: boolean }, canConfigure: boolean): string {
   if (blocker.terminal) return TERMINAL_BLOCKER_HINT;
+  if (blocker.code === 'needs-irn' && !canConfigure) return NEEDS_IRN_FIX_UNCONFIGURABLE;
   return BLOCKER_FIX[blocker.code as 'needs-irn' | 'transport-incomplete'] ?? 'Fix the bill and try again.';
 }
 

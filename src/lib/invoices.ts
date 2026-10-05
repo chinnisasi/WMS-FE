@@ -1,6 +1,7 @@
 import { ApiProblem } from '@/lib/api/client';
 import type { InvoiceDto } from '@/lib/api/generated';
 import { formatQuantity } from '@/lib/format-quantity';
+import { GST_STATE_NAMES } from '@/lib/gst-states';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { parseRupees } from '@/lib/rupees';
 
@@ -123,22 +124,11 @@ export function amountInWords(paise: number): string {
 // ── Rule 46: the place of supply by name ────────────────────────────────────
 
 /**
- * The CBIC GST state-code list, mirroring wms-be's `gst_state_codes` seed
- * (migration 0053 — 38 entries, official names). The NAME of the place of
- * supply comes from here, never from the consignee's address text: a
- * consignee GSTIN outranks the address, so the address can name another state.
+ * The CBIC GST state-code list — moved to `gst-states.ts` (story 8-1d) so the
+ * pre-login GSTIN parser can read it without the API client; re-exported here
+ * for the invoice surfaces.
  */
-export const GST_STATE_NAMES: Readonly<Record<string, string>> = {
-  '01': 'Jammu and Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh',
-  '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh',
-  '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh', '13': 'Nagaland', '14': 'Manipur',
-  '15': 'Mizoram', '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal',
-  '20': 'Jharkhand', '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat',
-  '26': 'Dadra and Nagar Haveli and Daman and Diu', '27': 'Maharashtra', '29': 'Karnataka', '30': 'Goa',
-  '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu', '34': 'Puducherry',
-  '35': 'Andaman and Nicobar Islands', '36': 'Telangana', '37': 'Andhra Pradesh', '38': 'Ladakh',
-  '97': 'Other Territory', '99': 'Other Country',
-};
+export { GST_STATE_NAMES };
 
 /** `27 — Maharashtra`; a code outside the list still prints, by its code. */
 export function placeOfSupplyLabel(code: string | null): string {
@@ -167,7 +157,16 @@ export const STATUS_LABEL: Readonly<Record<InvoiceStatus, string>> = {
 };
 
 /** The gap kinds the backend names (`invoicing/generator.ts` GAP_KINDS). */
-export type GapKind = 'unpriced-line' | 'place-of-supply' | 'supplier-gstin' | 'hsn-gap' | 'pos-discrepancy';
+export type GapKind =
+  | 'unpriced-line'
+  | 'place-of-supply'
+  | 'supplier-gstin'
+  | 'hsn-gap'
+  | 'pos-discrepancy'
+  | 'hsn-invalid'
+  | 'state-text-unknown'
+  | 'gstin-prefix-unknown'
+  | 'party-name-unprintable';
 
 export const GAP_LABEL: Readonly<Record<GapKind, string>> = {
   'unpriced-line': 'Unpriced line',
@@ -175,6 +174,11 @@ export const GAP_LABEL: Readonly<Record<GapKind, string>> = {
   'supplier-gstin': 'No supplier GSTIN',
   'hsn-gap': 'HSN missing',
   'pos-discrepancy': 'GSTIN / address mismatch',
+  // Story 8-1d: warnings — the invoice issues with them visible.
+  'hsn-invalid': 'HSN malformed',
+  'state-text-unknown': 'State not recognised',
+  'gstin-prefix-unknown': 'GSTIN state code unknown',
+  'party-name-unprintable': 'Name not printable for e-way',
 };
 
 /** The kinds that park an invoice `awaiting-data` (the rest are warnings). */

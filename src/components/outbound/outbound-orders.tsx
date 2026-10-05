@@ -5,6 +5,7 @@ import { useEffect, useId, useState } from 'react';
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
 import type { OrderEntryDto, SkuResponse } from '@/lib/api/generated';
 import { quantityInputLabel, sharedQuantityUom } from '@/lib/format-quantity';
+import { buyerGstinStateMismatch } from '@/lib/gst-states';
 import { GSTIN_HELP, parseGstinField } from '@/lib/gstin';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import {
@@ -19,6 +20,8 @@ import {
   filterPage,
   groupKitLines,
   holdStateLabel,
+  legalNameBody,
+  legalNameProblem,
   kitParentHoldLabel,
   lineQuantityLabel,
   lineTotals,
@@ -30,6 +33,7 @@ import {
   parseDestinationFields,
   parseDraftLines,
   RATE_HELP,
+  showsLegalName,
   type DestinationFields,
   type DraftLine,
   type Outcome,
@@ -39,6 +43,7 @@ import { useOrderDetail, useOutboundOrders, useOutboundSkus } from '@/lib/use-ou
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
+import { StateSelect } from '@/components/address/state-select';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
@@ -122,12 +127,22 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   // Story 8-1c: the buyer's GSTIN, in its OWN state — `DestinationFields` is
   // shared with the warehouse origin form, which has no buyer.
   const [consigneeGstin, setConsigneeGstin] = useState('');
+  // Story 8-1d: the registered buyer's legal / trade name — printed as the
+  // invoice's buyer and the e-way bill's toTrdName. Offered once a buyer
+  // GSTIN is typed; kept (not sent) while the GSTIN is blank.
+  const [consigneeLegalName, setConsigneeLegalName] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
   const rateHelpId = useId();
   const gstinHelpId = useId();
+  const legalNameHelpId = useId();
+  const buyerStateWarningId = useId();
+  // Story 8-1d: a buyer GSTIN from another state than the ship-to is legal,
+  // so this only WARNS, inline — the invoice will carry pos-discrepancy and
+  // the e-way bill will be blocked ship-to-differs.
+  const buyerStateMismatch = buyerGstinStateMismatch(consigneeGstin, destination.state);
   const skuMap = skus.state === 'ready' ? skus.data : null;
   const skuList: readonly SkuResponse[] =
     skuMap === null ? [] : Object.values(skuMap).sort((a, b) => a.code.localeCompare(b.code));
@@ -152,6 +167,13 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     setConsigneeGstin(next);
   }
 
+  /** The legal name joins the backend's request hash when sent — an edit
+   * mints a fresh key, like every other field of the body. */
+  function editConsigneeLegalName(next: string) {
+    setIdempotencyKey(null);
+    setConsigneeLegalName(next);
+  }
+
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const parsed = parseDraftLines(draft);
@@ -174,6 +196,13 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
       setOutcome({ tone: 'rejected', word: 'Not created', reason: buyer.problem });
       return;
     }
+    // The legal name's cap, counted as the backend counts it (code points
+    // after the trim) — only when it would be sent.
+    const legalProblem = legalNameProblem(buyer.gstin, consigneeLegalName);
+    if (legalProblem !== null) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: legalProblem });
+      return;
+    }
     // Reused across retries of an unchanged draft; minted afresh otherwise.
     const key = idempotencyKey ?? ulid();
     setIdempotencyKey(key);
@@ -189,12 +218,15 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
           destination: address.destination!,
           // Blank = absent: no key at all, never `''`.
           ...(buyer.gstin === undefined ? {} : { consigneeGstin: buyer.gstin }),
+          // Sent only beside a GSTIN, and only when non-blank.
+          ...legalNameBody(buyer.gstin, consigneeLegalName),
         },
         key,
       );
       setDraft([emptyRow()]);
       setDestination(emptyDestinationFields());
       setConsigneeGstin('');
+      setConsigneeLegalName('');
       setIdempotencyKey(null);
       setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId], parsed.lines));
       notifyOutboundChanged();
@@ -291,13 +323,10 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
           </label>
           <label className="flex flex-1 flex-col gap-1">
             <span className={labelClass}>State</span>
-            <input
-              className={inputClass}
+            <StateSelect
+              className={selectClass}
               value={destination.state}
-              onChange={(e) => editDestination({ ...destination, state: e.target.value })}
-              required
-              maxLength={100}
-              placeholder="Karnataka"
+              onChange={(state) => editDestination({ ...destination, state })}
             />
           </label>
           <label className="flex flex-1 flex-col gap-1">
@@ -329,10 +358,34 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
             spellCheck={false}
             autoComplete="off"
             placeholder="27AAPCD1234K1Z5"
-            aria-describedby={gstinHelpId}
+            aria-describedby={buyerStateMismatch === null ? gstinHelpId : `${gstinHelpId} ${buyerStateWarningId}`}
           />
           <span id={gstinHelpId} className="text-xs text-(--muted-foreground)">{GSTIN_HELP}</span>
+          {buyerStateMismatch !== null && (
+            // Non-blocking: the submit stays enabled. Glyph + word, never colour alone.
+            <span id={buyerStateWarningId} data-testid="buyer-state-mismatch" className="text-xs text-(--warning)">
+              ⚠ Warning: {buyerStateMismatch}
+            </span>
+          )}
         </label>
+        {showsLegalName(consigneeGstin) && (
+          <label className="flex flex-col gap-1 sm:max-w-md">
+            <span className={labelClass}>Buyer legal name (optional)</span>
+            <input
+              className={inputClass}
+              value={consigneeLegalName}
+              onChange={(e) => editConsigneeLegalName(e.target.value)}
+              // No maxLength: it counts UTF-16 units before the trim, the
+              // backend counts code points after it — `legalNameProblem` does.
+              autoComplete="off"
+              placeholder="Mysore Spices Pvt Ltd"
+              aria-describedby={legalNameHelpId}
+            />
+            <span id={legalNameHelpId} className="text-xs text-(--muted-foreground)">
+              The registered legal or trade name, printed as the buyer on the invoice and the e-way bill. Blank prints the contact name.
+            </span>
+          </label>
+        )}
       </fieldset>
       <div className="flex flex-col gap-2">
         {draft.map((row, index) => (

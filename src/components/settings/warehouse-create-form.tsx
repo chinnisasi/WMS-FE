@@ -5,6 +5,7 @@ import { useId, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiCreateWarehouse } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { gstinStateMismatch, tenantGstinStateMismatch } from '@/lib/gst-states';
 import { GSTIN_HELP } from '@/lib/gstin';
 import { emptyDestinationFields, type DestinationFields } from '@/lib/outbound-orders';
 import { warehouseBody, warehouseCreatedReason } from '@/lib/tenancy-forms';
@@ -13,6 +14,7 @@ import { ulid } from '@/lib/ulid';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { notifyWarehousesChanged } from '@/lib/warehouses';
 
+import { StateSelect } from '@/components/address/state-select';
 import { FeedbackBanner } from '@/components/feedback/banner';
 
 const inputClass =
@@ -42,6 +44,7 @@ export function WarehouseCreateForm() {
   // invoices. Optional; create-only like the origin.
   const [gstin, setGstin] = useState('');
   const gstinHelpId = useId();
+  const gstinWarningId = useId();
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<
     { tone: 'accepted'; word: string; reason: string } | { tone: 'rejected'; word: string; reason: string } | null
@@ -69,6 +72,15 @@ export function WarehouseCreateForm() {
   if (!roleHasCapability(readSession()?.user.role, 'warehouse.create')) {
     return null;
   }
+
+  // Story 8-1d: a GSTIN registered in another state than the origin is
+  // legal (the backend never refuses it), so this only WARNS, inline. A blank
+  // warehouse GSTIN falls back to the TENANT's on every invoice — the main
+  // case — so that one is compared instead.
+  const stateMismatch =
+    gstin.trim() === ''
+      ? tenantGstinStateMismatch(readSession()?.tenant.gstin, origin.state)
+      : gstinStateMismatch(gstin, origin.state);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -206,13 +218,10 @@ export function WarehouseCreateForm() {
           </label>
           <label className="flex flex-1 flex-col gap-1">
             <span className={labelClass}>State</span>
-            <input
+            <StateSelect
               className={inputClass}
               value={origin.state}
-              onChange={(e) => setOrigin({ ...origin, state: e.target.value })}
-              required
-              maxLength={100}
-              placeholder="Karnataka"
+              onChange={(state) => setOrigin({ ...origin, state })}
             />
           </label>
           <label className="flex flex-1 flex-col gap-1">
@@ -245,9 +254,16 @@ export function WarehouseCreateForm() {
           spellCheck={false}
           autoComplete="off"
           placeholder="29AAPCD1234K1Z5"
-          aria-describedby={gstinHelpId}
+          aria-describedby={stateMismatch === null ? gstinHelpId : `${gstinHelpId} ${gstinWarningId}`}
         />
         <span id={gstinHelpId} className="text-xs text-(--muted-foreground)">{GSTIN_HELP}</span>
+        {stateMismatch !== null && (
+          // Non-blocking: the submit stays enabled. A glyph + word beside
+          // the amber, never colour alone.
+          <span id={gstinWarningId} data-testid="gstin-state-mismatch" className="text-xs text-(--warning)">
+            ⚠ Warning: {stateMismatch}
+          </span>
+        )}
       </label>
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
       <button

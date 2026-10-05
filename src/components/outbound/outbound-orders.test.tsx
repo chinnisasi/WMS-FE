@@ -473,7 +473,8 @@ function fillDestination(container: HTMLElement): void {
   setInput(input(container, 'Phone'), '+91 98200 11111');
   setInput(input(container, 'Address line 1'), '4, Linking Road');
   setInput(input(container, 'City'), 'Mumbai');
-  setInput(input(container, 'State'), 'Maharashtra');
+  // Story 8-1d: State is a select over the official names.
+  setSelect(labelled(container, 'State')[0]!.querySelector('select')!, 'Maharashtra');
   setInput(input(container, 'Pincode'), '400050');
 }
 
@@ -594,5 +595,148 @@ describe('OrderCreateForm: rates and the buyer GSTIN (story 8-1c)', () => {
     const rate = input(view.container, 'Rate ₹ (optional)');
     const help = view.container.querySelector(`#${CSS.escape(rate.getAttribute('aria-describedby')!)}`);
     expect(help!.textContent).toContain("Once set it can't be changed");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Story 8-1d: the State select and the buyer legal name               */
+/* ------------------------------------------------------------------ */
+
+describe('OrderCreateForm: the State select and the buyer legal name (story 8-1d)', () => {
+  const LEGAL = 'Buyer legal name (optional)';
+
+  test('State is a select over the official names; the chosen name is the destination state', async () => {
+    view = await mountForm();
+    const select = labelled(view.container, 'State')[0]!.querySelector('select')!;
+    expect(select).not.toBeNull();
+    expect(select.required).toBe(true);
+    expect(select.options[0]!.value).toBe('');
+    expect([...select.options].map((o) => o.value)).not.toContain('Other Country');
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    await submitCreate(view.container);
+    expect((creates[0]!.body.destination as { state: string }).state).toBe('Maharashtra');
+  });
+
+  test('the legal name is offered only once a buyer GSTIN is typed; no maxLength (the parser counts code points)', async () => {
+    view = await mountForm();
+    expect(labelled(view.container, LEGAL)).toHaveLength(0);
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '   ');
+    expect(labelled(view.container, LEGAL)).toHaveLength(0);
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    expect(labelled(view.container, LEGAL)).toHaveLength(1);
+    expect(input(view.container, LEGAL).hasAttribute('maxlength')).toBe(false);
+  });
+
+  test('a typed legal name rides beside the GSTIN, trimmed; the form resets it on success', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    setInput(input(view.container, LEGAL), '  Mysore Spices Pvt Ltd ');
+    await submitCreate(view.container);
+
+    expect(creates).toHaveLength(1);
+    expect(creates[0]!.body.consigneeGstin).toBe('27AAPCD1234K1Z5');
+    expect(creates[0]!.body.consigneeLegalName).toBe('Mysore Spices Pvt Ltd');
+    // Reset: the GSTIN clears (so the input hides) and, once a GSTIN is typed again, the name is empty.
+    expect(labelled(view.container, LEGAL)).toHaveLength(0);
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    expect(input(view.container, LEGAL).value).toBe('');
+  });
+
+  test('clearing the GSTIN keeps the typed name but does not send it; a blank name sends no key', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    setInput(input(view.container, LEGAL), 'Mysore Spices Pvt Ltd');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '');
+    expect(labelled(view.container, LEGAL)).toHaveLength(0);
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(1);
+    expect('consigneeGstin' in creates[0]!.body).toBe(false);
+    expect('consigneeLegalName' in creates[0]!.body).toBe(false);
+
+    // A blank name beside a GSTIN: no key at all.
+    view.unmount();
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    setInput(input(view.container, LEGAL), '   ');
+    await submitCreate(view.container);
+    expect('consigneeLegalName' in creates[1]!.body).toBe(false);
+  });
+
+  test('a GSTIN-kept name returns when the GSTIN is typed again (kept, not discarded)', async () => {
+    view = await mountForm();
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    setInput(input(view.container, LEGAL), 'Mysore Spices Pvt Ltd');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    expect(input(view.container, LEGAL).value).toBe('Mysore Spices Pvt Ltd');
+  });
+
+  test('a legal-name edit after a failed submit mints a fresh key (it is in the request hash)', async () => {
+    createStatus = 503;
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    setInput(input(view.container, LEGAL), 'Mysore Spices');
+    await submitCreate(view.container);
+    await submitCreate(view.container);
+    expect(creates[1]!.key).toBe(creates[0]!.key);
+    setInput(input(view.container, LEGAL), 'Mysore Spices Pvt Ltd');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(3);
+    expect(creates[2]!.body.consigneeLegalName).toBe('Mysore Spices Pvt Ltd');
+    expect(creates[2]!.key).not.toBe(creates[1]!.key);
+  });
+
+  test('a buyer GSTIN whose prefix is not a GST state code sends nothing', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '99AAPCD1234K1Z5');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(0);
+    expect(view.container.querySelector('[role="alert"]')!.textContent).toContain('Buyer GSTIN begins "99"');
+  });
+
+  test('the 100 cap counts code points after the trim: 101 astral characters are refused inline, 100 padded ones are sent', async () => {
+    const astral = '𝐀';
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    setInput(input(view.container, LEGAL), `A${astral.repeat(100)}`);
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(0);
+    expect(view.container.querySelector('[role="alert"]')!.textContent).toContain('Buyer legal name is at most 100 characters (got 101)');
+
+    // 100 code points = 199 UTF-16 units, plus padding: a maxLength of 100 would have cut it.
+    setInput(input(view.container, LEGAL), `  A${astral.repeat(99)}  `);
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(1);
+    expect(creates[0]!.body.consigneeLegalName).toBe(`A${astral.repeat(99)}`);
+  });
+
+  test('a buyer GSTIN from another state than the ship-to warns inline — never blocking', async () => {
+    view = await mountForm();
+    fillDestination(view.container); // Maharashtra
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    expect(view.container.querySelector('[data-testid="buyer-state-mismatch"]')).toBeNull();
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '27AAPCD1234K1Z5');
+    expect(view.container.querySelector('[data-testid="buyer-state-mismatch"]')).toBeNull();
+    setInput(input(view.container, 'Buyer GSTIN (optional, B2B)'), '29AAPCD1234K1Z5');
+    const warning = view.container.querySelector('[data-testid="buyer-state-mismatch"]')!;
+    expect(warning.textContent).toContain('registered in Karnataka');
+    expect(warning.textContent).toContain('ship-to state is Maharashtra');
+    expect(input(view.container, 'Buyer GSTIN (optional, B2B)').getAttribute('aria-describedby')).toContain(warning.id);
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(1);
+    expect(creates[0]!.body.consigneeGstin).toBe('29AAPCD1234K1Z5');
   });
 });

@@ -1,10 +1,14 @@
+import { isGstinStateCode } from '@/lib/gst-states';
+
 /**
- * The GSTIN input (story 8-1c) — the one shape gate every web form that
- * collects a GSTIN runs (registration, warehouse create, order create).
+ * The GSTIN input (story 8-1c) — the one gate every web form that collects a
+ * GSTIN runs (registration, warehouse create, order create).
  *
- * The client checks SHAPE only, the `PINCODE_RE` precedent: the checksum and
- * the state-code validity stay server-side (8-2's regulatory pass). Blank
- * means "absent" and is omitted from the body, never sent as `''`.
+ * What it checks: the SHAPE, and (story 8-1d) that the two-digit prefix is a
+ * GST registration state code — the same predicate the backend refuses on at
+ * all three entries. The PAN segment and the checksum character are not
+ * validated anywhere, client or server. Blank means "absent" and is omitted
+ * from the body, never sent as `''`.
  */
 
 /**
@@ -37,6 +41,13 @@ export function parseGstinField(text: string, label: string): ParsedGstin {
   if (!GSTIN_RE.test(value)) {
     return {
       problem: `${label} is 15 characters — two digits (the state code), then 13 letters or digits. Leave it blank if there is none.`,
+    };
+  }
+  const prefix = value.slice(0, 2);
+  if (!isGstinStateCode(prefix)) {
+    // The code only — never its seed label (99's "Other Country" is wrong).
+    return {
+      problem: `${label} begins "${prefix}", which is not a GST registration state code — the first two digits are the state the GSTIN is registered in.`,
     };
   }
   return { gstin: value, problem: null };
