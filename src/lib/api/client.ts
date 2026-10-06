@@ -108,6 +108,7 @@ import {
   usersControllerListUsers,
   usersControllerMe,
   usersControllerSetUserRole,
+  reportingControllerOverview,
 } from './generated/sdk.gen';
 import { ensureSessionHint, readSession, clearSession, writeSession } from '../auth';
 import type {
@@ -222,6 +223,7 @@ import type {
   SkuResponse,
   TenantRegistrationResponse,
   UserListResponse,
+  ReportingOverviewResponse,
   UserResponse,
   VendorListResponse,
   WarehouseListResponse,
@@ -369,6 +371,23 @@ export async function fetchApiHealth(options?: {
   if (error || !data) {
     throw unwrapError(error, 503);
   }
+  return data;
+}
+
+/**
+ * Story 9-1 — the per-warehouse Overview: ten KPI tiles, each figure with
+ * its drill. A read (member-open); no query parameters.
+ */
+export async function fetchApiReportingOverview(
+  tenantId: string,
+  warehouseId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ReportingOverviewResponse> {
+  const { data, error } = await reportingControllerOverview({
+    path: { tenantId, warehouseId },
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
   return data;
 }
 

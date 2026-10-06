@@ -53,6 +53,7 @@ import {
   fetchApiRegisterTenant,
   fetchApiReleaseWave,
   fetchApiReplaceKit,
+  fetchApiReportingOverview,
   fetchApiResolveExcursion,
   refreshSessionUser,
 } from './client';
@@ -1410,5 +1411,34 @@ describe('e-way bill wrappers (story 8-2b)', () => {
     expect([lastRequest!.method, new URL(lastRequest!.url).pathname]).toEqual(['PUT', `${base()}/gstin-settings/29AAAPZ1234C1ZV`]);
     expect(lastRequest!.headers.get('Idempotency-Key')).toBe(EKEY);
     expect(JSON.parse(await lastRequest!.text())).toEqual({ eInvoiceApplies: true });
+  });
+});
+
+describe('reporting overview wrapper (story 9-1)', () => {
+  const WAREHOUSE_ID = '0198f7a2-1b3c-7d4e-8f90-99aabbccddee';
+
+  test('the overview is a warehouse-scoped GET with no query and no Idempotency-Key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { asOf: '2026-10-06T10:00:00.000Z', stale: false, window: {}, tiles: {} });
+    const overview = await fetchApiReportingOverview(SESSION.tenant.id, WAREHOUSE_ID);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/warehouses/${WAREHOUSE_ID}/reporting/overview`,
+    );
+    expect(url.search).toBe('');
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(overview.asOf).toBe('2026-10-06T10:00:00.000Z');
+    clearSession();
+  });
+
+  test('a refusal surfaces as an ApiProblem carrying its code', async () => {
+    writeSession(SESSION);
+    stubFetch(404, { type: 'about:blank', title: 'Not found', status: 404, code: 'not-found', detail: 'no warehouse' });
+    await expect(fetchApiReportingOverview(SESSION.tenant.id, WAREHOUSE_ID)).rejects.toMatchObject({
+      code: 'not-found',
+      status: 404,
+    });
+    clearSession();
   });
 });
