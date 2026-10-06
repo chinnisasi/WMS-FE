@@ -5245,6 +5245,114 @@ export type RenameClientDto = {
     name: string;
 };
 
+export type RateCardLineResponseDto = {
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    /**
+     * Integer paise per unit of the basis, GST-exclusive
+     */
+    amountPaise: number;
+};
+
+export type RateCardDto = {
+    id: string;
+    tenantId: string;
+    clientId: string;
+    /**
+     * draft (editable, undated) · active (dated, frozen; scheduled when its date is ahead) · superseded (a later card took over from its date) · cancelled (withdrawn before its date; never in force)
+     */
+    status: 'draft' | 'active' | 'superseded' | 'cancelled';
+    /**
+     * IST date the card takes effect (from IST midnight); null for a draft
+     */
+    effectiveFrom: string | null;
+    /**
+     * IST date a successor took over (exclusive); null unless superseded
+     */
+    effectiveTo: string | null;
+    /**
+     * The priced charges, in charge order
+     */
+    lines: Array<RateCardLineResponseDto>;
+    createdBy: string;
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC
+     */
+    updatedAt: string;
+    activatedBy: string | null;
+    /**
+     * ISO-8601 UTC
+     */
+    activatedAt: string | null;
+    cancelledBy: string | null;
+    /**
+     * ISO-8601 UTC
+     */
+    cancelledAt: string | null;
+};
+
+export type RateCardInForceResponse = {
+    /**
+     * The card in force at asOf, or null — the client is not billed then
+     */
+    rateCard: RateCardDto | null;
+    /**
+     * The instant resolved (ISO-8601 UTC) — the request `at`, or the server clock
+     */
+    asOf: string;
+};
+
+export type RateCardListResponse = {
+    /**
+     * The client's cards — the newest 100 drafts first, then EVERY dated card by effectiveFrom descending (never dropped by a bound). Unpaginated
+     */
+    items: Array<RateCardDto>;
+};
+
+export type RateCardLineDto = {
+    /**
+     * The charge this line prices — each at most once per card
+     */
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
+    /**
+     * The basis — fixed per charge: storage ↔ per_thousand_units_per_day (₹ per 1,000 SKU base units per day), inbound_handling ↔ per_receipt_line, pick ↔ per_pick, outbound_handling ↔ per_order
+     */
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    /**
+     * Integer paise per unit of the basis, GST-exclusive (₹0 is billed at zero; ₹1 lakh cap)
+     */
+    amountPaise: number;
+};
+
+export type CreateRateCardDto = {
+    /**
+     * The charges this card prices — any subset of the four. A charge with no line is not billed. A draft may have none; activation needs at least one
+     */
+    lines: Array<RateCardLineDto>;
+};
+
+export type RateCardResponse = {
+    rateCard: RateCardDto;
+};
+
+export type RateCardLinesDto = {
+    /**
+     * The charges this card prices — any subset of the four. A charge with no line is not billed. A draft may have none; activation needs at least one
+     */
+    lines: Array<RateCardLineDto>;
+};
+
+export type ActivateRateCardDto = {
+    /**
+     * The IST date the card takes effect, at IST midnight. A client's first card: today (IST) or later; a replacement: tomorrow (IST) or later, and after every existing card's date
+     */
+    effectiveFrom: string;
+};
+
 export type ChannelWebhookOrderResponse = {
     outcome: 'accepted' | 'backordered' | 'replayed';
     /**
@@ -13124,6 +13232,407 @@ export type ClientsControllerRenameClientResponses = {
 };
 
 export type ClientsControllerRenameClientResponse = ClientsControllerRenameClientResponses[keyof ClientsControllerRenameClientResponses];
+
+export type RateCardsControllerInForceData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: {
+        /**
+         * The instant to resolve, ISO-8601 UTC with a Z designator. Default: now
+         */
+        at?: string;
+    };
+    url: '/tenants/{tenantId}/clients/{clientId}/rate-cards/in-force';
+};
+
+export type RateCardsControllerInForceErrors = {
+    /**
+     * A malformed clientId, or `at` is not a UTC instant ending in Z (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type RateCardsControllerInForceError = RateCardsControllerInForceErrors[keyof RateCardsControllerInForceErrors];
+
+export type RateCardsControllerInForceResponses = {
+    200: RateCardInForceResponse;
+};
+
+export type RateCardsControllerInForceResponse = RateCardsControllerInForceResponses[keyof RateCardsControllerInForceResponses];
+
+export type RateCardsControllerListData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/rate-cards';
+};
+
+export type RateCardsControllerListErrors = {
+    /**
+     * A malformed clientId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type RateCardsControllerListError = RateCardsControllerListErrors[keyof RateCardsControllerListErrors];
+
+export type RateCardsControllerListResponses = {
+    200: RateCardListResponse;
+};
+
+export type RateCardsControllerListResponse = RateCardsControllerListResponses[keyof RateCardsControllerListResponses];
+
+export type RateCardsControllerCreateData = {
+    body: CreateRateCardDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/rate-cards';
+};
+
+export type RateCardsControllerCreateErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, a line outside the vocabularies or the amount range, a charge on the wrong basis or priced twice, or the tenant's own client (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks rates.manage — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The client is suspended or departed (client-not-active), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type RateCardsControllerCreateError = RateCardsControllerCreateErrors[keyof RateCardsControllerCreateErrors];
+
+export type RateCardsControllerCreateResponses = {
+    /**
+     * The draft (a matching Idempotency-Key replays it)
+     */
+    201: RateCardResponse;
+};
+
+export type RateCardsControllerCreateResponse = RateCardsControllerCreateResponses[keyof RateCardsControllerCreateResponses];
+
+export type RateCardsControllerDiscardData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rateCardId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/rate-cards/{rateCardId}';
+};
+
+export type RateCardsControllerDiscardErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed rateCardId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks rates.manage — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No rate card with this id exists in this tenant, or it was already discarded (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The card is not a draft (rate-card-not-draft), or a concurrent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type RateCardsControllerDiscardError = RateCardsControllerDiscardErrors[keyof RateCardsControllerDiscardErrors];
+
+export type RateCardsControllerDiscardResponses = {
+    /**
+     * The draft and its lines were deleted
+     */
+    204: void;
+};
+
+export type RateCardsControllerDiscardResponse = RateCardsControllerDiscardResponses[keyof RateCardsControllerDiscardResponses];
+
+export type RateCardsControllerGetData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rateCardId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/rate-cards/{rateCardId}';
+};
+
+export type RateCardsControllerGetErrors = {
+    /**
+     * A malformed rateCardId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No rate card with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type RateCardsControllerGetError = RateCardsControllerGetErrors[keyof RateCardsControllerGetErrors];
+
+export type RateCardsControllerGetResponses = {
+    200: RateCardResponse;
+};
+
+export type RateCardsControllerGetResponse = RateCardsControllerGetResponses[keyof RateCardsControllerGetResponses];
+
+export type RateCardsControllerReplaceLinesData = {
+    body: RateCardLinesDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rateCardId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/rate-cards/{rateCardId}/lines';
+};
+
+export type RateCardsControllerReplaceLinesErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed rateCardId, or invalid lines (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks rates.manage — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No rate card with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The card is not a draft (rate-card-not-draft), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type RateCardsControllerReplaceLinesError = RateCardsControllerReplaceLinesErrors[keyof RateCardsControllerReplaceLinesErrors];
+
+export type RateCardsControllerReplaceLinesResponses = {
+    200: RateCardResponse;
+};
+
+export type RateCardsControllerReplaceLinesResponse = RateCardsControllerReplaceLinesResponses[keyof RateCardsControllerReplaceLinesResponses];
+
+export type RateCardsControllerActivateData = {
+    body: ActivateRateCardDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rateCardId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/rate-cards/{rateCardId}/activate';
+};
+
+export type RateCardsControllerActivateErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed rateCardId or effectiveFrom (validation-failed); the tenant's own client (validation-failed); a date before today (IST) for a first card or before tomorrow (IST) for a replacement (rate-card-effective-date)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks rates.manage — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No rate card with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The card is not a draft (rate-card-not-draft), the date is not after every existing card (rate-card-effective-overlap), the card has no lines (rate-card-no-lines), the client is not active (client-not-active), or a concurrent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type RateCardsControllerActivateError = RateCardsControllerActivateErrors[keyof RateCardsControllerActivateErrors];
+
+export type RateCardsControllerActivateResponses = {
+    200: RateCardResponse;
+};
+
+export type RateCardsControllerActivateResponse = RateCardsControllerActivateResponses[keyof RateCardsControllerActivateResponses];
+
+export type RateCardsControllerCancelData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rateCardId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/rate-cards/{rateCardId}/cancel';
+};
+
+export type RateCardsControllerCancelErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed rateCardId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks rates.manage — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No rate card with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The card is a draft or cancelled, or its date has already arrived (rate-card-not-cancellable), or a concurrent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type RateCardsControllerCancelError = RateCardsControllerCancelErrors[keyof RateCardsControllerCancelErrors];
+
+export type RateCardsControllerCancelResponses = {
+    200: RateCardResponse;
+};
+
+export type RateCardsControllerCancelResponse = RateCardsControllerCancelResponses[keyof RateCardsControllerCancelResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;

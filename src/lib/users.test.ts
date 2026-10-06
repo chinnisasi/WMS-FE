@@ -39,7 +39,12 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // — 32 became 33; story 8-1 adds `invoice.generate` — 33 became 34;
     // story 8-2b adds `eway.manage` and `eway.configure` — 34 became 36.
     // Story 21-2b adds `clients.manage` (owner-only) — 36 became 37.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(37);
+    // Story 21-3 adds `rates.manage` (owner + accountant) — 37 became 38.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(38);
+    expect(roleHasCapability('owner', 'rates.manage')).toBe(true);
+    // Story 21-3 — rate cards are NOT an ops verb (and not owner-only either:
+    // the accountant holds them) — the explicit ops-excluded set.
+    expect(roleHasCapability('ops_manager', 'rates.manage')).toBe(false);
     expect(roleHasCapability('owner', 'clients.manage')).toBe(true);
     expect(roleHasCapability('owner', 'eway.manage')).toBe(true);
     expect(roleHasCapability('owner', 'eway.configure')).toBe(true);
@@ -174,7 +179,7 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     );
   });
 
-  test('operator holds exactly the floor verbs; accountant holds only the e-way paperwork', () => {
+  test('operator holds exactly the floor verbs; accountant holds only the e-way paperwork and the rate cards', () => {
     // Story 3.5 opened the operator column with `putaway.execute`; stories
     // 4.3 / 4.5 / 4.6 added pick, pack and dispatch; story 12-5 added the
     // excursion record (the floor records what it observes); story 4.6c added
@@ -215,9 +220,12 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 5-4 — the floor never resolves variances.
     expect(roleHasCapability('operator', 'variances.resolve')).toBe(false);
     expect(roleHasCapability('operator', 'eway.manage')).toBe(false);
-    // Story 8-2b — the accountant's first (and only) write: the e-way
-    // paperwork. Its configuration stays owner-only.
-    expect(ROLE_CAPABILITIES.accountant).toEqual(['eway.manage']);
+    // Story 8-2b — the accountant's first write: the e-way paperwork. Its
+    // configuration stays owner-only. Story 21-3 — and the client rate cards
+    // (decision 2: finance work; reverses 8-1's "the accountant does not set
+    // prices" for the client price list only — `invoice.generate` stays off).
+    expect(ROLE_CAPABILITIES.accountant).toEqual(['eway.manage', 'rates.manage']);
+    expect(roleHasCapability('operator', 'rates.manage')).toBe(false);
     expect(roleHasCapability('accountant', 'eway.configure')).toBe(false);
     expect(roleHasCapability('ops_manager', 'eway.configure')).toBe(false);
     // Story 21-2b — client admin is owner-only.

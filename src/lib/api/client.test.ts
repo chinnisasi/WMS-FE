@@ -6,6 +6,13 @@ import {
   ApiProblem,
   fetchApiCorrectSkuClient,
   fetchApiCreateClient,
+  fetchApiActivateRateCard,
+  fetchApiCancelRateCard,
+  fetchApiCreateRateCard,
+  fetchApiDiscardRateCard,
+  fetchApiListRateCards,
+  fetchApiRateCardInForce,
+  fetchApiReplaceRateCardLines,
   fetchApiImportCatalog,
   fetchApiListClients,
   fetchApiRenameClient,
@@ -1531,6 +1538,112 @@ describe('client admin + attribution wrappers (story 21-2b)', () => {
     const without = await lastRequest!.formData();
     expect(without.get('clientId')).toBeNull();
     expect(without.get('mode')).toBe('fix');
+    clearSession();
+  });
+});
+
+describe('rate-card wrappers (story 21-3)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const CLIENT_ID = '0198f7a2-1b3c-7d4e-8f90-000000000001';
+  const CARD_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000c1';
+  const LINES = [
+    { chargeCode: 'storage' as const, basis: 'per_thousand_units_per_day' as const, amountPaise: 330 },
+    { chargeCode: 'pick' as const, basis: 'per_pick' as const, amountPaise: 300 },
+  ];
+  const CARD = {
+    id: CARD_ID,
+    tenantId: SESSION.tenant.id,
+    clientId: CLIENT_ID,
+    status: 'draft',
+    effectiveFrom: null,
+    effectiveTo: null,
+    lines: LINES,
+    createdBy: 'u-1',
+    createdAt: '2026-10-06T00:00:00.000Z',
+    updatedAt: '2026-10-06T00:00:00.000Z',
+    activatedBy: null,
+    activatedAt: null,
+    cancelledBy: null,
+    cancelledAt: null,
+  };
+  const base = `/api/v1/tenants/${SESSION.tenant.id}`;
+
+  test('the list is a GET under the client with no query and no key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [CARD] });
+    const list = await fetchApiListRateCards(SESSION.tenant.id, CLIENT_ID);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/clients/${CLIENT_ID}/rate-cards`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(list.items[0]!.id).toBe(CARD_ID);
+    clearSession();
+  });
+
+  test('the in-force read sends `at` only when given (the default is the SERVER clock)', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { rateCard: null, asOf: '2026-10-20T04:30:00.000Z' });
+    const now = await fetchApiRateCardInForce(SESSION.tenant.id, CLIENT_ID);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/clients/${CLIENT_ID}/rate-cards/in-force`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(now.rateCard).toBeNull();
+    await fetchApiRateCardInForce(SESSION.tenant.id, CLIENT_ID, { at: '2026-10-31T18:30:00Z' });
+    expect(new URL(lastRequest!.url).searchParams.get('at')).toBe('2026-10-31T18:30:00Z');
+    clearSession();
+  });
+
+  test('create POSTs the lines with the key; replace PUTs them on the card', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { rateCard: CARD });
+    const created = await fetchApiCreateRateCard(SESSION.tenant.id, CLIENT_ID, LINES, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/clients/${CLIENT_ID}/rate-cards`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ lines: LINES });
+    expect(created.id).toBe(CARD_ID);
+
+    stubFetch(200, { rateCard: CARD });
+    await fetchApiReplaceRateCardLines(SESSION.tenant.id, CARD_ID, [], KEY);
+    expect(lastRequest!.method).toBe('PUT');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/rate-cards/${CARD_ID}/lines`);
+    expect(await lastRequest!.json()).toEqual({ lines: [] });
+    clearSession();
+  });
+
+  test('activate POSTs the IST date; cancel POSTs with no body; both carry the key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { rateCard: { ...CARD, status: 'active', effectiveFrom: '2026-11-01' } });
+    const active = await fetchApiActivateRateCard(SESSION.tenant.id, CARD_ID, '2026-11-01', KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/rate-cards/${CARD_ID}/activate`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ effectiveFrom: '2026-11-01' });
+    expect(active.effectiveFrom).toBe('2026-11-01');
+
+    stubFetch(200, { rateCard: { ...CARD, status: 'cancelled' } });
+    const cancelled = await fetchApiCancelRateCard(SESSION.tenant.id, CARD_ID, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/rate-cards/${CARD_ID}/cancel`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(cancelled.status).toBe('cancelled');
+    clearSession();
+  });
+
+  test('discard DELETEs the card and treats the bodyless 204 as success; a refusal is an ApiProblem', async () => {
+    writeSession(SESSION);
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      lastRequest = input instanceof Request ? input : new Request(input.toString());
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch);
+    await fetchApiDiscardRateCard(SESSION.tenant.id, CARD_ID, KEY);
+    expect(lastRequest!.method).toBe('DELETE');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/rate-cards/${CARD_ID}`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+
+    stubFetch(409, { type: 'about:blank', title: 'Not a draft', status: 409, code: 'rate-card-not-draft', detail: 'active' });
+    await expect(fetchApiDiscardRateCard(SESSION.tenant.id, CARD_ID, KEY)).rejects.toMatchObject({
+      code: 'rate-card-not-draft',
+      status: 409,
+    });
     clearSession();
   });
 });
