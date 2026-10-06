@@ -2066,6 +2066,112 @@ export type OrderListResponse = {
     nextCursor?: string | null;
 };
 
+export type PicklistLineEntryDto = {
+    id: string;
+    picklistId: string;
+    waveId: string;
+    orderId: string;
+    orderLineId: string;
+    skuId: string;
+    binId: string | null;
+    binCode: string | null;
+    /**
+     * Planned quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    qty: number;
+    /**
+     * Never drawn. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    shortfallQty: number;
+    reasonCode: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | null;
+    status: 'planned' | 'unfulfillable' | 'picked' | 'short' | 'cancelled';
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC — the last transition (a terminal status: its flip time)
+     */
+    updatedAt: string;
+};
+
+export type PicklistLineListResponse = {
+    items: Array<PicklistLineEntryDto>;
+    nextCursor: string | null;
+};
+
+export type PackFailureMismatchDto = {
+    skuId: string;
+    skuCode: string;
+    /**
+     * What the order had picked. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    pickedQty: number;
+    /**
+     * What the bench scanned. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    scannedQty: number;
+};
+
+export type PackFailureEntryDto = {
+    id: string;
+    warehouseId: string;
+    orderId: string;
+    /**
+     * The entry path: the tenant route, the device bench route, or a device sync-report apply
+     */
+    entry: 'tenant' | 'device' | 'sync';
+    actorUserId: string;
+    /**
+     * Every SKU whose scan differed from the pick
+     */
+    mismatch: Array<PackFailureMismatchDto>;
+    /**
+     * ISO-8601 UTC — when the refused attempt was recorded (server time)
+     */
+    createdAt: string;
+};
+
+export type PackFailureListResponse = {
+    items: Array<PackFailureEntryDto>;
+    nextCursor: string | null;
+};
+
+export type BackorderRefusalLineDto = {
+    skuId: string;
+    /**
+     * What the channel order asked for. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    requestedQty: number;
+    /**
+     * What could be reserved at grant time. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    availableQty: number;
+};
+
+export type BackorderRefusalEntryDto = {
+    id: string;
+    warehouseId: string;
+    integrationId: string;
+    /**
+     * The channel's own order event id
+     */
+    externalEventId: string;
+    /**
+     * The lines that could not fully reserve
+     */
+    lines: Array<BackorderRefusalLineDto>;
+    /**
+     * ISO-8601 UTC — when the first delivery was refused (redeliveries add no row)
+     */
+    createdAt: string;
+};
+
+export type BackorderRefusalListResponse = {
+    items: Array<BackorderRefusalEntryDto>;
+    nextCursor: string | null;
+};
+
 export type CreateManifestDto = {
     /**
      * The labelled shipments to close (≥ 1, at most 500; duplicates collapse).
@@ -4765,6 +4871,297 @@ export type EwayGstinSettingResponse = {
     setting: EwayGstinSettingDto;
 };
 
+export type ReportingWindowDto = {
+    /**
+     * ISO-8601 UTC — IST midnight of asOf's IST date (the start of today)
+     */
+    todayFrom: string;
+    /**
+     * ISO-8601 UTC — IST midnight six days before todayFrom
+     */
+    d7From: string;
+    /**
+     * ISO-8601 UTC — the exclusive end of every window (= asOf)
+     */
+    to: string;
+    /**
+     * ISO-8601 UTC — asOf − 1 h: the pick rate's lastHour window start (its drill's from)
+     */
+    lastHourFrom: string;
+    /**
+     * ISO-8601 UTC — asOf − 24 h: the sync tile's ingest-failure window start
+     */
+    last24hFrom: string;
+};
+
+export type ReportingDrillDto = {
+    /**
+     * The API route (relative to /api/v1, ids filled in) whose rows are behind the figure — e.g. /tenants/{t}/warehouses/{w}/outbound/picklist-lines
+     */
+    apiPath: string;
+    /**
+     * The exact query to send it. Windowed figures carry from and to (to = asOf, exclusive)
+     */
+    query: {
+        [key: string]: string;
+    };
+    /**
+     * True: paging apiPath?query to exhaustion yields exactly the figure. False for rates, medians and ratios — and for figures whose list cannot express the exact filter
+     */
+    reconciles: boolean;
+};
+
+export type ReportingFigureDto = {
+    /**
+     * Null when the tile is unavailable or the figure has no data
+     */
+    value: number | null;
+    drill: ReportingDrillDto;
+};
+
+export type ReportingWindowedFigureDto = {
+    /**
+     * Today so far — the IST calendar day of asOf
+     */
+    today: ReportingFigureDto;
+    /**
+     * Today plus the previous six IST days
+     */
+    d7: ReportingFigureDto;
+};
+
+export type DockToStockTileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * Median minutes from GRN creation to bin placement, over placements in the window (negative intervals excluded); null with no placement
+     */
+    medianMinutes: ReportingWindowedFigureDto;
+    /**
+     * Live: GRN lines whose applied stock still sits in Receiving — the putaway task list
+     */
+    awaitingPutaway: ReportingFigureDto;
+};
+
+export type PickRateTileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * Pick lines recorded (one per line — a serial draw is one line)
+     */
+    pickLines: ReportingWindowedFigureDto;
+    /**
+     * Pick lines recorded in the hour before asOf
+     */
+    lastHour: ReportingFigureDto;
+};
+
+export type ShortPicksTileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * Picklist lines flipped to short in the window — zero-unit (empty-bin) shorts included
+     */
+    shortLines: ReportingWindowedFigureDto;
+};
+
+export type GrnVariancesTileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * Over-receipts requested in the window
+     */
+    overReceipts: ReportingWindowedFigureDto;
+    /**
+     * Live: over-receipts awaiting a decision
+     */
+    pendingOverReceipts: ReportingFigureDto;
+    /**
+     * Blind GRNs (no purchase order — flagged for PO matching) recorded in the window
+     */
+    blindGrns: ReportingWindowedFigureDto;
+};
+
+export type OrderAccuracyTileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * SM-3: (short-picked lines + failed pack verifications) per 1,000 dispatched lines; null with no dispatched line
+     */
+    defectsPer1000: ReportingWindowedFigureDto;
+    shortLines: ReportingWindowedFigureDto;
+    /**
+     * Failed pack verifications (recorded since countingSince)
+     */
+    packFailures: ReportingWindowedFigureDto;
+    /**
+     * Order lines dispatched in the window
+     */
+    dispatchedLines: ReportingWindowedFigureDto;
+    /**
+     * ISO-8601 UTC — when failed pack verifications began to be recorded (no backfill)
+     */
+    countingSince: string | null;
+};
+
+export type OversellTileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * SM-4: channel orders accepted in the window with at least one backordered line (per order)
+     */
+    backorderedOrders: ReportingWindowedFigureDto;
+    /**
+     * Channel orders refused under the reject backorder policy — oversell prevented (recorded since countingSince)
+     */
+    prevented: ReportingWindowedFigureDto;
+    /**
+     * ISO-8601 UTC — when refusals began to be recorded (no backfill)
+     */
+    countingSince: string | null;
+};
+
+export type ExpiryAlertsTileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * Live: open expiry-upcoming alerts
+     */
+    openExpiryUpcoming: ReportingFigureDto;
+    /**
+     * Live: open aged-stock alerts
+     */
+    openAged: ReportingFigureDto;
+    /**
+     * Alerts of either kind raised in the window
+     */
+    raised: ReportingWindowedFigureDto;
+};
+
+export type SyncConnectionHealthDto = {
+    integrationId: string;
+    provider: string;
+    /**
+     * A disconnected connection is always health error, reason disconnected
+     */
+    status: 'connected' | 'disconnected';
+    health: 'ok' | 'degraded' | 'error';
+    /**
+     * Why the health is not ok. disconnected / ingest-warehouse-unset (error — channel orders land nowhere); then /channels' own rule (connectionHealth): breaker-open (error), breaker-half-open, last-delivery-failed, never-synced, sync-lag (degraded); then ingest-failures (degraded — a genuine order-ingest failure in 24 h; refusals and settled cancellations are not failures). Null when ok
+     */
+    reason: 'disconnected' | 'ingest-warehouse-unset' | 'breaker-open' | 'breaker-half-open' | 'last-delivery-failed' | 'never-synced' | 'sync-lag' | 'ingest-failures' | null;
+    /**
+     * Seconds since the last successful availability sync; null when it never synced
+     */
+    lagSeconds: number | null;
+    /**
+     * Genuine order-ingest failures in the 24 h before asOf (a policy refusal or a settled cancellation is not one)
+     */
+    ingestFailures24h: number;
+};
+
+export type SyncHealthTileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * Channel connections (connected or disconnected) ingesting into this warehouse or with no ingest warehouse set; null when unavailable
+     */
+    connections: Array<SyncConnectionHealthDto> | null;
+    drill: ReportingDrillDto;
+};
+
+export type DispatchPipelineTileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * Live: orders accepted, not yet packed
+     */
+    accepted: ReportingFigureDto;
+    /**
+     * Live: orders packed, ready to dispatch
+     */
+    readyToDispatch: ReportingFigureDto;
+    /**
+     * Live: shipments labelled but not yet on a manifest (no list of their own — drills to the packed orders)
+     */
+    labelledNotManifested: ReportingFigureDto;
+    /**
+     * Orders dispatched in the window
+     */
+    ordersDispatched: ReportingWindowedFigureDto;
+};
+
+export type Sm8TileDto = {
+    /**
+     * `ok`: every figure was computed. `unavailable`: the tile timed out, missed the overall deadline, or failed — every value is null (there is no 'estimated' state)
+     */
+    state: 'ok' | 'unavailable';
+    /**
+     * E-way bills queued in the window for this warehouse's invoices (dismissed bills and voided invoices excluded)
+     */
+    eligible: ReportingWindowedFigureDto;
+    /**
+     * Of those, generated through the gateway
+     */
+    gatewayGenerated: ReportingWindowedFigureDto;
+    /**
+     * SM-8: gatewayGenerated ÷ eligible, 0–1; null with none eligible. Reads 0 until a live gateway adapter exists
+     */
+    gatewayShare: ReportingWindowedFigureDto;
+    /**
+     * This warehouse's invoices issued in the window
+     */
+    invoicesIssued: ReportingWindowedFigureDto;
+    /**
+     * Secondary: the share (0–1) of those issued with no manually priced line; null with none issued
+     */
+    noManualPricingShare: ReportingWindowedFigureDto;
+};
+
+export type ReportingTilesDto = {
+    dockToStock: DockToStockTileDto;
+    pickRate: PickRateTileDto;
+    shortPicks: ShortPicksTileDto;
+    grnVariances: GrnVariancesTileDto;
+    orderAccuracy: OrderAccuracyTileDto;
+    oversell: OversellTileDto;
+    expiryAlerts: ExpiryAlertsTileDto;
+    syncHealth: SyncHealthTileDto;
+    dispatchPipeline: DispatchPipelineTileDto;
+    sm8: Sm8TileDto;
+};
+
+export type ReportingOverviewResponse = {
+    /**
+     * ISO-8601 UTC — the instant every figure was read at
+     */
+    asOf: string;
+    /**
+     * True whenever any tile is unavailable
+     */
+    stale: boolean;
+    window: ReportingWindowDto;
+    tiles: ReportingTilesDto;
+};
+
 export type ChannelWebhookOrderResponse = {
     outcome: 'accepted' | 'backordered' | 'replayed';
     /**
@@ -6867,6 +7264,26 @@ export type InventoryControllerListEventsData = {
          */
         binId?: string;
         /**
+         * Story 9-1 — only events of these types (repeatable: `?type=a&type=b`; one value is a one-element list). An unknown type is refused (400 validation-failed naming the known set)
+         */
+        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound'>;
+        /**
+         * Story 9-1 — only events RECORDED at or after this instant (`recorded_at` — the server stamp, never the device `occurred_at`). ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only events RECORDED strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
+         * Story 9-1 — only events whose reference document names this order (`referenceDoc.orderId` — the pick, pack and dispatch arms)
+         */
+        orderId?: string;
+        /**
+         * Story 9-1 — `true`: only short-pick draws (`referenceDoc.shortPick`); `false`: only events that are not. Exactly 'true' or 'false'
+         */
+        shortPick?: boolean;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -6877,7 +7294,7 @@ export type InventoryControllerListEventsData = {
 
 export type InventoryControllerListEventsErrors = {
     /**
-     * Malformed skuId/binId query, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     * Malformed skuId/binId/orderId query, an unregistered type, a from/to that is not an ISO-8601 instant, from not before to, a shortPick other than true/false, a malformed cursor, or an out-of-range limit (validation-failed / invalid-cursor)
      */
     400: ProblemDetailsDto;
     /**
@@ -7899,6 +8316,26 @@ export type OutboundControllerListOrdersData = {
     };
     query?: {
         /**
+         * Story 9-1 — only orders in this status
+         */
+        status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+        /**
+         * Story 9-1 — only orders of this source
+         */
+        source?: 'manual' | 'ingested';
+        /**
+         * Story 9-1 — `true`: only orders with at least one line created backordered (counted per order, so a kit never counts twice); `false`: only orders with none. Exactly 'true' or 'false'
+         */
+        backordered?: boolean;
+        /**
+         * Story 9-1 — only rows whose `created_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only rows whose `created_at` is strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -7909,7 +8346,7 @@ export type OutboundControllerListOrdersData = {
 
 export type OutboundControllerListOrdersErrors = {
     /**
-     * Malformed cursor or out-of-range limit (invalid-cursor / validation-failed)
+     * Malformed cursor, out-of-range limit, an unknown status/source, a from/to that is not an ISO-8601 instant, from not before to, or a backordered flag other than true/false (invalid-cursor / validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -7937,6 +8374,172 @@ export type OutboundControllerListOrdersResponses = {
 
 export type OutboundControllerListOrdersResponse = OutboundControllerListOrdersResponses[keyof OutboundControllerListOrdersResponses];
 
+export type OutboundControllerListPicklistLinesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Only lines in this status
+         */
+        status?: 'planned' | 'unfulfillable' | 'picked' | 'short' | 'cancelled';
+        /**
+         * Story 9-1 — only rows whose `updated_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only rows whose `updated_at` is strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/picklist-lines';
+};
+
+export type OutboundControllerListPicklistLinesErrors = {
+    /**
+     * Malformed cursor, out-of-range limit, an unknown status, a from/to that is not an ISO-8601 instant, or from not before to (invalid-cursor / validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerListPicklistLinesError = OutboundControllerListPicklistLinesErrors[keyof OutboundControllerListPicklistLinesErrors];
+
+export type OutboundControllerListPicklistLinesResponses = {
+    200: PicklistLineListResponse;
+};
+
+export type OutboundControllerListPicklistLinesResponse = OutboundControllerListPicklistLinesResponses[keyof OutboundControllerListPicklistLinesResponses];
+
+export type OutboundControllerListPackFailuresData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Story 9-1 — only rows whose `created_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only rows whose `created_at` is strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/pack-failures';
+};
+
+export type OutboundControllerListPackFailuresErrors = {
+    /**
+     * Malformed cursor, out-of-range limit, a from/to that is not an ISO-8601 instant, or from not before to (invalid-cursor / validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerListPackFailuresError = OutboundControllerListPackFailuresErrors[keyof OutboundControllerListPackFailuresErrors];
+
+export type OutboundControllerListPackFailuresResponses = {
+    200: PackFailureListResponse;
+};
+
+export type OutboundControllerListPackFailuresResponse = OutboundControllerListPackFailuresResponses[keyof OutboundControllerListPackFailuresResponses];
+
+export type OutboundControllerListBackorderRefusalsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Story 9-1 — only rows whose `created_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only rows whose `created_at` is strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/backorder-refusals';
+};
+
+export type OutboundControllerListBackorderRefusalsErrors = {
+    /**
+     * Malformed cursor, out-of-range limit, a from/to that is not an ISO-8601 instant, or from not before to (invalid-cursor / validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerListBackorderRefusalsError = OutboundControllerListBackorderRefusalsErrors[keyof OutboundControllerListBackorderRefusalsErrors];
+
+export type OutboundControllerListBackorderRefusalsResponses = {
+    200: BackorderRefusalListResponse;
+};
+
+export type OutboundControllerListBackorderRefusalsResponse = OutboundControllerListBackorderRefusalsResponses[keyof OutboundControllerListBackorderRefusalsResponses];
+
 export type OutboundControllerListManifestsData = {
     body?: never;
     path: {
@@ -7947,6 +8550,26 @@ export type OutboundControllerListManifestsData = {
         warehouseId: string;
     };
     query?: {
+        /**
+         * Story 9-1 — only orders in this status
+         */
+        status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+        /**
+         * Story 9-1 — only orders of this source
+         */
+        source?: 'manual' | 'ingested';
+        /**
+         * Story 9-1 — `true`: only orders with at least one line created backordered (counted per order, so a kit never counts twice); `false`: only orders with none. Exactly 'true' or 'false'
+         */
+        backordered?: boolean;
+        /**
+         * Story 9-1 — only rows whose `created_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only rows whose `created_at` is strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
         /**
          * Opaque keyset cursor from the previous page
          */
@@ -8109,6 +8732,26 @@ export type OutboundControllerListWavePoliciesData = {
         warehouseId: string;
     };
     query?: {
+        /**
+         * Story 9-1 — only orders in this status
+         */
+        status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+        /**
+         * Story 9-1 — only orders of this source
+         */
+        source?: 'manual' | 'ingested';
+        /**
+         * Story 9-1 — `true`: only orders with at least one line created backordered (counted per order, so a kit never counts twice); `false`: only orders with none. Exactly 'true' or 'false'
+         */
+        backordered?: boolean;
+        /**
+         * Story 9-1 — only rows whose `created_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only rows whose `created_at` is strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
         /**
          * Opaque keyset cursor from the previous page
          */
@@ -8484,6 +9127,26 @@ export type OutboundControllerListWavesData = {
     };
     query?: {
         /**
+         * Story 9-1 — only orders in this status
+         */
+        status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+        /**
+         * Story 9-1 — only orders of this source
+         */
+        source?: 'manual' | 'ingested';
+        /**
+         * Story 9-1 — `true`: only orders with at least one line created backordered (counted per order, so a kit never counts twice); `false`: only orders with none. Exactly 'true' or 'false'
+         */
+        backordered?: boolean;
+        /**
+         * Story 9-1 — only rows whose `created_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only rows whose `created_at` is strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -8536,6 +9199,18 @@ export type ReceivingControllerListGoodsReceiptsData = {
          */
         warehouseId?: string;
         /**
+         * Story 9-1 — `true`: only BLIND receipts (no purchase order — flagged for PO matching); `false`: only PO-backed ones. Exactly 'true' or 'false'
+         */
+        poless?: boolean;
+        /**
+         * Story 9-1 — only receipts whose `created_at` (server time) is at or after this instant. ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only receipts whose `created_at` is strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -8546,7 +9221,7 @@ export type ReceivingControllerListGoodsReceiptsData = {
 
 export type ReceivingControllerListGoodsReceiptsErrors = {
     /**
-     * Malformed cursor (invalid-cursor), malformed warehouseId, or out-of-range limit (validation-failed)
+     * Malformed cursor (invalid-cursor), malformed warehouseId, out-of-range limit, a poless flag other than true/false, a from/to that is not an ISO-8601 instant, or from not before to (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -8688,6 +9363,18 @@ export type ReceivingControllerListOverReceiptsData = {
     query?: {
         status?: 'pending' | 'approved' | 'rejected';
         /**
+         * Story 9-1 — narrow to one warehouse (404 when it is not this tenant's)
+         */
+        warehouseId?: string;
+        /**
+         * Story 9-1 — only over-receipts requested (`requested_at`, server time) at or after this instant. ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only over-receipts requested strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -8698,7 +9385,7 @@ export type ReceivingControllerListOverReceiptsData = {
 
 export type ReceivingControllerListOverReceiptsErrors = {
     /**
-     * Malformed status, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     * Malformed status, warehouseId, cursor, out-of-range limit, a from/to that is not an ISO-8601 instant, or from not before to (validation-failed / invalid-cursor)
      */
     400: ProblemDetailsDto;
     /**
@@ -8709,6 +9396,10 @@ export type ReceivingControllerListOverReceiptsErrors = {
      * Session belongs to another tenant (permission-denied)
      */
     403: ProblemDetailsDto;
+    /**
+     * The warehouseId filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
 };
 
 export type ReceivingControllerListOverReceiptsError = ReceivingControllerListOverReceiptsErrors[keyof ReceivingControllerListOverReceiptsErrors];
@@ -10784,6 +11475,14 @@ export type ReplenishmentControllerListBatchAlertsData = {
          */
         warehouseId?: string;
         /**
+         * Story 9-1 — only alerts raised (`created_at`, server time) at or after this instant. ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only alerts raised strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -10794,7 +11493,7 @@ export type ReplenishmentControllerListBatchAlertsData = {
 
 export type ReplenishmentControllerListBatchAlertsErrors = {
     /**
-     * Malformed kind, status, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     * Malformed kind, status, cursor, out-of-range limit, a from/to that is not an ISO-8601 instant, or from not before to (validation-failed / invalid-cursor)
      */
     400: ProblemDetailsDto;
     /**
@@ -11349,6 +12048,18 @@ export type InvoicingControllerListInvoicesData = {
     };
     query?: {
         /**
+         * Story 9-1 — only this warehouse's invoices. 404 when the warehouse is not this tenant's
+         */
+        warehouseId?: string;
+        /**
+         * Story 9-1 — only invoices ISSUED (`issued_at`) at or after this instant; an awaiting-data invoice has no issue instant, so a windowed read never lists one. ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only invoices issued strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -11359,7 +12070,7 @@ export type InvoicingControllerListInvoicesData = {
 
 export type InvoicingControllerListInvoicesErrors = {
     /**
-     * Malformed cursor or out-of-range limit (validation-failed / invalid-cursor)
+     * Malformed cursor, warehouseId or out-of-range limit, a from/to that is not an ISO-8601 instant, or from not before to (validation-failed / invalid-cursor)
      */
     400: ProblemDetailsDto;
     /**
@@ -11370,6 +12081,10 @@ export type InvoicingControllerListInvoicesErrors = {
      * Session belongs to another tenant (permission-denied)
      */
     403: ProblemDetailsDto;
+    /**
+     * The warehouseId filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
 };
 
 export type InvoicingControllerListInvoicesError = InvoicingControllerListInvoicesErrors[keyof InvoicingControllerListInvoicesErrors];
@@ -11581,6 +12296,22 @@ export type EwayControllerListBillsData = {
          */
         gstin?: string;
         /**
+         * Story 9-1 — only bills of this warehouse's invoices (a bill carries no warehouse; it is read through its invoice). 404 when the warehouse is not this tenant's
+         */
+        warehouseId?: string;
+        /**
+         * Story 9-1 — only bills generated by this source (`gateway` or `manual`); a bill not yet generated has none
+         */
+        source?: 'manual' | 'gateway';
+        /**
+         * Story 9-1 — only bills queued (`created_at`, server time) at or after this instant. ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Story 9-1 — only bills queued strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -11591,7 +12322,7 @@ export type EwayControllerListBillsData = {
 
 export type EwayControllerListBillsErrors = {
     /**
-     * Malformed status, gstin, cursor or limit (validation-failed / invalid-cursor)
+     * Malformed status, gstin, warehouseId, source, cursor or limit, a from/to that is not an ISO-8601 instant, or from not before to (validation-failed / invalid-cursor)
      */
     400: ProblemDetailsDto;
     /**
@@ -11602,6 +12333,10 @@ export type EwayControllerListBillsErrors = {
      * Session belongs to another tenant (permission-denied)
      */
     403: ProblemDetailsDto;
+    /**
+     * The warehouseId filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
 };
 
 export type EwayControllerListBillsError = EwayControllerListBillsErrors[keyof EwayControllerListBillsErrors];
@@ -12067,6 +12802,46 @@ export type EwayControllerPutGstinSettingResponses = {
 };
 
 export type EwayControllerPutGstinSettingResponse = EwayControllerPutGstinSettingResponses[keyof EwayControllerPutGstinSettingResponses];
+
+export type ReportingControllerOverviewData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/reporting/overview';
+};
+
+export type ReportingControllerOverviewErrors = {
+    /**
+     * Malformed warehouseId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found) — checked before any tile runs
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReportingControllerOverviewError = ReportingControllerOverviewErrors[keyof ReportingControllerOverviewErrors];
+
+export type ReportingControllerOverviewResponses = {
+    200: ReportingOverviewResponse;
+};
+
+export type ReportingControllerOverviewResponse = ReportingControllerOverviewResponses[keyof ReportingControllerOverviewResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;
