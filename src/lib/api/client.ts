@@ -118,6 +118,7 @@ import {
   rateCardsControllerCreate,
   rateCardsControllerDiscard,
   rateCardsControllerInForce,
+  billingUsageControllerUsage,
   rateCardsControllerList,
   rateCardsControllerReplaceLines,
 } from './generated/sdk.gen';
@@ -219,6 +220,7 @@ import type {
   ClientListResponse,
   RateCardDto,
   RateCardInForceResponse,
+  ClientUsageResponse,
   RateCardLineDto,
   RateCardListResponse,
   ProductListResponse,
@@ -787,6 +789,29 @@ export async function fetchApiRateCardInForce(
   const { data, error } = await rateCardsControllerInForce({
     path: { tenantId, clientId },
     query: options?.at === undefined ? undefined : { at: options.at },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 21-4 — a client's metered usage over an inclusive IST date period
+ * (`from`/`to` are `YYYY-MM-DD`): each charge's quantity per rate-card
+ * segment, with its rate and GST-exclusive amount — an estimate until
+ * invoiced. Member-open.
+ */
+export async function fetchApiClientUsage(
+  tenantId: string,
+  clientId: string,
+  period: { from: string; to: string },
+  options?: { signal?: AbortSignal },
+): Promise<ClientUsageResponse> {
+  const { data, error } = await billingUsageControllerUsage({
+    path: { tenantId, clientId },
+    query: { from: period.from, to: period.to },
     signal: options?.signal,
   });
   if (error || !data) {

@@ -5353,6 +5353,83 @@ export type ActivateRateCardDto = {
     effectiveFrom: string;
 };
 
+export type UsageLineDto = {
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
+    /**
+     * The basis the charge is metered and priced on (fixed per charge)
+     */
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    /**
+     * The SKU base UoM of a storage line — storage is counted separately per base unit. Null for the handling counts, and for the single zero storage line of a stretch with no measured stock
+     */
+    uom: string | null;
+    /**
+     * A decimal string. Storage: base-unit-days (Σ of each day’s closing stock in base units, exact to three decimals). Receipt lines, picks, orders: a whole count. A string because a storage total can pass 2^53
+     */
+    quantity: string;
+    /**
+     * Integer paise per unit of the basis from the rate card in force (storage: per 1,000 base units per day). Null when the card prices no such charge, or no card is in force
+     */
+    ratePaise: number | null;
+    /**
+     * Integer paise, GST-exclusive, rounded once half-up (storage: Σ milli-unit-days × rate ÷ 1,000,000). Null = not billed (no card line, no card) — or, for storage, not yet billable (the stretch has unmeasured days)
+     */
+    amountPaise: number | null;
+};
+
+export type UsageSegmentDto = {
+    /**
+     * The rate card in force over this stretch, or null — no card, so nothing in it is billed
+     */
+    rateCardId: string | null;
+    /**
+     * First IST date of the stretch (inclusive)
+     */
+    fromDate: string;
+    /**
+     * Last IST date of the stretch (inclusive)
+     */
+    toDate: string;
+    /**
+     * The last day of this stretch whose storage is measured (≤ toDate), or null when none is. When it is short of toDate, the storage lines carry the measured days only and a null amount (not yet billable) — never ₹0 for unmeasured days
+     */
+    storageMeasuredThrough: string | null;
+    /**
+     * Storage (one line per base UoM), then inbound_handling, pick and outbound_handling — summed across warehouses
+     */
+    lines: Array<UsageLineDto>;
+};
+
+export type UsageTotalsDto = {
+    /**
+     * Σ of every priced line’s amountPaise (GST-exclusive)
+     */
+    billedPaise: number;
+    /**
+     * How many lines carry no price (no card line, or no card)
+     */
+    unbilledLines: number;
+};
+
+export type ClientUsageResponse = {
+    clientId: string;
+    from: string;
+    to: string;
+    /**
+     * The server instant the read ran (ISO-8601 UTC) — counts run to it; a period past it is in progress
+     */
+    asOf: string;
+    /**
+     * The last IST date storage is measured through: the minimum snapshot watermark across the client’s warehouses, where a warehouse with events but no snapshot yet counts as the day before its first event. Storage days after it are not in the lines yet. Null: not measured — the tenant’s own client (never snapshotted), or a client with no ledger events
+     */
+    storageCompleteThrough: string | null;
+    /**
+     * The period split at every rate-card boundary (IST midnights), in time order
+     */
+    segments: Array<UsageSegmentDto>;
+    totals: UsageTotalsDto;
+};
+
 export type ChannelWebhookOrderResponse = {
     outcome: 'accepted' | 'backordered' | 'replayed';
     /**
@@ -13633,6 +13710,55 @@ export type RateCardsControllerCancelResponses = {
 };
 
 export type RateCardsControllerCancelResponse = RateCardsControllerCancelResponses[keyof RateCardsControllerCancelResponses];
+
+export type BillingUsageControllerUsageData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query: {
+        /**
+         * First IST date of the period (inclusive), YYYY-MM-DD
+         */
+        from: string;
+        /**
+         * Last IST date of the period (inclusive), YYYY-MM-DD — at most 366 days after `from`, never before it
+         */
+        to: string;
+    };
+    url: '/tenants/{tenantId}/clients/{clientId}/usage';
+};
+
+export type BillingUsageControllerUsageErrors = {
+    /**
+     * A malformed clientId, a `from`/`to` that is not a real YYYY-MM-DD date, `from` after `to`, or a period longer than 366 days (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator read
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type BillingUsageControllerUsageError = BillingUsageControllerUsageErrors[keyof BillingUsageControllerUsageErrors];
+
+export type BillingUsageControllerUsageResponses = {
+    200: ClientUsageResponse;
+};
+
+export type BillingUsageControllerUsageResponse = BillingUsageControllerUsageResponses[keyof BillingUsageControllerUsageResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;

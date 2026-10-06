@@ -44,6 +44,7 @@ import { useRateCards } from '@/lib/use-rate-cards';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { ReadFailure } from '@/components/outbound/shell';
+import { ClientUsage } from '@/components/settings/client-usage';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -70,7 +71,8 @@ type Panel =
  * change, and "Not billed" for every charge a card does not price; a banner
  * warns when an active client has no card in force. An owner or accountant
  * (`rates.manage`) drafts, edits and discards drafts, activates a draft from
- * a date, and cancels a scheduled card.
+ * a date, and cancels a scheduled card. Below the cards, every member reads
+ * the client's metered usage for a period (story 21-4, `ClientUsage`).
  *
  * Gating copies `sku-table.tsx`: the role is read through the session
  * subscription, so a `/me` role rewrite re-renders the affordances.
@@ -301,6 +303,9 @@ function ClientRateCards({ client, canManage }: { client: ClientDto; canManage: 
       ) : null}
 
       {outcome !== null ? <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} /> : null}
+
+      {/* Story 21-4 — what the client used, priced by these cards (an estimate). */}
+      <ClientUsage client={client} cards={items} asOf={inForce.asOf} />
     </div>
   );
 }
