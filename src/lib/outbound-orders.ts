@@ -674,3 +674,51 @@ export function destinationSummary(order: Pick<OrderEntryDto, 'destination'>): s
   if (order.destination === null) return '—';
   return `${order.destination.city} ${order.destination.pincode}`;
 }
+
+/* ------------------------------------------------------------------ */
+/* The buyer legal name (story 8-1d)                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The backend's ceiling on `consigneeLegalName` (100 Unicode code points —
+ * NIC's `toTrdName` width). The input's `maxLength` is the client cap; the
+ * command is the authority and counts code points.
+ */
+export const MAX_CONSIGNEE_LEGAL_NAME_LENGTH = 100;
+
+/** The input offers itself only once a buyer GSTIN is typed (B2B). */
+export function showsLegalName(consigneeGstinText: string): boolean {
+  return consigneeGstinText.trim() !== '';
+}
+
+/**
+ * The legal name's slice of the create body. The backend refuses a legal
+ * name without a GSTIN, so while the GSTIN is blank the typed name is KEPT in
+ * the form (the viewer may be mid-edit) but NOT sent. A blank name is absent
+ * — no key at all, never `''` — which also keeps the backend's request hash
+ * identical to an order created without the field.
+ */
+export function legalNameBody(
+  consigneeGstin: string | undefined,
+  legalNameText: string,
+): { consigneeLegalName?: string } {
+  if (consigneeGstin === undefined) return {};
+  const name = legalNameText.trim();
+  return name === '' ? {} : { consigneeLegalName: name };
+}
+
+/**
+ * The legal name's length check, as the backend counts it: Unicode CODE
+ * POINTS after trimming (an input `maxLength` counts UTF-16 units before
+ * the trim, so it would refuse a 60-character name in an astral script and
+ * pass 100 characters of padding). Checked only when the name would be sent
+ * (beside a GSTIN). Null when fine.
+ */
+export function legalNameProblem(consigneeGstin: string | undefined, legalNameText: string): string | null {
+  if (consigneeGstin === undefined) return null;
+  const length = [...legalNameText.trim()].length;
+  if (length > MAX_CONSIGNEE_LEGAL_NAME_LENGTH) {
+    return `Buyer legal name is at most ${MAX_CONSIGNEE_LEGAL_NAME_LENGTH} characters (got ${length}).`;
+  }
+  return null;
+}

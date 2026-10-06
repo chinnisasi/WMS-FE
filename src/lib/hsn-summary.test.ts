@@ -9,7 +9,9 @@ import {
   hsnCsvFilename,
   hsnSummaryCsv,
   hsnSummaryReason,
+  isCsvRow,
   issueShortfallNote,
+  rateOnlyIssueRows,
   istMonthOf,
   mixedUnitsNote,
   paiseToPlainRupees,
@@ -26,6 +28,7 @@ function row(overrides: Partial<HsnSummaryRowDto> = {}): HsnSummaryRowDto {
   return {
     hsn: '0910',
     hsnIssue: false,
+    rateIssue: false,
     uqc: 'KGS',
     sourceUoms: ['kg'],
     mixedUnits: false,
@@ -64,6 +67,19 @@ describe('the pinned GSTN offline-tool template', () => {
     expect(b2c).not.toContain('HSN 0910');
     expect(hsnSummaryCsv(rows, 'b2b')).toBe(b2c);
     expect(hsnSummaryCsv([], 'b2b')).toBe(`${HSN_CSV_HEADER}\n`);
+  });
+
+  test('8-1d: rate-issue rows are excluded too — a valid HSN at 12.5 % never reaches the CSV; 0.1 / 1.5 / 7.5 % do', () => {
+    const rows = [
+      row({ gstBps: 1250, rateIssue: true }),
+      row({ gstBps: 10 }),
+      row({ gstBps: 150 }),
+      row({ gstBps: 750 }),
+      row({ hsn: 'HSN 0910', hsnIssue: true, rateIssue: true, gstBps: 1250 }),
+    ];
+    const lines = hsnSummaryCsv(rows, 'b2b').trim().split('\n').slice(1);
+    expect(lines.map((line) => line.split(',')[5])).toEqual(['"0.1"', '"1.5"', '"7.5"']);
+    expect(rows.map(isCsvRow)).toEqual([false, true, true, true, false]);
   });
 
   test('the filename names the section, the GSTIN and the period', () => {
@@ -150,10 +166,27 @@ describe('copy', () => {
   });
 
   test('the issue shortfall states the value Table 12 will be short by', () => {
-    expect(issueShortfallNote([], formatRupees)).toBeNull();
-    const note = issueShortfallNote([{ valuePaise: 11_800 }, { valuePaise: 5_901 }], formatRupees)!;
+    expect(issueShortfallNote([], [row()], formatRupees)).toBeNull();
+    const note = issueShortfallNote([{ valuePaise: 11_800 }, { valuePaise: 5_901 }], [row()], formatRupees)!;
     expect(note).toContain('2 invoice lines have a blank or malformed HSN');
     expect(note).toContain('₹177.01 short');
+  });
+
+  test('8-1d: the shortfall adds the rate-only issue rows once — a row flagged for both is counted through its issue lines', () => {
+    const rows = [
+      row({ gstBps: 1250, rateIssue: true, totalValuePaise: 11_250 }),
+      // Both flags: its value is already in the issue lines below — never added twice.
+      row({ hsn: 'HSN 0910', hsnIssue: true, rateIssue: true, gstBps: 1250, totalValuePaise: 1_125 }),
+      row({ totalValuePaise: 99_999 }),
+    ];
+    expect(rateOnlyIssueRows(rows)).toEqual([rows[0]!]);
+    const note = issueShortfallNote([{ valuePaise: 1_125 }], rows, formatRupees)!;
+    expect(note).toContain('1 invoice line has a blank or malformed HSN');
+    expect(note).toContain('1 row has a GST rate not on the GST rate master (12.5%)');
+    expect(note).toContain('₹123.75 short'); // 11,250 + 1,125 paise
+    const rateOnly = issueShortfallNote([], [rows[0]!], formatRupees)!;
+    expect(rateOnly).toMatch(/^1 row has a GST rate not on the GST rate master \(12\.5%\)\./);
+    expect(rateOnly).toContain('₹112.50 short');
   });
 
   test('the reason mapper branches on code; the transport arm is the house copy', () => {

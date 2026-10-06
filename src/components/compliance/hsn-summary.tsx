@@ -8,6 +8,7 @@ import { downloadText } from '@/lib/csv';
 import {
   AATO_NOTE,
   hsnCsvFilename,
+  isCsvRow,
   hsnSummaryCsv,
   issueShortfallNote,
   istMonthOf,
@@ -160,10 +161,10 @@ function SummaryBody({ summary }: { summary: HsnSummaryDto }) {
       </div>
     );
   }
-  const shortfall = issueShortfallNote(summary.issueLines, formatRupees);
+  const shortfall = issueShortfallNote(summary.issueLines, [...summary.b2b.rows, ...summary.b2c.rows], formatRupees);
   return (
     <div className="flex flex-col gap-4">
-      {shortfall !== null && <FeedbackBanner tone="rejected" word="HSN issues" reason={shortfall} />}
+      {shortfall !== null && <FeedbackBanner tone="rejected" word="Left out of the CSV" reason={shortfall} />}
       <SectionTable title="B2B — registered recipients" section="b2b" data={summary.b2b} summary={summary} />
       <SectionTable title="B2C — unregistered recipients" section="b2c" data={summary.b2c} summary={summary} />
       <div className="text-sm" data-testid="hsn-grand-total">
@@ -182,7 +183,7 @@ const td = 'px-2 py-1';
 const tdNum = 'px-2 py-1 text-right data';
 
 function SectionTable({ title, section, data, summary }: { title: string; section: HsnSection; data: HsnSummarySectionDto; summary: HsnSummaryDto }) {
-  const exportable = data.rows.filter((row) => !row.hsnIssue).length;
+  const exportable = data.rows.filter(isCsvRow).length;
   function download() {
     downloadText(hsnCsvFilename(section, summary.gstin, summary.period.label), hsnSummaryCsv(data.rows, section));
   }
@@ -237,7 +238,11 @@ function SectionTable({ title, section, data, summary }: { title: string; sectio
 function Row({ row }: { row: HsnSummaryRowDto }) {
   const mixed = mixedUnitsNote(row);
   return (
-    <tr className="border-b border-(--border)" data-hsn-issue={row.hsnIssue ? 'true' : undefined}>
+    <tr
+      className="border-b border-(--border)"
+      data-hsn-issue={row.hsnIssue ? 'true' : undefined}
+      data-rate-issue={row.rateIssue ? 'true' : undefined}
+    >
       <td className={td}>
         <span className="font-mono text-xs">{row.hsn ?? '(blank)'}</span>
         {row.hsnIssue && (
@@ -256,7 +261,14 @@ function Row({ row }: { row: HsnSummaryRowDto }) {
         )}
       </td>
       <td className={tdNum}>{qtyMilliExact(row.qtyMilli)}</td>
-      <td className={tdNum}>{gstRateLabel(row.gstBps)}</td>
+      <td className={tdNum}>
+        {gstRateLabel(row.gstBps)}
+        {row.rateIssue && (
+          <span className="block text-xs text-(--warning)" data-testid="hsn-rate-flag">
+            ⚠ Not on the GST rate master — not in CSV
+          </span>
+        )}
+      </td>
       <td className={tdNum}>{formatRupees(row.taxablePaise)}</td>
       <td className={tdNum}>{formatRupees(row.igstPaise)}</td>
       <td className={tdNum}>{formatRupees(row.cgstPaise)}</td>

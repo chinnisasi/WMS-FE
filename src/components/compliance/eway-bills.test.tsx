@@ -1,9 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
+import { notifyEwayChanged } from '../../lib/eway';
+import { notifyInvoicesChanged } from '../../lib/invoices';
+import { EWAY_INVOICE_REFETCH_DELAYS_MS } from '../../lib/use-eway';
 import { EwayBills } from './eway-bills';
 
 /**
@@ -326,5 +329,105 @@ describe('the e-way bills section', () => {
     const before = requests.length;
     await click(buttons(view.container, 'Refresh')[0]!);
     expect(requests.length).toBeGreaterThan(before);
+  });
+});
+
+describe('8-1d: the needs-irn hint follows eway.configure', () => {
+  const irn = () => billDto('b-irn', '29/2627/000009', { b2b: true, consigneeGstin: '27BBBPT5678M2AB', blockers: [{ code: 'needs-irn', terminal: false }] });
+
+  test('an accountant (no eway.configure) is told to ask an owner — never to turn the flag off', async () => {
+    bills = [irn()];
+    view = await mountAs('accountant');
+    const badge = view.container.querySelector('[data-blocker="needs-irn"]') as HTMLElement;
+    expect(badge.title).toContain('ask an owner to turn the flag off');
+    expect(badge.title).not.toContain('Turn the flag off');
+  });
+
+  test('an owner (eway.configure) is told to turn the flag off', async () => {
+    bills = [irn()];
+    view = await mountAs('owner');
+    const badge = view.container.querySelector('[data-blocker="needs-irn"]') as HTMLElement;
+    expect(badge.title).toContain('Turn the flag off if it no longer applies');
+    expect(badge.title).not.toContain('ask an owner');
+  });
+});
+
+describe('8-1d: invoice events re-read the bills on a trailing debounce; the settings lists ignore them', () => {
+  const gets = (suffix: string) => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith(suffix)).length;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  async function advance(ms: number): Promise<void> {
+    act(() => {
+      jest.advanceTimersByTime(ms);
+    });
+    await settle();
+  }
+
+  test('a burst of invoice events: nothing at once, ONE bills re-read at ~3 s after the last, one more at ~10 s, no settings re-read', async () => {
+    view = await mountAs('owner'); // the owner mounts all three reads
+    const bills0 = gets('/eway/bills');
+    const gstin0 = gets('/eway/gstin-settings');
+    const thresholds0 = gets('/eway/state-thresholds');
+    expect(gstin0).toBeGreaterThan(0);
+    expect(thresholds0).toBeGreaterThan(0);
+
+    act(() => notifyInvoicesChanged());
+    await advance(2_000);
+    act(() => notifyInvoicesChanged()); // restarts the debounce
+    act(() => notifyInvoicesChanged());
+    await settle();
+    expect(gets('/eway/bills')).toBe(bills0); // never immediate
+
+    const [first, second] = EWAY_INVOICE_REFETCH_DELAYS_MS;
+    await advance(first - 1);
+    expect(gets('/eway/bills')).toBe(bills0);
+    await advance(1);
+    expect(gets('/eway/bills')).toBe(bills0 + 1);
+    await advance(second - first - 1);
+    expect(gets('/eway/bills')).toBe(bills0 + 1);
+    await advance(1);
+    expect(gets('/eway/bills')).toBe(bills0 + 2);
+    await advance(60_000);
+    expect(gets('/eway/bills')).toBe(bills0 + 2); // the schedule ends
+
+    expect(gets('/eway/gstin-settings')).toBe(gstin0);
+    expect(gets('/eway/state-thresholds')).toBe(thresholds0);
+  });
+
+  test('an e-way mutation still re-reads every list at once', async () => {
+    view = await mountAs('owner');
+    const bills0 = gets('/eway/bills');
+    const gstin0 = gets('/eway/gstin-settings');
+    act(() => notifyEwayChanged());
+    await settle();
+    expect(gets('/eway/bills')).toBe(bills0 + 1);
+    expect(gets('/eway/gstin-settings')).toBeGreaterThan(gstin0);
+  });
+
+  test('the pending re-read is cleared on unmount', async () => {
+    view = await mountAs('accountant');
+    const before = requests.length;
+    act(() => notifyInvoicesChanged());
+    view.unmount();
+    view = undefined;
+    await advance(20_000);
+    expect(requests.length).toBe(before);
+  });
+
+  test('the pending re-read is cleared on a tenant change — the old schedule never fires', async () => {
+    view = await mountAs('accountant');
+    act(() => notifyInvoicesChanged());
+    await settle();
+    act(() => writeSession({ ...session('accountant'), tenant: { id: '0198f7a2-1b3c-7d4e-8f90-aabbccddeeff', name: 'Other Co', gstin: null } }));
+    await settle();
+    const afterSwitch = gets('/eway/bills'); // the new tenant's own first read
+    await advance(20_000);
+    expect(gets('/eway/bills')).toBe(afterSwitch);
   });
 });

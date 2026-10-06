@@ -434,7 +434,9 @@ function PrintableInvoice({
       <div className="text-xs">Amount in words: {amountInWords(totals.payable)}</div>
 
       {document.gaps.length > 0 && (
-        <ul className="flex flex-col gap-0.5 text-xs" aria-label="Invoice gaps">
+        // Screen-only (8-1d): the gaps are internal advice — data fixes and
+        // e-way consequences — never part of the customer's tax document.
+        <ul className="flex flex-col gap-0.5 text-xs print:hidden" aria-label="Invoice gaps">
           {document.gaps.map((gap, index) => (
             <li key={`${gap.kind}-${gap.orderLineId ?? index}`}>
               <span className="font-medium">

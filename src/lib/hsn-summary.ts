@@ -117,17 +117,26 @@ export function rateCell(bps: number): string {
 export type HsnSection = 'b2b' | 'b2c';
 
 /**
+ * Whether a row goes into the Table 12 CSV: a valid HSN AND (story 8-1d) a
+ * rate on the GST rate master. A flagged row stays in the on-screen totals.
+ */
+export function isCsvRow(row: Pick<HsnSummaryRowDto, 'hsn' | 'hsnIssue' | 'rateIssue'>): boolean {
+  return !row.hsnIssue && !row.rateIssue && row.hsn !== null;
+}
+
+/**
  * One section's Table 12 CSV: the pinned header, then one line per row,
  * every cell quoted with `csvField`, `\n` separated, **no BOM** (the offline
  * tool matches the header exactly). HSN-issue rows are EXCLUDED — the portal
- * accepts only HSNs from its master list; the screen states the shortfall.
+ * accepts only HSNs from its master list — and so are rate-issue rows (8-1d:
+ * a rate off the GST rate master); the screen states the shortfall.
  * Description is blank (Phase III auto-fills it from the HSN master); Cess is
  * `0.00` (cess is not modelled).
  */
 export function hsnSummaryCsv(rows: readonly HsnSummaryRowDto[], section: HsnSection): string {
   void section; // B2B and B2C share one layout; the section names the file, not the columns.
   const lines = rows
-    .filter((row) => !row.hsnIssue && row.hsn !== null)
+    .filter(isCsvRow)
     .map((row) =>
       [
         row.hsn ?? '',
@@ -245,14 +254,40 @@ export function mixedUnitsNote(row: Pick<HsnSummaryRowDto, 'mixedUnits' | 'sourc
 }
 
 /**
- * The HSN-issue warning: those lines are in the on-screen totals but cannot
- * go into the CSV, so Table 12 will fall short of the invoices by their value.
+ * The rows the CSV drops for their RATE alone (story 8-1d): `rateIssue` and
+ * NOT `hsnIssue` — a row with both is already counted through its issue
+ * lines, so the shortfall never counts it twice.
  */
-export function issueShortfallNote(lines: readonly Pick<HsnIssueLineDto, 'valuePaise'>[], formatRupees: (paise: number) => string): string | null {
-  if (lines.length === 0) return null;
-  const value = lines.reduce((sum, line) => sum + line.valuePaise, 0);
-  const noun = lines.length === 1 ? 'line has' : 'lines have';
-  return `${lines.length} invoice ${noun} a blank or malformed HSN. They are in the totals above but left out of the CSV (the portal accepts master HSNs only), so Table 12 will be ${formatRupees(value)} short of the invoice total. Issued invoices are frozen — correct the SKU's HSN in the catalog for future invoices, and declare these lines manually or by credit/debit note.`;
+export function rateOnlyIssueRows<T extends Pick<HsnSummaryRowDto, 'hsnIssue' | 'rateIssue'>>(rows: readonly T[]): T[] {
+  return rows.filter((row) => row.rateIssue && !row.hsnIssue);
+}
+
+/**
+ * The CSV-shortfall warning: the HSN-issue lines and (8-1d) the rate-issue
+ * rows are in the on-screen totals but cannot go into the CSV, so Table 12
+ * will fall short of the invoices by their value — the issue lines' value
+ * plus the `totalValuePaise` of the rows flagged for their rate only.
+ */
+export function issueShortfallNote(
+  lines: readonly Pick<HsnIssueLineDto, 'valuePaise'>[],
+  rows: readonly Pick<HsnSummaryRowDto, 'hsnIssue' | 'rateIssue' | 'gstBps' | 'totalValuePaise'>[],
+  formatRupees: (paise: number) => string,
+): string | null {
+  const rateRows = rateOnlyIssueRows(rows);
+  if (lines.length === 0 && rateRows.length === 0) return null;
+  const value =
+    lines.reduce((sum, line) => sum + line.valuePaise, 0) + rateRows.reduce((sum, row) => sum + row.totalValuePaise, 0);
+  if (rateRows.length === 0) {
+    const noun = lines.length === 1 ? 'line has' : 'lines have';
+    return `${lines.length} invoice ${noun} a blank or malformed HSN. They are in the totals above but left out of the CSV (the portal accepts master HSNs only), so Table 12 will be ${formatRupees(value)} short of the invoice total. Issued invoices are frozen — correct the SKU's HSN in the catalog for future invoices, and declare these lines manually or by credit/debit note.`;
+  }
+  const parts: string[] = [];
+  if (lines.length > 0) {
+    parts.push(`${lines.length} invoice ${lines.length === 1 ? 'line has' : 'lines have'} a blank or malformed HSN`);
+  }
+  const rates = [...new Set(rateRows.map((row) => row.gstBps))].sort((a, b) => a - b).map((bps) => `${rateCell(bps)}%`);
+  parts.push(`${rateRows.length} ${rateRows.length === 1 ? 'row has a GST rate' : 'rows have GST rates'} not on the GST rate master (${rates.join(', ')})`);
+  return `${parts.join(', and ')}. They are in the totals above but left out of the CSV, so Table 12 will be ${formatRupees(value)} short of the invoice total. Issued invoices are frozen — correct the SKU's HSN or rate in the catalog for future invoices, and declare these manually or by credit/debit note.`;
 }
 
 export function hsnSummaryReason(error: unknown): string {

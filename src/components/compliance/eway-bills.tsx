@@ -219,7 +219,7 @@ function EwayBillsSessioned() {
     columns.push({
       key: 'blockers',
       header: 'Blockers',
-      render: (bill) => <BlockerBadges bill={bill} />,
+      render: (bill) => <BlockerBadges bill={bill} canConfigure={canConfigure} />,
     });
     columns.push({
       key: 'exported',
@@ -320,7 +320,7 @@ function EwayBillsSessioned() {
           onCursor={list.onCursor}
           emptyMessage={list.state === 'loading' ? 'Loading e-way bills…' : `No ${EWAY_TAB_LABEL[tab].toLowerCase()} e-way bills.`}
           renderExpanded={(bill) =>
-            canManage && tab === 'pending' && bill.id === openId ? <BillActions bill={bill} onSettled={settled} labelOf={labelOf} /> : null
+            canManage && tab === 'pending' && bill.id === openId ? <BillActions bill={bill} onSettled={settled} labelOf={labelOf} canConfigure={canConfigure} /> : null
           }
         />
       )}
@@ -330,7 +330,7 @@ function EwayBillsSessioned() {
   );
 }
 
-function BlockerBadges({ bill }: { bill: EwayBillDto }) {
+function BlockerBadges({ bill, canConfigure }: { bill: EwayBillDto; canConfigure: boolean }) {
   if (bill.blockers.length === 0) {
     return <span className="text-xs text-(--accent)">Ready</span>;
   }
@@ -342,7 +342,7 @@ function BlockerBadges({ bill }: { bill: EwayBillDto }) {
           <span
             key={blocker.code}
             data-blocker={blocker.code}
-            title={blockerHint(blocker)}
+            title={blockerHint(blocker, canConfigure)}
             className={`rounded-sm border px-1.5 py-0.5 text-xs ${
               blocker.terminal ? 'border-(--destructive) text-(--destructive)' : 'border-(--warning) text-(--warning)'
             }`}
@@ -362,10 +362,13 @@ function BillActions({
   bill,
   onSettled,
   labelOf,
+  canConfigure,
 }: {
   bill: EwayBillDto;
   onSettled: (outcome: Outcome) => void;
   labelOf: (id: string) => string;
+  /** Whether the viewer may change the e-invoicing flag (`eway.configure`) — the hints follow it. */
+  canConfigure: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3 py-1">
@@ -373,7 +376,7 @@ function BillActions({
         <div className="text-xs text-(--muted-foreground)">
           {bill.blockers
             .filter((b) => b.terminal)
-            .map((b) => `${blockerLabel(b.code)}: ${blockerHint(b)}`)
+            .map((b) => `${blockerLabel(b.code)}: ${blockerHint(b, canConfigure)}`)
             .join(' ')}
         </div>
       )}

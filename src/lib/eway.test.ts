@@ -93,11 +93,26 @@ describe('blocker copy', () => {
   });
 
   test('a terminal blocker sends the user to the portal and back; fixable ones say how to fix', () => {
-    expect(blockerHint({ code: 'ship-to-differs', terminal: true })).toBe(TERMINAL_BLOCKER_HINT);
+    expect(blockerHint({ code: 'ship-to-differs', terminal: true }, true)).toBe(TERMINAL_BLOCKER_HINT);
+    expect(blockerHint({ code: 'ship-to-differs', terminal: true }, false)).toBe(TERMINAL_BLOCKER_HINT);
     expect(TERMINAL_BLOCKER_HINT).toContain('NIC portal');
     expect(TERMINAL_BLOCKER_HINT).toContain('record its number here');
-    expect(blockerHint({ code: 'transport-incomplete', terminal: false })).toContain('transporter id');
-    expect(blockerHint({ code: 'needs-irn', terminal: false })).toContain('IRN');
+    expect(blockerHint({ code: 'transport-incomplete', terminal: false }, false)).toContain('transporter id');
+    expect(blockerHint({ code: 'needs-irn', terminal: false }, true)).toContain('IRN');
+  });
+
+  test('8-1d: the needs-irn hint follows whether the viewer can change the flag (eway.configure)', () => {
+    const configurer = blockerHint({ code: 'needs-irn', terminal: false }, true);
+    expect(configurer).toContain('Turn the flag off if it no longer applies');
+    expect(configurer).not.toContain('ask an owner');
+    const viewer = blockerHint({ code: 'needs-irn', terminal: false }, false);
+    expect(viewer).toContain('IRN');
+    expect(viewer).toContain('ask an owner to turn the flag off');
+    expect(viewer).not.toContain('Turn the flag off');
+    // Only needs-irn depends on the capability.
+    expect(blockerHint({ code: 'transport-incomplete', terminal: false }, false)).toBe(
+      blockerHint({ code: 'transport-incomplete', terminal: false }, true),
+    );
   });
 
   test('threshold and transport labels', () => {
