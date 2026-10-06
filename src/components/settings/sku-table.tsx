@@ -1,15 +1,16 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   ApiProblem,
+  fetchApiCorrectSkuClient,
   fetchApiCreateKit,
   fetchApiEditSku,
   fetchApiListKits,
   fetchApiReplaceKit,
 } from '@/lib/api/client';
-import type { KitResponse, SkuResponse } from '@/lib/api/generated';
+import type { ClientDto, KitResponse, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
 import { kitBomLabel, kitMarkerLabel, kitReason, parseKitComponents } from '@/lib/catalog-kits';
@@ -20,6 +21,8 @@ import { skuPhysicalLabel } from '@/lib/sku-attributes';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useCatalogSkus, useKits, useSkus } from '@/lib/use-catalog';
+import { clientCell, clientLabel, correctClientReason, correctionOutcome, mixedClientReason, showClients } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
@@ -91,7 +94,18 @@ function SkuTableCardSessioned() {
   const kits = useKits();
   const [editing, setEditing] = useState<SkuResponse | null>(null);
   const [kitEditing, setKitEditing] = useState<SkuResponse | null>(null);
+  // Story 21-2b — the owner's client correction, one SKU at a time.
+  const [correcting, setCorrecting] = useState<SkuResponse | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  // Story 21-2b — the client column appears only once the tenant holds more
+  // than its own client (the D2C case shows nothing new).
+  const clients = readyClients(useClients());
+  const tenantName = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.name ?? null,
+    () => null,
+  );
+  const multiClient = showClients(clients);
   // Story 1.5 gating: the table is a read (open to every member); the Edit
   // actions column renders only for roles holding `sku.edit`. The role is
   // subscribed (not a bare readSession() at render) so a /me bootstrap role
@@ -103,6 +117,7 @@ function SkuTableCardSessioned() {
     () => undefined,
   );
   const canEditSku = roleHasCapability(role, 'sku.edit');
+  const canCorrectClient = multiClient && roleHasCapability(role, 'clients.manage');
 
   const kitOf = (skuId: string): KitResponse | undefined =>
     kits.state === 'ready' ? kits.data[skuId] : undefined;
@@ -110,6 +125,15 @@ function SkuTableCardSessioned() {
   const columns: readonly DataTableColumn<SkuResponse>[] = [
     { key: 'code', header: 'SKU code', render: (sku) => <span className="font-mono text-xs">{sku.code}</span> },
     { key: 'name', header: 'Name' },
+    ...(multiClient
+      ? [
+          {
+            key: 'client',
+            header: 'Client',
+            render: (sku: SkuResponse) => clientCell(sku.clientId, clients ?? [], tenantName),
+          } satisfies DataTableColumn<SkuResponse>,
+        ]
+      : []),
     // Story 11-6 — the kit marker, derived from the kits-list join (the
     // 11-4 no-flag decision: no `isKit` field ever rides the SKU).
     { key: 'kit', header: 'Kit', render: (sku) => kitMarkerLabel(kitOf(sku.id)) },
@@ -141,13 +165,29 @@ function SkuTableCardSessioned() {
     { key: 'storage', header: 'Storage', render: (sku) => storageClassLabel(sku) },
     { key: 'hazard', header: 'Hazard', render: (sku) => hazardClassLabel(sku) },
     { key: 'barcode', header: 'Barcode', render: (sku) => <span className="font-mono text-xs">{sku.barcode}</span> },
-    ...(canEditSku
+    ...(canEditSku || canCorrectClient
       ? [
           {
             key: 'actions',
             header: '',
             render: (sku: SkuResponse) => (
               <div className="flex justify-end gap-2">
+                {/* Story 21-2b — owner-only; the server decides whether the
+                    SKU still has no history (409 sku-has-history). */}
+                {canCorrectClient ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCorrecting(sku);
+                      setOutcome(null);
+                    }}
+                    className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+                  >
+                    Correct client
+                  </button>
+                ) : null}
+                {canEditSku ? (
+                  <>
                 {/* A kit-marked row edits its composition (PUT); a plain SKU
                     row offers create — the only door into kit-ness. */}
                 <button
@@ -170,6 +210,8 @@ function SkuTableCardSessioned() {
                 >
                   Edit
                 </button>
+                  </>
+                ) : null}
               </div>
             ),
           } satisfies DataTableColumn<SkuResponse>,
@@ -211,6 +253,22 @@ function SkuTableCardSessioned() {
         emptyMessage="No SKUs yet — import your catalog above."
       />
 
+      {correcting !== null && clients !== null && (
+        <CorrectClientForm
+          key={correcting.id}
+          sku={correcting}
+          clients={clients}
+          tenantName={tenantName}
+          onClose={() => setCorrecting(null)}
+          onSaved={(moved) => {
+            setCorrecting(null);
+            setOutcome({ tone: 'accepted', ...correctionOutcome(moved, clients, tenantName) });
+            skus?.reload();
+            notifyCatalogChanged();
+          }}
+          onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Client not corrected', reason })}
+        />
+      )}
       {kitEditing !== null && (
         <KitForm
           key={kitEditing.id}
@@ -253,6 +311,83 @@ function SkuTableCardSessioned() {
       )}
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
     </section>
+  );
+}
+
+/**
+ * Story 21-2b — the owner's client correction: a picker over the other
+ * clients; per-click key (the body cannot change once submitted); a
+ * synchronous ref guards the pre-render double-click.
+ */
+function CorrectClientForm({
+  sku,
+  clients,
+  tenantName,
+  onClose,
+  onSaved,
+  onRejected,
+}: {
+  sku: SkuResponse;
+  clients: readonly ClientDto[];
+  tenantName: string | null;
+  onClose: () => void;
+  onSaved: (moved: readonly SkuResponse[]) => void;
+  onRejected: (reason: string) => void;
+}) {
+  const options = clients.filter((client) => client.id !== sku.clientId);
+  const [picked, setPicked] = useState('');
+  const [pending, setPending] = useState(false);
+  // A pre-render double-click fires both handlers before `disabled`
+  // renders — a synchronous ref, not state, is the guard.
+  const inFlight = useRef(false);
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const session = readSession();
+    if (session === null || picked === '' || inFlight.current) return;
+    inFlight.current = true;
+    setPending(true);
+    try {
+      onSaved((await fetchApiCorrectSkuClient(session.tenant.id, sku.id, picked, ulid())).skus);
+    } catch (error) {
+      onRejected(correctClientReason(error));
+    } finally {
+      inFlight.current = false;
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} aria-label={`Correct the client of ${sku.code}`} className="flex flex-wrap items-end gap-2 rounded-md border border-(--border) p-3">
+      <label className="flex min-w-48 flex-1 flex-col gap-1">
+        <span className={labelClass}>
+          {sku.code} belongs to {clientCell(sku.clientId, clients, tenantName)} — move it to
+        </span>
+        <select className={inputClass} value={picked} required onChange={(event) => setPicked(event.target.value)}>
+          <option value="" disabled>
+            Choose a client
+          </option>
+          {options.map((client) => (
+            <option key={client.id} value={client.id}>
+              {clientLabel(client, tenantName)}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-(--muted-foreground)">
+          Only a SKU with no stock movements, orders or purchase orders can move.
+        </span>
+      </label>
+      <button
+        type="submit"
+        disabled={pending || picked === ''}
+        className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-40"
+      >
+        {pending ? 'Saving…' : 'Move'}
+      </button>
+      <button type="button" onClick={onClose} className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)">
+        Cancel
+      </button>
+    </form>
   );
 }
 
@@ -617,6 +752,9 @@ function rejectionReason(error: unknown, attemptedBarcode?: string): string {
       case 'storage-class-conflict':
       case 'hazard-segregation-conflict':
         return skuClassReason(error);
+      // Story 21-2b — attaching to a product holding another client's SKUs.
+      case 'mixed-client':
+        return mixedClientReason(error);
       case 'duplicate-barcode':
         // The API names the conflicting SKU in the problem detail.
         return error.detail ?? `Barcode ${attemptedBarcode ?? ''} already belongs to another SKU in this tenant.`;

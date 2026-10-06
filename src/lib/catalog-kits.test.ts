@@ -166,3 +166,11 @@ describe('kitMarkerLabel / kitBomLabel (the derived kit marker)', () => {
     expect(kitBomLabel(kit(), () => undefined)).toBe('PAD-01: 2 units · TAPE-01: 1.5 units');
   });
 });
+describe('kitReason — story 21-2b', () => {
+  test('mixed-client renders the server detail naming the codes', () => {
+    expect(kitReason(new ApiProblem('mixed-client', 409, 'Kit "K" mixes SKUs of clients ACME, self'))).toBe(
+      'Kit "K" mixes SKUs of clients ACME, self',
+    );
+    expect(kitReason(new ApiProblem('mixed-client', 409))).toMatch(/share one client/);
+  });
+});

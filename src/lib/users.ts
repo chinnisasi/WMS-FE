@@ -152,6 +152,12 @@ export const CAPABILITIES = [
   // Story 8-2b — the e-way configuration (the per-state threshold overrides
   // and the per-GSTIN e-invoicing flag). OWNER-ONLY.
   'eway.configure',
+  // Story 21-2b — client admin: register a client brand, rename it, and
+  // correct a SKU's client while it has no history. OWNER-ONLY (a client is
+  // a commercial relationship — the person who signs the contract). Gates
+  // the Settings clients card's create/rename and the SKU table's "Correct
+  // client" action; the client list read stays open to every member.
+  'clients.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -171,6 +177,8 @@ const OWNER_ONLY_CAPABILITIES: readonly Capability[] = [
   // Story 8-2b — the e-way thresholds decide which consignments need a bill:
   // the person who sets the bar is the owner.
   'eway.configure',
+  // Story 21-2b — client admin is the owner's (the commercial relationship).
+  'clients.manage',
 ];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {

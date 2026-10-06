@@ -101,3 +101,11 @@ describe('skuAttachReason (the variant attach/detach PATCH)', () => {
     expect(skuAttachReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
   });
 });
+describe('skuAttachReason — story 21-2b', () => {
+  test("mixed-client: a product's variants never span clients", () => {
+    expect(skuAttachReason(new ApiProblem('mixed-client', 409, 'Product "Tee" mixes SKUs of clients ACME, self'))).toBe(
+      'Product "Tee" mixes SKUs of clients ACME, self',
+    );
+    expect(skuAttachReason(new ApiProblem('mixed-client', 409))).toMatch(/share one client/);
+  });
+});

@@ -427,6 +427,10 @@ export type CatalogImportResponse = {
      */
     skippedRows: number;
     errors: Array<CatalogImportErrorResponse>;
+    /**
+     * Story 21-2b — the client this run imported for (a fix-mode re-run inherits it). Absent only on a replayed response stored before 21-2b
+     */
+    clientId?: string | null;
 };
 
 export type SkuUomConversionResponse = {
@@ -442,6 +446,10 @@ export type SkuResponse = {
     tenantId: string;
     code: string;
     name: string;
+    /**
+     * Story 21-2b — the client this SKU belongs to (set at import; correctable by an owner only while the SKU has no history). Absent only on a replayed edit response stored before 21-2b
+     */
+    clientId?: string | null;
     uom: 'each' | 'box' | 'case' | 'carton' | 'pack' | 'pallet' | 'bag' | 'drum' | 'roll' | 'crate' | 'bundle' | 'pair' | 'dozen' | 'bottle' | 'can' | 'tin' | 'jar' | 'tube' | 'tray' | 'sheet' | 'bar' | 'cylinder' | 'keg' | 'set' | 'g' | 'kg' | 'tonne' | 'ml' | 'litre' | 'kl' | 'mm' | 'cm' | 'm' | 'sqm' | 'sqft';
     /**
      * The decimal places this SKU's base UoM declares (each = 0 places, kg = 3). Derived from the unit — never an input.
@@ -628,6 +636,20 @@ export type PatchSkuDto = {
      * The SKU's ABC classification (FR-cycle-count): a, b or c. Omit to leave unchanged; null clears the class (excludes the SKU from scheduled count generation, on-demand still covers it).
      */
     abcClass?: 'a' | 'b' | 'c';
+};
+
+export type CorrectSkuClientDto = {
+    /**
+     * The client the SKU belongs to instead (any client of this tenant, including its own `self` client)
+     */
+    clientId: string;
+};
+
+export type SkuClientCorrectionResponse = {
+    /**
+     * Every SKU the correction moved — the named SKU first, then its kit partners and product siblings (a kit and a product never span clients, so they move as one group). On a no-op (already on that client) just the named SKU
+     */
+    skus: Array<SkuResponse>;
 };
 
 export type KitComponentDto = {
@@ -1546,6 +1568,10 @@ export type PurchaseOrderDto = {
      */
     carriedFromPoId: string | null;
     /**
+     * Story 21-2b — the client the PO is for, derived from its lines' SKUs. Absent or null only on a replayed response stored before 21-2b
+     */
+    clientId?: string | null;
+    /**
      * Per-line ordered / received / open (detail and mutations; headers only on the list)
      */
     lines: Array<PurchaseOrderLineDto>;
@@ -1707,6 +1733,10 @@ export type OrderDto = {
      * Where the shipment goes (story 11-1); null on a pre-11.1 order row
      */
     destination: AddressDto | null;
+    /**
+     * Story 21-2b — the client the order is for, derived from its lines' and kit components' SKUs. Absent or null only on a replayed response stored before 21-2b
+     */
+    clientId?: string | null;
     /**
      * ISO-8601 UTC creation time
      */
@@ -2051,6 +2081,10 @@ export type OrderEntryDto = {
      * Where the shipment goes (story 11-1); null on a pre-11.1 order row
      */
     destination: AddressDto | null;
+    /**
+     * Story 21-2b — the client the order is for, derived from its SKUs
+     */
+    clientId?: string | null;
     /**
      * ISO-8601 UTC creation time
      */
@@ -5162,6 +5196,55 @@ export type ReportingOverviewResponse = {
     tiles: ReportingTilesDto;
 };
 
+export type ClientDto = {
+    id: string;
+    tenantId: string;
+    /**
+     * The client's code. The tenant's own client carries the fixed code `self` (lowercase)
+     */
+    code: string;
+    /**
+     * The client's name. The tenant's own client mirrors the tenant name
+     */
+    name: string;
+    status: 'active' | 'suspended' | 'departed';
+    /**
+     * True only for the tenant's own `self` client — its goods are the tenant's own, and only its orders are GST-invoiced by the tenant
+     */
+    systemOwned: boolean;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last update
+     */
+    updatedAt: string;
+};
+
+export type ClientListResponse = {
+    /**
+     * Every client of the tenant, any status — the system-owned client first, then by code. Unpaginated, bounded at 500
+     */
+    items: Array<ClientDto>;
+};
+
+export type CreateClientDto = {
+    /**
+     * Operator-facing short code, unique per tenant. Trimmed and stored UPPERCASE: 2-32 characters of A-Z, 0-9 and "-", starting with a letter or digit. "SELF" is reserved for the tenant's own client
+     */
+    code: string;
+    name: string;
+};
+
+export type ClientResponse = {
+    client: ClientDto;
+};
+
+export type RenameClientDto = {
+    name: string;
+};
+
 export type ChannelWebhookOrderResponse = {
     outcome: 'accepted' | 'backordered' | 'replayed';
     /**
@@ -6000,6 +6083,10 @@ export type CatalogControllerImportCatalogData = {
          * `initial` (default) or `fix` — fix processes only the latest run's failed SKU codes
          */
         mode?: 'initial' | 'fix';
+        /**
+         * Story 21-2b — the client the new SKUs belong to. Required (client-required) once the tenant holds more than one client; a fix-mode re-run inherits its original run's client
+         */
+        clientId?: string;
     };
     headers: {
         /**
@@ -6019,7 +6106,7 @@ export type CatalogControllerImportCatalogData = {
 
 export type CatalogControllerImportCatalogErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or a file that cannot be parsed (file-unreadable)
+     * Missing or malformed Idempotency-Key, a file that cannot be parsed (file-unreadable), a non-uuid clientId or a fix-mode re-run naming a different client than its original run (validation-failed), or no clientId while the tenant holds more than one client (client-required)
      */
     400: ProblemDetailsDto;
     /**
@@ -6030,6 +6117,10 @@ export type CatalogControllerImportCatalogErrors = {
      * Session belongs to another tenant (permission-denied), or the caller lacks catalog.import (role-denied)
      */
     403: ProblemDetailsDto;
+    /**
+     * clientId names no client of this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
     /**
      * Concurrent import with the same Idempotency-Key (conflict), or the SKU/barcode this file introduces was committed by a concurrent import and a row-level check raced it (duplicate-sku-code / duplicate-barcode) — regenerate the key or retry
      */
@@ -6331,6 +6422,60 @@ export type CatalogControllerEditSkuResponses = {
 };
 
 export type CatalogControllerEditSkuResponse = CatalogControllerEditSkuResponses[keyof CatalogControllerEditSkuResponses];
+
+export type CatalogControllerCorrectSkuClientData = {
+    body: CorrectSkuClientDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        skuId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/skus/{skuId}/client';
+};
+
+export type CatalogControllerCorrectSkuClientErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed skuId path parameter, or a non-uuid clientId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The SKU or the client does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The SKU, or a kit partner / product sibling that must move with it, already has history — ledger events, order/PO/transfer lines, pending adjustments, count tasks, batches, serials, reservations or channel mappings (sku-has-history, naming the SKU); or a concurrent kit/product change or same-key request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerCorrectSkuClientError = CatalogControllerCorrectSkuClientErrors[keyof CatalogControllerCorrectSkuClientErrors];
+
+export type CatalogControllerCorrectSkuClientResponses = {
+    200: SkuClientCorrectionResponse;
+};
+
+export type CatalogControllerCorrectSkuClientResponse = CatalogControllerCorrectSkuClientResponses[keyof CatalogControllerCorrectSkuClientResponses];
 
 export type CatalogControllerCreateKitData = {
     body: PutKitDto;
@@ -11963,7 +12108,7 @@ export type ChannelsControllerSetConnectionMappingsErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The same Idempotency-Key is being processed concurrently (conflict)
+     * The same Idempotency-Key is being processed concurrently (conflict), or the mapped SKUs belong to more than one client (mixed-client, story 21-2b — names the clients)
      */
     409: ProblemDetailsDto;
     /**
@@ -12134,7 +12279,7 @@ export type InvoicingControllerGenerateInvoiceErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Rates sent to an issued or voided invoice (invoice-frozen — it outranks the line checks), the order is not dispatched (order-not-dispatched), a rate override names a line that is not of this order (line-not-of-order) or a line already priced at order acceptance (line-already-priced), or a concurrent idempotent request (conflict)
+     * Rates sent to an issued or voided invoice (invoice-frozen — it outranks the line checks), the order is not dispatched (order-not-dispatched), the order is for a client brand — client orders are not invoiced by the tenant (client-order-not-invoiced, story 21-2b), a rate override names a line that is not of this order (line-not-of-order) or a line already priced at order acceptance (line-already-priced), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -12842,6 +12987,143 @@ export type ReportingControllerOverviewResponses = {
 };
 
 export type ReportingControllerOverviewResponse = ReportingControllerOverviewResponses[keyof ReportingControllerOverviewResponses];
+
+export type ClientsControllerListClientsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients';
+};
+
+export type ClientsControllerListClientsErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ClientsControllerListClientsError = ClientsControllerListClientsErrors[keyof ClientsControllerListClientsErrors];
+
+export type ClientsControllerListClientsResponses = {
+    200: ClientListResponse;
+};
+
+export type ClientsControllerListClientsResponse = ClientsControllerListClientsResponses[keyof ClientsControllerListClientsResponses];
+
+export type ClientsControllerCreateClientData = {
+    body: CreateClientDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients';
+};
+
+export type ClientsControllerCreateClientErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a code/name that breaks the shape rules — including the reserved code SELF (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The code is already used by another client of this tenant, including by a concurrent create (duplicate-client-code), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerCreateClientError = ClientsControllerCreateClientErrors[keyof ClientsControllerCreateClientErrors];
+
+export type ClientsControllerCreateClientResponses = {
+    /**
+     * The created client (a matching Idempotency-Key replays it)
+     */
+    201: ClientResponse;
+};
+
+export type ClientsControllerCreateClientResponse = ClientsControllerCreateClientResponses[keyof ClientsControllerCreateClientResponses];
+
+export type ClientsControllerRenameClientData = {
+    body: RenameClientDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}';
+};
+
+export type ClientsControllerRenameClientErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, a name outside 1-200 characters, or a rename of the self client (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerRenameClientError = ClientsControllerRenameClientErrors[keyof ClientsControllerRenameClientErrors];
+
+export type ClientsControllerRenameClientResponses = {
+    200: ClientResponse;
+};
+
+export type ClientsControllerRenameClientResponse = ClientsControllerRenameClientResponses[keyof ClientsControllerRenameClientResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;

@@ -80,6 +80,9 @@ export function kitReason(error: unknown): string {
         return error.detail ?? 'A named component is itself a kit — a kit’s BOM is flat.';
       case 'kit-self-reference':
         return 'A kit cannot name itself as a component.';
+      // Story 21-2b — a kit and its components share one client.
+      case 'mixed-client':
+        return error.detail ?? 'A component belongs to another client — a kit and its components share one client.';
       case 'duplicate-kit-component':
         return error.detail ?? 'The same component SKU is named twice — the BOM is a set.';
       case 'kit-component-not-found':

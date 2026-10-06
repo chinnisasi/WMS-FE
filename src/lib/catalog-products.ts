@@ -103,6 +103,9 @@ export function skuAttachReason(error: unknown): string {
     switch (error.code) {
       case 'duplicate-variant-values':
         return verbatim(error);
+      // Story 21-2b — a product's variants never span clients.
+      case 'mixed-client':
+        return error.detail ?? "This product already holds another client's SKUs — a product's variants share one client.";
       case 'not-found':
         return 'That SKU or product no longer exists — refresh the page.';
       case 'role-denied':

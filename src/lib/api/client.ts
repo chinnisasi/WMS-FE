@@ -1,5 +1,9 @@
 import { client } from './generated/client.gen';
 import {
+  catalogControllerCorrectSkuClient,
+  clientsControllerCreateClient,
+  clientsControllerListClients,
+  clientsControllerRenameClient,
   catalogControllerCreateKit,
   catalogControllerCreateProduct,
   catalogControllerEditProduct,
@@ -204,6 +208,8 @@ import type {
   PatchBinDto,
   PatchProductDto,
   PatchSkuDto,
+  ClientDto,
+  ClientListResponse,
   ProductListResponse,
   ProductResponse,
   PurchaseOrderListResponse,
@@ -220,6 +226,7 @@ import type {
   SignInDto,
   SignInResponse,
   SkuListResponse,
+  SkuClientCorrectionResponse,
   SkuResponse,
   TenantRegistrationResponse,
   UserListResponse,
@@ -592,16 +599,24 @@ export async function fetchApiRetireBin(
  * Catalog import (story 1.4) — synchronous multipart; valid rows commit in
  * one transaction, bad rows come back row-level (a 201 can carry failures).
  * `mode` is undefined for the default `initial` run; `fix` targets only the
- * latest run's failed SKU codes.
+ * latest run's failed SKU codes. Story 21-2b: `clientId` names the client
+ * the run's new SKUs belong to — dropped from the form when undefined (the
+ * backend then defaults to the tenant's own client while it is the only
+ * one, and a fix-mode run inherits its original run's client).
  */
 export async function fetchApiImportCatalog(
   tenantId: string,
   file: File,
   mode: 'initial' | 'fix' | undefined,
   idempotencyKey: string,
+  clientId?: string,
 ): Promise<CatalogImportResponse> {
   const { data, error } = await catalogControllerImportCatalog({
-    body: { file, ...(mode === undefined ? {} : { mode }) },
+    body: {
+      file,
+      ...(mode === undefined ? {} : { mode }),
+      ...(clientId === undefined ? {} : { clientId }),
+    },
     headers: { 'Idempotency-Key': idempotencyKey },
     path: { tenantId },
   });
@@ -650,6 +665,81 @@ export async function fetchApiEditSku(
     throw unwrapError(error, 400);
   }
   return data;
+}
+
+/**
+ * Story 21-2b — the owner's client correction: allowed by the server only
+ * while the SKU has no ledger event, order line or PO line (409
+ * `sku-has-history` otherwise). Gated `clients.manage`.
+ */
+export async function fetchApiCorrectSkuClient(
+  tenantId: string,
+  skuId: string,
+  clientId: string,
+  idempotencyKey: string,
+): Promise<SkuClientCorrectionResponse> {
+  const { data, error } = await catalogControllerCorrectSkuClient({
+    path: { tenantId, skuId },
+    body: { clientId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Clients (story 21-2b) — the tenant's client brands. The list is a   */
+/* member-open read (unpaginated, bounded at 500); create and rename   */
+/* are owner-only (`clients.manage`).                                  */
+/* ------------------------------------------------------------------ */
+
+export async function fetchApiListClients(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ClientListResponse> {
+  const { data, error } = await clientsControllerListClients({
+    path: { tenantId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiCreateClient(
+  tenantId: string,
+  body: { code: string; name: string },
+  idempotencyKey: string,
+): Promise<ClientDto> {
+  const { data, error } = await clientsControllerCreateClient({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.client;
+}
+
+export async function fetchApiRenameClient(
+  tenantId: string,
+  clientId: string,
+  name: string,
+  idempotencyKey: string,
+): Promise<ClientDto> {
+  const { data, error } = await clientsControllerRenameClient({
+    path: { tenantId, clientId },
+    body: { name },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.client;
 }
 
 /* ------------------------------------------------------------------ */

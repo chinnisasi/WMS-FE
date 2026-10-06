@@ -2,18 +2,18 @@
 
 import { useState, useSyncExternalStore } from 'react';
 
-import {
-  ApiProblem,
-  fetchApiImportCatalog,
-} from '@/lib/api/client';
-import type { CatalogImportErrorResponse, CatalogImportResponse } from '@/lib/api/generated';
+import { fetchApiImportCatalog } from '@/lib/api/client';
+import type { CatalogImportErrorResponse, CatalogImportResponse, ClientDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
+import { clientLabel, importClientChoice, importClientParam, importReason, importedForLabel, showClients } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { csvField, downloadText } from '@/lib/csv';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { ReadFailure } from '@/components/outbound/shell';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -41,6 +41,14 @@ export function ImportCatalogCard() {
     () => null as boolean | null,
   );
 
+  // Story 21-2b: the role through the subscription (the sku-table.tsx
+  // pattern) — a /me role rewrite re-renders the gate.
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+
   if (sessioned === null) return null;
   if (!sessioned) {
     return (
@@ -54,7 +62,7 @@ export function ImportCatalogCard() {
   // visible), so roles without `catalog.import` see nothing — hide surfaces,
   // never "blocked" screens. The backend per-command role read stays the
   // authority.
-  if (!roleHasCapability(readSession()?.user.role, 'catalog.import')) {
+  if (!roleHasCapability(role, 'catalog.import')) {
     return null;
   }
   return <ImportCatalogCardSessioned />;
@@ -65,12 +73,30 @@ function ImportCatalogCardSessioned() {
   const [fixMode, setFixMode] = useState(false);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<CatalogImportResponse | null>(null);
+  const [pickedClientId, setPickedClientId] = useState('');
   const [rejection, setRejection] = useState<string | null>(null);
+  const clientsState = useClients();
+  const clients = readyClients(clientsState);
+  const tenantName = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.name ?? null,
+    () => null,
+  );
+  // Until the client list is in hand the choice is unknown — the submit
+  // waits rather than guess a default (a guessed client cannot be undone
+  // once the SKU has history).
+  const choice =
+    clients === null ? null : importClientChoice(clients, fixMode ? 'fix' : 'initial', tenantName);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const session = readSession();
-    if (session === null || file === null) return;
+    if (session === null || file === null || choice === null) return;
+    const param = importClientParam(choice, pickedClientId);
+    if (param.problem !== null) {
+      setRejection(param.problem);
+      return;
+    }
     setPending(true);
     setRejection(null);
     setResult(null);
@@ -80,12 +106,13 @@ function ImportCatalogCardSessioned() {
         file,
         fixMode ? 'fix' : undefined,
         ulid(),
+        param.clientId,
       );
       setResult(run);
       // Both outcomes move the catalog (and the checklist's catalog step).
       notifyCatalogChanged();
     } catch (error) {
-      setRejection(rejectionReason(error));
+      setRejection(importReason(error));
     } finally {
       setPending(false);
     }
@@ -134,12 +161,25 @@ function ImportCatalogCardSessioned() {
         </label>
         <button
           type="submit"
-          disabled={pending || file === null || file.size > MAX_FILE_BYTES}
+          disabled={pending || file === null || file.size > MAX_FILE_BYTES || choice === null}
           className="self-end rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
         >
           {pending ? 'Importing…' : 'Import'}
         </button>
       </div>
+
+      {clientsState.state === 'failed' ? (
+        <ReadFailure word="Clients unavailable" reason={clientsState.reason} onRetry={clientsState.reload} />
+      ) : null}
+      {choice !== null && clients !== null ? (
+        <ImportClientField
+          choice={choice}
+          clients={clients}
+          tenantName={tenantName}
+          picked={pickedClientId}
+          onPick={setPickedClientId}
+        />
+      ) : null}
 
       {file !== null && file.size > MAX_FILE_BYTES && (
         <div className="text-xs text-(--destructive)">
@@ -150,7 +190,14 @@ function ImportCatalogCardSessioned() {
       {rejection !== null && (
         <FeedbackBanner tone="rejected" word="Not imported" reason={rejection} />
       )}
-      {result !== null && <ImportResult result={result} />}
+      {result !== null && (
+        <ImportResult
+          result={result}
+          clientLabel={
+            clients !== null && showClients(clients) ? importedForLabel(clients, result.clientId ?? null, tenantName) : null
+          }
+        />
+      )}
     </form>
   );
 }
@@ -161,10 +208,20 @@ function ImportCatalogCardSessioned() {
  * per-row table directly — its verbatim-`detail` contract is the point of
  * story 10.5's import-report row.
  */
-export function ImportResult({ result }: { result: CatalogImportResponse }) {
+export function ImportResult({
+  result,
+  clientLabel: importedFor = null,
+}: {
+  result: CatalogImportResponse;
+  /** Story 21-2b — the client the SERVER reports the run imported for (multi-client tenants only). */
+  clientLabel?: string | null;
+}) {
   const allClean = result.failedRows === 0 && result.errors.length === 0;
   return (
     <div className="flex flex-col gap-2">
+      {importedFor !== null && (
+        <div className="text-xs text-(--muted-foreground)">Imported for {importedFor}.</div>
+      )}
       <FeedbackBanner
         tone="accepted"
         word={
@@ -258,28 +315,46 @@ function downloadErrorReport(result: CatalogImportResponse): void {
 
 
 /**
- * Clients branch on the machine-readable problem `code`, never on prose —
- * same convention as the zone/bin forms, extended with the new import codes
- * (spec 1.4).
+ * Story 21-2b — the import's client field: the hint line with one client,
+ * a required picker with no default with several, and in a fix run the
+ * inherit hint (nothing is sent — the server inherits the latest run's
+ * client and the result names it).
  */
-function rejectionReason(error: unknown): string {
-  if (error instanceof ApiProblem) {
-    switch (error.code) {
-      case 'import-too-large':
-        return error.detail ?? 'Keep the file under 10,000 data rows and 5 MB.';
-      case 'unsupported-file-type':
-        return 'Only .csv and .xlsx files can be imported.';
-      case 'file-unreadable':
-        return error.detail ?? 'The file could not be read — check the header row uses the documented column names.';
-      case 'idempotency-key-reuse':
-        return 'This submission was already processed.';
-      case 'unauthenticated':
-        return 'Your session expired — sign in again.';
-      case 'validation-failed':
-        return error.detail ?? 'Check the file and try again.';
-      default:
-        return error.detail ?? `Import failed (${error.code}).`;
-    }
+export function ImportClientField({
+  choice,
+  clients,
+  tenantName,
+  picked,
+  onPick,
+}: {
+  choice: NonNullable<ReturnType<typeof importClientChoice>>;
+  clients: readonly ClientDto[];
+  tenantName: string | null;
+  picked: string;
+  onPick: (clientId: string) => void;
+}) {
+  if (choice.kind === 'single' || choice.kind === 'inherit') {
+    return <div className="text-xs text-(--muted-foreground)">{choice.hint}</div>;
   }
-  return 'The API is unreachable — is wms-be running?';
+  return (
+    <label className="flex flex-col gap-1">
+      <span className={labelClass}>Client</span>
+      <select
+        className={inputClass}
+        value={picked}
+        required
+        aria-label="Client"
+        onChange={(event) => onPick(event.target.value)}
+      >
+        <option value="" disabled>
+          Choose the client these SKUs belong to
+        </option>
+        {clients.map((client) => (
+          <option key={client.id} value={client.id}>
+            {clientLabel(client, tenantName)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }

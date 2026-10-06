@@ -290,6 +290,8 @@ describe('outcomes and refusals', () => {
   test('generateReason branches on the code, with the 8-1 arms', () => {
     expect(generateReason(problem('line-already-priced'))).toContain('already carries the rate frozen');
     expect(generateReason(problem('order-not-dispatched'))).toContain('not dispatched');
+    // Story 21-2b — a client brand's order is never invoiced here.
+    expect(generateReason(problem('client-order-not-invoiced'))).toContain('client brand');
     expect(generateReason(problem('line-not-of-order'))).toContain('does not belong');
     expect(generateReason(problem('invoice-frozen'))).toContain('frozen');
     expect(generateReason(problem('invoice-frozen'))).toContain('has been re-read');

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
 import type { OrderEntryDto, SkuResponse } from '@/lib/api/generated';
@@ -40,6 +40,9 @@ import {
   type OrderStatus,
 } from '@/lib/outbound-orders';
 import { useOrderDetail, useOutboundOrders, useOutboundSkus } from '@/lib/use-outbound-orders';
+import { clientCell, showClients, skusForOrderClient } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
+import { readSession, subscribeSession } from '@/lib/auth';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
@@ -405,7 +408,10 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
                 <option value="" disabled>
                   Pick a SKU…
                 </option>
-                {skuList.map((sku) => (
+                {/* Story 21-2b — an order is for ONE client: once the first
+                    line names a SKU, the other lines are offered only that
+                    SKU's client's SKUs (the row's own pick stays listed). */}
+                {(index === 0 ? skuList : withCurrent(skusForOrderClient(skuList, draft[0]!.skuId), skuList, row.skuId)).map((sku) => (
                   <option key={sku.id} value={sku.id}>
                     {sku.code} {sku.name}
                   </option>
@@ -528,6 +534,14 @@ function OrdersTable({
 
   const loaded = orders.state === 'ready' ? orders.data.items : [];
   const rows = filterPage(loaded, statusFilter);
+  // Story 21-2b — the client column, only once the tenant holds more than
+  // its own client.
+  const clients = readyClients(useClients());
+  const tenantName = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.name ?? null,
+    () => null,
+  );
 
   async function confirmCancel(orderId: string) {
     setBusyId(orderId);
@@ -576,6 +590,15 @@ function OrdersTable({
         </span>
       ),
     },
+    ...(showClients(clients)
+      ? [
+          {
+            key: 'client',
+            header: 'Client',
+            render: (order: OrderEntryDto) => clientCell(order.clientId, clients ?? [], tenantName),
+          } satisfies DataTableColumn<OrderEntryDto>,
+        ]
+      : []),
     { key: 'source', header: 'Source', render: (order) => orderSourceLabel(order.source) },
     {
       // Story 11-1: the one address line the list works from first — city
@@ -816,4 +839,15 @@ export function OrderDetailPanel({ orderId }: { orderId: string }) {
       </ul>
     </div>
   );
+}
+
+/** The filtered options, keeping the row's own current pick listed. */
+function withCurrent(
+  options: readonly SkuResponse[],
+  all: readonly SkuResponse[],
+  currentId: string,
+): readonly SkuResponse[] {
+  if (currentId === '' || options.some((sku) => sku.id === currentId)) return options;
+  const current = all.find((sku) => sku.id === currentId);
+  return current === undefined ? options : [current, ...options];
 }

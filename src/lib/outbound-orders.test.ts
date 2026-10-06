@@ -910,3 +910,12 @@ describe('the buyer legal name (story 8-1d)', () => {
     expect(legalNameProblem(undefined, astral.repeat(101))).toBeNull();
   });
 });
+
+describe('createReason — story 21-2b', () => {
+  test('mixed-client renders the server detail naming the client codes', () => {
+    expect(createReason(new ApiProblem('mixed-client', 409, 'The order mixes SKUs of clients ACME, self'))).toBe(
+      'The order mixes SKUs of clients ACME, self',
+    );
+    expect(createReason(new ApiProblem('mixed-client', 409))).toMatch(/an order is for one client/);
+  });
+});

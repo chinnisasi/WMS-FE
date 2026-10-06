@@ -26,6 +26,8 @@ import type {
   SkuResponse,
 } from '@/lib/api/generated';
 import { roleHasCapability } from '@/lib/users';
+import { clientCell, showClients } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { ulid } from '@/lib/ulid';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
@@ -106,9 +108,27 @@ function PurchaseOrdersCard({
   const pos = usePurchaseOrders(warehouseId);
   const vendors = useVendorMap();
   const skus = useSkuMap();
+  // Story 21-2b — the PO's client (derived from its lines' SKUs), shown once
+  // the tenant holds more than its own client. The row carries its lines
+  // too, so this one column is both the list's and the detail's.
+  const clients = readyClients(useClients());
+  const tenantName = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.name ?? null,
+    () => null,
+  );
 
   const columns: readonly DataTableColumn<PurchaseOrderHeader>[] = [
     { key: 'code', header: 'PO code', render: (po) => <span className="font-mono text-xs">{po.code}</span> },
+    ...(showClients(clients)
+      ? [
+          {
+            key: 'client',
+            header: 'Client',
+            render: (po: PurchaseOrderHeader) => clientCell(po.clientId, clients ?? [], tenantName),
+          } satisfies DataTableColumn<PurchaseOrderHeader>,
+        ]
+      : []),
     {
       key: 'vendor',
       header: 'Vendor',

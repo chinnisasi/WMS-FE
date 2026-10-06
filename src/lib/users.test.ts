@@ -38,7 +38,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // `replenishment.manage` — 31 became 32; story 7-1 adds `channel.manage`
     // — 32 became 33; story 8-1 adds `invoice.generate` — 33 became 34;
     // story 8-2b adds `eway.manage` and `eway.configure` — 34 became 36.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(36);
+    // Story 21-2b adds `clients.manage` (owner-only) — 36 became 37.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(37);
+    expect(roleHasCapability('owner', 'clients.manage')).toBe(true);
     expect(roleHasCapability('owner', 'eway.manage')).toBe(true);
     expect(roleHasCapability('owner', 'eway.configure')).toBe(true);
     // 8-1: invoice pricing is owner + ops_manager — never the floor, and
@@ -218,6 +220,10 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     expect(ROLE_CAPABILITIES.accountant).toEqual(['eway.manage']);
     expect(roleHasCapability('accountant', 'eway.configure')).toBe(false);
     expect(roleHasCapability('ops_manager', 'eway.configure')).toBe(false);
+    // Story 21-2b — client admin is owner-only.
+    expect(roleHasCapability('ops_manager', 'clients.manage')).toBe(false);
+    expect(roleHasCapability('accountant', 'clients.manage')).toBe(false);
+    expect(roleHasCapability('operator', 'clients.manage')).toBe(false);
     expect(roleHasCapability('accountant', 'putaway.execute')).toBe(false);
     expect(roleHasCapability('accountant', 'users.invite')).toBe(false);
     expect(roleHasCapability('accountant', 'orders.manage')).toBe(false);
