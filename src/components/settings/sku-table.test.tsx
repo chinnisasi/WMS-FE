@@ -47,6 +47,8 @@ let kitRows: Record<string, unknown>[] = [];
 let forceKitConflict = false;
 /** Makes every kits-list GET answer 500 (the join's failed arm). */
 let kitsFail = false;
+/** Story 21-2b — the clients list; null = unrouted (the D2C-shaped default). */
+let clientRows: unknown[] | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -132,6 +134,13 @@ function stubRouter(): void {
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       return json(200, { items: skuRows, nextCursor: null });
     }
+    if (method === 'GET' && pathname.endsWith('/clients') && clientRows !== null) {
+      return json(200, { items: clientRows });
+    }
+    if (method === 'POST' && /\/catalog\/skus\/[^/]+\/client$/.test(pathname)) {
+      const skuId = pathname.split('/catalog/skus/')[1]!.split('/client')[0]!;
+      return json(200, { skus: [sku({ id: skuId, clientId: (body as { clientId: string }).clientId })] });
+    }
     if (method === 'GET' && pathname.endsWith('/catalog/kits')) {
       if (kitsFail) {
         return json(500, { code: 'internal-error', title: 'Kits unavailable', status: 500, detail: 'The kits list is unavailable.' });
@@ -183,6 +192,7 @@ beforeEach(() => {
   requests = [];
   forceKitConflict = false;
   kitsFail = false;
+  clientRows = null;
   nextPatchStatus = 200;
   nextPatchBody = null;
   skuRows = [
@@ -763,5 +773,74 @@ describe('SkuTable: the class pickers and the segregation refusal (triage row 18
     );
     // The PATCH went out with the new hazard (the refusal is the server's).
     expect((requests.find((r) => r.method === 'PATCH')!.body as Record<string, unknown>).hazardClass).toBe('oxidizer');
+  });
+});
+
+describe('story 21-2b: the client column and the owner client correction', () => {
+  const SELF = {
+    id: 'c-self',
+    tenantId: TENANT_ID,
+    code: 'self',
+    name: 'Priya Spices',
+    status: 'active',
+    systemOwned: true,
+    createdAt: '2026-10-06T00:00:00.000Z',
+    updatedAt: '2026-10-06T00:00:00.000Z',
+  };
+  const ACME = { ...SELF, id: 'c-acme', code: 'ACME', name: 'Acme Foods', systemOwned: false };
+
+  function headerTexts(container: HTMLElement): string[] {
+    return [...container.querySelectorAll('th')].map((th) => th.textContent ?? '');
+  }
+
+  test('one client (the D2C case): no client column and no Correct client action', async () => {
+    clientRows = [SELF];
+    view = await mount();
+    expect(headerTexts(view.container)).not.toContain('Client');
+    expect(view.container.textContent).not.toContain('Correct client');
+  });
+
+  test('several clients: the column names each SKU\'s client — the code, or the company for self', async () => {
+    clientRows = [SELF, ACME];
+    skuRows = [sku({ clientId: 'c-self' }), sku({ id: 'sku-2', code: 'ACME-01', barcode: 'BC-A', clientId: 'c-acme' })];
+    view = await mount();
+    expect(headerTexts(view.container)).toContain('Client');
+    const rows = [...view.container.querySelectorAll('tbody tr')].map((tr) => tr.textContent ?? '');
+    expect(rows.find((r) => r.includes('SPICE-01'))).toContain('Priya Spices');
+    expect(rows.find((r) => r.includes('ACME-01'))).toContain('ACME');
+  });
+
+  test('the owner corrects a SKU\'s client: Move sends POST …/client with the picked client', async () => {
+    clientRows = [SELF, ACME];
+    skuRows = [sku({ clientId: 'c-self' })];
+    view = await mount();
+    const button = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Correct client')!;
+    expect(button).toBeDefined();
+    act(() => button.click());
+    const form = view.container.querySelector('form[aria-label="Correct the client of SPICE-01"]')!;
+    const select = form.querySelector('select') as HTMLSelectElement;
+    // The SKU's own client is not offered.
+    expect([...select.querySelectorAll('option')].map((o) => o.value)).toEqual(['', 'c-acme']);
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(select, 'c-acme');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    const post = requests.find((r) => r.method === 'POST' && r.pathname.endsWith('/client'))!;
+    expect(post.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/catalog/skus/sku-1/client`);
+    expect(post.body).toEqual({ clientId: 'c-acme' });
+    expect(view.container.textContent).toContain('SPICE-01 moved');
+  });
+
+  test('an ops manager sees the client column but is never offered Correct client', async () => {
+    clientRows = [SELF, ACME];
+    writeSession({ ...SESSION, user: { ...SESSION.user, role: 'ops_manager' } });
+    view = await mount();
+    expect(headerTexts(view.container)).toContain('Client');
+    expect(view.container.textContent).not.toContain('Correct client');
   });
 });

@@ -4,6 +4,11 @@ import { restoreGlobals, stubGlobal } from '../test/globals';
 
 import {
   ApiProblem,
+  fetchApiCorrectSkuClient,
+  fetchApiCreateClient,
+  fetchApiImportCatalog,
+  fetchApiListClients,
+  fetchApiRenameClient,
   fetchApiCancelOrder,
   fetchApiCancelWave,
   fetchApiCreateKit,
@@ -1439,6 +1444,93 @@ describe('reporting overview wrapper (story 9-1)', () => {
       code: 'not-found',
       status: 404,
     });
+    clearSession();
+  });
+});
+
+describe('client admin + attribution wrappers (story 21-2b)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const CLIENT = {
+    id: '0198f7a2-1b3c-7d4e-8f90-000000000001',
+    tenantId: SESSION.tenant.id,
+    code: 'ACME',
+    name: 'Acme Foods',
+    status: 'active',
+    systemOwned: false,
+    createdAt: '2026-10-06T00:00:00.000Z',
+    updatedAt: '2026-10-06T00:00:00.000Z',
+  };
+
+  test('the client list is a GET with no query and no Idempotency-Key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [CLIENT] });
+    const list = await fetchApiListClients(SESSION.tenant.id);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/clients`);
+    expect(url.search).toBe('');
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(list.items[0]!.code).toBe('ACME');
+    clearSession();
+  });
+
+  test('create POSTs the body with the key and unwraps the client', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { client: CLIENT });
+    const created = await fetchApiCreateClient(SESSION.tenant.id, { code: 'acme', name: 'Acme Foods' }, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/clients`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ code: 'acme', name: 'Acme Foods' });
+    expect(created.id).toBe(CLIENT.id);
+    clearSession();
+  });
+
+  test('rename PATCHes the client path with only the name', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { client: { ...CLIENT, name: 'Acme Foods Pvt Ltd' } });
+    const renamed = await fetchApiRenameClient(SESSION.tenant.id, CLIENT.id, 'Acme Foods Pvt Ltd', KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/clients/${CLIENT.id}`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ name: 'Acme Foods Pvt Ltd' });
+    expect(renamed.name).toBe('Acme Foods Pvt Ltd');
+    clearSession();
+  });
+
+  test('a duplicate code surfaces as an ApiProblem carrying its code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { type: 'about:blank', title: 'dup', status: 409, code: 'duplicate-client-code', detail: 'taken' });
+    await expect(fetchApiCreateClient(SESSION.tenant.id, { code: 'ACME', name: 'x' }, KEY)).rejects.toMatchObject({
+      code: 'duplicate-client-code',
+      status: 409,
+    });
+    clearSession();
+  });
+
+  test('the SKU client correction POSTs {clientId} to the SKU\'s client path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { id: 'sku-1', clientId: CLIENT.id });
+    await fetchApiCorrectSkuClient(SESSION.tenant.id, 'sku-1', CLIENT.id, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/catalog/skus/sku-1/client`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ clientId: CLIENT.id });
+    clearSession();
+  });
+
+  test('the import carries clientId in the multipart form only when given', async () => {
+    writeSession(SESSION);
+    const file = new File(['sku_code,name,uom,gst_rate\n'], 'catalog.csv', { type: 'text/csv' });
+    stubFetch(201, { importId: 'i', mode: 'initial', committedRows: 0, failedRows: 0, skippedRows: 0, errors: [] });
+    await fetchApiImportCatalog(SESSION.tenant.id, file, undefined, KEY, CLIENT.id);
+    const withClient = await lastRequest!.formData();
+    expect(withClient.get('clientId')).toBe(CLIENT.id);
+    expect(withClient.get('mode')).toBeNull();
+    await fetchApiImportCatalog(SESSION.tenant.id, file, 'fix', KEY);
+    const without = await lastRequest!.formData();
+    expect(without.get('clientId')).toBeNull();
+    expect(without.get('mode')).toBe('fix');
     clearSession();
   });
 });

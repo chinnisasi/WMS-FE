@@ -559,6 +559,12 @@ export function generateReason(error: unknown): string {
         return 'No order with this id exists in this tenant.';
       case 'order-not-dispatched':
         return 'That order is not dispatched yet — invoices are generated from dispatched orders only.';
+      case 'client-order-not-invoiced':
+        // Story 21-2b: a client brand invoices its own customer — the
+        // warehouse issues no tax invoice (or e-way bill) for its order.
+        return "That order is for a client brand — the brand invoices its own customer, so no tax invoice is issued here.";
+      case 'order-client-missing':
+        return error.detail ?? "That order's client no longer exists — no invoice can be issued.";
       case 'line-already-priced':
         return 'One of those lines already carries the rate frozen when the order was accepted — only unpriced lines can be priced here. The invoice has been re-read.';
       case 'line-not-of-order':

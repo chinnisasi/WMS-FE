@@ -345,6 +345,10 @@ export function createReason(error: unknown): string {
         return 'This submission was already processed.';
       case 'order-source-conflict':
         return error.detail ?? 'That channel reference already created a different order.';
+      // Story 21-2b — an order is for ONE client, derived from its SKUs; the
+      // server names the client codes the lines (or kit components) span.
+      case 'mixed-client':
+        return error.detail ?? 'These SKUs belong to more than one client — an order is for one client; split it.';
       case 'conflict':
         return 'The same submission is still in flight — retry to read the settled result.';
       case 'reservation-store-unavailable':
