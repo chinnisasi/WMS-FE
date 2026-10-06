@@ -113,6 +113,13 @@ import {
   usersControllerMe,
   usersControllerSetUserRole,
   reportingControllerOverview,
+  rateCardsControllerActivate,
+  rateCardsControllerCancel,
+  rateCardsControllerCreate,
+  rateCardsControllerDiscard,
+  rateCardsControllerInForce,
+  rateCardsControllerList,
+  rateCardsControllerReplaceLines,
 } from './generated/sdk.gen';
 import { ensureSessionHint, readSession, clearSession, writeSession } from '../auth';
 import type {
@@ -210,6 +217,10 @@ import type {
   PatchSkuDto,
   ClientDto,
   ClientListResponse,
+  RateCardDto,
+  RateCardInForceResponse,
+  RateCardLineDto,
+  RateCardListResponse,
   ProductListResponse,
   ProductResponse,
   PurchaseOrderListResponse,
@@ -740,6 +751,129 @@ export async function fetchApiRenameClient(
     throw unwrapError(error, 400);
   }
   return data.client;
+}
+
+/* ------------------------------------------------------------------ */
+/* Rate cards (story 21-3) — a client's versioned prices. Reads are    */
+/* member-open; the mutations need `rates.manage` (owner + accountant). */
+/* ------------------------------------------------------------------ */
+
+/** A client's cards — drafts first, then by effective date descending. */
+export async function fetchApiListRateCards(
+  tenantId: string,
+  clientId: string,
+  options?: { signal?: AbortSignal },
+): Promise<RateCardListResponse> {
+  const { data, error } = await rateCardsControllerList({
+    path: { tenantId, clientId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The client's card in force at `at` (default: the SERVER's now) — the
+ * "In force" highlight reads this, never the browser clock. `rateCard` is
+ * null when nothing is in force (the client is not billed then).
+ */
+export async function fetchApiRateCardInForce(
+  tenantId: string,
+  clientId: string,
+  options?: { at?: string; signal?: AbortSignal },
+): Promise<RateCardInForceResponse> {
+  const { data, error } = await rateCardsControllerInForce({
+    path: { tenantId, clientId },
+    query: options?.at === undefined ? undefined : { at: options.at },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+export async function fetchApiCreateRateCard(
+  tenantId: string,
+  clientId: string,
+  lines: readonly RateCardLineDto[],
+  idempotencyKey: string,
+): Promise<RateCardDto> {
+  const { data, error } = await rateCardsControllerCreate({
+    path: { tenantId, clientId },
+    body: { lines: [...lines] },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.rateCard;
+}
+
+export async function fetchApiReplaceRateCardLines(
+  tenantId: string,
+  rateCardId: string,
+  lines: readonly RateCardLineDto[],
+  idempotencyKey: string,
+): Promise<RateCardDto> {
+  const { data, error } = await rateCardsControllerReplaceLines({
+    path: { tenantId, rateCardId },
+    body: { lines: [...lines] },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.rateCard;
+}
+
+export async function fetchApiActivateRateCard(
+  tenantId: string,
+  rateCardId: string,
+  effectiveFrom: string,
+  idempotencyKey: string,
+): Promise<RateCardDto> {
+  const { data, error } = await rateCardsControllerActivate({
+    path: { tenantId, rateCardId },
+    body: { effectiveFrom },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.rateCard;
+}
+
+export async function fetchApiCancelRateCard(
+  tenantId: string,
+  rateCardId: string,
+  idempotencyKey: string,
+): Promise<RateCardDto> {
+  const { data, error } = await rateCardsControllerCancel({
+    path: { tenantId, rateCardId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.rateCard;
+}
+
+/** Discards a draft (DELETE → 204, no body; only a problem payload is an error). */
+export async function fetchApiDiscardRateCard(
+  tenantId: string,
+  rateCardId: string,
+  idempotencyKey: string,
+): Promise<void> {
+  const { error } = await rateCardsControllerDiscard({
+    path: { tenantId, rateCardId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error) {
+    throw unwrapError(error, 400);
+  }
 }
 
 /* ------------------------------------------------------------------ */

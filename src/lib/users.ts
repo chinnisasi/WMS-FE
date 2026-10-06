@@ -158,6 +158,14 @@ export const CAPABILITIES = [
   // the Settings clients card's create/rename and the SKU table's "Correct
   // client" action; the client list read stays open to every member.
   'clients.manage',
+  // Story 21-3 — rate cards: draft a client's card, edit or discard the
+  // draft, activate it from a date, cancel a scheduled card. OWNER +
+  // ACCOUNTANT (decision 2 — a client's price list is finance work; this
+  // reverses 8-1's "the accountant does not set prices" for the client
+  // price list only — `invoice.generate` is unchanged). Ops Manager does NOT
+  // hold it (see OPS_EXCLUDED_CAPABILITIES). Gates the Settings rate-cards
+  // card's editor and row actions; every member reads the cards.
+  'rates.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -181,10 +189,24 @@ const OWNER_ONLY_CAPABILITIES: readonly Capability[] = [
   'clients.manage',
 ];
 
+/**
+ * Everything the Ops Manager does not hold: the owner-only capabilities,
+ * plus (story 21-3) `rates.manage` — which is NOT owner-only (the accountant
+ * holds it too), so it cannot ride the owner-only list. Stated as an
+ * explicit set so the computed grant below stays the one place the Ops
+ * Manager's exclusions live.
+ */
+const OPS_EXCLUDED_CAPABILITIES: readonly Capability[] = [
+  ...OWNER_ONLY_CAPABILITIES,
+  // Story 21-3 — rate cards are the owner's and the accountant's (finance
+  // work); the Ops Manager runs the floor and reads the cards.
+  'rates.manage',
+];
+
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
   owner: CAPABILITIES,
-  // Every operational mutation, no user management.
-  ops_manager: CAPABILITIES.filter((capability) => !OWNER_ONLY_CAPABILITIES.includes(capability)),
+  // Every operational mutation, no user management, no rate cards.
+  ops_manager: CAPABILITIES.filter((capability) => !OPS_EXCLUDED_CAPABILITIES.includes(capability)),
   // The floor verbs only: place, pick, pack, label, dispatch, record. Notably
   // **not** `orders.manage` — an Operator never creates or cancels an order —
   // and **not** `secure.move` (story 12-3): the cage is off-limits to floor
@@ -204,8 +226,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     // rationale). Planning stays above: an operator never schedules counts.
     'counts.execute',
   ],
-  // Story 8-2b: read-only except the e-way paperwork (finance work).
-  accountant: ['eway.manage'],
+  // Story 8-2b: read-only except the e-way paperwork (finance work); story
+  // 21-3: and the client rate cards (finance work).
+  accountant: ['eway.manage', 'rates.manage'],
 };
 
 /**
