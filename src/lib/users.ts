@@ -166,6 +166,15 @@ export const CAPABILITIES = [
   // hold it (see OPS_EXCLUDED_CAPABILITIES). Gates the Settings rate-cards
   // card's editor and row actions; every member reads the cards.
   'rates.manage',
+  // Story 21-5 — client invoices: prepare a client's monthly services
+  // invoice drafts, refresh, discard, issue, dispute, settle and void — AND
+  // the client tax-details write (legal name, GSTIN, billing address), so
+  // whoever clears an invoice's recipient gaps can fix them. OWNER +
+  // ACCOUNTANT (the `rates.manage` rationale: billing is finance work). Ops
+  // Manager does NOT hold it (see OPS_EXCLUDED_CAPABILITIES). Gates the
+  // /compliance Client invoices actions and the clients card's tax-details
+  // form; every member reads the invoices.
+  'billing.invoice',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -201,6 +210,8 @@ const OPS_EXCLUDED_CAPABILITIES: readonly Capability[] = [
   // Story 21-3 — rate cards are the owner's and the accountant's (finance
   // work); the Ops Manager runs the floor and reads the cards.
   'rates.manage',
+  // Story 21-5 — client invoices and tax details, the same holder set.
+  'billing.invoice',
 ];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
@@ -227,8 +238,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     'counts.execute',
   ],
   // Story 8-2b: read-only except the e-way paperwork (finance work); story
-  // 21-3: and the client rate cards (finance work).
-  accountant: ['eway.manage', 'rates.manage'],
+  // 21-3: and the client rate cards (finance work); story 21-5: and the
+  // client invoices and tax details (finance work).
+  accountant: ['eway.manage', 'rates.manage', 'billing.invoice'],
 };
 
 /**

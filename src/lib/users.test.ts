@@ -40,7 +40,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // story 8-2b adds `eway.manage` and `eway.configure` — 34 became 36.
     // Story 21-2b adds `clients.manage` (owner-only) — 36 became 37.
     // Story 21-3 adds `rates.manage` (owner + accountant) — 37 became 38.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(38);
+    // Story 21-5 adds `billing.invoice` (owner + accountant) — 38 became 39.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(39);
     expect(roleHasCapability('owner', 'rates.manage')).toBe(true);
     // Story 21-3 — rate cards are NOT an ops verb (and not owner-only either:
     // the accountant holds them) — the explicit ops-excluded set.
@@ -224,10 +225,16 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // configuration stays owner-only. Story 21-3 — and the client rate cards
     // (decision 2: finance work; reverses 8-1's "the accountant does not set
     // prices" for the client price list only — `invoice.generate` stays off).
-    expect(ROLE_CAPABILITIES.accountant).toEqual(['eway.manage', 'rates.manage']);
+    expect(ROLE_CAPABILITIES.accountant).toEqual(['eway.manage', 'rates.manage', 'billing.invoice']);
     expect(roleHasCapability('operator', 'rates.manage')).toBe(false);
     expect(roleHasCapability('accountant', 'eway.configure')).toBe(false);
     expect(roleHasCapability('ops_manager', 'eway.configure')).toBe(false);
+    // Story 21-5 — the client invoices and tax details: owner + accountant,
+    // never the Ops Manager or the floor (the holder test).
+    expect((['owner', 'ops_manager', 'operator', 'accountant'] as const).filter((role) => roleHasCapability(role, 'billing.invoice'))).toEqual([
+      'owner',
+      'accountant',
+    ]);
     // Story 21-2b — client admin is owner-only.
     expect(roleHasCapability('ops_manager', 'clients.manage')).toBe(false);
     expect(roleHasCapability('accountant', 'clients.manage')).toBe(false);

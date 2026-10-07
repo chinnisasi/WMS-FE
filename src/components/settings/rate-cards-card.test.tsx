@@ -90,6 +90,8 @@ interface Recorded {
   readonly pathname: string;
   readonly body: unknown;
   readonly key: string | null;
+  /** The query string (21-5 — the invoices read's filters). */
+  readonly search: URLSearchParams;
 }
 let requests: Recorded[] = [];
 /** Story 21-4 — the usage read's storage watermark (null = not measured); the answer echoes the period asked. */
@@ -121,6 +123,8 @@ function usageFixture(from: string, to: string, storageCompleteThrough: string |
 }
 const AS_OF_USAGE = '2026-10-20T04:30:00.000Z';
 let cardRows: unknown[] = [];
+/** Story 21-5 — the client's invoices the usage preview reads (null = the read fails). */
+let clientInvoiceRows: unknown[] | null = [];
 let inForce: unknown = null;
 /** The SERVER's asOf: 10:00 IST on 20 Oct 2026 — independent of the test's own clock. */
 const AS_OF = '2026-10-20T04:30:00.000Z';
@@ -140,11 +144,16 @@ function stubRouter(): void {
     } catch {
       body = null;
     }
-    requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key') });
+    requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key'), search: new URL(request.url).searchParams });
     if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: [SELF, ACME] });
     if (method === 'GET' && pathname.endsWith('/usage')) {
       const query = new URL(request.url).searchParams;
       return json(200, usageFixture(query.get('from')!, query.get('to')!, usageThrough));
+    }
+    if (method === 'GET' && pathname.endsWith('/client-invoices')) {
+      return clientInvoiceRows === null
+        ? json(503, { code: 'unavailable', title: 'Down', status: 503 })
+        : json(200, { items: clientInvoiceRows, nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith('/rate-cards/in-force')) return json(200, { rateCard: inForce, asOf: AS_OF });
     if (method === 'GET' && pathname.endsWith('/rate-cards')) return json(200, { items: cardRows });
@@ -170,6 +179,7 @@ beforeEach(() => {
   cardRows = [DRAFT, SCHEDULED, IN_FORCE];
   inForce = IN_FORCE;
   usageThrough = '2026-09-30';
+  clientInvoiceRows = [];
   stubRouter();
 });
 
@@ -426,6 +436,29 @@ describe('RateCardsCard', () => {
     expect(text).toContain('Billed total ₹10.07 · 2 lines not billed');
     // A read, never a mutation.
     expect(requests.some((r) => r.method !== 'GET')).toBe(false);
+  });
+
+  test('story 21-5: an invoiced month reads "Invoiced as <no.>" (live figures may differ) — never for a draft or a void, and a failed invoices read leaves the estimate as it was', async () => {
+    const entry = (status: string, invoiceNo: string | null, periodStart = '2026-09-01') => ({ id: `i-${status}`, clientId: ACME.id, periodStart, status, invoiceNo });
+    clientInvoiceRows = [entry('issued', '29/S2627/000001'), entry('draft', null), entry('void', '29/S2627/000000'), entry('issued', '29/S2627/000007', '2026-08-01')];
+    writeSession(session('ops_manager'));
+    view = render(<RateCardsCard />);
+    await settle();
+    const text = view.container.querySelector('[aria-label="Usage notices"]')!.textContent ?? '';
+    expect(text).toContain('Invoiced as 29/S2627/000001 — the live figures below may differ from the invoice');
+    expect(text).not.toContain('000000');
+    expect(text).not.toContain('000007');
+    // The read is one client's invoices, a big enough page to cover its months.
+    const read = requests.find((r) => r.pathname.endsWith('/client-invoices'))!;
+    expect(read.search.get('clientId')).toBe(ACME.id);
+    expect(read.search.get('limit')).toBe('100');
+    view.unmount();
+    clientInvoiceRows = null;
+    view = render(<RateCardsCard />);
+    await settle();
+    const fallback = view.container.querySelector('[aria-label="Usage"]')!.textContent ?? '';
+    expect(fallback).toContain('Estimate until invoiced · GST-exclusive');
+    expect(fallback).not.toContain('Invoiced as');
   });
 
   test('usage: the period picker sends the month it names, and the in-progress month is marked', async () => {

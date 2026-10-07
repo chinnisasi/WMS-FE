@@ -20,6 +20,8 @@ import {
   usageRateLabel,
   usageUnitLabel,
 } from '@/lib/usage';
+import { invoicedNotice, invoicedNumbers } from '@/lib/client-invoices';
+import { useClientInvoices } from '@/lib/use-client-invoices';
 import { useClientUsage } from '@/lib/use-client-usage';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
@@ -53,7 +55,9 @@ function columnsFor(segment: UsageSegmentDto): DataTableColumn<UsageRow>[] {
  * Storage reads as base-unit-days per base unit. Everything is an estimate
  * until invoiced and excludes GST; the server decides every figure, and this
  * only lays them out. Member-open, like the cards. The month list runs on
- * the SERVER's clock (the rate-cards read's `asOf`).
+ * the SERVER's clock (the rate-cards read's `asOf`). Story 21-5: a month
+ * already invoiced reads "Invoiced as <no.>" — the live figures may differ
+ * from the frozen invoice.
  */
 export function ClientUsage({ client, cards, asOf }: { client: ClientDto; cards: readonly RateCardDto[]; asOf: string }) {
   const months = usageMonthOptions(client.createdAt, asOf);
@@ -67,6 +71,13 @@ export function ClientUsage({ client, cards, asOf }: { client: ClientDto; cards:
   const month = months.find((option) => option.value === choice) ?? null;
   const period = choice === CUSTOM ? custom : month === null ? null : { from: month.from, to: month.to };
   const usage = useClientUsage(client.id, period);
+  // Story 21-5 — an invoiced month says so. Enrichment only: a failed read of
+  // the invoices leaves the estimate notice as it was.
+  const invoices = useClientInvoices(client.id, 100);
+  const invoiced =
+    choice === CUSTOM || month === null || invoices.state !== 'ready'
+      ? null
+      : invoicedNotice(invoicedNumbers(invoices.data.items, client.id, month.from));
 
   const apply = (event: React.FormEvent) => {
     event.preventDefault();
@@ -128,6 +139,7 @@ export function ClientUsage({ client, cards, asOf }: { client: ClientDto; cards:
       ) : (
         <div className="flex flex-col gap-3">
           <div aria-label="Usage notices" className="flex flex-col gap-0.5 text-(--muted-foreground)">
+            {invoiced !== null ? <span className="font-medium text-(--foreground)">{invoiced}</span> : null}
             <span>{storageNotice(usage.data)}</span>
             {periodInProgress(usage.data) ? <span>In progress — the counts run to now.</span> : null}
           </div>

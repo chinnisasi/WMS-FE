@@ -5196,6 +5196,19 @@ export type ReportingOverviewResponse = {
     tiles: ReportingTilesDto;
 };
 
+export type ClientTaxDetailsDto = {
+    legalName: string | null;
+    gstin: string | null;
+    billingLine1: string | null;
+    billingLine2: string | null;
+    billingCity: string | null;
+    /**
+     * A two-digit GST registration state code
+     */
+    billingStateCode: string | null;
+    billingPincode: string | null;
+};
+
 export type ClientDto = {
     id: string;
     tenantId: string;
@@ -5220,6 +5233,10 @@ export type ClientDto = {
      * ISO-8601 UTC last update
      */
     updatedAt: string;
+    /**
+     * Story 21-5 — the recipient's tax details a services tax invoice names (every field nullable; never required)
+     */
+    taxDetails: ClientTaxDetailsDto;
 };
 
 export type ClientListResponse = {
@@ -5243,6 +5260,28 @@ export type ClientResponse = {
 
 export type RenameClientDto = {
     name: string;
+};
+
+export type UpdateClientTaxDetailsDto = {
+    /**
+     * The legal name printed as the recipient
+     */
+    legalName?: string | null;
+    /**
+     * The client GSTIN (uppercased). Its two-digit prefix must equal billingStateCode when both are set
+     */
+    gstin?: string | null;
+    billingLine1?: string | null;
+    billingLine2?: string | null;
+    billingCity?: string | null;
+    /**
+     * A two-digit GST registration state code
+     */
+    billingStateCode?: string | null;
+    /**
+     * Six digits
+     */
+    billingPincode?: string | null;
 };
 
 export type RateCardLineResponseDto = {
@@ -5428,6 +5467,263 @@ export type ClientUsageResponse = {
      */
     segments: Array<UsageSegmentDto>;
     totals: UsageTotalsDto;
+};
+
+export type PrepareClientInvoicesDto = {
+    /**
+     * One IST calendar month, YYYY-MM — it must have ended
+     */
+    month: string;
+};
+
+export type ClientInvoiceTotalsDto = {
+    /**
+     * Taxable value, integer paise
+     */
+    subtotal: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    /**
+     * cgst + sgst + igst
+     */
+    tax: number;
+    /**
+     * Signed rupee round-off, −49…+50 paise
+     */
+    roundOff: number;
+    /**
+     * subtotal + tax + roundOff — a whole number of rupees, in paise
+     */
+    payable: number;
+};
+
+export type ClientInvoiceGapDto = {
+    code: 'supplier-gstin-missing' | 'supplier-address-missing' | 'client-legal-name-missing' | 'client-billing-address-missing' | 'storage-not-complete' | 'line-unpriced' | 'einvoice-required';
+    detail: string;
+    warehouseId?: string;
+    /**
+     * The IST date the line’s rate-card segment starts (line-scoped gaps)
+     */
+    segmentFrom?: string;
+};
+
+export type ClientInvoiceWarningDto = {
+    code: 'supplier-state-differs';
+    detail: string;
+};
+
+export type ClientInvoiceSupplierAddressDto = {
+    line1: string;
+    line2: string | null;
+    city: string;
+    /**
+     * The origin address state, as entered
+     */
+    state: string;
+    pincode: string;
+};
+
+export type ClientInvoiceSupplierDto = {
+    /**
+     * The tenant's name
+     */
+    name: string;
+    gstin: string | null;
+    /**
+     * The GSTIN's two-digit state code
+     */
+    stateCode: string | null;
+    stateName: string | null;
+    address: ClientInvoiceSupplierAddressDto | null;
+    /**
+     * The warehouse whose origin address is printed
+     */
+    warehouseCode: string | null;
+};
+
+export type ClientInvoiceRecipientAddressDto = {
+    line1: string | null;
+    line2: string | null;
+    city: string | null;
+    stateCode: string | null;
+    pincode: string | null;
+};
+
+export type ClientInvoiceRecipientDto = {
+    name: string;
+    code: string;
+    legalName: string | null;
+    gstin: string | null;
+    stateCode: string | null;
+    stateName: string | null;
+    address: ClientInvoiceRecipientAddressDto;
+};
+
+export type ClientInvoicePartyDto = {
+    supplier: ClientInvoiceSupplierDto;
+    recipient: ClientInvoiceRecipientDto;
+};
+
+export type ClientInvoiceLineDto = {
+    /**
+     * The rate card that priced the line (null: no card in force)
+     */
+    rateCardId: string | null;
+    /**
+     * First IST date of the rate-card segment (inclusive)
+     */
+    segmentFrom: string;
+    /**
+     * Last IST date of the segment (inclusive)
+     */
+    segmentTo: string;
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    /**
+     * The base UoM of a storage line; null for handling
+     */
+    uom: string | null;
+    /**
+     * A decimal string: base-unit-days for storage (up to three decimals), a whole count otherwise
+     */
+    quantity: string;
+    /**
+     * Integer paise per unit of the basis (null: unpriced, a draft only)
+     */
+    unitAmountPaise: number | null;
+    /**
+     * The taxable value, integer paise (null: unpriced, a draft only)
+     */
+    amountPaise: number | null;
+    /**
+     * The SAC (services accounting code)
+     */
+    sac: string;
+    gstBps: number;
+    /**
+     * Two-digit state code of the place of supply
+     */
+    placeOfSupply: string | null;
+    supplyType: 'intra' | 'inter' | null;
+    cgstPaise: number;
+    /**
+     * SGST/UTGST
+     */
+    sgstPaise: number;
+    igstPaise: number;
+};
+
+export type ClientInvoiceDto = {
+    id: string;
+    clientId: string;
+    periodStart: string;
+    periodEnd: string;
+    status: 'draft' | 'issued' | 'disputed' | 'settled' | 'void';
+    invoiceNo: string | null;
+    fyLabel: string | null;
+    /**
+     * The supplying GSTIN (the group key)
+     */
+    supplierGstin: string | null;
+    placeOfSupply: string | null;
+    supplyType: 'intra' | 'inter' | null;
+    totals: ClientInvoiceTotalsDto;
+    /**
+     * ISO-8601 UTC
+     */
+    issuedAt: string | null;
+    /**
+     * The latest dispute / settle / void note
+     */
+    statusNote: string | null;
+    /**
+     * The void invoice this one replaces
+     */
+    replacesInvoiceId: string | null;
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    gaps: Array<ClientInvoiceGapDto>;
+    warnings: Array<ClientInvoiceWarningDto>;
+    /**
+     * Supplier and recipient as printed — computed live on a draft, frozen at issue
+     */
+    party: ClientInvoicePartyDto;
+    lines: Array<ClientInvoiceLineDto>;
+};
+
+export type PrepareClientInvoicesResponse = {
+    /**
+     * The drafts created — one per supplying GSTIN with usage and no live invoice
+     */
+    created: Array<ClientInvoiceDto>;
+    /**
+     * The live (not void) invoices that already cover a group
+     */
+    existing: Array<ClientInvoiceDto>;
+};
+
+export type ClientInvoiceEntryDto = {
+    id: string;
+    clientId: string;
+    periodStart: string;
+    periodEnd: string;
+    status: 'draft' | 'issued' | 'disputed' | 'settled' | 'void';
+    invoiceNo: string | null;
+    fyLabel: string | null;
+    /**
+     * The supplying GSTIN (the group key)
+     */
+    supplierGstin: string | null;
+    placeOfSupply: string | null;
+    supplyType: 'intra' | 'inter' | null;
+    totals: ClientInvoiceTotalsDto;
+    /**
+     * ISO-8601 UTC
+     */
+    issuedAt: string | null;
+    /**
+     * The latest dispute / settle / void note
+     */
+    statusNote: string | null;
+    /**
+     * The void invoice this one replaces
+     */
+    replacesInvoiceId: string | null;
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    /**
+     * How many gaps block issue (0 on every issued invoice)
+     */
+    gapCount: number;
+};
+
+export type ClientInvoiceListResponse = {
+    items: Array<ClientInvoiceEntryDto>;
+    nextCursor: string | null;
+};
+
+export type ClientInvoiceResponse = {
+    invoice: ClientInvoiceDto;
+};
+
+export type IssueClientInvoiceResponse = {
+    /**
+     * `stale`: the figures changed since the draft was last computed — the fresh draft is stored and returned, nothing is issued and no number is used. Review it and issue again (with a NEW Idempotency-Key)
+     */
+    outcome: 'issued' | 'stale';
+    invoice: ClientInvoiceDto;
+};
+
+export type ClientInvoiceNoteDto = {
+    /**
+     * Why — REQUIRED to dispute or void (400 without one), optional to settle. The invoice keeps the latest note; the audit trail keeps every one
+     */
+    note?: string;
 };
 
 export type ChannelWebhookOrderResponse = {
@@ -13310,6 +13606,60 @@ export type ClientsControllerRenameClientResponses = {
 
 export type ClientsControllerRenameClientResponse = ClientsControllerRenameClientResponses[keyof ClientsControllerRenameClientResponses];
 
+export type ClientsControllerUpdateTaxDetailsData = {
+    body: UpdateClientTaxDetailsDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/tax-details';
+};
+
+export type ClientsControllerUpdateTaxDetailsErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, a malformed GSTIN or one whose prefix is not a registration state code, a billing state code off the registration list, a GSTIN in another state than the billing state, a pincode that is not six digits, an over-long field, or the tenant's own self client (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerUpdateTaxDetailsError = ClientsControllerUpdateTaxDetailsErrors[keyof ClientsControllerUpdateTaxDetailsErrors];
+
+export type ClientsControllerUpdateTaxDetailsResponses = {
+    200: ClientResponse;
+};
+
+export type ClientsControllerUpdateTaxDetailsResponse = ClientsControllerUpdateTaxDetailsResponses[keyof ClientsControllerUpdateTaxDetailsResponses];
+
 export type RateCardsControllerInForceData = {
     body?: never;
     path: {
@@ -13759,6 +14109,476 @@ export type BillingUsageControllerUsageResponses = {
 };
 
 export type BillingUsageControllerUsageResponse = BillingUsageControllerUsageResponses[keyof BillingUsageControllerUsageResponses];
+
+export type ClientInvoicesControllerPrepareData = {
+    body: PrepareClientInvoicesDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/invoices';
+};
+
+export type ClientInvoicesControllerPrepareErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, or a month that is not YYYY-MM (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The month has not ended (period-not-ended), the tenant's own client (client-not-billable), no group has any usage (nothing-to-invoice), a live invoice raced in (invoice-exists), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerPrepareError = ClientInvoicesControllerPrepareErrors[keyof ClientInvoicesControllerPrepareErrors];
+
+export type ClientInvoicesControllerPrepareResponses = {
+    /**
+     * The drafts created and the live invoices already covering a group
+     */
+    201: PrepareClientInvoicesResponse;
+};
+
+export type ClientInvoicesControllerPrepareResponse = ClientInvoicesControllerPrepareResponses[keyof ClientInvoicesControllerPrepareResponses];
+
+export type ClientInvoicesControllerListData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * One client's invoices
+         */
+        clientId?: string;
+        status?: 'draft' | 'issued' | 'disputed' | 'settled' | 'void';
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/client-invoices';
+};
+
+export type ClientInvoicesControllerListErrors = {
+    /**
+     * A malformed clientId or status, a limit outside 1–100 (validation-failed), or a malformed cursor (invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerListError = ClientInvoicesControllerListErrors[keyof ClientInvoicesControllerListErrors];
+
+export type ClientInvoicesControllerListResponses = {
+    200: ClientInvoiceListResponse;
+};
+
+export type ClientInvoicesControllerListResponse = ClientInvoicesControllerListResponses[keyof ClientInvoicesControllerListResponses];
+
+export type ClientInvoicesControllerDiscardData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}';
+};
+
+export type ClientInvoicesControllerDiscardErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed invoiceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client invoice with this id exists in this tenant — including one already discarded under another key (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The invoice is not a draft (invoice-not-draft), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerDiscardError = ClientInvoicesControllerDiscardErrors[keyof ClientInvoicesControllerDiscardErrors];
+
+export type ClientInvoicesControllerDiscardResponses = {
+    /**
+     * Discarded (a replay under the same key answers 204 too)
+     */
+    204: void;
+};
+
+export type ClientInvoicesControllerDiscardResponse = ClientInvoicesControllerDiscardResponses[keyof ClientInvoicesControllerDiscardResponses];
+
+export type ClientInvoicesControllerGetData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}';
+};
+
+export type ClientInvoicesControllerGetErrors = {
+    /**
+     * A malformed invoiceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client invoice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerGetError = ClientInvoicesControllerGetErrors[keyof ClientInvoicesControllerGetErrors];
+
+export type ClientInvoicesControllerGetResponses = {
+    200: ClientInvoiceResponse;
+};
+
+export type ClientInvoicesControllerGetResponse = ClientInvoicesControllerGetResponses[keyof ClientInvoicesControllerGetResponses];
+
+export type ClientInvoicesControllerRefreshData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}/refresh';
+};
+
+export type ClientInvoicesControllerRefreshErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed invoiceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client invoice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The invoice is not a draft (invoice-not-draft), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerRefreshError = ClientInvoicesControllerRefreshErrors[keyof ClientInvoicesControllerRefreshErrors];
+
+export type ClientInvoicesControllerRefreshResponses = {
+    200: ClientInvoiceResponse;
+};
+
+export type ClientInvoicesControllerRefreshResponse = ClientInvoicesControllerRefreshResponses[keyof ClientInvoicesControllerRefreshResponses];
+
+export type ClientInvoicesControllerIssueData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}/issue';
+};
+
+export type ClientInvoicesControllerIssueErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed invoiceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client invoice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The draft has gaps — the `gaps` member names them (invoice-has-gaps), it has no line (nothing-to-invoice), it is not a draft (invoice-not-draft), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerIssueError = ClientInvoicesControllerIssueErrors[keyof ClientInvoicesControllerIssueErrors];
+
+export type ClientInvoicesControllerIssueResponses = {
+    200: IssueClientInvoiceResponse;
+};
+
+export type ClientInvoicesControllerIssueResponse = ClientInvoicesControllerIssueResponses[keyof ClientInvoicesControllerIssueResponses];
+
+export type ClientInvoicesControllerDisputeData = {
+    body: ClientInvoiceNoteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}/dispute';
+};
+
+export type ClientInvoicesControllerDisputeErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed invoiceId, or no note (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client invoice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Only an issued invoice can be disputed (invoice-transition-invalid), or a concurrent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerDisputeError = ClientInvoicesControllerDisputeErrors[keyof ClientInvoicesControllerDisputeErrors];
+
+export type ClientInvoicesControllerDisputeResponses = {
+    200: ClientInvoiceResponse;
+};
+
+export type ClientInvoicesControllerDisputeResponse = ClientInvoicesControllerDisputeResponses[keyof ClientInvoicesControllerDisputeResponses];
+
+export type ClientInvoicesControllerSettleData = {
+    body: ClientInvoiceNoteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}/settle';
+};
+
+export type ClientInvoicesControllerSettleErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed invoiceId, or an over-long note (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client invoice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Only an issued or disputed invoice can be settled (invoice-transition-invalid), or a concurrent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerSettleError = ClientInvoicesControllerSettleErrors[keyof ClientInvoicesControllerSettleErrors];
+
+export type ClientInvoicesControllerSettleResponses = {
+    200: ClientInvoiceResponse;
+};
+
+export type ClientInvoicesControllerSettleResponse = ClientInvoicesControllerSettleResponses[keyof ClientInvoicesControllerSettleResponses];
+
+export type ClientInvoicesControllerVoidData = {
+    body: ClientInvoiceNoteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}/void';
+};
+
+export type ClientInvoicesControllerVoidErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed invoiceId, or no note (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client invoice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Only an issued or disputed invoice can be voided (invoice-transition-invalid), or a concurrent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerVoidError = ClientInvoicesControllerVoidErrors[keyof ClientInvoicesControllerVoidErrors];
+
+export type ClientInvoicesControllerVoidResponses = {
+    200: ClientInvoiceResponse;
+};
+
+export type ClientInvoicesControllerVoidResponse = ClientInvoicesControllerVoidResponses[keyof ClientInvoicesControllerVoidResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;

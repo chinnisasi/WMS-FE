@@ -10,6 +10,14 @@ import {
   fetchApiCancelRateCard,
   fetchApiCreateRateCard,
   fetchApiDiscardRateCard,
+  fetchApiDiscardClientInvoice,
+  fetchApiGetClientInvoice,
+  fetchApiIssueClientInvoice,
+  fetchApiListClientInvoices,
+  fetchApiPrepareClientInvoices,
+  fetchApiRefreshClientInvoice,
+  fetchApiTransitionClientInvoice,
+  fetchApiUpdateClientTaxDetails,
   fetchApiListRateCards,
   fetchApiRateCardInForce,
   fetchApiClientUsage,
@@ -1666,6 +1674,92 @@ describe('rate-card wrappers (story 21-3)', () => {
       code: 'rate-card-not-draft',
       status: 409,
     });
+    clearSession();
+  });
+});
+
+describe('client invoices and tax details (story 21-5)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const CLIENT_ID = '0198f7a2-1b3c-7d4e-8f90-aaaaaaaaaaaa';
+  const INVOICE_ID = '0198f7a2-1b3c-7d4e-8f90-bbbbbbbbbbbb';
+  const INVOICE = { id: INVOICE_ID, status: 'draft', gaps: [], lines: [] };
+  const base = `/api/v1/tenants/${SESSION.tenant.id}`;
+
+  test('tax details PATCH the client path with exactly the body given and the key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { client: { id: CLIENT_ID, code: 'ACME' } });
+    const saved = await fetchApiUpdateClientTaxDetails(SESSION.tenant.id, CLIENT_ID, { legalName: 'Acme Foods', billingLine2: null }, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/clients/${CLIENT_ID}/tax-details`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ legalName: 'Acme Foods', billingLine2: null });
+    expect(saved.id).toBe(CLIENT_ID);
+    clearSession();
+  });
+
+  test('prepare POSTs the month under the client with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { created: [INVOICE], existing: [] });
+    const result = await fetchApiPrepareClientInvoices(SESSION.tenant.id, CLIENT_ID, '2026-09', KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/clients/${CLIENT_ID}/invoices`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ month: '2026-09' });
+    expect(result.created).toHaveLength(1);
+    clearSession();
+  });
+
+  test('the list sends no query on an unfiltered first page, and only the filters given', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListClientInvoices(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    await fetchApiListClientInvoices(SESSION.tenant.id, { clientId: CLIENT_ID, cursor: 'abc', limit: 100 });
+    const params = new URL(lastRequest!.url).searchParams;
+    expect([params.get('clientId'), params.get('cursor'), params.get('limit'), params.get('status')]).toEqual([CLIENT_ID, 'abc', '100', null]);
+    stubFetch(200, { invoice: INVOICE });
+    await fetchApiGetClientInvoice(SESSION.tenant.id, INVOICE_ID);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices/${INVOICE_ID}`);
+    clearSession();
+  });
+
+  test('refresh and issue POST the invoice verb with the key; issue returns the outcome', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { invoice: INVOICE });
+    await fetchApiRefreshClientInvoice(SESSION.tenant.id, INVOICE_ID, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices/${INVOICE_ID}/refresh`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    stubFetch(200, { outcome: 'stale', invoice: INVOICE });
+    const issued = await fetchApiIssueClientInvoice(SESSION.tenant.id, INVOICE_ID, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices/${INVOICE_ID}/issue`);
+    expect(issued.outcome).toBe('stale');
+    stubFetch(409, { type: 'about:blank', title: 'Gaps', status: 409, code: 'invoice-has-gaps', detail: 'x', gaps: [{ code: 'line-unpriced', detail: 'd' }] });
+    await expect(fetchApiIssueClientInvoice(SESSION.tenant.id, INVOICE_ID, KEY)).rejects.toMatchObject({
+      code: 'invoice-has-gaps',
+      extensions: { gaps: [{ code: 'line-unpriced', detail: 'd' }] },
+    });
+    clearSession();
+  });
+
+  test('the transitions POST their own verb; the note is sent only when given', async () => {
+    writeSession(SESSION);
+    for (const verb of ['dispute', 'settle', 'void'] as const) {
+      stubFetch(200, { invoice: { ...INVOICE, status: verb === 'dispute' ? 'disputed' : verb === 'settle' ? 'settled' : 'void' } });
+      await fetchApiTransitionClientInvoice(SESSION.tenant.id, INVOICE_ID, verb, verb === 'settle' ? null : 'why', KEY);
+      expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices/${INVOICE_ID}/${verb}`);
+      expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+      expect(await lastRequest!.json()).toEqual(verb === 'settle' ? {} : { note: 'why' });
+    }
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      lastRequest = input instanceof Request ? input : new Request(input.toString());
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch);
+    await fetchApiDiscardClientInvoice(SESSION.tenant.id, INVOICE_ID, KEY);
+    expect(lastRequest!.method).toBe('DELETE');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices/${INVOICE_ID}`);
     clearSession();
   });
 });
