@@ -8,7 +8,10 @@ import { render, type Rendered } from '../../lib/test/render';
 import { RateCardsCard } from './rate-cards-card';
 
 /**
- * Story 21-3 — the claims a `src/lib` test cannot make:
+ * Story 21-3 — the claims a `src/lib` test cannot make (story 21-4 adds the
+ * Usage section's: the default period, the notices, the priced / Not billed
+ * lines, the custom range refused before it is sent, the refetch on a card
+ * change):
  *   1. every role READS a client's cards (states, "Not billed" cells, the
  *      next change), and the tenant's own client is never offered;
  *   2. the "In force" highlight follows the in-force ENDPOINT's answer, not
@@ -42,7 +45,8 @@ const SELF = {
   createdAt: '2026-10-06T00:00:00.000Z',
   updatedAt: '2026-10-06T00:00:00.000Z',
 };
-const ACME = { ...SELF, id: 'c-acme', code: 'ACME', name: 'Acme Foods', systemOwned: false };
+// Created mid-August (IST), so the usage picker offers Oct (in progress), Sep, Aug.
+const ACME = { ...SELF, id: 'c-acme', code: 'ACME', name: 'Acme Foods', systemOwned: false, createdAt: '2026-08-15T00:00:00.000Z' };
 
 function card(id: string, overrides: Record<string, unknown>) {
   return {
@@ -88,6 +92,34 @@ interface Recorded {
   readonly key: string | null;
 }
 let requests: Recorded[] = [];
+/** Story 21-4 — the usage read's storage watermark (null = not measured); the answer echoes the period asked. */
+let usageThrough: string | null = '2026-09-30';
+
+function usageFixture(from: string, to: string, storageCompleteThrough: string | null): Record<string, unknown> {
+  return {
+    clientId: 'c-acme',
+    from,
+    to,
+    asOf: AS_OF_USAGE,
+    storageCompleteThrough,
+    segments: [
+      {
+        rateCardId: 'card-a',
+        fromDate: from,
+        toDate: to,
+        storageMeasuredThrough: storageCompleteThrough === null ? null : storageCompleteThrough < to ? storageCompleteThrough : to,
+        lines: [
+          { chargeCode: 'storage', basis: 'per_thousand_units_per_day', uom: 'kg', quantity: '1234.567', ratePaise: 330, amountPaise: 407 },
+          { chargeCode: 'inbound_handling', basis: 'per_receipt_line', uom: null, quantity: '3', ratePaise: null, amountPaise: null },
+          { chargeCode: 'pick', basis: 'per_pick', uom: null, quantity: '2', ratePaise: 300, amountPaise: 600 },
+          { chargeCode: 'outbound_handling', basis: 'per_order', uom: null, quantity: '1', ratePaise: null, amountPaise: null },
+        ],
+      },
+    ],
+    totals: { billedPaise: 1007, unbilledLines: 2 },
+  };
+}
+const AS_OF_USAGE = '2026-10-20T04:30:00.000Z';
 let cardRows: unknown[] = [];
 let inForce: unknown = null;
 /** The SERVER's asOf: 10:00 IST on 20 Oct 2026 — independent of the test's own clock. */
@@ -110,6 +142,10 @@ function stubRouter(): void {
     }
     requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key') });
     if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: [SELF, ACME] });
+    if (method === 'GET' && pathname.endsWith('/usage')) {
+      const query = new URL(request.url).searchParams;
+      return json(200, usageFixture(query.get('from')!, query.get('to')!, usageThrough));
+    }
     if (method === 'GET' && pathname.endsWith('/rate-cards/in-force')) return json(200, { rateCard: inForce, asOf: AS_OF });
     if (method === 'GET' && pathname.endsWith('/rate-cards')) return json(200, { items: cardRows });
     if (method === 'POST' && pathname.endsWith('/rate-cards')) {
@@ -133,6 +169,7 @@ beforeEach(() => {
   requests = [];
   cardRows = [DRAFT, SCHEDULED, IN_FORCE];
   inForce = IN_FORCE;
+  usageThrough = '2026-09-30';
   stubRouter();
 });
 
@@ -181,7 +218,8 @@ describe('RateCardsCard', () => {
     view = render(<RateCardsCard />);
     await settle();
     // The tenant's own client is never offered.
-    const options = [...view.container.querySelectorAll('option')].map((option) => option.textContent);
+    // (The CLIENT picker's options — 21-4 added the usage period picker beside it.)
+    const options = [...view.container.querySelectorAll('select[aria-label="Client"] option')].map((option) => option.textContent);
     expect(options).toEqual(['ACME — Acme Foods']);
     const rows = rowText(view.container);
     expect(rows[0]).toContain('Draft');
@@ -345,5 +383,103 @@ describe('RateCardsCard', () => {
     await press(buttons(view.container, 'Cancel')[0]);
     // C's predecessor B is itself still scheduled.
     expect(view.container.textContent).toContain('Cancel the card from 1 Dec 2026? The previous card applies from its own date.');
+  });
+
+  // ── story 21-4 — the Usage section ──────────────────────────────────────
+  function usageReads(): string[] {
+    return requests
+      .filter((r) => r.method === 'GET' && r.pathname.endsWith(`/clients/${ACME.id}/usage`))
+      .map((r) => r.pathname);
+  }
+
+  function selectValue(select: HTMLSelectElement, value: string): void {
+    act(() => {
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  test('usage: every role reads last month by default — the estimate notice, storage through its date, each line priced or Not billed, the totals', async () => {
+    writeSession(session('ops_manager'));
+    view = render(<RateCardsCard />);
+    await settle();
+    expect(usageReads()).toHaveLength(1);
+    const region = view.container.querySelector('[aria-label="Usage"]')!;
+    expect(region).not.toBeNull();
+    // The months run on the SERVER's asOf (20 Oct), from ACME's creation (Aug).
+    const periods = [...region.querySelectorAll('select[aria-label="Usage period"] option')].map((option) => option.textContent);
+    expect(periods).toEqual(['October 2026 — in progress', 'September 2026', 'August 2026', 'Custom range…']);
+    expect((region.querySelector('select[aria-label="Usage period"]') as HTMLSelectElement).value).toBe('2026-09');
+    const text = region.textContent ?? '';
+    expect(text).toContain('Estimate until invoiced · GST-exclusive');
+    expect(text).toContain('Storage through 30 Sep 2026');
+    expect(text).toContain('1 Sep 2026 – 30 Sep 2026 · card from 10 Oct 2026');
+    const rows = [...region.querySelectorAll('tbody tr')].map((row) => row.textContent ?? '');
+    expect(rows[0]).toContain('Storage');
+    expect(rows[0]).toContain('kg');
+    expect(rows[0]).toContain('1,234.567 kg-days');
+    expect(rows[0]).toContain('₹3.30 per 1,000 units per day');
+    expect(rows[0]).toContain('₹4.07');
+    expect(rows[1]).toContain('3 receipt lines');
+    expect(rows[1]).toContain('Not billed');
+    expect(text).toContain('Segment total ₹10.07');
+    expect(text).toContain('Billed total ₹10.07 · 2 lines not billed');
+    // A read, never a mutation.
+    expect(requests.some((r) => r.method !== 'GET')).toBe(false);
+  });
+
+  test('usage: the period picker sends the month it names, and the in-progress month is marked', async () => {
+    writeSession(session('accountant'));
+    view = render(<RateCardsCard />);
+    await settle();
+    const select = view.container.querySelector('select[aria-label="Usage period"]') as HTMLSelectElement;
+    const before = usageReads().length;
+    selectValue(select, '2026-10');
+    await settle();
+    expect(usageReads().length).toBeGreaterThan(before);
+    const text = view.container.querySelector('[aria-label="Usage"]')!.textContent ?? '';
+    // The answer echoes the requested period: Oct 1–31, past the server's today.
+    expect(text).toContain('1 Oct 2026 – 31 Oct 2026');
+    expect(text).toContain('In progress — the counts run to now.');
+  });
+
+  test('usage: a custom range is checked before anything is sent (from ≤ to, at most 366 days)', async () => {
+    writeSession(session('owner'));
+    view = render(<RateCardsCard />);
+    await settle();
+    const select = view.container.querySelector('select[aria-label="Usage period"]') as HTMLSelectElement;
+    selectValue(select, 'custom');
+    await settle();
+    const before = usageReads().length;
+    const from = view.container.querySelector('input[aria-label="Usage from"]') as HTMLInputElement;
+    const to = view.container.querySelector('input[aria-label="Usage to"]') as HTMLInputElement;
+    setInput(from, '2026-09-30');
+    setInput(to, '2026-09-01');
+    await press(buttons(view.container, 'Show')[0]);
+    expect(view.container.textContent).toContain('The start date is after the end date.');
+    setInput(from, '2025-01-01');
+    setInput(to, '2026-09-01');
+    await press(buttons(view.container, 'Show')[0]);
+    expect(view.container.textContent).toContain('A period covers at most 366 days.');
+    expect(usageReads().length).toBe(before);
+    setInput(from, '2026-09-10');
+    setInput(to, '2026-09-20');
+    await press(buttons(view.container, 'Show')[0]);
+    expect(usageReads().length).toBe(before + 1);
+    expect(view.container.textContent).toContain('10 Sep 2026 – 20 Sep 2026');
+  });
+
+  test('usage: storage not measured yet when the server has no watermark; a card change refetches the usage', async () => {
+    usageThrough = null;
+    writeSession(session('ops_manager'));
+    view = render(<RateCardsCard />);
+    await settle();
+    expect(view.container.textContent).toContain('Storage not measured yet');
+    const before = usageReads().length;
+    await act(async () => {
+      window.dispatchEvent(new Event('wms-rate-cards-changed'));
+    });
+    await settle();
+    expect(usageReads().length).toBeGreaterThan(before);
   });
 });

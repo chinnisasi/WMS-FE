@@ -12,6 +12,7 @@ import {
   fetchApiDiscardRateCard,
   fetchApiListRateCards,
   fetchApiRateCardInForce,
+  fetchApiClientUsage,
   fetchApiReplaceRateCardLines,
   fetchApiImportCatalog,
   fetchApiListClients,
@@ -1589,6 +1590,27 @@ describe('rate-card wrappers (story 21-3)', () => {
     expect(now.rateCard).toBeNull();
     await fetchApiRateCardInForce(SESSION.tenant.id, CLIENT_ID, { at: '2026-10-31T18:30:00Z' });
     expect(new URL(lastRequest!.url).searchParams.get('at')).toBe('2026-10-31T18:30:00Z');
+    clearSession();
+  });
+
+  test('the usage read (21-4) GETs the client path with from/to and no key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, {
+      clientId: CLIENT_ID,
+      from: '2026-09-01',
+      to: '2026-09-30',
+      asOf: '2026-10-07T04:30:00.000Z',
+      storageCompleteThrough: '2026-09-30',
+      segments: [],
+      totals: { billedPaise: 0, unbilledLines: 0 },
+    });
+    const usage = await fetchApiClientUsage(SESSION.tenant.id, CLIENT_ID, { from: '2026-09-01', to: '2026-09-30' });
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/clients/${CLIENT_ID}/usage`);
+    expect(new URL(lastRequest!.url).searchParams.get('from')).toBe('2026-09-01');
+    expect(new URL(lastRequest!.url).searchParams.get('to')).toBe('2026-09-30');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(usage.storageCompleteThrough).toBe('2026-09-30');
     clearSession();
   });
 
