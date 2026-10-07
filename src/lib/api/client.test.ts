@@ -12,6 +12,8 @@ import {
   fetchApiDiscardRateCard,
   fetchApiDiscardClientInvoice,
   fetchApiGetClientInvoice,
+  fetchApiClientInvoiceLineRecords,
+  fetchApiClientInvoiceStorageBreakdown,
   fetchApiIssueClientInvoice,
   fetchApiListClientInvoices,
   fetchApiPrepareClientInvoices,
@@ -1722,6 +1724,29 @@ describe('client invoices and tax details (story 21-5)', () => {
     stubFetch(200, { invoice: INVOICE });
     await fetchApiGetClientInvoice(SESSION.tenant.id, INVOICE_ID);
     expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices/${INVOICE_ID}`);
+    clearSession();
+  });
+
+  test('21-5b: the line drill sends no query on a first page, then only the cursor and limit given; the breakdown sends date and warehouse', async () => {
+    writeSession(SESSION);
+    const LINE_ID = '01900000-0000-7000-8000-0000000000aa';
+    stubFetch(200, { kind: 'pick', invoiceStatus: 'issued', summary: { lineQuantity: '1', recordsQuantity: '1', reconciles: true }, records: [], nextCursor: null });
+    const first = await fetchApiClientInvoiceLineRecords(SESSION.tenant.id, INVOICE_ID, LINE_ID);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices/${INVOICE_ID}/lines/${LINE_ID}/records`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(first.summary?.reconciles).toBe(true);
+    await fetchApiClientInvoiceLineRecords(SESSION.tenant.id, INVOICE_ID, LINE_ID, { cursor: 'abc', limit: 1000 });
+    const params = new URL(lastRequest!.url).searchParams;
+    expect([params.get('cursor'), params.get('limit')]).toEqual(['abc', '1000']);
+    stubFetch(200, { date: '2026-09-14', warehouseId: 'w', warehouseCode: 'WH1', uom: 'each', skus: [], total: '0', snapshotOnHand: null, reconciles: true });
+    await fetchApiClientInvoiceStorageBreakdown(SESSION.tenant.id, INVOICE_ID, LINE_ID, '2026-09-14', 'w');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices/${INVOICE_ID}/lines/${LINE_ID}/storage-breakdown`);
+    const breakdown = new URL(lastRequest!.url).searchParams;
+    expect([breakdown.get('date'), breakdown.get('warehouseId')]).toEqual(['2026-09-14', 'w']);
+    stubFetch(404, { type: 'about:blank', title: 'Not found', status: 404, code: 'not-found', detail: 'gone' });
+    await expect(fetchApiClientInvoiceLineRecords(SESSION.tenant.id, INVOICE_ID, LINE_ID)).rejects.toMatchObject({ code: 'not-found', status: 404 });
     clearSession();
   });
 

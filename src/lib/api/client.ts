@@ -126,8 +126,10 @@ import {
   clientInvoicesControllerDispute,
   clientInvoicesControllerGet,
   clientInvoicesControllerIssue,
+  clientInvoicesControllerLineRecords,
   clientInvoicesControllerList,
   clientInvoicesControllerPrepare,
+  clientInvoicesControllerStorageBreakdown,
   clientInvoicesControllerRefresh,
   clientInvoicesControllerSettle,
   clientInvoicesControllerVoid,
@@ -135,7 +137,9 @@ import {
 import { ensureSessionHint, readSession, clearSession, writeSession } from '../auth';
 import type {
   ClientInvoiceDto,
+  ClientInvoiceLineRecordsResponse,
   ClientInvoiceListResponse,
+  StorageBreakdownResponse,
   ClientInvoiceResponse,
   IssueClientInvoiceResponse,
   PrepareClientInvoicesResponse,
@@ -846,6 +850,52 @@ export async function fetchApiGetClientInvoice(
 ): Promise<ClientInvoiceResponse> {
   const { data, error } = await clientInvoicesControllerGet({
     path: { tenantId, invoiceId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 21-5b — one keyset page of a client-invoice line's records (the
+ * dispute drill-down). The first page (no cursor) carries the
+ * reconciliation `summary`; a first page sends only the limit given.
+ */
+export async function fetchApiClientInvoiceLineRecords(
+  tenantId: string,
+  invoiceId: string,
+  lineId: string,
+  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<ClientInvoiceLineRecordsResponse> {
+  const query = {
+    ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options?.limit === undefined ? {} : { limit: options.limit }),
+  };
+  const { data, error } = await clientInvoicesControllerLineRecords({
+    path: { tenantId, invoiceId, lineId },
+    query: Object.keys(query).length === 0 ? undefined : query,
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 21-5b — a storage line's one-day per-SKU breakdown in one warehouse. */
+export async function fetchApiClientInvoiceStorageBreakdown(
+  tenantId: string,
+  invoiceId: string,
+  lineId: string,
+  date: string,
+  warehouseId: string,
+  options?: { signal?: AbortSignal },
+): Promise<StorageBreakdownResponse> {
+  const { data, error } = await clientInvoicesControllerStorageBreakdown({
+    path: { tenantId, invoiceId, lineId },
+    query: { date, warehouseId },
     signal: options?.signal,
   });
   if (error || !data) {

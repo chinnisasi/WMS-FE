@@ -5469,6 +5469,125 @@ export type ClientUsageResponse = {
     totals: UsageTotalsDto;
 };
 
+export type ReceiptLineRecordDto = {
+    kind: 'receipt-line';
+    /**
+     * The GRN line
+     */
+    id: string;
+    grnCode: string;
+    /**
+     * The purchase order the GRN booked against — null on a blind receipt
+     */
+    poCode: string | null;
+    /**
+     * The GRN's recorded_at (the server stamp), ISO-8601 UTC at full precision
+     */
+    recordedAt: string;
+    warehouseId: string;
+    warehouseCode: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * Received, base units — a decimal string
+     */
+    qty: string;
+    /**
+     * Applied at once (the rest pended as an over-receipt), base units — a decimal string
+     */
+    appliedQty: string;
+    actorId: string;
+    /**
+     * The actor's email; null when the user is unknown
+     */
+    actorEmail: string | null;
+};
+
+export type OrderRefDto = {
+    /**
+     * `manual` or the channel the order came from; null only when the order row is missing
+     */
+    source: string | null;
+    /**
+     * The channel's event id (the web labels it "Channel ref"); null on a manual order — there is no order number yet
+     */
+    externalEventId: string | null;
+    orderId: string;
+};
+
+export type PickRecordDto = {
+    kind: 'pick';
+    /**
+     * The pick row
+     */
+    id: string;
+    /**
+     * The pick row's created_at (the server clock), ISO-8601 UTC at full precision
+     */
+    pickedAt: string;
+    warehouseId: string;
+    warehouseCode: string;
+    orderRef: OrderRefDto;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * Picked, base units — a decimal string
+     */
+    qty: string;
+    /**
+     * The bin the operator scanned
+     */
+    binCode: string | null;
+    actorId: string;
+    actorEmail: string | null;
+};
+
+export type OrderRecordDto = {
+    kind: 'order';
+    /**
+     * The order's FIRST dispatch event (the one that billed it)
+     */
+    id: string;
+    /**
+     * That event's recorded_at, ISO-8601 UTC at full precision
+     */
+    dispatchedAt: string;
+    warehouseId: string;
+    warehouseCode: string;
+    orderRef: OrderRefDto;
+    /**
+     * The order's dispatch events in this window and group — one per order line shipped
+     */
+    lines: number;
+    /**
+     * The first event's carrier
+     */
+    carrierName: string | null;
+    trackingNumber: string | null;
+    actorId: string;
+    actorEmail: string | null;
+};
+
+export type StorageDayRecordDto = {
+    kind: 'storage-day';
+    /**
+     * The IST day this is the closing stock of
+     */
+    date: string;
+    warehouseId: string;
+    warehouseCode: string;
+    /**
+     * The base UoM (the line’s)
+     */
+    uom: string;
+    /**
+     * On hand at the end of the IST day, base units — a decimal string
+     */
+    onHand: string;
+};
+
 export type PrepareClientInvoicesDto = {
     /**
      * One IST calendar month, YYYY-MM — it must have ended
@@ -5566,6 +5685,10 @@ export type ClientInvoicePartyDto = {
 };
 
 export type ClientInvoiceLineDto = {
+    /**
+     * The line's id — the dispute drill's address (21-5b). A draft's lines are rewritten (new ids) when it is refreshed or answers stale
+     */
+    id: string;
     /**
      * The rate card that priced the line (null: no card in force)
      */
@@ -5709,6 +5832,71 @@ export type ClientInvoiceListResponse = {
 
 export type ClientInvoiceResponse = {
     invoice: ClientInvoiceDto;
+};
+
+export type LineRecordsSummaryDto = {
+    /**
+     * The line's quantity as the line view states it (storage base-unit-days, a whole count otherwise)
+     */
+    lineQuantity: string;
+    /**
+     * The same figure re-derived now from every record of the predicate, in the same units
+     */
+    recordsQuantity: string;
+    /**
+     * The two are exactly equal
+     */
+    reconciles: boolean;
+};
+
+export type ClientInvoiceLineRecordsResponse = {
+    /**
+     * The kind of every record on this line
+     */
+    kind: 'receipt-line' | 'pick' | 'order' | 'storage-day';
+    /**
+     * The invoice status the drill was read under
+     */
+    invoiceStatus: 'draft' | 'issued' | 'disputed' | 'settled' | 'void';
+    /**
+     * The first page only (no cursor)
+     */
+    summary?: LineRecordsSummaryDto;
+    records: Array<ReceiptLineRecordDto | PickRecordDto | OrderRecordDto | StorageDayRecordDto>;
+    nextCursor: string | null;
+};
+
+export type StorageBreakdownSkuDto = {
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * On hand at the end of the day, signed base units — a negative SKU is kept (it is part of the sum)
+     */
+    onHand: string;
+};
+
+export type StorageBreakdownResponse = {
+    date: string;
+    warehouseId: string;
+    warehouseCode: string;
+    uom: string;
+    /**
+     * Every SKU of the base UoM whose on-hand is not zero, by code
+     */
+    skus: Array<StorageBreakdownSkuDto>;
+    /**
+     * Σ of the SKUs, base units
+     */
+    total: string;
+    /**
+     * The day's snapshot, base units — null when the day closed at ≤ 0 (no snapshot is written)
+     */
+    snapshotOnHand: string | null;
+    /**
+     * total = snapshotOnHand (or total ≤ 0 when there is no snapshot)
+     */
+    reconciles: boolean;
 };
 
 export type IssueClientInvoiceResponse = {
@@ -14309,6 +14497,111 @@ export type ClientInvoicesControllerGetResponses = {
 };
 
 export type ClientInvoicesControllerGetResponse = ClientInvoicesControllerGetResponses[keyof ClientInvoicesControllerGetResponses];
+
+export type ClientInvoicesControllerLineRecordsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+        lineId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from a previous page (no cursor = the first page, which carries the summary)
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}/lines/{lineId}/records';
+};
+
+export type ClientInvoicesControllerLineRecordsErrors = {
+    /**
+     * A malformed invoiceId or lineId, a limit outside 1–1,000 (validation-failed), or a malformed cursor (invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such invoice in this tenant, or no such line on it — a draft's line ids change when it is refreshed: reload (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The invoice's supplying GSTIN no longer maps to any warehouse (invoice-group-changed)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerLineRecordsError = ClientInvoicesControllerLineRecordsErrors[keyof ClientInvoicesControllerLineRecordsErrors];
+
+export type ClientInvoicesControllerLineRecordsResponses = {
+    200: ClientInvoiceLineRecordsResponse;
+};
+
+export type ClientInvoicesControllerLineRecordsResponse = ClientInvoicesControllerLineRecordsResponses[keyof ClientInvoicesControllerLineRecordsResponses];
+
+export type ClientInvoicesControllerStorageBreakdownData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+        lineId: string;
+    };
+    query: {
+        /**
+         * An IST day of the line’s measured segment, YYYY-MM-DD
+         */
+        date: string;
+        /**
+         * A warehouse of the invoice’s supplying-GSTIN group
+         */
+        warehouseId: string;
+    };
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}/lines/{lineId}/storage-breakdown';
+};
+
+export type ClientInvoicesControllerStorageBreakdownErrors = {
+    /**
+     * A malformed invoiceId, lineId, date or warehouseId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such invoice or line; not a storage line; a date outside the line’s measured segment; or a warehouse outside the invoice’s group (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The invoice's supplying GSTIN no longer maps to any warehouse (invoice-group-changed)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type ClientInvoicesControllerStorageBreakdownError = ClientInvoicesControllerStorageBreakdownErrors[keyof ClientInvoicesControllerStorageBreakdownErrors];
+
+export type ClientInvoicesControllerStorageBreakdownResponses = {
+    200: StorageBreakdownResponse;
+};
+
+export type ClientInvoicesControllerStorageBreakdownResponse = ClientInvoicesControllerStorageBreakdownResponses[keyof ClientInvoicesControllerStorageBreakdownResponses];
 
 export type ClientInvoicesControllerRefreshData = {
     body?: never;
