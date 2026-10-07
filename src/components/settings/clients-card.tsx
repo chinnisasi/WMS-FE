@@ -2,10 +2,24 @@
 
 import { useRef, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiCreateClient, fetchApiRenameClient } from '@/lib/api/client';
+import { fetchApiCreateClient, fetchApiRenameClient, fetchApiUpdateClientTaxDetails } from '@/lib/api/client';
 import type { ClientDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { clientLabel, clientNameProblem, clientReason, notifyClientsChanged, parseClientDraft } from '@/lib/clients';
+import {
+  BILLING_STATE_OPTIONS,
+  clientLabel,
+  clientNameProblem,
+  clientReason,
+  notifyClientsChanged,
+  parseClientDraft,
+  parseTaxDetailsDraft,
+  taxDetailLabel,
+  taxDetailsFieldsOf,
+  taxDetailsReason,
+  taxDetailsSummary,
+  type TaxDetailField,
+  type TaxDetailsFields,
+} from '@/lib/clients';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useClients } from '@/lib/use-clients';
@@ -63,30 +77,54 @@ function ClientsCardSessioned() {
     () => null,
   );
   const canManage = roleHasCapability(role, 'clients.manage');
+  // Story 21-5 — the tax details are `billing.invoice`'s (owner + accountant):
+  // whoever clears an invoice's recipient gaps fixes them here.
+  const canInvoice = roleHasCapability(role, 'billing.invoice');
   const [renaming, setRenaming] = useState<ClientDto | null>(null);
+  const [taxing, setTaxing] = useState<ClientDto | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
 
   const columns: readonly DataTableColumn<ClientDto>[] = [
     { key: 'code', header: 'Code', render: (client) => <span className="font-mono">{client.code}</span> },
     { key: 'name', header: 'Client', render: (client) => clientLabel(client, tenantName) },
     { key: 'status', header: 'Status', render: (client) => client.status },
-    ...(canManage
+    // Story 21-5 — every member reads a brand's tax details (what its invoices print).
+    { key: 'tax', header: 'Tax details', render: (client) => <span className="text-xs">{taxDetailsSummary(client)}</span> },
+    ...(canManage || canInvoice
       ? [
           {
             key: 'actions',
             header: '',
             render: (client: ClientDto) =>
               client.systemOwned ? null : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRenaming(client);
-                    setOutcome(null);
-                  }}
-                  className={rowButtonClass}
-                >
-                  Rename
-                </button>
+                <div className="flex gap-1">
+                  {canManage ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRenaming(client);
+                        setTaxing(null);
+                        setOutcome(null);
+                      }}
+                      className={rowButtonClass}
+                    >
+                      Rename
+                    </button>
+                  ) : null}
+                  {canInvoice ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaxing(client);
+                        setRenaming(null);
+                        setOutcome(null);
+                      }}
+                      className={rowButtonClass}
+                    >
+                      Tax details
+                    </button>
+                  ) : null}
+                </div>
               ),
           } satisfies DataTableColumn<ClientDto>,
         ]
@@ -138,6 +176,24 @@ function ClientsCardSessioned() {
             notifyClientsChanged();
           }}
           onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Not renamed', reason })}
+        />
+      ) : null}
+
+      {canInvoice && taxing !== null ? (
+        <TaxDetailsForm
+          key={taxing.id}
+          client={taxing}
+          onClose={() => setTaxing(null)}
+          onSaved={(client, changed) => {
+            setTaxing(null);
+            setOutcome(
+              changed
+                ? { tone: 'accepted', word: `${client.code} tax details saved`, reason: 'Refresh a draft invoice to pick them up — an issued invoice keeps what it printed.' }
+                : { tone: 'accepted', word: 'Nothing changed', reason: `${client.code}'s tax details are as entered.` },
+            );
+            if (changed) notifyClientsChanged();
+          }}
+          onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Tax details not saved', reason })}
         />
       ) : null}
 
@@ -310,6 +366,133 @@ function RenameClientForm({
       </button>
       {problem !== null ? (
         <div role="alert" className="w-full text-xs text-(--destructive)">
+          {problem}
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
+/**
+ * Story 21-5 — a client brand's tax details: the legal name, GSTIN and
+ * billing address its services tax invoices name it by. Only the CHANGED
+ * fields are sent (an emptied field clears). Per-draft Idempotency-Key:
+ * reused across retries of the unchanged form, cleared on any edit and on
+ * success.
+ */
+function TaxDetailsForm({
+  client,
+  onClose,
+  onSaved,
+  onRejected,
+}: {
+  client: ClientDto;
+  onClose: () => void;
+  onSaved: (client: ClientDto, changed: boolean) => void;
+  onRejected: (reason: string) => void;
+}) {
+  const [fields, setFields] = useState<TaxDetailsFields>(() => taxDetailsFieldsOf(client));
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const keyRef = useRef<string | null>(null);
+  const inFlight = useRef(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (inFlight.current) return;
+    const parsed = parseTaxDetailsDraft(fields, client.taxDetails);
+    if (parsed.body === null) {
+      setProblem(parsed.problem);
+      return;
+    }
+    setProblem(null);
+    if (Object.keys(parsed.body).length === 0) {
+      onSaved(client, false);
+      return;
+    }
+    const session = readSession();
+    if (session === null) return;
+    inFlight.current = true;
+    setBusy(true);
+    keyRef.current ??= ulid();
+    try {
+      const saved = await fetchApiUpdateClientTaxDetails(session.tenant.id, client.id, parsed.body, keyRef.current);
+      keyRef.current = null;
+      onSaved(saved, true);
+    } catch (error) {
+      onRejected(taxDetailsReason(error));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  const edit = (field: TaxDetailField, value: string) => {
+    keyRef.current = null;
+    setFields((current) => ({ ...current, [field]: value }));
+  };
+  const text = (field: TaxDetailField, placeholder: string) => (
+    <label className="flex min-w-48 flex-1 flex-col gap-1">
+      <span className={labelClass}>{taxDetailLabel(field)}</span>
+      <input
+        className={inputClass}
+        value={fields[field]}
+        aria-label={taxDetailLabel(field)}
+        placeholder={placeholder}
+        spellCheck={false}
+        onChange={(event) => edit(field, event.target.value)}
+      />
+    </label>
+  );
+
+  return (
+    <form onSubmit={submit} aria-label={`Tax details of ${client.code}`} className="flex flex-col gap-2 rounded-md border border-(--border) p-3">
+      <div className="text-(--muted-foreground)">
+        What {client.code}&apos;s services tax invoices name it by. A registered client is billed in its GSTIN&apos;s state; leave the GSTIN blank for an
+        unregistered one. Clear a field to remove it.
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {text('legalName', 'Acme Foods Private Limited')}
+        {text('gstin', '27AAACA1234A1Z5')}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {text('billingLine1', '12 MG Road')}
+        {text('billingLine2', 'Floor 3')}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {text('billingCity', 'Pune')}
+        <label className="flex min-w-48 flex-1 flex-col gap-1">
+          <span className={labelClass}>{taxDetailLabel('billingStateCode')}</span>
+          <select
+            className={inputClass}
+            value={fields.billingStateCode}
+            aria-label={taxDetailLabel('billingStateCode')}
+            onChange={(event) => edit('billingStateCode', event.target.value)}
+          >
+            <option value="">—</option>
+            {BILLING_STATE_OPTIONS.map((option) => (
+              <option key={option.code} value={option.code}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {text('billingPincode', '411001')}
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-40"
+        >
+          {busy ? 'Saving…' : 'Save tax details'}
+        </button>
+        <button type="button" onClick={onClose} className={rowButtonClass}>
+          Cancel
+        </button>
+      </div>
+      {problem !== null ? (
+        <div role="alert" className="text-xs text-(--destructive)">
           {problem}
         </div>
       ) : null}

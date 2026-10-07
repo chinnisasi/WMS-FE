@@ -20,6 +20,12 @@ import {
   importedForLabel,
   clientNameProblem,
   correctionOutcome,
+  NO_TAX_DETAILS,
+  BILLING_STATE_OPTIONS,
+  parseTaxDetailsDraft,
+  taxDetailsFieldsOf,
+  taxDetailsReason,
+  taxDetailsSummary,
 } from './clients';
 import { UNREACHABLE_REASON } from './outbound-orders';
 
@@ -33,6 +39,7 @@ function client(over: Partial<ClientDto> = {}): ClientDto {
     systemOwned: false,
     createdAt: '2026-10-06T00:00:00.000Z',
     updatedAt: '2026-10-06T00:00:00.000Z',
+    taxDetails: NO_TAX_DETAILS,
     ...over,
   };
 }
@@ -212,5 +219,56 @@ describe('the refusal mappers branch on the code', () => {
       'The order mixes SKUs of clients ACME, self',
     );
     expect(mixedClientReason(problem('mixed-client', 409))).toMatch(/more than one client/);
+  });
+});
+
+describe('story 21-5 — the client tax details', () => {
+  const STORED = {
+    legalName: 'Acme Foods Private Limited',
+    gstin: '27AAACA1234A1Z5',
+    billingLine1: '5 FC Road',
+    billingLine2: null,
+    billingCity: 'Pune',
+    billingStateCode: '27',
+    billingPincode: '411001',
+  };
+
+  test('the form round-trips the stored values; only CHANGED fields are sent; an emptied field is null', () => {
+    const fields = taxDetailsFieldsOf(client({ taxDetails: STORED }));
+    expect(fields.billingLine2).toBe('');
+    expect(parseTaxDetailsDraft(fields, STORED)).toEqual({ body: {}, problem: null });
+    expect(parseTaxDetailsDraft({ ...fields, billingLine2: ' Floor 2 ', legalName: '' }, STORED)).toEqual({
+      body: { legalName: null, billingLine2: 'Floor 2' },
+      problem: null,
+    });
+    // The GSTIN is uppercased before it is compared.
+    expect(parseTaxDetailsDraft({ ...fields, gstin: '27aaaca1234a1z5' }, STORED)).toEqual({ body: {}, problem: null });
+  });
+
+  test('refuses what the server would 400: GSTIN shape and prefix, a GSTIN in another state, a bad pincode, an unknown state', () => {
+    const fields = taxDetailsFieldsOf(client({ taxDetails: STORED }));
+    expect(parseTaxDetailsDraft({ ...fields, gstin: '27ABC' }, STORED).problem).toContain('15 characters');
+    expect(parseTaxDetailsDraft({ ...fields, gstin: '99AAACA1234A1Z5', billingStateCode: '' }, STORED).problem).toContain('not a GST registration state code');
+    expect(parseTaxDetailsDraft({ ...fields, gstin: '29AAACA1234A1Z5' }, STORED).problem).toBe(
+      "This GSTIN is registered in Karnataka (29) — a registered client is billed in its GSTIN's state, so pick that state.",
+    );
+    expect(parseTaxDetailsDraft({ ...fields, billingPincode: '4110' }, STORED).problem).toBe('A pincode is six digits.');
+    expect(parseTaxDetailsDraft({ ...fields, billingStateCode: '99' }, STORED).problem).toBe('Choose a state from the list.');
+    expect(parseTaxDetailsDraft({ ...fields, legalName: 'x'.repeat(201) }, STORED).problem).toBe('Legal name is at most 200 characters.');
+  });
+
+  test('the summary names what an invoice still needs; the state options are the registration codes', () => {
+    expect(taxDetailsSummary(client({ taxDetails: STORED }))).toBe('Acme Foods Private Limited · 27AAACA1234A1Z5 · Maharashtra');
+    expect(taxDetailsSummary(client({ taxDetails: { ...STORED, gstin: null } }))).toBe('Acme Foods Private Limited · Unregistered · Maharashtra');
+    expect(taxDetailsSummary(client())).toBe('Missing legal name and billing address — needed to invoice');
+    expect(taxDetailsSummary(client({ systemOwned: true }))).toBe('—');
+    expect(BILLING_STATE_OPTIONS.find((option) => option.code === '27')).toEqual({ code: '27', label: '27 — Maharashtra' });
+    expect(BILLING_STATE_OPTIONS.some((option) => option.code === '99')).toBe(false);
+  });
+
+  test('the refusal mapper', () => {
+    expect(taxDetailsReason(new ApiProblem('validation-failed', 400, 'gstin bad'))).toBe('gstin bad');
+    expect(taxDetailsReason(new ApiProblem('role-denied', 403))).toBe('Only an owner or an accountant can set tax details.');
+    expect(taxDetailsReason(new TypeError('Failed to fetch'))).toBe(UNREACHABLE_REASON);
   });
 });

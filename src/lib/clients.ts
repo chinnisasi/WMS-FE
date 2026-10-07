@@ -9,7 +9,9 @@
  * can pin).
  */
 import { ApiProblem } from '@/lib/api/client';
-import type { ClientDto } from '@/lib/api/generated';
+import type { ClientDto, ClientTaxDetailsDto, UpdateClientTaxDetailsDto } from '@/lib/api/generated';
+import { GST_STATE_NAMES, GSTIN_STATE_CODES } from '@/lib/gst-states';
+import { parseGstinField } from '@/lib/gstin';
 import { UNREACHABLE_REASON, verbatim } from '@/lib/outbound-orders';
 
 /** Fired on `window` after a client mutation so readers refetch. */
@@ -276,6 +278,159 @@ export function importReason(error: unknown): string {
         return error.detail ?? 'Check the file and try again.';
       default:
         return error.detail ?? `Import failed (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+// ── story 21-5: the client's tax details ────────────────────────────────────
+
+/** A client with no tax details at all (every field unset). */
+export const NO_TAX_DETAILS: ClientTaxDetailsDto = Object.freeze({
+  legalName: null,
+  gstin: null,
+  billingLine1: null,
+  billingLine2: null,
+  billingCity: null,
+  billingStateCode: null,
+  billingPincode: null,
+});
+
+/** The tax-detail fields in the backend's fixed order. */
+export const TAX_DETAIL_FIELDS = [
+  'legalName',
+  'gstin',
+  'billingLine1',
+  'billingLine2',
+  'billingCity',
+  'billingStateCode',
+  'billingPincode',
+] as const;
+export type TaxDetailField = (typeof TAX_DETAIL_FIELDS)[number];
+
+/** The form's text fields (an unset value is ''). */
+export type TaxDetailsFields = Record<TaxDetailField, string>;
+
+/** The backend's ceilings (the 0062 CHECKs / the address primitive). */
+export const TAX_DETAIL_MAX: Readonly<Record<Exclude<TaxDetailField, 'gstin' | 'billingStateCode' | 'billingPincode'>, number>> = {
+  legalName: 200,
+  billingLine1: 200,
+  billingLine2: 200,
+  billingCity: 100,
+};
+
+const TAX_DETAIL_LABEL: Readonly<Record<TaxDetailField, string>> = {
+  legalName: 'Legal name',
+  gstin: 'GSTIN',
+  billingLine1: 'Address line 1',
+  billingLine2: 'Address line 2',
+  billingCity: 'City',
+  billingStateCode: 'State',
+  billingPincode: 'Pincode',
+};
+
+export function taxDetailLabel(field: TaxDetailField): string {
+  return TAX_DETAIL_LABEL[field];
+}
+
+/** The state select's options: every GST registration code, `27 — Maharashtra`, by code. */
+export const BILLING_STATE_OPTIONS: readonly { readonly code: string; readonly label: string }[] = Object.freeze(
+  GSTIN_STATE_CODES.map((code) => ({ code, label: `${code} — ${GST_STATE_NAMES[code] ?? code}` })),
+);
+
+/** A client's stored tax details as form text (a pre-21-5 read without them is all unset). */
+export function taxDetailsFieldsOf(client: Pick<ClientDto, 'taxDetails'>): TaxDetailsFields {
+  const details = client.taxDetails ?? NO_TAX_DETAILS;
+  return Object.fromEntries(TAX_DETAIL_FIELDS.map((field) => [field, details[field] ?? ''])) as TaxDetailsFields;
+}
+
+/**
+ * The form → the PATCH body, or a problem (nothing is sent when set): only
+ * the CHANGED fields are sent (an untouched field stays absent — unchanged on
+ * the server); a field emptied is sent as `null` (cleared). The rules the
+ * backend answers 400 to are mirrored so a guaranteed refusal is never sent:
+ * the GSTIN shape and registration prefix (`parseGstinField`), a six-digit
+ * pincode, the ceilings, and the GSTIN agreeing with the billing state.
+ * Nothing changed → `body: {}` with no problem (the caller says so).
+ */
+export function parseTaxDetailsDraft(
+  fields: TaxDetailsFields,
+  stored: ClientTaxDetailsDto | undefined,
+): { body: UpdateClientTaxDetailsDto; problem: null } | { body: null; problem: string } {
+  const current = stored ?? NO_TAX_DETAILS;
+  const next: Record<TaxDetailField, string | null> = { ...NO_TAX_DETAILS };
+  for (const field of TAX_DETAIL_FIELDS) {
+    const trimmed = fields[field].trim();
+    next[field] = trimmed === '' ? null : field === 'gstin' ? trimmed.toUpperCase() : trimmed;
+  }
+  for (const [field, max] of Object.entries(TAX_DETAIL_MAX) as [TaxDetailField, number][]) {
+    const value = next[field];
+    if (value !== null && [...value].length > max) return { body: null, problem: `${taxDetailLabel(field)} is at most ${max} characters.` };
+  }
+  if (next.gstin !== null) {
+    const parsed = parseGstinField(next.gstin, 'The GSTIN');
+    if (parsed.problem !== null) return { body: null, problem: parsed.problem };
+  }
+  if (next.billingPincode !== null && !/^\d{6}$/.test(next.billingPincode)) {
+    return { body: null, problem: 'A pincode is six digits.' };
+  }
+  if (next.billingStateCode !== null && !GSTIN_STATE_CODES.includes(next.billingStateCode)) {
+    return { body: null, problem: 'Choose a state from the list.' };
+  }
+  if (next.gstin !== null && next.billingStateCode !== null && next.gstin.slice(0, 2) !== next.billingStateCode) {
+    const named = GST_STATE_NAMES[next.gstin.slice(0, 2)] ?? next.gstin.slice(0, 2);
+    return {
+      body: null,
+      problem: `This GSTIN is registered in ${named} (${next.gstin.slice(0, 2)}) — a registered client is billed in its GSTIN's state, so pick that state.`,
+    };
+  }
+  const body: Record<string, string | null> = {};
+  for (const field of TAX_DETAIL_FIELDS) {
+    if (next[field] !== (current[field] ?? null)) body[field] = next[field];
+  }
+  return { body: body as UpdateClientTaxDetailsDto, problem: null };
+}
+
+/**
+ * The card's one-line summary of a client's tax details: the legal name, the
+ * GSTIN (or "unregistered") and the billing state — or what is still missing
+ * before an invoice can issue to it (the same parts the invoice's
+ * recipient gaps name).
+ */
+export function taxDetailsSummary(client: Pick<ClientDto, 'taxDetails' | 'systemOwned'>): string {
+  if (client.systemOwned) return '—';
+  const details = client.taxDetails ?? NO_TAX_DETAILS;
+  const missing = [
+    details.legalName === null ? 'legal name' : null,
+    details.billingLine1 === null || details.billingCity === null || details.billingStateCode === null || details.billingPincode === null
+      ? 'billing address'
+      : null,
+  ].filter((part): part is string => part !== null);
+  if (missing.length > 0) return `Missing ${missing.join(' and ')} — needed to invoice`;
+  const state = details.billingStateCode === null ? '' : ` · ${GST_STATE_NAMES[details.billingStateCode] ?? details.billingStateCode}`;
+  return `${details.legalName} · ${details.gstin ?? 'Unregistered'}${state}`;
+}
+
+/** The tax-details write's refusals. */
+export function taxDetailsReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'validation-failed':
+        return error.detail ?? 'Check the tax details and try again.';
+      case 'not-found':
+        return 'That client no longer exists — refresh the page.';
+      case 'role-denied':
+        return 'Only an owner or an accountant can set tax details.';
+      case 'permission-denied':
+        return 'Your session belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This submission was already processed with different details — edit and save again.';
+      case 'conflict':
+        return 'The same submission is still in flight — retry to read the settled result.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      default:
+        return error.detail ?? `Tax details not saved (${error.code}).`;
     }
   }
   return UNREACHABLE_REASON;

@@ -121,9 +121,25 @@ import {
   billingUsageControllerUsage,
   rateCardsControllerList,
   rateCardsControllerReplaceLines,
+  clientsControllerUpdateTaxDetails,
+  clientInvoicesControllerDiscard,
+  clientInvoicesControllerDispute,
+  clientInvoicesControllerGet,
+  clientInvoicesControllerIssue,
+  clientInvoicesControllerList,
+  clientInvoicesControllerPrepare,
+  clientInvoicesControllerRefresh,
+  clientInvoicesControllerSettle,
+  clientInvoicesControllerVoid,
 } from './generated/sdk.gen';
 import { ensureSessionHint, readSession, clearSession, writeSession } from '../auth';
 import type {
+  ClientInvoiceDto,
+  ClientInvoiceListResponse,
+  ClientInvoiceResponse,
+  IssueClientInvoiceResponse,
+  PrepareClientInvoicesResponse,
+  UpdateClientTaxDetailsDto,
   AcceptInviteDto,
   AcceptInviteResponse,
   AdjustmentDecisionResponse,
@@ -753,6 +769,153 @@ export async function fetchApiRenameClient(
     throw unwrapError(error, 400);
   }
   return data.client;
+}
+
+/**
+ * Story 21-5 — set a client brand's tax details (`billing.invoice`: owner +
+ * accountant). An absent field is unchanged; `null` clears it.
+ */
+export async function fetchApiUpdateClientTaxDetails(
+  tenantId: string,
+  clientId: string,
+  body: UpdateClientTaxDetailsDto,
+  idempotencyKey: string,
+): Promise<ClientDto> {
+  const { data, error } = await clientsControllerUpdateTaxDetails({
+    path: { tenantId, clientId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.client;
+}
+
+/* ------------------------------------------------------------------ */
+/* Client invoices (story 21-5) — a client's monthly services tax      */
+/* invoice per supplying GSTIN. Reads are member-open (portal sessions */
+/* refused); the mutations need `billing.invoice`.                      */
+/* ------------------------------------------------------------------ */
+
+/** Prepare the drafts of one client for an ended IST month (`YYYY-MM`). */
+export async function fetchApiPrepareClientInvoices(
+  tenantId: string,
+  clientId: string,
+  month: string,
+  idempotencyKey: string,
+): Promise<PrepareClientInvoicesResponse> {
+  const { data, error } = await clientInvoicesControllerPrepare({
+    path: { tenantId, clientId },
+    body: { month },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** A keyset page of client invoices, newest first; a first page sends only the filters given. */
+export async function fetchApiListClientInvoices(
+  tenantId: string,
+  options?: { clientId?: string; status?: ClientInvoiceDto['status']; cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<ClientInvoiceListResponse> {
+  const query = {
+    ...(options?.clientId === undefined ? {} : { clientId: options.clientId }),
+    ...(options?.status === undefined ? {} : { status: options.status }),
+    ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options?.limit === undefined ? {} : { limit: options.limit }),
+  };
+  const { data, error } = await clientInvoicesControllerList({
+    path: { tenantId },
+    query: Object.keys(query).length === 0 ? undefined : query,
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** One client invoice: lines, gaps, warnings, party, totals. */
+export async function fetchApiGetClientInvoice(
+  tenantId: string,
+  invoiceId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ClientInvoiceResponse> {
+  const { data, error } = await clientInvoicesControllerGet({
+    path: { tenantId, invoiceId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Re-derive a draft from the current figures. */
+export async function fetchApiRefreshClientInvoice(tenantId: string, invoiceId: string, idempotencyKey: string): Promise<ClientInvoiceDto> {
+  const { data, error } = await clientInvoicesControllerRefresh({
+    path: { tenantId, invoiceId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.invoice;
+}
+
+/** Discard a draft (204). */
+export async function fetchApiDiscardClientInvoice(tenantId: string, invoiceId: string, idempotencyKey: string): Promise<void> {
+  const { error } = await clientInvoicesControllerDiscard({
+    path: { tenantId, invoiceId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error) {
+    throw unwrapError(error, 400);
+  }
+}
+
+/**
+ * Issue a draft: `{outcome: 'issued' | 'stale', invoice}` — a stale answer is
+ * a 200 carrying the fresh draft (nothing issued), recorded under its key; the
+ * caller mints a NEW key per click.
+ */
+export async function fetchApiIssueClientInvoice(tenantId: string, invoiceId: string, idempotencyKey: string): Promise<IssueClientInvoiceResponse> {
+  const { data, error } = await clientInvoicesControllerIssue({
+    path: { tenantId, invoiceId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Dispute, settle or void an issued invoice; the note is sent only when given. */
+export async function fetchApiTransitionClientInvoice(
+  tenantId: string,
+  invoiceId: string,
+  verb: 'dispute' | 'settle' | 'void',
+  note: string | null,
+  idempotencyKey: string,
+): Promise<ClientInvoiceDto> {
+  const options = {
+    path: { tenantId, invoiceId },
+    body: note === null ? {} : { note },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  };
+  const { data, error } =
+    verb === 'dispute'
+      ? await clientInvoicesControllerDispute(options)
+      : verb === 'settle'
+        ? await clientInvoicesControllerSettle(options)
+        : await clientInvoicesControllerVoid(options);
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.invoice;
 }
 
 /* ------------------------------------------------------------------ */

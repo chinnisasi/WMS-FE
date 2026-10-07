@@ -81,6 +81,9 @@ function stubRouter(): void {
     if (method === 'POST' && pathname.endsWith('/catalog/imports')) {
       return json(201, { importId: 'i-1', mode: 'initial', committedRows: 1, failedRows: 0, skippedRows: 0, errors: [], clientId: 'c-acme' });
     }
+    if (method === 'PATCH' && pathname.endsWith('/tax-details')) {
+      return json(200, { client: { ...ACME, status: 'active' } });
+    }
     if (method === 'POST' && pathname.endsWith('/clients')) {
       const sent = body as { code: string; name: string };
       return json(201, { client: { ...ACME, id: 'c-new', code: sent.code, name: sent.name, status: 'active' } });
@@ -140,15 +143,64 @@ describe('ClientsCard', () => {
   });
 
   for (const role of ['ops_manager', 'accountant', 'operator'] as const) {
-    test(`${role} reads the list and is offered NO mutating affordance`, async () => {
+    test(`${role} reads the list and is offered no create or rename${role === 'accountant' ? ' (only Tax details — 21-5)' : ', and no Tax details'}`, async () => {
       writeSession(session(role));
       view = render(<ClientsCard />);
       await settle();
       expect(view.container.textContent).toContain('ACME — Acme Foods');
       expect(view.container.querySelector('form[aria-label="New client"]')).toBeNull();
       expect(buttons(view.container, 'Rename')).toHaveLength(0);
+      // Story 21-5 — the tax details are billing.invoice's (owner + accountant), never on the self row.
+      expect(buttons(view.container, 'Tax details')).toHaveLength(role === 'accountant' ? 1 : 0);
     });
   }
+
+  test('story 21-5: every role reads the tax-details summary; the accountant saves ONLY the changed fields', async () => {
+    clientRows = [
+      SELF,
+      {
+        ...ACME,
+        taxDetails: {
+          legalName: 'Acme Foods Private Limited',
+          gstin: null,
+          billingLine1: '5 FC Road',
+          billingLine2: 'Floor 2',
+          billingCity: 'Pune',
+          billingStateCode: '27',
+          billingPincode: '411001',
+        },
+      },
+    ];
+    writeSession(session('accountant'));
+    view = render(<ClientsCard />);
+    await settle();
+    expect(view.container.textContent).toContain('Acme Foods Private Limited · Unregistered · Maharashtra');
+    await act(async () => {
+      buttons(view!.container, 'Tax details')[0]!.click();
+    });
+    const form = view.container.querySelector('form[aria-label="Tax details of ACME"]')!;
+    const input = (label: string) => form.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement;
+    expect(input('Legal name').value).toBe('Acme Foods Private Limited');
+    // A GSTIN of another state than the billing state is refused locally — nothing sent.
+    setInput(input('GSTIN'), '29aaaca1234a1z5');
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(requests.some((r) => r.method === 'PATCH')).toBe(false);
+    expect(view.container.textContent).toContain('registered in Karnataka (29)');
+    // A matching GSTIN, and line 2 cleared: exactly those two are sent.
+    setInput(input('GSTIN'), '27aaaca1234a1z5');
+    setInput(input('Address line 2'), '');
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    const patch = requests.find((r) => r.method === 'PATCH')!;
+    expect(patch.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-acme/tax-details`);
+    expect(patch.body).toEqual({ gstin: '27AAACA1234A1Z5', billingLine2: null });
+    expect(patch.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(view.container.textContent).toContain('ACME tax details saved');
+  });
 
   test('Add client POSTs the normalized body with an Idempotency-Key and refetches the list', async () => {
     writeSession(session('owner'));
