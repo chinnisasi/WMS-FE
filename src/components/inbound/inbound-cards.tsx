@@ -29,27 +29,24 @@ import { roleHasCapability } from '@/lib/users';
 import { clientCell, showClients } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { ulid } from '@/lib/ulid';
+import { grnDocument } from '@/lib/asns';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { AsnsCard } from '@/components/inbound/asn-card';
 
 /**
  * The Inbound surface (stories 3.1 / 3.3) — the review half of receiving:
  * the active warehouse's purchase orders (code, vendor, per-line
- * ordered/received/open, status) and its goods receipt notes (code, PO
- * reference or blind flag + reason, lines, units, recorded time). Reads only
- * — the mobile device records receipts; the web surface reviews them.
+ * ordered/received/open, status), its advance shipment notices (story 21-6,
+ * `asn-card.tsx` — the one inbound document the web also writes) and its
+ * goods receipt notes (code, the document — PO, ASN or blind + reason —
+ * lines, units, recorded time). The mobile device records receipts; the web
+ * surface reviews them.
  *
  * Warehouse scoping follows the sidebar switcher's pick (per-viewer, like
  * zone-bin-setup), falling back to the tenant's first warehouse.
  */
-
-/** Blind reason codes are a fixed backend enum — surfaced in plain words. */
-const BLIND_REASON_LABEL: Record<GoodsReceiptEntryDto['blindReasonCode'], string> = {
-  'unannounced-delivery': 'Unannounced delivery',
-  'po-not-found': 'PO not found',
-  other: 'Other',
-};
 
 export function InboundCards() {
   const sessioned = useSyncExternalStore(
@@ -91,6 +88,7 @@ function InboundCardsSessioned() {
   return (
     <div className="flex flex-col gap-4">
       <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+      <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
       <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
       <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
     </div>
@@ -225,18 +223,16 @@ function GoodsReceiptsCard({
   const columns: readonly DataTableColumn<GoodsReceiptEntryDto>[] = [
     { key: 'code', header: 'GRN code', render: (grn) => <span className="font-mono text-xs">{grn.code}</span> },
     {
-      key: 'po',
-      header: 'PO',
+      // Story 21-6: a receipt books against a PO, an ASN, or neither (blind).
+      key: 'document',
+      header: 'Document',
       render: (grn) => {
-        if (grn.poId === null) {
-          return (
-            <span className="rounded-sm bg-(--muted) px-1.5 py-0.5 text-xs">
-              Blind · {BLIND_REASON_LABEL[grn.blindReasonCode]}
-            </span>
-          );
-        }
-        const code = grns?.poCodes[grn.poId];
-        return code === undefined ? <span>—</span> : <span className="font-mono text-xs">{code}</span>;
+        const document = grnDocument(grn, grn.poId === null ? null : (grns?.poCodes[grn.poId] ?? null));
+        return document.kind === 'blind' ? (
+          <span className="rounded-sm bg-(--muted) px-1.5 py-0.5 text-xs">{document.label}</span>
+        ) : (
+          <span className="font-mono text-xs">{document.label}</span>
+        );
       },
     },
     { key: 'lineCount', header: 'Lines', numeric: true },
@@ -271,7 +267,7 @@ function GoodsReceiptsCard({
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its receipts.'
-            : `${warehouseLabel} — newest first. Blind receipts are flagged for PO-matching; "(+N pending)" units wait on an over-receipt decision.`}
+            : `${warehouseLabel} — newest first. Each receipt names its document — a PO, an ASN, or Blind; "(+N pending)" units wait on an over-receipt decision.`}
         </div>
       </div>
 

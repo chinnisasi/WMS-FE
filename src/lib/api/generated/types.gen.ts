@@ -1213,9 +1213,17 @@ export type LedgerReferenceDocDto = {
      */
     poId?: string;
     /**
-     * The exact PO line (grn-receipt arm only — absent on the blind arm)
+     * The exact PO line (grn-receipt arm only — absent on the blind arm and on an unmatched line)
      */
     poLineId?: string;
+    /**
+     * Story 21-6 — the advance shipment notice received against (grn-receipt arm only)
+     */
+    asnId?: string;
+    /**
+     * Story 21-6 — the exact ASN line credited (grn-receipt arm only)
+     */
+    asnLineId?: string;
 };
 
 export type LedgerEventDto = {
@@ -1622,6 +1630,172 @@ export type ClosePurchaseOrderDto = {
 export type PurchaseOrderCloseResponse = {
     purchaseOrder: PurchaseOrderDto;
     successor: PurchaseOrderDto | null;
+};
+
+export type AsnLineInputDto = {
+    /**
+     * Existing line to update (amend only) — omitted means a new line
+     */
+    id?: string;
+    skuId: string;
+    /**
+     * Announced quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    announcedQty: number;
+};
+
+export type CreateAsnDto = {
+    /**
+     * The client the shipment is for — checked against the lines' SKUs
+     */
+    clientId: string;
+    /**
+     * The warehouse the shipment arrives at — fixed at create
+     */
+    warehouseId: string;
+    /**
+     * The client's own ASN code — unique per client; 1–64 characters, counted in code points
+     */
+    asnCode: string;
+    /**
+     * When the shipment is expected (ISO-8601 UTC, Z-suffixed); optional
+     */
+    expectedAt?: string | null;
+    /**
+     * At least one line with a known SKU of the client
+     */
+    lines: Array<AsnLineInputDto>;
+};
+
+export type AsnLineDto = {
+    id: string;
+    skuId: string;
+    /**
+     * Announced quantity in base UoM
+     */
+    announcedQty: number;
+    /**
+     * Received to date in base UoM
+     */
+    receivedQty: number;
+    /**
+     * Derived: announcedQty − receivedQty (negative after an approved over-receipt)
+     */
+    openQty: number;
+};
+
+export type AsnDto = {
+    id: string;
+    /**
+     * The client's ASN code
+     */
+    code: string;
+    clientId: string;
+    /**
+     * announced / partially_received / received are derived from the lines; closed (short) and cancelled are explicit
+     */
+    status: 'announced' | 'partially_received' | 'received' | 'closed' | 'cancelled';
+    /**
+     * When the shipment is expected (ISO-8601 UTC), null when unset
+     */
+    expectedAt: string | null;
+    /**
+     * Number of lines
+     */
+    lineCount: number;
+    /**
+     * Lines whose received quantity has reached announced — the unit-safe progress figure ("N of M lines received")
+     */
+    linesComplete: number;
+    /**
+     * Σ announced over the lines, in base units — sums across UoMs, so indicative only
+     */
+    announcedTotal: number;
+    /**
+     * Σ received over the lines, in base units
+     */
+    receivedTotal: number;
+    /**
+     * ISO-8601 UTC creation time (the keyset field)
+     */
+    createdAt: string;
+    warehouseId: string;
+    /**
+     * The close / cancel note — set exactly on those two statuses
+     */
+    statusNote: string | null;
+    /**
+     * ISO-8601 UTC last-mutation time
+     */
+    updatedAt: string;
+    /**
+     * Per-line announced / received / open, oldest first
+     */
+    lines: Array<AsnLineDto>;
+};
+
+export type AsnResponse = {
+    asn: AsnDto;
+};
+
+export type AsnEntryDto = {
+    id: string;
+    /**
+     * The client's ASN code
+     */
+    code: string;
+    clientId: string;
+    /**
+     * announced / partially_received / received are derived from the lines; closed (short) and cancelled are explicit
+     */
+    status: 'announced' | 'partially_received' | 'received' | 'closed' | 'cancelled';
+    /**
+     * When the shipment is expected (ISO-8601 UTC), null when unset
+     */
+    expectedAt: string | null;
+    /**
+     * Number of lines
+     */
+    lineCount: number;
+    /**
+     * Lines whose received quantity has reached announced — the unit-safe progress figure ("N of M lines received")
+     */
+    linesComplete: number;
+    /**
+     * Σ announced over the lines, in base units — sums across UoMs, so indicative only
+     */
+    announcedTotal: number;
+    /**
+     * Σ received over the lines, in base units
+     */
+    receivedTotal: number;
+    /**
+     * ISO-8601 UTC creation time (the keyset field)
+     */
+    createdAt: string;
+};
+
+export type AsnListResponse = {
+    items: Array<AsnEntryDto>;
+    nextCursor?: string | null;
+};
+
+export type AmendAsnDto = {
+    /**
+     * Omitted: unchanged; null: cleared; otherwise an ISO-8601 UTC instant (Z-suffixed)
+     */
+    expectedAt?: string | null;
+    /**
+     * The complete new line set (update by id, add without id, remove by absence). A line that has received anything cannot be removed, change SKU, or announce less than it received
+     */
+    lines: Array<AsnLineInputDto>;
+};
+
+export type AsnNoteDto = {
+    /**
+     * Why — required, 1–500 characters
+     */
+    note: string;
 };
 
 export type OrderLineInputDto = {
@@ -2653,6 +2827,10 @@ export type GrnLineInputDto = {
      * The PO line received against — null on a blind receipt's lines
      */
     poLineId?: string | null;
+    /**
+     * Story 21-6 — the ASN line received against (only beside asnId). A line with no line reference, or whose SKU differs from the referenced line's, settles unmatched: applied in full, crediting no line
+     */
+    asnLineId?: string | null;
     skuId: string;
     /**
      * Catalog batch code (required for batch-tracked SKUs, forbidden otherwise)
@@ -2678,13 +2856,17 @@ export type SubmitGoodsReceiptDto = {
      */
     warehouseId: string;
     /**
-     * The purchase order received against — null on a blind receipt
+     * The purchase order received against — exactly one of poId, asnId and blindReasonCode
      */
     poId?: string | null;
     /**
-     * The blind-receive reason code (required when poId is null, forbidden otherwise)
+     * Story 21-6 — the advance shipment notice received against — exactly one of poId, asnId and blindReasonCode
      */
-    blindReasonCode?: 'unannounced-delivery' | 'po-not-found' | 'other';
+    asnId?: string | null;
+    /**
+     * The blind-receive reason code (required when neither poId nor asnId is given, forbidden otherwise)
+     */
+    blindReasonCode?: 'unannounced-delivery' | 'po-not-found' | 'other' | null;
     /**
      * Device time of the receipt (ISO-8601 UTC, Z-suffixed)
      */
@@ -2698,7 +2880,14 @@ export type SubmitGoodsReceiptDto = {
 export type GrnLineDto = {
     id: string;
     grnId: string;
+    /**
+     * The PO line credited — null on a blind, ASN or unmatched line
+     */
     poLineId: string | null;
+    /**
+     * Story 21-6 — the ASN line credited; present only when one was
+     */
+    asnLineId?: string;
     skuId: string;
     batchId: string | null;
     batchCode: string | null;
@@ -2721,17 +2910,35 @@ export type GrnLineDto = {
 };
 
 export type RejectedGrnLineDto = {
-    poLineId: string;
+    /**
+     * The PO line named — null on an ASN line rejection
+     */
+    poLineId: string | null;
+    /**
+     * Story 21-6 — the ASN line named; present only on an ASN line rejection
+     */
+    asnLineId?: string;
     skuId: string;
     qty: number;
     /**
-     * Machine reason (po-line-not-found | po-line-not-open)
+     * Machine reason
      */
-    code: string;
+    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found';
     /**
      * Human-readable reason naming the line state
      */
     reason: string;
+};
+
+export type UnmatchedGrnLineDto = {
+    /**
+     * The line's index in the request's lines array
+     */
+    index: number;
+    /**
+     * no-line-reference: the line named no document line; line-sku-mismatch: its SKU is not the referenced line's
+     */
+    reason: 'no-line-reference' | 'line-sku-mismatch';
 };
 
 export type GoodsReceiptDto = {
@@ -2743,7 +2950,15 @@ export type GoodsReceiptDto = {
      */
     code: string;
     poId: string | null;
-    blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other';
+    /**
+     * Story 21-6 — the ASN received against; present only on an ASN receipt
+     */
+    asnId?: string;
+    /**
+     * Story 21-6 — the ASN's code; present only on an ASN receipt
+     */
+    asnCode?: string;
+    blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other' | null;
     /**
      * recorded (the v1 terminal state)
      */
@@ -2760,6 +2975,10 @@ export type GoodsReceiptDto = {
     recordedAt: string;
     lines: Array<GrnLineDto>;
     rejectedLines?: Array<RejectedGrnLineDto>;
+    /**
+     * Story 21-6 — present only when some lines of a PO/ASN receipt settled unmatched (booked in full, crediting no document line)
+     */
+    unmatchedLines?: Array<UnmatchedGrnLineDto>;
 };
 
 export type GoodsReceiptResponse = {
@@ -2807,6 +3026,38 @@ export type CatalogSnapshotPoDto = {
      * Per-line ordered / received / open quantities
      */
     lines: Array<PurchaseOrderLineDto>;
+};
+
+export type CatalogSnapshotAsnLineDto = {
+    id: string;
+    skuId: string;
+    /**
+     * Announced quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    announcedQty: number;
+    /**
+     * Received to date, in base UoM
+     */
+    receivedQty: number;
+    /**
+     * Derived: announcedQty − receivedQty (negative after an approved over-receipt)
+     */
+    openQty: number;
+};
+
+export type CatalogSnapshotAsnDto = {
+    id: string;
+    /**
+     * The client-supplied ASN code
+     */
+    code: string;
+    clientId: string;
+    warehouseId: string;
+    /**
+     * When the shipment is expected (ISO-8601 UTC), null when unannounced
+     */
+    expectedAt: string | null;
+    lines: Array<CatalogSnapshotAsnLineDto>;
 };
 
 export type PutawayBinDto = {
@@ -3035,6 +3286,10 @@ export type CatalogSnapshotResponse = {
      */
     openPurchaseOrders: Array<CatalogSnapshotPoDto>;
     /**
+     * Story 21-6 (additive): the warehouse's open advance shipment notices (announced or partially received) with per-line announced / received / open — receiving books against them exactly as against a PO
+     */
+    openAsns: Array<CatalogSnapshotAsnDto>;
+    /**
      * Story 3.5 (additive): every bin of the warehouse — blocked/system bins included so the device can reject a scan against them pre-queue
      */
     bins: Array<PutawayBinDto>;
@@ -3074,9 +3329,17 @@ export type GoodsReceiptEntryDto = {
     code: string;
     poId: string | null;
     /**
+     * Story 21-6 — the ASN received against; present only on an ASN receipt
+     */
+    asnId?: string;
+    /**
+     * Story 21-6 — the ASN's code; present only on an ASN receipt
+     */
+    asnCode?: string;
+    /**
      * Set only on a blind receipt
      */
-    blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other';
+    blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other' | null;
     /**
      * recorded (the v1 terminal state)
      */
@@ -3125,6 +3388,18 @@ export type OverReceiptDto = {
     grnLineId: string;
     poId: string | null;
     poLineId: string | null;
+    /**
+     * Story 21-6 — present only on an ASN receipt's over-receipt
+     */
+    asnId?: string;
+    /**
+     * Story 21-6 — the ASN line; present only on an ASN receipt's over-receipt
+     */
+    asnLineId?: string;
+    /**
+     * Story 21-6 — the ASN's code; present only on an ASN receipt's over-receipt
+     */
+    asnCode?: string;
     skuId: string;
     /**
      * The excess held for approval. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
@@ -5477,9 +5752,17 @@ export type ReceiptLineRecordDto = {
     id: string;
     grnCode: string;
     /**
-     * The purchase order the GRN booked against — null on a blind receipt
+     * The purchase order the GRN booked against — null on a blind or ASN receipt
      */
     poCode: string | null;
+    /**
+     * Story 21-6 — the advance shipment notice the GRN booked against — null on a PO or blind receipt
+     */
+    asnCode: string | null;
+    /**
+     * Story 21-6 — the GRN was blind (a reason, no PO or ASN). Both codes are null on a blind line, but ALSO on another client's line received against a PO/ASN (the document's code is that client's to see) — only this flag says blind
+     */
+    blind: boolean;
     /**
      * The GRN's recorded_at (the server stamp), ISO-8601 UTC at full precision
      */
@@ -8605,7 +8888,7 @@ export type InboundControllerAmendPurchaseOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The PO is not open (po-not-open, naming the status), or a concurrent idempotent request (conflict)
+     * The PO is not open (po-not-open, naming the status), a line that has received stock would be removed, change SKU or order less than it received (po-line-received), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -8662,7 +8945,7 @@ export type InboundControllerClosePurchaseOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The PO is already closed (po-not-open, naming the status), or a concurrent idempotent request (conflict)
+     * The PO is already closed (po-not-open, naming the status), an over-receipt of it awaits a decision (over-receipt-pending), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -8681,6 +8964,327 @@ export type InboundControllerClosePurchaseOrderResponses = {
 };
 
 export type InboundControllerClosePurchaseOrderResponse = InboundControllerClosePurchaseOrderResponses[keyof InboundControllerClosePurchaseOrderResponses];
+
+export type InboundControllerCreateAsnData = {
+    body: CreateAsnDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/asns';
+};
+
+export type InboundControllerCreateAsnErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, a malformed expectedAt, or a quantity finer than its unit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks asn.manage (role-denied), or a client-portal session (role-denied — 21-7 opens the portal)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse, the client, or a line's SKU does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The lines span clients (mixed-client), their client is not clientId (sku-client-mismatch), the client already has this code (duplicate-asn-code), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InboundControllerCreateAsnError = InboundControllerCreateAsnErrors[keyof InboundControllerCreateAsnErrors];
+
+export type InboundControllerCreateAsnResponses = {
+    /**
+     * The ASN, announced (the idempotency snapshot)
+     */
+    201: AsnResponse;
+};
+
+export type InboundControllerCreateAsnResponse = InboundControllerCreateAsnResponses[keyof InboundControllerCreateAsnResponses];
+
+export type InboundControllerListAsnsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Only ASNs of one status
+         */
+        status?: 'announced' | 'partially_received' | 'received' | 'closed' | 'cancelled';
+        /**
+         * Only one client's ASNs
+         */
+        clientId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inbound/asns';
+};
+
+export type InboundControllerListAsnsErrors = {
+    /**
+     * A malformed warehouseId, status or clientId, a limit outside 1–100 (validation-failed), or a malformed cursor (invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): 21-7 opens the portal
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InboundControllerListAsnsError = InboundControllerListAsnsErrors[keyof InboundControllerListAsnsErrors];
+
+export type InboundControllerListAsnsResponses = {
+    200: AsnListResponse;
+};
+
+export type InboundControllerListAsnsResponse = InboundControllerListAsnsResponses[keyof InboundControllerListAsnsResponses];
+
+export type InboundControllerGetAsnData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        asnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/asns/{asnId}';
+};
+
+export type InboundControllerGetAsnErrors = {
+    /**
+     * A malformed asnId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): 21-7 opens the portal
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No advance shipment notice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InboundControllerGetAsnError = InboundControllerGetAsnErrors[keyof InboundControllerGetAsnErrors];
+
+export type InboundControllerGetAsnResponses = {
+    200: AsnResponse;
+};
+
+export type InboundControllerGetAsnResponse = InboundControllerGetAsnResponses[keyof InboundControllerGetAsnResponses];
+
+export type InboundControllerAmendAsnData = {
+    body: AmendAsnDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        asnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/asns/{asnId}';
+};
+
+export type InboundControllerAmendAsnErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an invalid body, a repeated line id, a malformed expectedAt, or a quantity finer than its unit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks asn.manage (role-denied), or a client-portal session (role-denied — 21-7 opens the portal)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The ASN, a referenced line id, or a line's SKU does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The ASN is received, closed or cancelled (asn-not-open), a line that has received stock would be removed, change SKU or announce less than it received (asn-line-received), a SKU of another client (sku-client-mismatch), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InboundControllerAmendAsnError = InboundControllerAmendAsnErrors[keyof InboundControllerAmendAsnErrors];
+
+export type InboundControllerAmendAsnResponses = {
+    /**
+     * The amended ASN — its status re-derived from the lines (the idempotency snapshot)
+     */
+    200: AsnResponse;
+};
+
+export type InboundControllerAmendAsnResponse = InboundControllerAmendAsnResponses[keyof InboundControllerAmendAsnResponses];
+
+export type InboundControllerCloseAsnData = {
+    body: AsnNoteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        asnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/asns/{asnId}/close';
+};
+
+export type InboundControllerCloseAsnErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed asnId, or a note that is blank or over 500 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks asn.manage (role-denied), or a client-portal session (role-denied — 21-7 opens the portal)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No advance shipment notice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The ASN is not partially received (asn-transition-invalid), an over-receipt of it awaits a decision (over-receipt-pending), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InboundControllerCloseAsnError = InboundControllerCloseAsnErrors[keyof InboundControllerCloseAsnErrors];
+
+export type InboundControllerCloseAsnResponses = {
+    /**
+     * The closed ASN (the idempotency snapshot)
+     */
+    200: AsnResponse;
+};
+
+export type InboundControllerCloseAsnResponse = InboundControllerCloseAsnResponses[keyof InboundControllerCloseAsnResponses];
+
+export type InboundControllerCancelAsnData = {
+    body: AsnNoteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        asnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/asns/{asnId}/cancel';
+};
+
+export type InboundControllerCancelAsnErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed asnId, or a note that is blank or over 500 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks asn.manage (role-denied), or a client-portal session (role-denied — 21-7 opens the portal)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No advance shipment notice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The ASN is not announced — something was received, so close it short instead (asn-transition-invalid), goods receipts reference it (asn-has-receipts), an over-receipt of it awaits a decision (over-receipt-pending), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InboundControllerCancelAsnError = InboundControllerCancelAsnErrors[keyof InboundControllerCancelAsnErrors];
+
+export type InboundControllerCancelAsnResponses = {
+    /**
+     * The cancelled ASN (the idempotency snapshot)
+     */
+    200: AsnResponse;
+};
+
+export type InboundControllerCancelAsnResponse = InboundControllerCancelAsnResponses[keyof InboundControllerCancelAsnResponses];
 
 export type OutboundControllerCreateOrderData = {
     body: CreateOrderDto;
@@ -10013,7 +10617,13 @@ export type ReceivingControllerListGoodsReceiptsData = {
          */
         warehouseId?: string;
         /**
-         * Story 9-1 — `true`: only BLIND receipts (no purchase order — flagged for PO matching); `false`: only PO-backed ones. Exactly 'true' or 'false'
+         * Story 21-6 — `true`: only BLIND receipts (no PO and no ASN — `blind_reason_code` set); `false`: only document-backed ones (a PO or an ASN). Exactly 'true' or 'false'
+         */
+        blind?: boolean;
+        /**
+         * Story 9-1, kept as an ALIAS of `blind` since 21-6 (it means blind — an ASN receipt has no PO but is not blind). Exactly 'true' or 'false'; refused when it disagrees with `blind`
+         *
+         * @deprecated
          */
         poless?: boolean;
         /**
@@ -10035,7 +10645,7 @@ export type ReceivingControllerListGoodsReceiptsData = {
 
 export type ReceivingControllerListGoodsReceiptsErrors = {
     /**
-     * Malformed cursor (invalid-cursor), malformed warehouseId, out-of-range limit, a poless flag other than true/false, a from/to that is not an ISO-8601 instant, or from not before to (validation-failed)
+     * Malformed cursor (invalid-cursor), malformed warehouseId, out-of-range limit, a blind/poless flag other than true/false or the two disagreeing, a from/to that is not an ISO-8601 instant, or from not before to (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -10095,11 +10705,11 @@ export type ReceivingControllerSubmitGoodsReceiptErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Warehouse, purchase order, or a line's SKU does not exist in this tenant (not-found)
+     * Warehouse, purchase order, advance shipment notice, or a line's SKU does not exist in this tenant (not-found)
      */
     404: ProblemDetailsDto;
     /**
-     * The PO is not open (po-not-open, naming the status), a GRN line names a kit SKU — a kit never receives stock (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
+     * The PO is not open (po-not-open, naming the status), the ASN is not announced or partially received (asn-not-open), the document belongs to another warehouse (document-warehouse-mismatch), a GRN line names a kit SKU — a kit never receives stock (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**

@@ -22,6 +22,7 @@ import {
   needsInvoiceReload,
   orderRefLabel,
   pseudonymsOf,
+  receiptDocumentLabel,
   reconcileNotice,
   summaryLabel,
   type LineRecord,
@@ -309,5 +310,58 @@ describe('the export', () => {
   test('the file name: <invoiceNo | draft-id8>-<charge>-<segmentFrom>.csv', () => {
     expect(lineRecordsFilename({ id: '0198f7a2-aaaa-7000', invoiceNo: '29/S2627/000001' }, PICK_LINE)).toBe('29-S2627-000001-pick-2026-09-15.csv');
     expect(lineRecordsFilename({ id: '0198f7a2-aaaa-7000', invoiceNo: null }, STORAGE_LINE)).toBe('draft-0198f7a2-storage-2026-09-01.csv');
+  });
+});
+
+describe('receipt-line records name their document (story 21-6)', () => {
+  const RECEIPT_LINE = { chargeCode: 'inbound_handling' as const, uom: null, segmentFrom: '2026-09-01', segmentTo: '2026-09-30', quantity: '3' };
+  function receipt(id: string, poCode: string | null, asnCode: string | null, blind = false): LineRecord {
+    return {
+      kind: 'receipt-line',
+      id,
+      grnCode: `GRN-000${id}`,
+      poCode,
+      asnCode,
+      blind,
+      recordedAt: '2026-09-16T20:00:00.123456Z',
+      warehouseId: 'w1',
+      warehouseCode: 'BLR1',
+      skuId: 's1',
+      skuCode: 'ACME-PC',
+      skuName: 'Acme widget',
+      qty: '5',
+      appliedQty: '5',
+      actorId: ACTOR,
+      actorEmail: null,
+    };
+  }
+
+  test('a PO code, an ASN code, Blind only when the GRN was blind, else —', () => {
+    expect(receiptDocumentLabel({ poCode: 'PO-7', asnCode: null, blind: false })).toBe('PO-7');
+    expect(receiptDocumentLabel({ poCode: null, asnCode: 'ASN-001', blind: false })).toBe('ASN ASN-001');
+    expect(receiptDocumentLabel({ poCode: null, asnCode: null, blind: true })).toBe('Blind');
+    // Another client's line on a PO/ASN: its code is hidden, and it was NOT blind.
+    expect(receiptDocumentLabel({ poCode: null, asnCode: null, blind: false })).toBe('—');
+  });
+
+  test('the CSV carries an `asn` column after `po`', async () => {
+    const records = [receipt('1', 'PO-7', null), receipt('2', null, 'ASN-001'), receipt('3', null, null, true), receipt('4', null, null)];
+    const pseudonyms = await pseudonymsOf(TENANT, records);
+    const summary = { lineQuantity: '3', recordsQuantity: '3', reconciles: true };
+    const text = buildLineRecordsCsv({
+      invoice: { id: '0198f7a2-aaaa-7000-8000-000000000001', invoiceNo: '29/S2627/000001', status: 'issued', supplierGstin: '29AAACT1234A1Z5', periodStart: '2026-09-01', periodEnd: '2026-09-30', party: { recipient: { code: 'ACME', name: 'Acme', legalName: null } } as never },
+      line: RECEIPT_LINE,
+      exported: { kind: 'receipt-line', summary, endSummary: summary, records, truncated: false },
+      pseudonyms,
+      generatedAt: '2026-10-07T04:30:00.000Z',
+    });
+    const lines = text.slice(1).trimEnd().split('\n');
+    const header = lines.findIndex((line) => line.startsWith('recorded_at_ist'));
+    expect(lines[header]).toBe('recorded_at_ist,ist_date,grn,po,asn,blind,warehouse,sku_code,sku_name,qty,applied_qty,actor');
+    expect(lines[header + 1]).toContain('"GRN-0001","PO-7","","no","BLR1"');
+    expect(lines[header + 2]).toContain('"GRN-0002","","ASN-001","no","BLR1"');
+    expect(lines[header + 3]).toContain('"GRN-0003","","","yes","BLR1"');
+    // A hidden-code line is not blind.
+    expect(lines[header + 4]).toContain('"GRN-0004","","","no","BLR1"');
   });
 });

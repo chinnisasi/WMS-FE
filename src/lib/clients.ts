@@ -172,6 +172,22 @@ export function skusForOrderClient<T extends { id: string; clientId?: string | n
   return skus.filter((sku) => sku.clientId === first.clientId);
 }
 
+/**
+ * Story 21-6 — the ASN form's SKU options once its client is chosen: the
+ * explicit-client sibling of `skusForOrderClient`. An ASN names its client
+ * up front (and the server refuses another client's SKU 409
+ * `sku-client-mismatch`), so the picker offers only that client's SKUs —
+ * and none until a client is picked. A SKU row without a client (a response
+ * stored before 21-2b) is never offered: it cannot be shown to match.
+ */
+export function skusOfClient<T extends { id: string; clientId?: string | null }>(
+  skus: readonly T[],
+  clientId: string,
+): readonly T[] {
+  if (clientId === '') return [];
+  return skus.filter((sku) => sku.clientId === clientId);
+}
+
 /** The shared `mixed-client` sentence — the server names the client codes. */
 export function mixedClientReason(problem: ApiProblem): string {
   return problem.detail ?? 'These SKUs belong to more than one client — one document is for one client.';

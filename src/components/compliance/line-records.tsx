@@ -21,6 +21,7 @@ import {
   needsInvoiceReload,
   orderRefLabel,
   pseudonymsOf,
+  receiptDocumentLabel,
   reconcileNotice,
   recordCountLabel,
   summaryLabel,
@@ -262,7 +263,7 @@ function RecordsTable({
               <>
                 <th className={th}>Recorded (IST)</th>
                 <th className={th}>GRN</th>
-                <th className={th}>PO</th>
+                <th className={th}>Document</th>
                 <th className={th}>Warehouse</th>
                 <th className={th}>SKU</th>
                 <th className={thNum}>Received</th>
@@ -312,7 +313,7 @@ function RecordsTable({
                   <tr key={record.id} className="border-b border-(--border)">
                     <td className={td}>{formatIstInstant(record.recordedAt)}</td>
                     <td className={`${td} font-mono`}>{record.grnCode}</td>
-                    <td className={`${td} font-mono`}>{record.poCode ?? 'Blind'}</td>
+                    <td className={`${td} font-mono`}>{receiptDocumentLabel(record)}</td>
                     <td className={td}>{record.warehouseCode}</td>
                     <td className={td}>
                       <span className="font-mono">{record.skuCode}</span> {record.skuName}

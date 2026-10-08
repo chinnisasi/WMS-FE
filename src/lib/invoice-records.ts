@@ -69,6 +69,19 @@ export function istDateOfInstant(instant: string): string {
 
 // ── labels ───────────────────────────────────────────────────────────────────
 
+/**
+ * Story 21-6 — the document a receipt-line record booked against: its PO
+ * code, `ASN <code>` (the client's own reference), `Blind` only when the GRN
+ * WAS blind (the server's `blind` flag), and `—` otherwise — another
+ * client's line received against a PO/ASN, whose code is not this client's
+ * to see. A missing code is never read as blind.
+ */
+export function receiptDocumentLabel(record: { poCode: string | null; asnCode: string | null; blind: boolean }): string {
+  if (record.poCode !== null) return record.poCode;
+  if (record.asnCode !== null) return `ASN ${record.asnCode}`;
+  return record.blind ? 'Blind' : '—';
+}
+
 /** "Channel ref": the channel's event id, falling back to the order id (a manual order has no other reference). */
 export function orderRefLabel(ref: OrderRefDto): string {
   return ref.externalEventId ?? ref.orderId;
@@ -257,7 +270,9 @@ const yesNo = (value: boolean): string => (value ? 'yes' : 'no');
 const oneLine = (value: string): string => value.replace(/[\r\n]+/g, ' ');
 
 const HEADERS: Readonly<Record<LineRecordKind, readonly string[]>> = {
-  'receipt-line': ['recorded_at_ist', 'ist_date', 'grn', 'po', 'warehouse', 'sku_code', 'sku_name', 'qty', 'applied_qty', 'actor'],
+  // Story 21-6 — `asn` joins after `po` (a GRN books against one, the other, or neither).
+  // …and `blind` after `asn` (yes/no — a row with neither code is not necessarily blind).
+  'receipt-line': ['recorded_at_ist', 'ist_date', 'grn', 'po', 'asn', 'blind', 'warehouse', 'sku_code', 'sku_name', 'qty', 'applied_qty', 'actor'],
   pick: ['picked_at_ist', 'ist_date', 'warehouse', 'channel_ref', 'order_id', 'sku_code', 'sku_name', 'qty', 'bin', 'actor'],
   order: ['dispatched_at_ist', 'ist_date', 'warehouse', 'channel_ref', 'order_id', 'lines', 'carrier', 'tracking', 'actor'],
   'storage-day': ['ist_date', 'warehouse', 'uom', 'on_hand'],
@@ -273,6 +288,8 @@ function recordRow(record: LineRecord, pseudonyms: ReadonlyMap<string, string>):
         csvField(istDateOfInstant(record.recordedAt)),
         csvField(record.grnCode),
         csvField(record.poCode ?? ''),
+        csvField(record.asnCode ?? ''),
+        csvField(yesNo(record.blind)),
         csvField(record.warehouseCode),
         csvField(record.skuCode),
         csvField(record.skuName),

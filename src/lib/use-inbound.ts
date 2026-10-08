@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import {
+  fetchApiGetAsn,
   fetchApiGetPurchaseOrder,
   fetchApiListBins,
   fetchApiListGoodsReceipts,
@@ -16,6 +17,7 @@ import {
   fetchApiListZones,
 } from '@/lib/api/client';
 import type {
+  AsnLineDto,
   BinResponse,
   GoodsReceiptEntryDto,
   OverReceiptDto,
@@ -250,10 +252,16 @@ export interface OverReceiptsPage {
   items: readonly OverReceiptDto[];
   /** Cursor for the Next button; null on the last page. */
   nextCursor: string | null;
-  /** poId → PO code (every over-receipt carries a PO line — a blind receipt cannot over-receive). */
+  /**
+   * poId → PO code. Every over-receipt carries a PO line OR (story 21-6) an
+   * ASN line — a blind receipt cannot over-receive; an ASN's code rides the
+   * row itself (`asnCode`).
+   */
   poCodes: Readonly<Record<string, string>>;
   /** poLineId → the PO line's ordered / received / open context. */
   poLines: Readonly<Record<string, PurchaseOrderLineDto>>;
+  /** Story 21-6 — asnLineId → the ASN line's announced / received / open context. */
+  asnLines: Readonly<Record<string, AsnLineDto>>;
 }
 
 export function useOverReceipts(
@@ -296,8 +304,24 @@ export function useOverReceipts(
         if (cancelled) return;
         const poCodes: Record<string, string> = {};
         const poLines: Record<string, PurchaseOrderLineDto> = {};
+        const asnLines: Record<string, AsnLineDto> = {};
+        // Story 21-6 — the ASN lines' context: ONE detail read per distinct
+        // ASN on the page (many over-receipts can share an ASN), every line
+        // kept so each card finds its own.
+        const asnIds = [...new Set(result.items.flatMap((entry) => (entry.asnId === undefined ? [] : [entry.asnId])))];
+        await Promise.all(
+          asnIds.map(async (asnId) => {
+            try {
+              const detail = await fetchApiGetAsn(tenantId, asnId);
+              for (const line of detail.asn.lines) asnLines[line.id] = line;
+            } catch {
+              // the cards still render; the line context is omitted
+            }
+          }),
+        );
         await Promise.all(
           result.items.map(async (entry) => {
+            if (entry.asnId !== undefined) return;
             if (entry.poId === null) return;
             try {
               const detail = await fetchApiGetPurchaseOrder(tenantId, entry.poId);
@@ -319,6 +343,7 @@ export function useOverReceipts(
               nextCursor: result.nextCursor ?? null,
               poCodes,
               poLines,
+              asnLines,
             },
           });
         }

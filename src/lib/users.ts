@@ -175,6 +175,11 @@ export const CAPABILITIES = [
   // /compliance Client invoices actions and the clients card's tax-details
   // form; every member reads the invoices.
   'billing.invoice',
+  // Story 21-6 — advance shipment notices: create, amend, close (short) and
+  // cancel an ASN. Owner + Ops Manager, the `po.manage` holder set (an ASN is
+  // the PO's mirror). Gates the Inbound surface's ASN card actions; every
+  // member reads ASNs.
+  'asn.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
