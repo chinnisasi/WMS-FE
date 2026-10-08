@@ -59,6 +59,7 @@ const PARTY = {
 };
 
 const LINE = {
+  id: '01900000-0000-7000-8000-00000000a001',
   rateCardId: 'card-a',
   segmentFrom: '2026-09-01',
   segmentTo: '2026-09-30',
@@ -201,7 +202,9 @@ async function press(button: HTMLButtonElement | undefined): Promise<void> {
 
 /** Toggle the N-th invoice row's View/Hide (expanded panels are rows too, so find the toggles). */
 async function open(container: HTMLElement, index: number): Promise<void> {
-  const toggles = [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')];
+  // The invoice rows' View/Hide toggles only — an open invoice adds its own
+  // (21-5b's line-record toggles), which are not invoice rows.
+  const toggles = [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].filter((b) => b.textContent === 'View' || b.textContent === 'Hide');
   await press(toggles[index]);
 }
 
@@ -239,6 +242,24 @@ describe('ClientInvoices', () => {
       expect(buttons(view.container, label)).toHaveLength(0);
     }
     expect(buttons(view.container, 'Print').length).toBeGreaterThan(0);
+  });
+
+  test('21-5b: the Line records panel sits under the printed invoice — screen-only, never inside data-print-root', async () => {
+    writeSession(session('ops_manager'));
+    view = render(<ClientInvoices />);
+    await settle();
+    await open(view.container, 1);
+    const panel = view.container.querySelector('section[data-line-records]')!;
+    expect(panel).not.toBeNull();
+    expect(panel.closest('[data-print-root]')).toBeNull();
+    expect(panel.className).toContain('print:hidden');
+    const printed = view.container.querySelector('article[data-print-root]')!;
+    expect(printed.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(printed.textContent).not.toContain('Line records');
+    // One toggle per invoice line, each naming the panel it controls.
+    const toggles = [...panel.querySelectorAll('button[aria-expanded]')];
+    expect(toggles).toHaveLength(1);
+    expect(toggles[0]!.getAttribute('aria-controls')).toBe(`line-records-panel-${LINE.id}`);
   });
 
   test('the printed invoice: Rule 46 fields from the frozen party; a draft is not a tax invoice', async () => {

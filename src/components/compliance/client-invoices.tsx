@@ -55,6 +55,8 @@ import { DataTable, expandedRowId, type DataTableColumn } from '@/components/dat
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass } from '@/components/outbound/shell';
 
+import { LineRecordsPanel } from './line-records';
+
 /**
  * The /compliance Client invoices section (story 21-5): a 3PL's monthly
  * services (SAC) tax invoice to each client brand, one per supplying GSTIN.
@@ -412,6 +414,8 @@ function ClientInvoiceDetail({
       {invoice.statusNote !== null ? <div className="text-xs print:hidden">Note: {invoice.statusNote}</div> : null}
 
       <PrintableClientInvoice invoice={invoice} />
+      {/* Story 21-5b: the dispute drill — screen-only, OUTSIDE data-print-root. */}
+      <LineRecordsPanel invoice={invoice} />
     </div>
   );
 }
@@ -638,7 +642,7 @@ function InvoiceCopy({ invoice, copy }: { invoice: ClientInvoiceDto; copy: strin
             {invoice.lines.map((line) => {
               const rates = taxRateLabels(line.gstBps, line.supplyType);
               return (
-                <tr key={`${line.segmentFrom}-${line.chargeCode}-${line.uom ?? ''}`} className="border-b border-(--border)">
+                <tr key={line.id} className="border-b border-(--border)">
                   <td className="py-1 pr-2">{lineDescription(line)}</td>
                   <td className="py-1 pr-2 font-mono">{line.sac}</td>
                   <td className="data py-1 pr-2 text-right">{lineQuantityLabel(line)}</td>
