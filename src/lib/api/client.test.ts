@@ -19,6 +19,11 @@ import {
   fetchApiPrepareClientInvoices,
   fetchApiRefreshClientInvoice,
   fetchApiTransitionClientInvoice,
+  fetchApiAmendAsn,
+  fetchApiCreateAsn,
+  fetchApiGetAsn,
+  fetchApiListAsns,
+  fetchApiTransitionAsn,
   fetchApiUpdateClientTaxDetails,
   fetchApiListRateCards,
   fetchApiRateCardInForce,
@@ -1785,6 +1790,102 @@ describe('client invoices and tax details (story 21-5)', () => {
     await fetchApiDiscardClientInvoice(SESSION.tenant.id, INVOICE_ID, KEY);
     expect(lastRequest!.method).toBe('DELETE');
     expect(new URL(lastRequest!.url).pathname).toBe(`${base}/client-invoices/${INVOICE_ID}`);
+    clearSession();
+  });
+});
+
+describe('advance shipment notice wrappers (story 21-6)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const WAREHOUSE_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const CLIENT_ID = '0198f7a2-1b3c-7d4e-8f90-000000000001';
+  const ASN_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000d1';
+  const SKU_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000e1';
+  const ASN = {
+    id: ASN_ID,
+    code: 'ASN-001',
+    clientId: CLIENT_ID,
+    status: 'announced',
+    expectedAt: null,
+    lineCount: 1,
+    announcedTotal: 10,
+    receivedTotal: 0,
+    createdAt: '2026-10-08T00:00:00.000Z',
+    warehouseId: WAREHOUSE_ID,
+    statusNote: null,
+    updatedAt: '2026-10-08T00:00:00.000Z',
+    lines: [{ id: 'l-1', skuId: SKU_ID, announcedQty: 10, receivedQty: 0, openQty: 10 }],
+  };
+  const base = `/api/v1/tenants/${SESSION.tenant.id}`;
+
+  test('the list GETs the warehouse path; the first page sends no query, filters ride as query params', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [ASN], nextCursor: null });
+    await fetchApiListAsns(SESSION.tenant.id, WAREHOUSE_ID);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/warehouses/${WAREHOUSE_ID}/inbound/asns`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListAsns(SESSION.tenant.id, WAREHOUSE_ID, { status: 'partially_received', clientId: CLIENT_ID, cursor: 'c-2' });
+    const params = new URL(lastRequest!.url).searchParams;
+    expect(params.get('status')).toBe('partially_received');
+    expect(params.get('clientId')).toBe(CLIENT_ID);
+    expect(params.get('cursor')).toBe('c-2');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    clearSession();
+  });
+
+  test('the detail GETs the tenant-level ASN path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { asn: ASN });
+    const res = await fetchApiGetAsn(SESSION.tenant.id, ASN_ID);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/inbound/asns/${ASN_ID}`);
+    expect(res.asn.code).toBe('ASN-001');
+    clearSession();
+  });
+
+  test('create POSTs the body with the Idempotency-Key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { asn: ASN });
+    const body = { clientId: CLIENT_ID, warehouseId: WAREHOUSE_ID, asnCode: 'ASN-001', lines: [{ skuId: SKU_ID, announcedQty: 10 }] };
+    await fetchApiCreateAsn(SESSION.tenant.id, body, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/inbound/asns`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    clearSession();
+  });
+
+  test('amend PATCHes the full line set with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { asn: ASN });
+    const body = { expectedAt: null, lines: [{ id: 'l-1', skuId: SKU_ID, announcedQty: 8 }] };
+    await fetchApiAmendAsn(SESSION.tenant.id, ASN_ID, body, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/inbound/asns/${ASN_ID}`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    clearSession();
+  });
+
+  test('close and cancel POST the note to their own verb', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { asn: { ...ASN, status: 'closed', statusNote: 'short' } });
+    await fetchApiTransitionAsn(SESSION.tenant.id, ASN_ID, 'close', 'short', KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/inbound/asns/${ASN_ID}/close`);
+    expect(await lastRequest!.json()).toEqual({ note: 'short' });
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    await fetchApiTransitionAsn(SESSION.tenant.id, ASN_ID, 'cancel', 'withdrawn', KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/inbound/asns/${ASN_ID}/cancel`);
+    expect(await lastRequest!.json()).toEqual({ note: 'withdrawn' });
+    clearSession();
+  });
+
+  test('a refusal surfaces as an ApiProblem carrying the code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { type: 'about:blank', title: 'Over-receipts await a decision', status: 409, code: 'over-receipt-pending', detail: 'x' });
+    const failure = await fetchApiTransitionAsn(SESSION.tenant.id, ASN_ID, 'close', 'short', KEY).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiProblem);
+    expect((failure as ApiProblem).code).toBe('over-receipt-pending');
     clearSession();
   });
 });

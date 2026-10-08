@@ -21,6 +21,26 @@ export function openQtyLabel(openQty: number, uom?: QuantityUom | null): string 
   return openQty < 0 ? `${qty} (over-received)` : qty;
 }
 
+/**
+ * Story 21-6 — the document an over-receipt pended against, named for the
+ * card: a PO (its code resolved by the caller, null while unknown) or an
+ * ASN (its code rides the row). Every over-receipt carries exactly one.
+ */
+export function overReceiptDocumentLabel(
+  entry: { poId: string | null; asnId?: string; asnCode?: string },
+  poCode: string | null,
+): string {
+  if (entry.asnId !== undefined) return `ASN ${entry.asnCode ?? '—'}`;
+  return entry.poId === null ? '—' : `PO ${poCode ?? '—'}`;
+}
+
+/** The approve outcome, document-neutral (a PO line or an ASN line takes the excess). */
+export function approvedReason(entry: { asnId?: string }): string {
+  return entry.asnId === undefined
+    ? 'The excess applied to the PO line and the ledger.'
+    : 'The excess applied to the ASN line and the ledger.';
+}
+
 /** The decision outcome's reason: the problem code branches, in plain words. */
 export function decisionReason(error: unknown): string {
   if (error instanceof ApiProblem) {

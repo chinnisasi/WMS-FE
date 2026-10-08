@@ -79,7 +79,7 @@ function overview(warehouseId: string, overrides: { stale?: boolean; asOf?: stri
         state: 'ok',
         overReceipts: windowed(1, 2, `${tn}/receiving/over-receipts`, { warehouseId }),
         pendingOverReceipts: figure(1, `${tn}/receiving/over-receipts`, { warehouseId, status: 'pending' }),
-        blindGrns: windowed(0, 1, `${tn}/receiving/goods-receipts`, { warehouseId, poless: 'true' }),
+        blindGrns: windowed(0, 1, `${tn}/receiving/goods-receipts`, { warehouseId, blind: 'true' }),
       },
       orderAccuracy: {
         state: 'ok',

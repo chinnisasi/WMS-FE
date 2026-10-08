@@ -41,7 +41,12 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 21-2b adds `clients.manage` (owner-only) — 36 became 37.
     // Story 21-3 adds `rates.manage` (owner + accountant) — 37 became 38.
     // Story 21-5 adds `billing.invoice` (owner + accountant) — 38 became 39.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(39);
+    // Story 21-6 adds `asn.manage` (owner + ops_manager, `po.manage`'s set) — 39 became 40.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(40);
+    expect(roleHasCapability('owner', 'asn.manage')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'asn.manage')).toBe(true);
+    expect(roleHasCapability('operator', 'asn.manage')).toBe(false);
+    expect(roleHasCapability('accountant', 'asn.manage')).toBe(false);
     expect(roleHasCapability('owner', 'rates.manage')).toBe(true);
     // Story 21-3 — rate cards are NOT an ops verb (and not owner-only either:
     // the accountant holds them) — the explicit ops-excluded set.
@@ -149,6 +154,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'stock.adjust',
         'vendor.manage',
         'po.manage',
+        // Story 21-6 — the ASN verbs, beside `po.manage`.
+        'asn.manage',
         'device.manage',
         'review.decide',
         'qc.manage',

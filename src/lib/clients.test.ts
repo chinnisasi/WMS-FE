@@ -17,6 +17,7 @@ import {
   showClients,
   singleClientImportHint,
   skusForOrderClient,
+  skusOfClient,
   importedForLabel,
   clientNameProblem,
   correctionOutcome,
@@ -270,5 +271,20 @@ describe('story 21-5 — the client tax details', () => {
     expect(taxDetailsReason(new ApiProblem('validation-failed', 400, 'gstin bad'))).toBe('gstin bad');
     expect(taxDetailsReason(new ApiProblem('role-denied', 403))).toBe('Only an owner or an accountant can set tax details.');
     expect(taxDetailsReason(new TypeError('Failed to fetch'))).toBe(UNREACHABLE_REASON);
+  });
+});
+
+describe('skusOfClient — the ASN form offers the chosen client\'s SKUs only (story 21-6)', () => {
+  const skus = [
+    { id: 's1', clientId: 'acme' },
+    { id: 's2', clientId: 'beta' },
+    { id: 's3', clientId: 'acme' },
+    { id: 's4', clientId: null },
+  ];
+
+  test('nothing until a client is picked; then exactly that client\'s SKUs', () => {
+    expect(skusOfClient(skus, '')).toEqual([]);
+    expect(skusOfClient(skus, 'acme').map((sku) => sku.id)).toEqual(['s1', 's3']);
+    expect(skusOfClient(skus, 'beta').map((sku) => sku.id)).toEqual(['s2']);
   });
 });

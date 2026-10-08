@@ -9,7 +9,7 @@ import {
 import type { OverReceiptDto, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { quantityLabel } from '@/lib/format-quantity';
-import { decisionReason, openQtyLabel } from '@/lib/over-receipt';
+import { approvedReason, decisionReason, openQtyLabel, overReceiptDocumentLabel } from '@/lib/over-receipt';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useOverReceipts, useSkuMap, useUserMap } from '@/lib/use-inbound';
@@ -18,10 +18,10 @@ import { FeedbackBanner } from '@/components/feedback/banner';
 
 /**
  * The Conflicts & Reviews queue (story 3.3) — over-receipt decisions. A GRN
- * that received past a PO line's open quantity applied the within-open part
- * immediately and parked the excess here; Approve applies the excess (a new
- * `grn.received` ledger event + the PO line's receivedQty), Reject leaves it
- * unapplied. Every decision is audit-trailed server-side; the buttons carry
+ * that received past a document line's open quantity — a PO line, or (story
+ * 21-6) an ASN line — applied the within-open part immediately and parked
+ * the excess here; Approve applies the excess (a new `grn.received` ledger
+ * event + the line's receivedQty), Reject leaves it unapplied. Every decision is audit-trailed server-side; the buttons carry
  * a fresh ULID Idempotency-Key so a double click replays, never duplicates.
  *
  * The surface itself is nav-gated behind `review.decide`; the buttons are
@@ -92,7 +92,7 @@ function OverReceiptQueueSessioned() {
         word: `${entry.grnCode} over-receipt ${decided.overReceipt.status}`,
         reason:
           decision === 'approve'
-            ? 'The excess applied to the PO line and the ledger.'
+            ? approvedReason(entry)
             : 'The excess stays unapplied; the decision is audit-trailed.',
       });
       queue?.reload();
@@ -108,8 +108,9 @@ function OverReceiptQueueSessioned() {
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Over-receipts</h2>
         <div className="text-(--muted-foreground)">
-          Units received beyond a PO line&apos;s open quantity pend here until a decision:
-          approve applies the excess, reject leaves it unapplied — both audit-trailed.
+          Units received beyond a PO or ASN line&apos;s open quantity pend here until a decision:
+          approve applies the excess, reject leaves it unapplied — both audit-trailed. A PO or
+          ASN cannot close while one of its over-receipts waits here.
         </div>
       </div>
 
@@ -142,8 +143,8 @@ function OverReceiptQueueSessioned() {
             <OverReceiptCard
               key={entry.id}
               entry={entry}
-              poCode={queue?.poCodes[entry.poId ?? ''] ?? null}
-              line={entry.poLineId === null ? null : (queue?.poLines[entry.poLineId] ?? null)}
+              documentLabel={overReceiptDocumentLabel(entry, queue?.poCodes[entry.poId ?? ''] ?? null)}
+              line={lineContext(entry, queue)}
               skuLabel={skus?.[entry.skuId]?.code ?? null}
               sku={skus?.[entry.skuId]}
               requestedBy={users?.[entry.requestedBy]?.email ?? null}
@@ -175,9 +176,35 @@ function OverReceiptQueueSessioned() {
   );
 }
 
+/**
+ * The document line's context: a PO line's ordered / received / open, or
+ * (story 21-6) an ASN line's announced / received / open. Null while the
+ * detail read has not resolved it.
+ */
+function lineContext(
+  entry: OverReceiptDto,
+  queue: { poLines: Readonly<Record<string, { orderedQty: number; receivedQty: number; openQty: number }>>; asnLines: Readonly<Record<string, { announcedQty: number; receivedQty: number; openQty: number }>> } | null,
+): LineContext | null {
+  if (queue === null) return null;
+  if (entry.asnLineId !== undefined) {
+    const line = queue.asnLines[entry.asnLineId];
+    return line === undefined ? null : { expected: line.announcedQty, expectedWord: 'announced', receivedQty: line.receivedQty, openQty: line.openQty };
+  }
+  if (entry.poLineId === null) return null;
+  const line = queue.poLines[entry.poLineId];
+  return line === undefined ? null : { expected: line.orderedQty, expectedWord: 'ordered', receivedQty: line.receivedQty, openQty: line.openQty };
+}
+
+interface LineContext {
+  readonly expected: number;
+  readonly expectedWord: 'ordered' | 'announced';
+  readonly receivedQty: number;
+  readonly openQty: number;
+}
+
 function OverReceiptCard({
   entry,
-  poCode,
+  documentLabel,
   line,
   skuLabel,
   sku,
@@ -187,8 +214,8 @@ function OverReceiptCard({
   onDecide,
 }: {
   entry: OverReceiptDto;
-  poCode: string | null;
-  line: { orderedQty: number; receivedQty: number; openQty: number } | null;
+  documentLabel: string;
+  line: LineContext | null;
   skuLabel: string | null;
   sku: SkuResponse | undefined;
   requestedBy: string | null;
@@ -202,14 +229,14 @@ function OverReceiptCard({
   return (
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-mono text-xs">{poCode ?? '—'}</span>
+        <span className="font-mono text-xs">{documentLabel}</span>
         <span className="font-mono text-xs">{skuLabel ?? '(unknown SKU)'}</span>
         <span className="font-medium">+{qty(entry.excessQty)} over open</span>
         <span className="font-mono text-xs text-(--muted-foreground)">{entry.grnCode}</span>
       </div>
       {line !== null && (
         <div className="text-xs text-(--muted-foreground)">
-          Line: {qty(line.orderedQty)} ordered · {qty(line.receivedQty)} received-to-date ·{' '}
+          Line: {qty(line.expected)} {line.expectedWord} · {qty(line.receivedQty)} received-to-date ·{' '}
           {openQtyLabel(line.openQty, sku)} open
         </div>
       )}

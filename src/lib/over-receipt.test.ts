@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from '@/lib/api/client';
-import { decisionReason, openQtyLabel, qcReason } from './over-receipt';
+import { approvedReason, decisionReason, openQtyLabel, overReceiptDocumentLabel, qcReason } from './over-receipt';
 
 /**
  * The story 3.3 surface copy decisions: an approved over-receipt
@@ -117,5 +117,18 @@ describe('qcReason (the story 3.4 hold/release problem-code strings)', () => {
     expect(qcReason(new Error('fetch failed'))).toBe(
       'The API is unreachable — is wms-be running?',
     );
+  });
+});
+
+describe('story 21-6 — the queue is document-neutral', () => {
+  test('an over-receipt names its PO or its ASN', () => {
+    expect(overReceiptDocumentLabel({ poId: 'po-1' }, 'PO-0004')).toBe('PO PO-0004');
+    expect(overReceiptDocumentLabel({ poId: 'po-1' }, null)).toBe('PO —');
+    expect(overReceiptDocumentLabel({ poId: null, asnId: 'a-1', asnCode: 'ASN-001' }, null)).toBe('ASN ASN-001');
+  });
+
+  test('the approve outcome names the line kind that took the excess', () => {
+    expect(approvedReason({})).toBe('The excess applied to the PO line and the ledger.');
+    expect(approvedReason({ asnId: 'a-1' })).toBe('The excess applied to the ASN line and the ledger.');
   });
 });

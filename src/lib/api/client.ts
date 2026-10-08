@@ -48,7 +48,13 @@ import {
   devicesControllerResolveRejectedOp,
   devicesControllerRevokeDevice,
   healthControllerHealth,
+  inboundControllerAmendAsn,
+  inboundControllerCancelAsn,
+  inboundControllerCloseAsn,
+  inboundControllerCreateAsn,
+  inboundControllerGetAsn,
   inboundControllerGetPurchaseOrder,
+  inboundControllerListAsns,
   inboundControllerListPurchaseOrders,
   inboundControllerListVendors,
   inventoryControllerApproveAdjustment,
@@ -247,6 +253,10 @@ import type {
   ProductResponse,
   PurchaseOrderListResponse,
   PurchaseOrderResponse,
+  AmendAsnDto,
+  AsnListResponse,
+  AsnResponse,
+  CreateAsnDto,
   RegisterTenantDto,
   RejectedOpListResponse,
   RejectedOpResolveResponse,
@@ -1422,6 +1432,105 @@ export async function fetchApiListPurchaseOrders(
     path: { tenantId, warehouseId },
     query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
     signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 21-6 — one warehouse's advance shipment notices (keyset, newest
+ * first), optionally one status's or one client's. Member-open; a client-
+ * portal session answers 403 until 21-7.
+ */
+export async function fetchApiListAsns(
+  tenantId: string,
+  warehouseId: string,
+  options?: {
+    status?: 'announced' | 'partially_received' | 'received' | 'closed' | 'cancelled';
+    clientId?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<AsnListResponse> {
+  const query = {
+    ...(options?.status === undefined ? {} : { status: options.status }),
+    ...(options?.clientId === undefined ? {} : { clientId: options.clientId }),
+    ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+  };
+  const { data, error } = await inboundControllerListAsns({
+    path: { tenantId, warehouseId },
+    query: Object.keys(query).length === 0 ? undefined : query,
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 21-6 — one ASN with its lines (announced / received / open). */
+export async function fetchApiGetAsn(
+  tenantId: string,
+  asnId: string,
+  options?: { signal?: AbortSignal },
+): Promise<AsnResponse> {
+  const { data, error } = await inboundControllerGetAsn({ path: { tenantId, asnId }, signal: options?.signal });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 21-6 — announces a shipment (capability `asn.manage`); the key is per draft. */
+export async function fetchApiCreateAsn(
+  tenantId: string,
+  body: CreateAsnDto,
+  idempotencyKey: string,
+): Promise<AsnResponse> {
+  const { data, error } = await inboundControllerCreateAsn({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 21-6 — amends an open ASN: `expectedAt` and the FULL line set (`asn.manage`). */
+export async function fetchApiAmendAsn(
+  tenantId: string,
+  asnId: string,
+  body: AmendAsnDto,
+  idempotencyKey: string,
+): Promise<AsnResponse> {
+  const { data, error } = await inboundControllerAmendAsn({
+    path: { tenantId, asnId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 21-6 — closes a partially received ASN short, or cancels an untouched one, with a note (`asn.manage`). */
+export async function fetchApiTransitionAsn(
+  tenantId: string,
+  asnId: string,
+  transition: 'close' | 'cancel',
+  note: string,
+  idempotencyKey: string,
+): Promise<AsnResponse> {
+  const call = transition === 'close' ? inboundControllerCloseAsn : inboundControllerCancelAsn;
+  const { data, error } = await call({
+    path: { tenantId, asnId },
+    body: { note },
+    headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
     throw unwrapError(error, 400);
