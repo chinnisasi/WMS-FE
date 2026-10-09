@@ -51,20 +51,34 @@ export type SignInDto = {
 export type UserResponse = {
     id: string;
     email: string;
-    role: 'owner' | 'ops_manager' | 'operator' | 'accountant';
+    role: 'owner' | 'ops_manager' | 'operator' | 'accountant' | 'client';
     status: 'invited' | 'active';
+    /**
+     * Story 21-7 — the client brand a client-portal user belongs to (role `client`); null for the tenant’s own staff
+     */
+    clientId: string | null;
     createdAt: string;
+};
+
+export type SessionClientResponse = {
+    id: string;
+    code: string;
+    name: string;
 };
 
 export type SignInResponse = {
     /**
-     * HS256 session token (15 min), claims: sub + tenant_id
+     * HS256 session token (15 min), claims: sub + tenant_id (+ client_id for a client-portal user, story 21-7)
      */
     accessToken: string;
     tokenType: string;
     expiresInSeconds: number;
     tenant: TenantResponse;
     user: UserResponse;
+    /**
+     * Story 21-7 — the client brand of a client-portal user (the portal shell prints its name); null for the tenant’s own staff
+     */
+    client: SessionClientResponse | null;
 };
 
 export type AddressDto = {
@@ -352,7 +366,11 @@ export type SetupChecklistResponse = {
 
 export type InviteUserDto = {
     email: string;
-    role: 'owner' | 'ops_manager' | 'operator' | 'accountant';
+    role: 'owner' | 'ops_manager' | 'operator' | 'accountant' | 'client';
+    /**
+     * Story 21-7 — required when role is `client` (the client brand the portal user belongs to); refused for every other role
+     */
+    clientId?: string;
 };
 
 export type InviteUserResponse = {
@@ -775,7 +793,7 @@ export type BadgeInDto = {
 export type BadgeInOperatorResponse = {
     id: string;
     email: string;
-    role: 'owner' | 'ops_manager' | 'operator' | 'accountant';
+    role: 'owner' | 'ops_manager' | 'operator' | 'accountant' | 'client';
 };
 
 export type BadgeInDeviceResponse = {
@@ -6197,6 +6215,321 @@ export type ClientInvoiceNoteDto = {
     note?: string;
 };
 
+export type PortalUserDto = {
+    id: string;
+    email: string;
+    role: 'client';
+    status: 'invited' | 'active';
+    clientId: string;
+};
+
+export type PortalMeResponse = {
+    user: PortalUserDto;
+    client: SessionClientResponse;
+};
+
+export type PortalStockRowDto = {
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * The SKU base UoM every quantity of the row is in
+     */
+    baseUom: string;
+    warehouseId: string;
+    warehouseName: string;
+    /**
+     * On hand across EVERY bin of the warehouse (receiving and QC included), base units
+     */
+    onHand: number;
+    /**
+     * Allocated to open orders (held or committed reservations), base units
+     */
+    allocated: number;
+};
+
+export type PortalStockPageResponse = {
+    items: Array<PortalStockRowDto>;
+    nextCursor: string | null;
+};
+
+export type PortalOrderRowDto = {
+    id: string;
+    status: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+    source: 'manual' | 'ingested';
+    /**
+     * The sales channel's own order reference; null for a manual order
+     */
+    externalRef: string | null;
+    warehouseName: string;
+    destinationName: string | null;
+    destinationCity: string | null;
+    destinationPincode: string | null;
+    /**
+     * Top-level lines — a kit counts once
+     */
+    lineCount: number;
+    createdAt: string;
+};
+
+export type PortalOrderPageResponse = {
+    items: Array<PortalOrderRowDto>;
+    nextCursor: string | null;
+};
+
+export type PortalOrderComponentDto = {
+    skuCode: string | null;
+    skuName: string | null;
+    /**
+     * Base units
+     */
+    qty: number;
+};
+
+export type PortalOrderLineDto = {
+    skuCode: string | null;
+    skuName: string | null;
+    /**
+     * Base units
+     */
+    qty: number;
+    /**
+     * A kit line's components; empty for a plain line
+     */
+    components: Array<PortalOrderComponentDto>;
+};
+
+export type PortalOrderDetailResponse = {
+    id: string;
+    status: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+    source: 'manual' | 'ingested';
+    /**
+     * The sales channel's own order reference; null for a manual order
+     */
+    externalRef: string | null;
+    warehouseName: string;
+    destinationName: string | null;
+    destinationCity: string | null;
+    destinationPincode: string | null;
+    /**
+     * Top-level lines — a kit counts once
+     */
+    lineCount: number;
+    createdAt: string;
+    lines: Array<PortalOrderLineDto>;
+};
+
+export type PortalAsnRowDto = {
+    id: string;
+    code: string;
+    status: 'announced' | 'partially_received' | 'received' | 'closed' | 'cancelled';
+    expectedAt: string | null;
+    warehouseName: string;
+    lineCount: number;
+    /**
+     * Σ announced across lines (base units, mixed UoMs — indicative)
+     */
+    announcedTotal: number;
+    /**
+     * Σ received across lines (base units, mixed UoMs — indicative)
+     */
+    receivedTotal: number;
+    createdAt: string;
+};
+
+export type PortalAsnPageResponse = {
+    items: Array<PortalAsnRowDto>;
+    nextCursor: string | null;
+};
+
+export type PortalAsnLineDto = {
+    skuCode: string | null;
+    skuName: string | null;
+    announcedQty: number;
+    receivedQty: number;
+};
+
+export type PortalAsnDetailResponse = {
+    id: string;
+    code: string;
+    status: 'announced' | 'partially_received' | 'received' | 'closed' | 'cancelled';
+    expectedAt: string | null;
+    warehouseName: string;
+    lineCount: number;
+    /**
+     * Σ announced across lines (base units, mixed UoMs — indicative)
+     */
+    announcedTotal: number;
+    /**
+     * Σ received across lines (base units, mixed UoMs — indicative)
+     */
+    receivedTotal: number;
+    createdAt: string;
+    lines: Array<PortalAsnLineDto>;
+};
+
+export type PortalPurchaseOrderRowDto = {
+    id: string;
+    code: string;
+    status: 'open' | 'closed';
+    warehouseName: string;
+    lineCount: number;
+    orderedTotal: number;
+    receivedTotal: number;
+    createdAt: string;
+};
+
+export type PortalPurchaseOrderPageResponse = {
+    items: Array<PortalPurchaseOrderRowDto>;
+    nextCursor: string | null;
+};
+
+export type PortalPurchaseOrderLineDto = {
+    skuCode: string | null;
+    skuName: string | null;
+    orderedQty: number;
+    receivedQty: number;
+    expectedDate: string | null;
+};
+
+export type PortalPurchaseOrderDetailResponse = {
+    id: string;
+    code: string;
+    status: 'open' | 'closed';
+    warehouseName: string;
+    lineCount: number;
+    orderedTotal: number;
+    receivedTotal: number;
+    createdAt: string;
+    lines: Array<PortalPurchaseOrderLineDto>;
+};
+
+export type PortalInvoiceTotalsDto = {
+    subtotal: number;
+    cgst: number;
+    sgst: number;
+    igst: number;
+    tax: number;
+    roundOff: number;
+    payable: number;
+};
+
+export type PortalInvoiceRowDto = {
+    id: string;
+    /**
+     * Always set — the portal serves non-draft invoices only
+     */
+    invoiceNo: string;
+    fyLabel: string;
+    periodStart: string;
+    periodEnd: string;
+    /**
+     * Never draft — a portal sees issued documents only
+     */
+    status: 'issued' | 'disputed' | 'settled' | 'void';
+    issuedAt: string;
+    replacesInvoiceId: string | null;
+    placeOfSupply: string | null;
+    supplyType: 'intra' | 'inter' | null;
+    /**
+     * Integer paise
+     */
+    totals: PortalInvoiceTotalsDto;
+};
+
+export type PortalInvoicePageResponse = {
+    items: Array<PortalInvoiceRowDto>;
+    nextCursor: string | null;
+};
+
+export type PortalSupplierAddressDto = {
+    line1: string;
+    line2: string | null;
+    city: string;
+    state: string;
+    pincode: string;
+};
+
+export type PortalInvoiceSupplierDto = {
+    name: string;
+    gstin: string | null;
+    stateCode: string | null;
+    stateName: string | null;
+    address: PortalSupplierAddressDto | null;
+};
+
+export type PortalRecipientAddressDto = {
+    line1: string | null;
+    line2: string | null;
+    city: string | null;
+    stateCode: string | null;
+    pincode: string | null;
+};
+
+export type PortalInvoiceRecipientDto = {
+    name: string;
+    legalName: string | null;
+    gstin: string | null;
+    stateCode: string | null;
+    stateName: string | null;
+    address: PortalRecipientAddressDto;
+};
+
+export type PortalInvoicePartyDto = {
+    supplier: PortalInvoiceSupplierDto;
+    recipient: PortalInvoiceRecipientDto;
+};
+
+export type PortalInvoiceLineDto = {
+    /**
+     * IST date, inclusive
+     */
+    segmentFrom: string;
+    /**
+     * IST date, inclusive
+     */
+    segmentTo: string;
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    uom: string | null;
+    /**
+     * A decimal string — base-unit-days for storage, a whole count otherwise
+     */
+    quantity: string;
+    unitAmountPaise: number | null;
+    amountPaise: number | null;
+    sac: string;
+    gstBps: number;
+    cgstPaise: number;
+    sgstPaise: number;
+    igstPaise: number;
+};
+
+export type PortalInvoiceDetailResponse = {
+    id: string;
+    /**
+     * Always set — the portal serves non-draft invoices only
+     */
+    invoiceNo: string;
+    fyLabel: string;
+    periodStart: string;
+    periodEnd: string;
+    /**
+     * Never draft — a portal sees issued documents only
+     */
+    status: 'issued' | 'disputed' | 'settled' | 'void';
+    issuedAt: string;
+    replacesInvoiceId: string | null;
+    placeOfSupply: string | null;
+    supplyType: 'intra' | 'inter' | null;
+    /**
+     * Integer paise
+     */
+    totals: PortalInvoiceTotalsDto;
+    party: PortalInvoicePartyDto;
+    lines: Array<PortalInvoiceLineDto>;
+};
+
 export type ChannelWebhookOrderResponse = {
     outcome: 'accepted' | 'backordered' | 'replayed';
     /**
@@ -6261,6 +6594,10 @@ export type TenancyControllerSignInErrors = {
      * Unknown email or wrong password (unauthenticated)
      */
     401: ProblemDetailsDto;
+    /**
+     * Invitation not yet accepted (invite-pending), or a client-portal user whose client is not active (client-suspended, story 21-7)
+     */
+    403: ProblemDetailsDto;
 };
 
 export type TenancyControllerSignInError = TenancyControllerSignInErrors[keyof TenancyControllerSignInErrors];
@@ -6878,7 +7215,7 @@ export type UsersControllerInviteUserData = {
 
 export type UsersControllerInviteUserErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or invalid body
+     * Missing or malformed Idempotency-Key, invalid body, a client invite without clientId / a staff invite with one, or the tenant’s own client (story 21-7)
      */
     400: ProblemDetailsDto;
     /**
@@ -6890,7 +7227,11 @@ export type UsersControllerInviteUserErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Email already has an account in any tenant (email-exists), or a concurrent idempotent request (conflict)
+     * Story 21-7: the named client does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Email already has an account in any tenant (email-exists), the named client is not active (client-not-active, story 21-7), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -6928,7 +7269,7 @@ export type UsersControllerSetUserRoleData = {
 
 export type UsersControllerSetUserRoleErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or invalid body
+     * Missing or malformed Idempotency-Key, invalid body, or a client-portal user as the target (story 21-7 — its role is fixed at invite)
      */
     400: ProblemDetailsDto;
     /**
@@ -15482,6 +15823,401 @@ export type ClientInvoicesControllerVoidResponses = {
 };
 
 export type ClientInvoicesControllerVoidResponse = ClientInvoicesControllerVoidResponses[keyof ClientInvoicesControllerVoidResponses];
+
+export type PortalControllerMeData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/me';
+};
+
+export type PortalControllerMeErrors = {
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerMeError = PortalControllerMeErrors[keyof PortalControllerMeErrors];
+
+export type PortalControllerMeResponses = {
+    200: PortalMeResponse;
+};
+
+export type PortalControllerMeResponse = PortalControllerMeResponses[keyof PortalControllerMeResponses];
+
+export type PortalControllerStockData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/portal/stock';
+};
+
+export type PortalControllerStockErrors = {
+    /**
+     * A malformed cursor (invalid-cursor), a limit outside 1–100 or a status outside its vocabulary (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerStockError = PortalControllerStockErrors[keyof PortalControllerStockErrors];
+
+export type PortalControllerStockResponses = {
+    200: PortalStockPageResponse;
+};
+
+export type PortalControllerStockResponse = PortalControllerStockResponses[keyof PortalControllerStockResponses];
+
+export type PortalControllerOrdersData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+        status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+    };
+    url: '/tenants/{tenantId}/portal/orders';
+};
+
+export type PortalControllerOrdersErrors = {
+    /**
+     * A malformed cursor (invalid-cursor), a limit outside 1–100 or a status outside its vocabulary (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerOrdersError = PortalControllerOrdersErrors[keyof PortalControllerOrdersErrors];
+
+export type PortalControllerOrdersResponses = {
+    200: PortalOrderPageResponse;
+};
+
+export type PortalControllerOrdersResponse = PortalControllerOrdersResponses[keyof PortalControllerOrdersResponses];
+
+export type PortalControllerOrderData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders/{orderId}';
+};
+
+export type PortalControllerOrderErrors = {
+    /**
+     * Malformed orderId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such order of this client — unknown, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerOrderError = PortalControllerOrderErrors[keyof PortalControllerOrderErrors];
+
+export type PortalControllerOrderResponses = {
+    200: PortalOrderDetailResponse;
+};
+
+export type PortalControllerOrderResponse = PortalControllerOrderResponses[keyof PortalControllerOrderResponses];
+
+export type PortalControllerAsnsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+        status?: 'announced' | 'partially_received' | 'received' | 'closed' | 'cancelled';
+    };
+    url: '/tenants/{tenantId}/portal/inbound/asns';
+};
+
+export type PortalControllerAsnsErrors = {
+    /**
+     * A malformed cursor (invalid-cursor), a limit outside 1–100 or a status outside its vocabulary (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerAsnsError = PortalControllerAsnsErrors[keyof PortalControllerAsnsErrors];
+
+export type PortalControllerAsnsResponses = {
+    200: PortalAsnPageResponse;
+};
+
+export type PortalControllerAsnsResponse = PortalControllerAsnsResponses[keyof PortalControllerAsnsResponses];
+
+export type PortalControllerAsnData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        asnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/inbound/asns/{asnId}';
+};
+
+export type PortalControllerAsnErrors = {
+    /**
+     * Malformed asnId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such ASN of this client — unknown, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerAsnError = PortalControllerAsnErrors[keyof PortalControllerAsnErrors];
+
+export type PortalControllerAsnResponses = {
+    200: PortalAsnDetailResponse;
+};
+
+export type PortalControllerAsnResponse = PortalControllerAsnResponses[keyof PortalControllerAsnResponses];
+
+export type PortalControllerPurchaseOrdersData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+        status?: 'open' | 'closed';
+    };
+    url: '/tenants/{tenantId}/portal/inbound/purchase-orders';
+};
+
+export type PortalControllerPurchaseOrdersErrors = {
+    /**
+     * A malformed cursor (invalid-cursor), a limit outside 1–100 or a status outside its vocabulary (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerPurchaseOrdersError = PortalControllerPurchaseOrdersErrors[keyof PortalControllerPurchaseOrdersErrors];
+
+export type PortalControllerPurchaseOrdersResponses = {
+    200: PortalPurchaseOrderPageResponse;
+};
+
+export type PortalControllerPurchaseOrdersResponse = PortalControllerPurchaseOrdersResponses[keyof PortalControllerPurchaseOrdersResponses];
+
+export type PortalControllerPurchaseOrderData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        poId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/inbound/purchase-orders/{poId}';
+};
+
+export type PortalControllerPurchaseOrderErrors = {
+    /**
+     * Malformed poId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such purchase order of this client — unknown, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerPurchaseOrderError = PortalControllerPurchaseOrderErrors[keyof PortalControllerPurchaseOrderErrors];
+
+export type PortalControllerPurchaseOrderResponses = {
+    200: PortalPurchaseOrderDetailResponse;
+};
+
+export type PortalControllerPurchaseOrderResponse = PortalControllerPurchaseOrderResponses[keyof PortalControllerPurchaseOrderResponses];
+
+export type PortalControllerInvoicesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/portal/invoices';
+};
+
+export type PortalControllerInvoicesErrors = {
+    /**
+     * A malformed cursor (invalid-cursor) or a limit outside 1–100 (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerInvoicesError = PortalControllerInvoicesErrors[keyof PortalControllerInvoicesErrors];
+
+export type PortalControllerInvoicesResponses = {
+    200: PortalInvoicePageResponse;
+};
+
+export type PortalControllerInvoicesResponse = PortalControllerInvoicesResponses[keyof PortalControllerInvoicesResponses];
+
+export type PortalControllerInvoiceData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/invoices/{invoiceId}';
+};
+
+export type PortalControllerInvoiceErrors = {
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such invoice of this client — unknown, malformed, a draft, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerInvoiceError = PortalControllerInvoiceErrors[keyof PortalControllerInvoiceErrors];
+
+export type PortalControllerInvoiceResponses = {
+    200: PortalInvoiceDetailResponse;
+};
+
+export type PortalControllerInvoiceResponse = PortalControllerInvoiceResponses[keyof PortalControllerInvoiceResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;

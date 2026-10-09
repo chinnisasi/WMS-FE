@@ -13,6 +13,7 @@ import {
   writeSession,
   type StoredSession,
 } from './auth';
+import { operatorShellRoute, portalShellRoute } from './portal';
 
 /**
  * localStorage/window shims — bun:test has no DOM. auth.ts touches the
@@ -239,5 +240,48 @@ describe('subscribeSession', () => {
     unsubscribe();
     window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
     expect(calls).toBe(2);
+  });
+});
+describe('story 21-7 — the client dimension in the session', () => {
+  test('a legacy (pre-21-7) stored session reads clientId === null and client === null — an operator session', () => {
+    store.set(SESSION_STORAGE_KEY, JSON.stringify(SESSION));
+    const session = readSession();
+    expect(session?.user.clientId).toBeNull();
+    expect(session?.client).toBeNull();
+  });
+
+  test('an explicit undefined clientId also normalises to null', () => {
+    store.set(SESSION_STORAGE_KEY, JSON.stringify({ ...SESSION, user: { ...SESSION.user, clientId: undefined } }));
+    expect(readSession()?.user.clientId).toBeNull();
+  });
+
+  test('a portal session keeps its clientId and client', () => {
+    const client = { id: 'c-1', code: 'BRAND-A', name: 'Brand A' };
+    writeSession({ ...SESSION, user: { ...SESSION.user, role: 'client', clientId: 'c-1' }, client });
+    expect(readSession()?.user.clientId).toBe('c-1');
+    expect(readSession()?.client).toEqual(client);
+  });
+
+  test('readSession hands back the same object for an unchanged row (a stable external-store snapshot)', () => {
+    store.set(SESSION_STORAGE_KEY, JSON.stringify(SESSION));
+    expect(readSession()).toBe(readSession());
+  });
+
+  test('no redirect loop between the two shells — for every session shape, at most one shell redirects, and never to the other', () => {
+    store.set(SESSION_STORAGE_KEY, JSON.stringify(SESSION));
+    const operator = readSession();
+    writeSession({ ...SESSION, user: { ...SESSION.user, role: 'client', clientId: 'c-1' }, client: null });
+    const portal = readSession();
+    for (const session of [operator, portal]) {
+      const fromApp = operatorShellRoute(session);
+      const fromPortal = portalShellRoute(session);
+      // Exactly one shell renders each signed-in session.
+      expect([fromApp.kind, fromPortal.kind].filter((kind) => kind === 'render')).toHaveLength(1);
+    }
+    expect(operatorShellRoute(portal)).toEqual({ kind: 'redirect', href: '/portal/stock' });
+    expect(portalShellRoute(operator)).toEqual({ kind: 'redirect', href: '/settings' });
+    // No session: both go to /login, neither to the other shell.
+    expect(operatorShellRoute(null)).toEqual({ kind: 'redirect', href: '/login' });
+    expect(portalShellRoute(null)).toEqual({ kind: 'redirect', href: '/login' });
   });
 });

@@ -139,9 +139,32 @@ import {
   clientInvoicesControllerRefresh,
   clientInvoicesControllerSettle,
   clientInvoicesControllerVoid,
+  portalControllerAsn,
+  portalControllerAsns,
+  portalControllerInvoice,
+  portalControllerInvoices,
+  portalControllerMe,
+  portalControllerOrder,
+  portalControllerOrders,
+  portalControllerPurchaseOrder,
+  portalControllerPurchaseOrders,
+  portalControllerStock,
 } from './generated/sdk.gen';
-import { ensureSessionHint, readSession, clearSession, writeSession } from '../auth';
+import { ensureSessionHint, readSession, clearSession, writeSession, PORTAL_SUSPENDED_EVENT } from '../auth';
 import type {
+  PortalAsnDetailResponse,
+  PortalAsnPageResponse,
+  PortalAsnRowDto,
+  PortalInvoiceDetailResponse,
+  PortalInvoicePageResponse,
+  PortalMeResponse,
+  PortalOrderDetailResponse,
+  PortalOrderPageResponse,
+  PortalOrderRowDto,
+  PortalPurchaseOrderDetailResponse,
+  PortalPurchaseOrderPageResponse,
+  PortalPurchaseOrderRowDto,
+  PortalStockPageResponse,
   ClientInvoiceDto,
   ClientInvoiceLineRecordsResponse,
   ClientInvoiceListResponse,
@@ -3056,15 +3079,28 @@ export async function refreshSessionUser(): Promise<void> {
   const session = readSession();
   if (session === null) return;
   try {
-    const { user } = await fetchApiMe(session.tenant.id);
+    // Story 21-7 — a portal session re-reads `portal/me` (the operator `/me`
+    // sits behind the operator fence and would refuse it 403).
+    const portal = session.user.clientId !== null;
+    const { user, client } = portal
+      ? await fetchApiPortalMe(session.tenant.id)
+      : { ...(await fetchApiMe(session.tenant.id)), client: null };
     const current = readSession();
+    // A response from a pre-21-7 backend carries no `clientId` — staff.
+    const clientId = user.clientId ?? null;
     if (
       current !== null &&
       (current.user.id !== user.id ||
         current.user.role !== user.role ||
-        current.user.status !== user.status)
+        current.user.status !== user.status ||
+        current.user.clientId !== clientId ||
+        (portal && (current.client?.id !== client?.id || current.client?.name !== client?.name)))
     ) {
-      writeSession({ ...current, user });
+      writeSession({
+        ...current,
+        user: { id: user.id, email: user.email, role: user.role, status: user.status, clientId },
+        client: clientId === null ? null : client,
+      });
     }
   } catch {
     // A failed refresh leaves the stored role in place — the backend still
@@ -3256,5 +3292,125 @@ export async function fetchApiRetryChannelConnection(
   if (error || !data) {
     throw unwrapError(error, 400);
   }
+  return data;
+}
+
+// ── Client portal (story 21-7) ──────────────────────────────────────────────
+
+/**
+ * A portal read's failure: unwrapped as every wrapper does, and — for a
+ * `client-suspended` refusal (the client brand was suspended mid-session) —
+ * announced on `window` so the portal shell signs out with the notice.
+ */
+function portalError(error: unknown): Error {
+  const failure = unwrapError(error, 400);
+  if (failure instanceof ApiProblem && failure.code === 'client-suspended' && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(PORTAL_SUSPENDED_EVENT));
+  }
+  return failure;
+}
+
+type PortalPageOptions = { cursor?: string; limit?: number; signal?: AbortSignal };
+
+function portalPageQuery(options?: PortalPageOptions): { cursor?: string; limit?: number } | undefined {
+  if (options?.cursor === undefined && options?.limit === undefined) return undefined;
+  return {
+    ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
+  };
+}
+
+/** The portal user and its client brand (the portal shell's bootstrap). */
+export async function fetchApiPortalMe(tenantId: string, options?: { signal?: AbortSignal }): Promise<PortalMeResponse> {
+  const { data, error } = await portalControllerMe({ path: { tenantId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** This client's stock, one row per (SKU, warehouse); keyset by SKU code. */
+export async function fetchApiPortalStock(tenantId: string, options?: PortalPageOptions): Promise<PortalStockPageResponse> {
+  const { data, error } = await portalControllerStock({ path: { tenantId }, query: portalPageQuery(options), signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** This client's orders, newest first; optionally one status. */
+export async function fetchApiPortalOrders(
+  tenantId: string,
+  options?: PortalPageOptions & { status?: PortalOrderRowDto['status'] },
+): Promise<PortalOrderPageResponse> {
+  const page = portalPageQuery(options);
+  const query = options?.status === undefined ? page : { ...page, status: options.status };
+  const { data, error } = await portalControllerOrders({ path: { tenantId }, query, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+export async function fetchApiPortalOrder(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalOrderDetailResponse> {
+  const { data, error } = await portalControllerOrder({ path: { tenantId, orderId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+export async function fetchApiPortalAsns(
+  tenantId: string,
+  options?: PortalPageOptions & { status?: PortalAsnRowDto['status'] },
+): Promise<PortalAsnPageResponse> {
+  const page = portalPageQuery(options);
+  const query = options?.status === undefined ? page : { ...page, status: options.status };
+  const { data, error } = await portalControllerAsns({ path: { tenantId }, query, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+export async function fetchApiPortalAsn(
+  tenantId: string,
+  asnId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalAsnDetailResponse> {
+  const { data, error } = await portalControllerAsn({ path: { tenantId, asnId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+export async function fetchApiPortalPurchaseOrders(
+  tenantId: string,
+  options?: PortalPageOptions & { status?: PortalPurchaseOrderRowDto['status'] },
+): Promise<PortalPurchaseOrderPageResponse> {
+  const page = portalPageQuery(options);
+  const query = options?.status === undefined ? page : { ...page, status: options.status };
+  const { data, error } = await portalControllerPurchaseOrders({ path: { tenantId }, query, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+export async function fetchApiPortalPurchaseOrder(
+  tenantId: string,
+  poId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalPurchaseOrderDetailResponse> {
+  const { data, error } = await portalControllerPurchaseOrder({ path: { tenantId, poId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** This client's issued invoices (never a draft), newest first. */
+export async function fetchApiPortalInvoices(tenantId: string, options?: PortalPageOptions): Promise<PortalInvoicePageResponse> {
+  const { data, error } = await portalControllerInvoices({ path: { tenantId }, query: portalPageQuery(options), signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+export async function fetchApiPortalInvoice(
+  tenantId: string,
+  invoiceId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalInvoiceDetailResponse> {
+  const { data, error } = await portalControllerInvoice({ path: { tenantId, invoiceId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
   return data;
 }

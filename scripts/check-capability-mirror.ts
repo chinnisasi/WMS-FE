@@ -14,7 +14,7 @@
 import { CAPABILITIES, ROLE_CAPABILITIES } from '../src/lib/users';
 
 const PERMISSIONS_PATH = '../../../backend/wms-be/src/modules/tenancy/permissions.ts';  // resolved from scripts/, i.e. the meta-repo workspace layout
-const ROLES = ['owner', 'ops_manager', 'operator', 'accountant'] as const;
+const ROLES = ['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const;
 
 /** Comments carry capability names in prose; they are not grants. */
 function stripComments(source: string): string {

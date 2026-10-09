@@ -19,6 +19,7 @@ import { render, type Rendered } from '../../lib/test/render';
 
 const pushes: string[] = [];
 let RegisterForm: ComponentType;
+let LoginForm: ComponentType<{ initialEmail?: string }>;
 
 beforeAll(async () => {
   const real = await import('next/navigation');
@@ -26,7 +27,7 @@ beforeAll(async () => {
     ...real,
     useRouter: () => ({ push: (href: string) => void pushes.push(href) }),
   }));
-  ({ RegisterForm } = await import('./auth-forms'));
+  ({ RegisterForm, LoginForm } = await import('./auth-forms'));
 });
 
 let posts: Record<string, unknown>[] = [];
@@ -39,6 +40,17 @@ function stubRouter(): void {
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
     const { pathname } = new URL(request.url);
+    if (request.method.toUpperCase() === 'POST' && pathname.endsWith('/tenants/sign-in')) {
+      if (signInRefusal !== null) return json(signInRefusal.status, signInRefusal);
+      return json(200, {
+        accessToken: 'header.payload.signature',
+        tokenType: 'Bearer',
+        expiresInSeconds: 900,
+        tenant: { id: 't-1', name: 'Priya Spices', gstin: null },
+        user: { id: 'u-1', email: 'x@example.com', role: signInClient === null ? 'owner' : 'client', status: 'active', clientId: signInClient?.id ?? null, createdAt: '2026-10-09T00:00:00.000Z' },
+        client: signInClient,
+      });
+    }
     if (request.method.toUpperCase() === 'POST' && pathname.endsWith('/tenants')) {
       const body = (await request.json()) as Record<string, unknown>;
       posts.push(body);
@@ -52,8 +64,12 @@ function stubRouter(): void {
 }
 
 let view: Rendered | undefined;
+let signInClient: { id: string; code: string; name: string } | null = null;
+let signInRefusal: { code: string; status: number; title: string } | null = null;
 
 beforeEach(() => {
+  signInClient = null;
+  signInRefusal = null;
   posts = [];
   pushes.length = 0;
   stubRouter();
@@ -123,5 +139,47 @@ describe('RegisterForm: the business GSTIN (story 8-1c)', () => {
     expect(container.querySelector('[role="alert"]')!.textContent).toContain('Business GSTIN is 15 characters');
     const button = container.querySelector('button[type="submit"]') as HTMLButtonElement;
     expect(button.disabled).toBe(false);
+  });
+});
+
+describe('LoginForm: where a sign-in lands (story 21-7)', () => {
+  async function signIn(): Promise<HTMLElement> {
+    view = render(<LoginForm />);
+    const { container } = view;
+    setInput(field(container, 'Email'), 'x@example.com');
+    setInput(field(container, 'Password'), 'hunter2hunter2');
+    const form = container.querySelector('form')!;
+    act(() => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    return container;
+  }
+
+  afterEach(() => {
+    localStorage.removeItem('wms-session');
+  });
+
+  test('a staff user goes to /settings, the session carries no client', async () => {
+    await signIn();
+    expect(pushes).toEqual(['/settings']);
+    const stored = JSON.parse(localStorage.getItem('wms-session')!) as { client: unknown; user: { clientId: unknown } };
+    expect(stored.client).toBeNull();
+    expect(stored.user.clientId).toBeNull();
+  });
+
+  test('a client-portal user goes to /portal/stock with its client in the session', async () => {
+    signInClient = { id: 'c-1', code: 'BRAND-A', name: 'Brand A' };
+    await signIn();
+    expect(pushes).toEqual(['/portal/stock']);
+    const stored = JSON.parse(localStorage.getItem('wms-session')!) as { client: unknown; user: { clientId: unknown } };
+    expect(stored.client).toEqual(signInClient);
+    expect(stored.user.clientId).toBe('c-1');
+  });
+
+  test('a suspended client brand is refused with the suspension copy, and nothing is stored', async () => {
+    signInRefusal = { code: 'client-suspended', status: 403, title: 'Client portal access is suspended' };
+    const container = await signIn();
+    expect(pushes).toEqual([]);
+    expect(localStorage.getItem('wms-session')).toBeNull();
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain("Your company's portal access is suspended.");
   });
 });

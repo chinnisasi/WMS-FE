@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 import { refreshSessionUser } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { visibleNavItems } from '@/lib/navigation';
+import { operatorShellRoute } from '@/lib/portal';
 
 import { SignOutButton } from '@/components/auth/sign-out';
 import { CommandPalette } from './command-palette';
@@ -18,6 +20,30 @@ import { WarehouseSwitcher } from './warehouse-switcher';
  * only, nav available through the header menu.
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  // Story 21-7 — render NOTHING until the session is read (the server
+  // snapshot is 'unknown'), then: a client-portal session goes to the
+  // portal and no session goes to /login — so no operator hook (the /me
+  // bootstrap, the warehouse switcher, any surface's loader) ever runs for
+  // a portal user.
+  // The snapshot is the decision as a string ('render' or the redirect
+  // href) — a primitive, so the external-store snapshot stays stable.
+  const decision = useSyncExternalStore(
+    subscribeSession,
+    () => {
+      const route = operatorShellRoute(readSession());
+      return route.kind === 'render' ? 'render' : route.href;
+    },
+    () => 'unknown',
+  );
+  useEffect(() => {
+    if (decision !== 'render' && decision !== 'unknown') router.replace(decision);
+  }, [decision, router]);
+  if (decision !== 'render') return null;
+  return <OperatorShell>{children}</OperatorShell>;
+}
+
+function OperatorShell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement>(null);
 

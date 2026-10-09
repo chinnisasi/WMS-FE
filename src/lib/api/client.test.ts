@@ -84,8 +84,18 @@ import {
   fetchApiReportingOverview,
   fetchApiResolveExcursion,
   refreshSessionUser,
+  fetchApiPortalAsn,
+  fetchApiPortalAsns,
+  fetchApiPortalInvoice,
+  fetchApiPortalInvoices,
+  fetchApiPortalMe,
+  fetchApiPortalOrder,
+  fetchApiPortalOrders,
+  fetchApiPortalPurchaseOrder,
+  fetchApiPortalPurchaseOrders,
+  fetchApiPortalStock,
 } from './client';
-import { SESSION_STORAGE_KEY, writeSession, clearSession } from '../auth';
+import { SESSION_STORAGE_KEY, writeSession, clearSession, PORTAL_SUSPENDED_EVENT } from '../auth';
 import type { StoredSession } from '../auth';
 
 /**
@@ -1887,5 +1897,104 @@ describe('advance shipment notice wrappers (story 21-6)', () => {
     expect(failure).toBeInstanceOf(ApiProblem);
     expect((failure as ApiProblem).code).toBe('over-receipt-pending');
     clearSession();
+  });
+});
+
+describe('refreshSessionUser — story 21-7 (the client dimension)', () => {
+  const CLIENT_ID = '0198f7a2-1b3c-7d4e-8f90-cccccccccccc';
+  const PORTAL_SESSION: StoredSession = {
+    ...SESSION,
+    user: { ...SESSION.user, role: 'client', clientId: CLIENT_ID },
+    client: { id: CLIENT_ID, code: 'BRAND-A', name: 'Brand A' },
+  };
+
+  test('a changed clientId from /me is written back', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { user: { ...SESSION.user, clientId: CLIENT_ID } });
+    await refreshSessionUser();
+    const stored = JSON.parse(store.get(SESSION_STORAGE_KEY)!) as { user: { clientId: string | null } };
+    expect(stored.user.clientId).toBe(CLIENT_ID);
+    clearSession();
+  });
+
+  test('a portal session re-reads portal/me, never the operator /me', async () => {
+    writeSession(PORTAL_SESSION);
+    stubFetch(200, {
+      user: { id: SESSION.user.id, email: SESSION.user.email, role: 'client', status: 'active', clientId: CLIENT_ID },
+      client: { id: CLIENT_ID, code: 'BRAND-A', name: 'Brand A Apparel' },
+    });
+    await refreshSessionUser();
+    expect(new URL(lastRequest!.url).pathname).toEndWith(`/tenants/${SESSION.tenant.id}/portal/me`);
+    const stored = JSON.parse(store.get(SESSION_STORAGE_KEY)!) as { client: { name: string } };
+    expect(stored.client.name).toBe('Brand A Apparel');
+    clearSession();
+  });
+});
+
+/** The window stub above, but recording every dispatched event's type. */
+function recordWindowEvents(): string[] {
+  const types: string[] = [];
+  stubGlobal('window', { dispatchEvent: (event: Event) => (types.push(event.type), true) });
+  return types;
+}
+
+describe('portal wrappers (story 21-7)', () => {
+  const T = '0198f7a2-1b3c-7d4e-8f90-112233445566';
+  const ID = '0198f7a2-1b3c-7d4e-8f90-dddddddddddd';
+  const EMPTY_PAGE = { items: [], nextCursor: null };
+
+  test.each([
+    ['stock', () => fetchApiPortalStock(T), `/tenants/${T}/portal/stock`],
+    ['orders', () => fetchApiPortalOrders(T), `/tenants/${T}/portal/orders`],
+    ['asns', () => fetchApiPortalAsns(T), `/tenants/${T}/portal/inbound/asns`],
+    ['purchase orders', () => fetchApiPortalPurchaseOrders(T), `/tenants/${T}/portal/inbound/purchase-orders`],
+    ['invoices', () => fetchApiPortalInvoices(T), `/tenants/${T}/portal/invoices`],
+  ] as const)('%s: a first page sends no query at all', async (_name, call, path) => {
+    stubFetch(200, EMPTY_PAGE);
+    await call();
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toEndWith(path);
+    expect(url.search).toBe('');
+  });
+
+  test('a later page carries the cursor; an orders status filter rides the query', async () => {
+    stubFetch(200, EMPTY_PAGE);
+    await fetchApiPortalOrders(T, { cursor: 'abc', status: 'dispatched' });
+    const url = new URL(lastRequest!.url);
+    expect(url.searchParams.get('cursor')).toBe('abc');
+    expect(url.searchParams.get('status')).toBe('dispatched');
+  });
+
+  test.each([
+    ['me', () => fetchApiPortalMe(T), `/tenants/${T}/portal/me`],
+    ['order', () => fetchApiPortalOrder(T, ID), `/tenants/${T}/portal/orders/${ID}`],
+    ['asn', () => fetchApiPortalAsn(T, ID), `/tenants/${T}/portal/inbound/asns/${ID}`],
+    ['purchase order', () => fetchApiPortalPurchaseOrder(T, ID), `/tenants/${T}/portal/inbound/purchase-orders/${ID}`],
+    ['invoice', () => fetchApiPortalInvoice(T, ID), `/tenants/${T}/portal/invoices/${ID}`],
+  ] as const)('%s: GET on its own path', async (_name, call, path) => {
+    stubFetch(200, {});
+    await call();
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toEndWith(path);
+  });
+
+  test('a client-suspended refusal is thrown as ApiProblem AND announced on window', async () => {
+    const announced = recordWindowEvents();
+    stubFetch(403, { code: 'client-suspended', status: 403, title: 'Client portal access is suspended' });
+    try {
+      await fetchApiPortalStock(T);
+      throw new Error('expected a refusal');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiProblem);
+      expect((error as ApiProblem).code).toBe('client-suspended');
+    }
+    expect(announced.filter((type) => type === PORTAL_SUSPENDED_EVENT)).toHaveLength(1);
+  });
+
+  test('any other refusal is not announced', async () => {
+    const announced = recordWindowEvents();
+    stubFetch(404, { code: 'not-found', status: 404 });
+    await fetchApiPortalOrder(T, ID).catch(() => undefined);
+    expect(announced.filter((type) => type === PORTAL_SUSPENDED_EVENT)).toHaveLength(0);
   });
 });

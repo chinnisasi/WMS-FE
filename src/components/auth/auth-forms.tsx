@@ -5,6 +5,7 @@ import { useId, useState } from 'react';
 
 import { ApiProblem, fetchApiAcceptInvite, fetchApiRegisterTenant, fetchApiSignIn } from '@/lib/api/client';
 import { writeSession } from '@/lib/auth';
+import { PORTAL_SUSPENDED_MESSAGE, signInDestination } from '@/lib/portal';
 import { GSTIN_HELP } from '@/lib/gstin';
 import { registerTenantBody } from '@/lib/tenancy-forms';
 import { ulid } from '@/lib/ulid';
@@ -146,9 +147,11 @@ export function LoginForm({ initialEmail = '' }: { initialEmail?: string }) {
         token: signIn.accessToken,
         tenant: signIn.tenant,
         user: signIn.user,
+        // Story 21-7 — a client-portal user's client brand (null for staff).
+        client: signIn.client ?? null,
         expiresAt: Date.now() + signIn.expiresInSeconds * 1000,
       });
-      router.push('/settings');
+      router.push(signInDestination(signIn.user));
     } catch (error) {
       setRejection(rejectionReason(error));
     } finally {
@@ -288,6 +291,8 @@ function rejectionReason(error: unknown): string {
         return 'An account for this email already exists.';
       case 'unauthenticated':
         return 'Unknown email or wrong password.';
+      case 'client-suspended':
+        return PORTAL_SUSPENDED_MESSAGE;
       case 'invite-pending':
         return 'This invitation has not been accepted yet — use the link from your invitation.';
       case 'invite-invalid':
