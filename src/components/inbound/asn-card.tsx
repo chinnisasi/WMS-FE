@@ -25,6 +25,7 @@ import {
   parseAsnCreate,
   parseAsnNote,
   type AsnDraftLine,
+  type LineOption,
 } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { clientCell, clientLabel, showClients, skusOfClient } from '@/lib/clients';
@@ -208,8 +209,13 @@ export function AsnsCard({
   );
 }
 
-/** Draft line rows: SKU picker (the client's SKUs only) + quantity, add/remove. */
-function LineRows({
+/**
+ * Draft line rows: SKU picker (the client's SKUs only) + quantity, add/remove.
+ * Story 21-7b — exported and generic over the minimal `LineOption`, so the
+ * portal's announce form renders the same rows from its own SKU list (mapped
+ * by `portalSkuOption`) without importing an operator type.
+ */
+export function LineRows<O extends LineOption>({
   lines,
   options,
   skus,
@@ -217,8 +223,8 @@ function LineRows({
   lockedIds,
 }: {
   lines: readonly AsnDraftLine[];
-  options: readonly SkuResponse[];
-  skus: Readonly<Record<string, SkuResponse>> | null;
+  options: readonly O[];
+  skus: Readonly<Record<string, O>> | null;
   onChange: (next: AsnDraftLine[]) => void;
   /** Lines that have received stock: their SKU is fixed (the server refuses a change). */
   lockedIds?: ReadonlySet<string>;

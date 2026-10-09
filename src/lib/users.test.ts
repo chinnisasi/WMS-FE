@@ -52,7 +52,10 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 21-3 adds `rates.manage` (owner + accountant) — 37 became 38.
     // Story 21-5 adds `billing.invoice` (owner + accountant) — 38 became 39.
     // Story 21-6 adds `asn.manage` (owner + ops_manager, `po.manage`'s set) — 39 became 40.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(40);
+    // Story 21-7b adds `asn.announce` (owner + client — the portal's one write) — 40 became 41.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(41);
+    expect(roleHasCapability('owner', 'asn.announce')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'asn.announce')).toBe(false);
     expect(roleHasCapability('owner', 'asn.manage')).toBe(true);
     expect(roleHasCapability('ops_manager', 'asn.manage')).toBe(true);
     expect(roleHasCapability('operator', 'asn.manage')).toBe(false);
@@ -445,8 +448,13 @@ describe('roleHasCapability (fail-closed)', () => {
 });
 
 describe('the client-portal persona (story 21-7)', () => {
-  test('client holds no capability at all', () => {
-    expect([...ROLE_CAPABILITIES.client]).toEqual([]);
+  test('client holds exactly asn.announce (story 21-7b — the portal\'s one write)', () => {
+    expect([...ROLE_CAPABILITIES.client]).toEqual(['asn.announce']);
+  });
+
+  test('story 21-7b: asn.announce is held by owner and client only — never ops_manager (derived by exclusion), operator or accountant', () => {
+    const holders = (Object.keys(ROLE_CAPABILITIES) as UserRole[]).filter((role) => roleHasCapability(role, 'asn.announce'));
+    expect(holders).toEqual(['owner', 'client']);
   });
 
   test('the inline role select assigns the four staff roles only; the invite adds client once brands exist', () => {

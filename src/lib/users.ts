@@ -180,6 +180,12 @@ export const CAPABILITIES = [
   // the PO's mirror). Gates the Inbound surface's ASN card actions; every
   // member reads ASNs.
   'asn.manage',
+  // Story 21-7b — the client portal's one write: a client user announces its
+  // OWN inbound shipment from the portal Inbound page (the client is the
+  // session's, never the body's). Held by `client` (and by Owner, who holds
+  // everything — the fence keeps an owner off portal routes). NOT by the Ops
+  // Manager (see OPS_EXCLUDED_CAPABILITIES) — staff key ASNs via `asn.manage`.
+  'asn.announce',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -217,6 +223,9 @@ const OPS_EXCLUDED_CAPABILITIES: readonly Capability[] = [
   'rates.manage',
   // Story 21-5 — client invoices and tax details, the same holder set.
   'billing.invoice',
+  // Story 21-7b — the portal announce is the client persona's verb; the Ops
+  // Manager keys ASNs through `asn.manage` and never holds this one.
+  'asn.announce',
 ];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
@@ -246,8 +255,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
   // 21-3: and the client rate cards (finance work); story 21-5: and the
   // client invoices and tax details (finance work).
   accountant: ['eway.manage', 'rates.manage', 'billing.invoice'],
-  // Story 21-7 — the client-portal persona holds no capability at all.
-  client: [],
+  // Story 21-7 — the client-portal persona; 21-7 left it empty, story 21-7b
+  // grants exactly one write: announcing its own shipment from the portal.
+  client: ['asn.announce'],
 };
 
 /**

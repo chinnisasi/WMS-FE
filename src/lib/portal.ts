@@ -8,14 +8,24 @@
  */
 import { ApiProblem } from '@/lib/api/client';
 import type {
+  PortalCreateAsnDto,
   PortalInvoiceDetailResponse,
   PortalOrderRowDto,
   PortalAsnRowDto,
   PortalPurchaseOrderRowDto,
+  PortalSkuDto,
+  PortalWarehouseDto,
 } from '@/lib/api/generated';
 import type { Session } from '@/lib/auth';
 import { CLIENT_INVOICE_STATUS_LABEL } from '@/lib/client-invoices';
-import { ASN_STATUS_LABEL } from '@/lib/asns';
+import {
+  ASN_STATUS_LABEL,
+  MAX_ASN_CODE_LENGTH,
+  parseAsnLines,
+  parseExpectedAt,
+  type AsnDraftLine,
+  type LineOption,
+} from '@/lib/asns';
 import { ORDER_STATUS_LABEL, UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
 // ── routing ──────────────────────────────────────────────────────────────────
@@ -205,4 +215,108 @@ export function portalRecipientAddress(party: PortalInvoiceDetailResponse['party
   return [address.line1, address.line2, [cityLine, address.pincode].filter(Boolean).join(' — ')].filter(
     (part): part is string => typeof part === 'string' && part !== '',
   );
+}
+
+// ── announcing a shipment (story 21-7b) ─────────────────────────────────────
+
+/** The SKU list is drained `limit=100` a page… */
+export const PORTAL_SKU_PAGE_LIMIT = 100;
+/** …for at most this many pages (2,000 SKUs); beyond that the form says so. */
+export const PORTAL_SKU_MAX_PAGES = 20;
+
+/** The form's sentence when the client has no SKU to announce (it is disabled). */
+export const PORTAL_NO_SKUS_MESSAGE = 'No SKUs are set up for your company yet — ask the warehouse';
+/** The form's sentence when the catalogue outgrows the drain (it is disabled). */
+export const PORTAL_SKUS_TOO_MANY_MESSAGE =
+  'Your catalogue is too large for this form — ask the warehouse to announce this shipment for you.';
+
+/** The portal's SKU row as the shared line rows' option (portal vocabulary → the minimal option). */
+export function portalSkuOption(sku: PortalSkuDto): LineOption {
+  return { id: sku.skuId, code: sku.skuCode, name: sku.skuName, uom: sku.baseUom, uomPrecision: sku.uomPrecision };
+}
+
+/**
+ * The warehouse picker's labels: the name, with the city when another
+ * warehouse shares the name (names are not unique; the city tells them
+ * apart). Order is the server's `(name, id)`.
+ */
+export function portalWarehouseOptions(warehouses: readonly PortalWarehouseDto[]): { id: string; label: string }[] {
+  const counts = new Map<string, number>();
+  for (const warehouse of warehouses) counts.set(warehouse.warehouseName, (counts.get(warehouse.warehouseName) ?? 0) + 1);
+  return warehouses.map((warehouse) => ({
+    id: warehouse.warehouseId,
+    label:
+      (counts.get(warehouse.warehouseName) ?? 0) > 1 && warehouse.city !== null && warehouse.city !== ''
+        ? `${warehouse.warehouseName} (${warehouse.city})`
+        : warehouse.warehouseName,
+  }));
+}
+
+export interface PortalAsnDraft {
+  readonly asnCode: string;
+  readonly expectedAt: string;
+  readonly lines: readonly AsnDraftLine[];
+}
+
+/**
+ * The announce body, or the first problem (nothing is sent while one
+ * stands): `{warehouseId, asnCode, expectedAt?, lines[{skuId,
+ * announcedQty}]}` — NEVER a `clientId` (the client is the session's; the
+ * server refuses one) and never a line `id` (there is no portal amend).
+ */
+export function parsePortalAsnCreate(
+  draft: PortalAsnDraft,
+  warehouseId: string,
+): { body: PortalCreateAsnDto | null; problem: string | null } {
+  if (warehouseId === '') return { body: null, problem: 'Choose the warehouse the shipment arrives at.' };
+  const code = draft.asnCode.trim();
+  const codeLength = [...code].length;
+  if (codeLength === 0 || codeLength > MAX_ASN_CODE_LENGTH) {
+    return { body: null, problem: `The shipment reference is 1–${MAX_ASN_CODE_LENGTH} characters — your own code for it.` };
+  }
+  const expected = parseExpectedAt(draft.expectedAt);
+  if (expected.problem !== null) return { body: null, problem: expected.problem };
+  const parsed = parseAsnLines(draft.lines);
+  if (parsed.problem !== null) return { body: null, problem: parsed.problem };
+  return {
+    body: {
+      warehouseId,
+      asnCode: code,
+      // Blank stays ABSENT, never `null` or `''`.
+      ...(expected.expectedAt === null ? {} : { expectedAt: expected.expectedAt }),
+      // Ids stripped: the line rows never carry one here, and the portal
+      // body must not (a line id is 400 at the server).
+      lines: parsed.lines.map((line) => ({ skuId: line.skuId, announcedQty: line.announcedQty })),
+    },
+    problem: null,
+  };
+}
+
+/** The announce refusals, in portal words — branching on the problem `code`, never on prose. */
+export function portalAsnReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'client-suspended':
+      case 'role-denied':
+      case 'permission-denied':
+      case 'unauthenticated':
+        return portalReadReason(error, 'This shipment notice');
+      case 'not-found':
+        return 'A SKU or warehouse is no longer available — reload the form and pick again.';
+      case 'duplicate-asn-code':
+        return 'You already have a shipment notice with this reference — use another one.';
+      case 'kit-cannot-hold-stock':
+        return 'A kit cannot be announced — announce the SKUs it is made of instead.';
+      case 'validation-failed':
+        // A fixed portal sentence — never the server's validator wording.
+        return 'Check the quantities, the reference and the expected arrival, then try again.';
+      case 'idempotency-key-reuse':
+        return 'This submission was already processed with different details — reload and try again.';
+      case 'conflict':
+        return 'The same submission is still being processed — try again in a moment.';
+      default:
+        return error.detail ?? `The shipment notice was not sent (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
 }
