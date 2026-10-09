@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from './api/client';
 import {
-  ASN_HANDHELD_NOTICE,
   ASN_STATUS_LABEL,
   amendDraftOf,
   asnProgressLabel,
@@ -34,8 +33,7 @@ describe('the transitions a row offers follow its status', () => {
     expect(statuses.filter(canCancelAsn)).toEqual(['announced']);
   });
 
-  test('the handheld notice and the progress figure', () => {
-    expect(ASN_HANDHELD_NOTICE).toBe('Receiving against ASNs arrives with the next handheld update.');
+  test('the progress figure', () => {
     // Lines, never the unit totals — those sum across UoMs.
     expect(asnProgressLabel({ linesComplete: 1, lineCount: 3 })).toBe('1 of 3 lines received');
   });
