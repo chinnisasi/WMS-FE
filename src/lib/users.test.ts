@@ -3,7 +3,17 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { restoreGlobals, stubGlobal } from './test/globals';
 
 import type { Capability } from './users';
-import { notifyUsersChanged, roleHasCapability, ROLE_CAPABILITIES, USERS_CHANGED_EVENT } from './users';
+import {
+  ASSIGNABLE_ROLES,
+  inviteBody,
+  inviteRoleOptions,
+  notifyUsersChanged,
+  portalInviteClients,
+  roleHasCapability,
+  ROLE_CAPABILITIES,
+  USERS_CHANGED_EVENT,
+} from './users';
+import type { UserRole } from './users';
 
 /**
  * The capability matrix contract (story 1.5): this file pins the UI mirror
@@ -420,6 +430,44 @@ describe('roleHasCapability (fail-closed)', () => {
     // form is a broken promise, a hidden one is fixed by the next sign-in.
     expect(roleHasCapability(undefined, 'warehouse.create')).toBe(false);
     expect(roleHasCapability(undefined, 'users.invite')).toBe(false);
+  });
+
+  test('story 21-7: a role this build does not know answers false — it never throws', () => {
+    // Via a cast: `client` is mirrored now, so only a genuinely unknown
+    // string exercises the membership check (a newer backend, a stale build,
+    // a hand-edited storage row). `toString`/`constructor` pin that the
+    // check is own-property membership, not a prototype lookup.
+    for (const role of ['auditor', 'toString', 'constructor', '']) {
+      expect(() => roleHasCapability(role as UserRole, 'warehouse.create')).not.toThrow();
+      expect(roleHasCapability(role as UserRole, 'warehouse.create')).toBe(false);
+    }
+  });
+});
+
+describe('the client-portal persona (story 21-7)', () => {
+  test('client holds no capability at all', () => {
+    expect([...ROLE_CAPABILITIES.client]).toEqual([]);
+  });
+
+  test('the inline role select assigns the four staff roles only; the invite adds client once brands exist', () => {
+    expect([...ASSIGNABLE_ROLES]).toEqual(['operator', 'accountant', 'ops_manager', 'owner']);
+    expect(inviteRoleOptions(false)).not.toContain('client');
+    expect(inviteRoleOptions(true)).toContain('client');
+  });
+
+  test('the picker offers active client brands only — never self, never suspended', () => {
+    const clients = [
+      { id: 'self', systemOwned: true, status: 'active' },
+      { id: 'a', systemOwned: false, status: 'active' },
+      { id: 'b', systemOwned: false, status: 'suspended' },
+    ];
+    expect(portalInviteClients(clients).map((c) => c.id)).toEqual(['a']);
+  });
+
+  test('the invite body carries clientId only for a client invite, and a client invite needs one', () => {
+    expect(inviteBody('x@y.z', 'operator', 'c-1')).toEqual({ body: { email: 'x@y.z', role: 'operator' }, problem: null });
+    expect(inviteBody('x@y.z', 'client', 'c-1')).toEqual({ body: { email: 'x@y.z', role: 'client', clientId: 'c-1' }, problem: null });
+    expect(inviteBody('x@y.z', 'client', null).body).toBeNull();
   });
 });
 

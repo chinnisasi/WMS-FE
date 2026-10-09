@@ -246,6 +246,8 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
   // 21-3: and the client rate cards (finance work); story 21-5: and the
   // client invoices and tax details (finance work).
   accountant: ['eway.manage', 'rates.manage', 'billing.invoice'],
+  // Story 21-7 — the client-portal persona holds no capability at all.
+  client: [],
 };
 
 /**
@@ -256,6 +258,10 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
  */
 export function roleHasCapability(role: UserRole | undefined, capability: Capability): boolean {
   if (role === undefined) return false;
+  // Story 21-7 — a membership check, never an index: a role this build does
+  // not know (a newer backend, a stale build, a hand-edited storage row)
+  // answers false instead of throwing out of the sidebar's first render.
+  if (!Object.prototype.hasOwnProperty.call(ROLE_CAPABILITIES, role)) return false;
   return ROLE_CAPABILITIES[role].includes(capability);
 }
 
@@ -264,4 +270,35 @@ export const USERS_CHANGED_EVENT = 'wms-users-changed';
 
 export function notifyUsersChanged(): void {
   window.dispatchEvent(new Event(USERS_CHANGED_EVENT));
+}
+// ── Story 21-7 — the client-portal persona in the Users card ────────────────
+
+/** The four staff roles — the only roles a role change may assign (wms-be `ASSIGNABLE_ROLES`). */
+export const ASSIGNABLE_ROLES = ['operator', 'accountant', 'ops_manager', 'owner'] as const satisfies readonly UserRole[];
+
+/** The invite form's roles: the four staff roles, plus `client` once client brands exist. */
+export function inviteRoleOptions(showClientRole: boolean): readonly UserRole[] {
+  return showClientRole ? [...ASSIGNABLE_ROLES, 'client'] : ASSIGNABLE_ROLES;
+}
+
+/** A client brand the invite picker may offer: active and not the tenant's own `self`. */
+export function portalInviteClients<T extends { systemOwned: boolean; status: string }>(clients: readonly T[]): T[] {
+  return clients.filter((client) => !client.systemOwned && client.status === 'active');
+}
+
+/**
+ * The invite body: `clientId` ONLY for a client-portal invite (the backend
+ * refuses one on a staff role), and a client invite without a picked client
+ * is not sent at all (`problem`).
+ */
+export function inviteBody(
+  email: string,
+  role: UserRole,
+  clientId: string | null,
+): { body: { email: string; role: UserRole; clientId?: string } | null; problem: string | null } {
+  if (role !== 'client') return { body: { email, role }, problem: null };
+  if (clientId === null || clientId === '') {
+    return { body: null, problem: 'Pick the client brand this portal user belongs to.' };
+  }
+  return { body: { email, role, clientId }, problem: null };
 }

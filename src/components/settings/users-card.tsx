@@ -7,10 +7,20 @@ import {
   fetchApiInviteUser,
   fetchApiSetUserRole,
 } from '@/lib/api/client';
-import type { UserResponse } from '@/lib/api/generated';
+import type { ClientDto, UserResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { notifyUsersChanged, roleHasCapability, type UserRole } from '@/lib/users';
+import {
+  ASSIGNABLE_ROLES,
+  inviteBody,
+  inviteRoleOptions,
+  notifyUsersChanged,
+  portalInviteClients,
+  roleHasCapability,
+  type UserRole,
+} from '@/lib/users';
+import { showClients } from '@/lib/clients';
 import { ulid } from '@/lib/ulid';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { useUsers } from '@/lib/use-users';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -21,14 +31,18 @@ const inputClass =
 const labelClass = 'text-sm font-medium';
 const selectClass = `${inputClass} appearance-none`;
 
-/** The four coarse roles (spec 1.5) — surfaced verbatim. */
-const ROLE_OPTIONS: readonly UserRole[] = ['operator', 'accountant', 'ops_manager', 'owner'];
+/**
+ * The inline role select keeps the four staff roles (story 21-7): `client`
+ * is never assigned — a portal user is created by an invite naming its client.
+ */
+const ROLE_OPTIONS: readonly UserRole[] = ASSIGNABLE_ROLES;
 
 const ROLE_LABELS: Readonly<Record<UserRole, string>> = {
   owner: 'Owner',
   ops_manager: 'Ops Manager',
   operator: 'Operator',
   accountant: 'Accountant',
+  client: 'Client portal',
 };
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
@@ -64,6 +78,7 @@ export function UsersCard() {
 function UsersCardSessioned() {
   const users = useUsers();
   const session = readSession();
+  const clients = readyClients(useClients());
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The invite response's one-time link, kept visible until the next action.
   const [inviteLink, setInviteLink] = useState<string | null>(null);
@@ -77,8 +92,17 @@ function UsersCardSessioned() {
       key: 'role',
       header: 'Role',
       render: (user) =>
-        canChangeRole ? <RoleSelect user={user} onDone={setOutcome} users={users} /> : (
-          <span>{ROLE_LABELS[user.role]}</span>
+        // Story 21-7 — a client-portal user's role is fixed at invite: shown
+        // read-only, with its client's code, never as a select.
+        user.role === 'client' ? (
+          <span data-testid="client-role">
+            {ROLE_LABELS.client}
+            {user.clientId !== null ? ` · ${clients?.find((client) => client.id === user.clientId)?.code ?? '—'}` : ''}
+          </span>
+        ) : canChangeRole ? (
+          <RoleSelect user={user} onDone={setOutcome} users={users} />
+        ) : (
+          <span>{ROLE_LABELS[user.role] ?? user.role}</span>
         ),
     },
     {
@@ -108,6 +132,7 @@ function UsersCardSessioned() {
 
       {canInvite && (
         <InviteForm
+          clients={clients}
           onInvited={(link) => {
             setInviteLink(link);
             setOutcome(null);
@@ -159,9 +184,18 @@ function UsersCardSessioned() {
 }
 
 /** The invite form: email + role select, fresh ULID key per submit. */
-function InviteForm({ onInvited }: { onInvited: (link: string) => void }) {
+function InviteForm({
+  onInvited,
+  clients,
+}: {
+  onInvited: (link: string) => void;
+  clients: readonly ClientDto[] | null;
+}) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<UserRole>('operator');
+  const [clientId, setClientId] = useState<string>('');
+  const clientRole = showClients(clients);
+  const pickable = clients === null ? [] : portalInviteClients(clients);
   const [pending, setPending] = useState(false);
   const [rejection, setRejection] = useState<string | null>(null);
 
@@ -169,10 +203,15 @@ function InviteForm({ onInvited }: { onInvited: (link: string) => void }) {
     event.preventDefault();
     const session = readSession();
     if (session === null) return;
+    const { body, problem } = inviteBody(email, role, clientId === '' ? null : clientId);
+    if (body === null) {
+      setRejection(problem);
+      return;
+    }
     setPending(true);
     setRejection(null);
     try {
-      const invited = await fetchApiInviteUser(session.tenant.id, { email, role }, ulid());
+      const invited = await fetchApiInviteUser(session.tenant.id, body, ulid());
       setEmail('');
       const url = new URL('/accept-invite', window.location.origin);
       url.searchParams.set('tenant', session.tenant.id);
@@ -209,13 +248,32 @@ function InviteForm({ onInvited }: { onInvited: (link: string) => void }) {
             value={role}
             onChange={(e) => setRole(e.target.value as UserRole)}
           >
-            {ROLE_OPTIONS.map((option) => (
+            {inviteRoleOptions(clientRole).map((option) => (
               <option key={option} value={option}>
                 {ROLE_LABELS[option]}
               </option>
             ))}
           </select>
         </label>
+        {role === 'client' && (
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Client</span>
+            <select
+              className={selectClass}
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              aria-label="Client brand"
+              required
+            >
+              <option value="">Pick a client…</option>
+              {pickable.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.code} — {client.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button
           type="submit"
           disabled={pending}
@@ -246,7 +304,12 @@ function RoleSelect({
     if (session === null || role === user.role) return;
     setPending(true);
     try {
-      const updated = await fetchApiSetUserRole(session.tenant.id, user.id, { role: role as UserRole }, ulid());
+      const updated = await fetchApiSetUserRole(
+        session.tenant.id,
+        user.id,
+        { role: role as (typeof ASSIGNABLE_ROLES)[number] },
+        ulid(),
+      );
       onDone({
         tone: 'accepted',
         word: `${updated.email} is now ${ROLE_LABELS[updated.role]}`,
@@ -302,6 +365,8 @@ function rejectionReason(error: unknown): string {
         return 'Your session expired — sign in again.';
       case 'validation-failed':
         return error.detail ?? 'Check the entered values and try again.';
+      case 'client-not-active':
+        return error.detail ?? 'That client brand is not active — portal users are invited for an active client only.';
       default:
         return error.detail ?? `Request failed (${error.code}).`;
     }
