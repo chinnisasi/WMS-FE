@@ -76,8 +76,14 @@ const PORTAL_ME = {
 let requests: string[] = [];
 /** Every request's pathname + query (the paging assertions). */
 let urls: string[] = [];
-/** pathname suffix (optionally `?cursor=<c>` for a later page) → [status, body] */
+/** pathname suffix (optionally `?cursor=<c>` for a later page) → [status, body] — GETs. */
 let routes: Record<string, [number, unknown]> = {};
+/** Story 21-7b — every POST as sent: its path, its Idempotency-Key header and its parsed body. */
+let posts: { path: string; key: string | null; body: Record<string, unknown> }[] = [];
+/** Story 21-7b — the POST replies, in order (one per POST); empty → 503. */
+let postReplies: [number, unknown][] = [];
+/** Story 21-7b — when set, every POST waits on it before replying (an in-flight submit). */
+let postHold: Promise<void> | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -89,6 +95,13 @@ function stubRouter(): void {
     const { pathname, search, searchParams } = new URL(request.url);
     requests.push(`${request.method.toUpperCase()} ${pathname}`);
     urls.push(`${pathname}${search}`);
+    if (request.method.toUpperCase() === 'POST') {
+      const text = await request.clone().text();
+      posts.push({ path: pathname, key: request.headers.get('Idempotency-Key'), body: text === '' ? {} : (JSON.parse(text) as Record<string, unknown>) });
+      if (postHold !== null) await postHold;
+      const reply = postReplies.shift() ?? [503, { code: 'unavailable', status: 503, title: 'Down' }];
+      return json(reply[0], reply[1]);
+    }
     const cursor = searchParams.get('cursor');
     if (cursor !== null) {
       const paged = Object.keys(routes).find((key) => key.includes('?cursor=') && pathname.endsWith(key.split('?')[0]!) && key.endsWith(`?cursor=${cursor}`));
@@ -108,6 +121,9 @@ beforeEach(() => {
   requests = [];
   urls = [];
   routes = {};
+  posts = [];
+  postReplies = [];
+  postHold = null;
   replaces.length = 0;
   pushes.length = 0;
   stubRouter();
@@ -481,5 +497,257 @@ describe('the portal surfaces — ready, empty, failed', () => {
     window.removeEventListener('wms-portal-suspended', onSuspended);
     expect(view.container.querySelector('[role="alert"]')!.textContent).toContain("Your company's portal access is suspended.");
     expect(announced).toBe(1);
+  });
+});
+
+// ── Story 21-7b — announcing a shipment from the portal ─────────────────────
+
+describe('Announce a shipment (story 21-7b)', () => {
+  const W1 = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const W2 = '0198f7a2-1b3c-7d4e-8f90-0000000000a2';
+  const W3 = '0198f7a2-1b3c-7d4e-8f90-0000000000a3';
+  const SKU1 = '0198f7a2-1b3c-7d4e-8f90-0000000000b1';
+  const SKU2 = '0198f7a2-1b3c-7d4e-8f90-0000000000b2';
+  const sku = (skuId: string, skuCode: string, skuName: string, baseUom = 'each', uomPrecision = 0) => ({ skuId, skuCode, skuName, baseUom, uomPrecision });
+  const asnRow = (id: string, code: string) => ({ id, code, status: 'announced', expectedAt: null, warehouseName: 'Main', lineCount: 1, announcedTotal: 1, receivedTotal: 0, createdAt: '2026-10-08T10:00:00.000Z' });
+  const DETAIL = { ...asnRow('a-new', 'ASN-NEW'), lines: [{ skuCode: 'TEE-RED', skuName: 'Red tee', announcedQty: 12, receivedQty: 0 }] };
+
+  /** The form's reads: two Mains told apart by city, an Annex; SKU page 1 → page 2 (the drain). */
+  function formRoutes(): void {
+    routes = {
+      ...routes,
+      '/portal/warehouses': [
+        200,
+        {
+          items: [
+            { warehouseId: W3, warehouseName: 'Annex', city: 'Chennai' },
+            { warehouseId: W1, warehouseName: 'Main', city: 'Bengaluru' },
+            { warehouseId: W2, warehouseName: 'Main', city: 'Mysuru' },
+          ],
+        },
+      ],
+      '/portal/skus': [200, { items: [sku(SKU1, 'TEE-RED', 'Red tee')], nextCursor: 'SKU-PAGE-2' }],
+      '/portal/skus?cursor=SKU-PAGE-2': [200, { items: [sku(SKU2, 'RICE', 'Basmati rice', 'kg', 3)], nextCursor: null }],
+    };
+  }
+
+  function setValue(element: HTMLInputElement | HTMLSelectElement, value: string): void {
+    const proto = element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+    act(() => {
+      setter.call(element, value);
+      element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    });
+  }
+
+  function field<T extends Element>(container: HTMLElement, label: string): T {
+    const found = container.querySelector(`[aria-label="${label}"]`);
+    expect(found).not.toBeNull();
+    return found as T;
+  }
+
+  async function openForm(): Promise<HTMLElement> {
+    view = render(<PortalInbound />);
+    await settle();
+    click(buttonNamed(view.container, 'Announce a shipment'));
+    await settle();
+    return view.container;
+  }
+
+  async function fillAndSubmit(container: HTMLElement, opts: { expectedAt?: string; skuId?: string; qty?: string } = {}): Promise<void> {
+    setValue(field<HTMLSelectElement>(container, 'Warehouse'), W2);
+    setValue(field<HTMLInputElement>(container, 'Shipment reference'), '  ASN-NEW ');
+    if (opts.expectedAt !== undefined) setValue(field<HTMLInputElement>(container, 'Expected arrival'), opts.expectedAt);
+    setValue(field<HTMLSelectElement>(container, 'Line 1 SKU'), opts.skuId ?? SKU1);
+    setValue(field<HTMLInputElement>(container, 'Line 1 quantity'), opts.qty ?? '12');
+    await submit(container);
+  }
+
+  async function submit(container: HTMLElement): Promise<void> {
+    const form = container.querySelector('form[aria-label="Announce a shipment"]') as HTMLFormElement;
+    act(() => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+  }
+
+  beforeEach(() => {
+    writeSession(PORTAL_SESSION);
+    formRoutes();
+  });
+
+  test('the POST carries exactly {asnCode, expectedAt, lines, warehouseId} — never a clientId or a line id — with an Idempotency-Key; every request is a portal route', async () => {
+    postReplies = [[201, DETAIL]];
+    const container = await openForm();
+    await fillAndSubmit(container, { expectedAt: '2026-10-20T10:00' });
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.path).toBe(`/api/v1/tenants/${TENANT_ID}/portal/inbound/asns`);
+    expect(Object.keys(posts[0]!.body).sort()).toEqual(['asnCode', 'expectedAt', 'lines', 'warehouseId']);
+    expect(posts[0]!.body).toMatchObject({ warehouseId: W2, asnCode: 'ASN-NEW', lines: [{ skuId: SKU1, announcedQty: 12 }] });
+    expect(Object.keys((posts[0]!.body.lines as Record<string, unknown>[])[0]!).sort()).toEqual(['announcedQty', 'skuId']);
+    expect(posts[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    // Only portal routes, ever.
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.filter((r) => !r.includes(`/api/v1/tenants/${TENANT_ID}/portal/`))).toEqual([]);
+  });
+
+  test('a blank expected arrival is ABSENT from the body', async () => {
+    postReplies = [[201, DETAIL]];
+    const container = await openForm();
+    await fillAndSubmit(container);
+    expect(Object.keys(posts[0]!.body).sort()).toEqual(['asnCode', 'lines', 'warehouseId']);
+  });
+
+  test('the key is reused on a retry of the unchanged draft, and fresh after an edit', async () => {
+    postReplies = [
+      [503, { code: 'unavailable', status: 503, title: 'Down', detail: 'Try again.' }],
+      [503, { code: 'unavailable', status: 503, title: 'Down', detail: 'Try again.' }],
+      [503, { code: 'unavailable', status: 503, title: 'Down', detail: 'Try again.' }],
+    ];
+    const container = await openForm();
+    await fillAndSubmit(container);
+    await submit(container);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]!.key).toBe(posts[0]!.key);
+    setValue(field<HTMLInputElement>(container, 'Line 1 quantity'), '13');
+    await submit(container);
+    expect(posts).toHaveLength(3);
+    expect(posts[2]!.key).not.toBe(posts[0]!.key);
+    expect(posts[2]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+  });
+
+  test('a SKU on page 2 of portal/skus is an option (the drain), with its unit and step; equal warehouse names carry their city', async () => {
+    const container = await openForm();
+    expect(urls.filter((url) => url.includes('/portal/skus') && url.includes('cursor=SKU-PAGE-2'))).toHaveLength(1);
+    expect(urls.some((url) => url.includes('/portal/skus') && url.includes('limit=100'))).toBe(true);
+    const skuOptions = [...field<HTMLSelectElement>(container, 'Line 1 SKU').options].map((o) => o.textContent);
+    expect(skuOptions).toEqual(['Pick a SKU…', 'TEE-RED — Red tee', 'RICE — Basmati rice']);
+    const warehouseOptions = [...field<HTMLSelectElement>(container, 'Warehouse').options].map((o) => o.textContent);
+    expect(warehouseOptions).toEqual(['Pick the warehouse…', 'Annex', 'Main (Bengaluru)', 'Main (Mysuru)']);
+    setValue(field<HTMLSelectElement>(container, 'Line 1 SKU'), SKU2);
+    expect(field<HTMLInputElement>(container, 'Line 1 quantity').step).toBe('0.001');
+    expect(container.textContent).toContain('kg');
+    // And it submits: a page-2 SKU in a decimal quantity.
+    postReplies = [[201, DETAIL]];
+    await fillAndSubmit(container, { skuId: SKU2, qty: '2.5' });
+    expect(posts[0]!.body.lines).toEqual([{ skuId: SKU2, announcedQty: 2.5 }]);
+  });
+
+  test('no SKUs: the form is disabled with the ask-the-warehouse sentence', async () => {
+    routes = { ...routes, '/portal/skus': [200, { items: [], nextCursor: null }] };
+    const container = await openForm();
+    expect(container.textContent).toContain('No SKUs are set up for your company yet — ask the warehouse');
+    expect(container.querySelector('form[aria-label="Announce a shipment"]')).toBeNull();
+  });
+
+  test('a failed read shows ReadFailure with Retry, and no form', async () => {
+    routes = { ...routes, '/portal/skus': [503, { code: 'unavailable', status: 503, title: 'Down', detail: 'The SKU read failed.' }] };
+    const container = await openForm();
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain('The SKU read failed.');
+    buttonNamed(container, 'Retry');
+    expect(container.querySelector('form[aria-label="Announce a shipment"]')).toBeNull();
+    view!.unmount();
+    formRoutes();
+    routes = { ...routes, '/portal/warehouses': [503, { code: 'unavailable', status: 503, title: 'Down', detail: 'The warehouse read failed.' }] };
+    const again = await openForm();
+    expect(again.querySelector('[role="alert"]')!.textContent).toContain('The warehouse read failed.');
+  });
+
+  test('success shows the banner and returns the notices to page ONE, refetched', async () => {
+    routes = {
+      ...routes,
+      '/portal/inbound/asns': [200, { items: [asnRow('a-1', 'ASN-PAGE-1')], nextCursor: 'ASN-PAGE-2' }],
+      '/portal/inbound/asns?cursor=ASN-PAGE-2': [200, { items: [asnRow('a-2', 'ASN-PAGE-2')], nextCursor: null }],
+    };
+    view = render(<PortalInbound />);
+    await settle();
+    click(buttonNamed(view.container, 'Next'));
+    await settle();
+    expect(view.container.textContent).toContain('ASN-PAGE-2');
+    click(buttonNamed(view.container, 'Announce a shipment'));
+    await settle();
+    postReplies = [[201, DETAIL]];
+    // The notice-list GETs (requests and urls are recorded in step).
+    const listReads = () => urls.filter((url, i) => requests[i]!.startsWith('GET ') && /\/portal\/inbound\/asns(\?|$)/.test(url));
+    const before = listReads().length;
+    await fillAndSubmit(view.container);
+    expect(view.container.textContent).toContain('Shipment ASN-NEW announced');
+    expect(listReads()).toHaveLength(before + 1);
+    expect(listReads().at(-1)).not.toContain('cursor=');
+    expect(view.container.textContent).toContain('ASN-PAGE-1');
+    expect(view.container.textContent).not.toContain('ASN-PAGE-2');
+    expect(view.container.querySelector('form[aria-label="Announce a shipment"]')).toBeNull();
+  });
+
+  test('while the POST is in flight the whole form is disabled — a field, the line rows and Discard', async () => {
+    let release!: () => void;
+    postHold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    postReplies = [[201, DETAIL]];
+    const container = await openForm();
+    await fillAndSubmit(container);
+    expect(posts).toHaveLength(1);
+    const fieldset = container.querySelector('form[aria-label="Announce a shipment"] fieldset') as HTMLFieldSetElement;
+    expect(fieldset.disabled).toBe(true);
+    expect(fieldset.contains(field<HTMLInputElement>(container, 'Shipment reference'))).toBe(true);
+    expect(fieldset.contains(field<HTMLSelectElement>(container, 'Line 1 SKU'))).toBe(true);
+    expect(fieldset.contains(buttonNamed(container, 'Discard'))).toBe(true);
+    // (happy-dom does not propagate a disabled fieldset to `:disabled`; a
+    // browser disables every control inside it — the containment above is
+    // the claim.)
+    release();
+    await settle();
+    expect(container.textContent).toContain('Shipment ASN-NEW announced');
+  });
+
+  test('a catalogue past the 20-page drain disables the form with the too-large sentence', async () => {
+    let page = 0;
+    routes = { ...routes };
+    // Every page carries a nextCursor: the stub answers each cursor with another.
+    const real = globalThis.fetch;
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      const request = input instanceof Request ? input : new Request(input.toString());
+      const { pathname } = new URL(request.url);
+      if (pathname.endsWith('/portal/skus')) {
+        page += 1;
+        requests.push(`GET ${pathname}`);
+        return json(200, { items: [sku(`0198f7a2-1b3c-7d4e-8f90-${String(page).padStart(12, '0')}`, `SKU-${page}`, `Sku ${page}`)], nextCursor: `C-${page}` });
+      }
+      return real(input);
+    }) as unknown as typeof fetch);
+    const container = await openForm();
+    expect(page).toBe(20);
+    expect(container.textContent).toContain('Your catalogue is too large for this form');
+    expect(container.querySelector('form[aria-label="Announce a shipment"]')).toBeNull();
+  });
+
+  test('a single warehouse is chosen without touching the picker', async () => {
+    routes = { ...routes, '/portal/warehouses': [200, { items: [{ warehouseId: W1, warehouseName: 'Main', city: 'Bengaluru' }] }] };
+    postReplies = [[201, DETAIL]];
+    const container = await openForm();
+    setValue(field<HTMLInputElement>(container, 'Shipment reference'), 'ASN-ONE');
+    setValue(field<HTMLSelectElement>(container, 'Line 1 SKU'), SKU1);
+    setValue(field<HTMLInputElement>(container, 'Line 1 quantity'), '3');
+    await submit(container);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body.warehouseId).toBe(W1);
+  });
+
+  test('a refusal shows the portal reason in the form (a duplicate code)', async () => {
+    postReplies = [[409, { code: 'duplicate-asn-code', status: 409, title: 'ASN code already in use', detail: 'Client BRAND-A already has an advance shipment notice "ASN-NEW".' }]];
+    const container = await openForm();
+    await fillAndSubmit(container);
+    expect(container.querySelector('form [role="alert"]')!.textContent).toBe('You already have a shipment notice with this reference — use another one.');
+  });
+
+  test('a client-suspended refusal of the POST fires the portal event', async () => {
+    postReplies = [[403, { code: 'client-suspended', status: 403, title: 'Suspended' }]];
+    let announced = 0;
+    const onSuspended = () => void (announced += 1);
+    window.addEventListener('wms-portal-suspended', onSuspended);
+    const container = await openForm();
+    await fillAndSubmit(container);
+    window.removeEventListener('wms-portal-suspended', onSuspended);
+    expect(announced).toBe(1);
+    expect(container.querySelector('form [role="alert"]')!.textContent).toBe("Your company's portal access is suspended.");
   });
 });

@@ -139,6 +139,7 @@ import {
   clientInvoicesControllerRefresh,
   clientInvoicesControllerSettle,
   clientInvoicesControllerVoid,
+  portalControllerAnnounceAsn,
   portalControllerAsn,
   portalControllerAsns,
   portalControllerInvoice,
@@ -148,13 +149,16 @@ import {
   portalControllerOrders,
   portalControllerPurchaseOrder,
   portalControllerPurchaseOrders,
+  portalControllerSkus,
   portalControllerStock,
+  portalControllerWarehouses,
 } from './generated/sdk.gen';
 import { ensureSessionHint, readSession, clearSession, writeSession, PORTAL_SUSPENDED_EVENT } from '../auth';
 import type {
   PortalAsnDetailResponse,
   PortalAsnPageResponse,
   PortalAsnRowDto,
+  PortalCreateAsnDto,
   PortalInvoiceDetailResponse,
   PortalInvoicePageResponse,
   PortalMeResponse,
@@ -164,7 +168,9 @@ import type {
   PortalPurchaseOrderDetailResponse,
   PortalPurchaseOrderPageResponse,
   PortalPurchaseOrderRowDto,
+  PortalSkuPageResponse,
   PortalStockPageResponse,
+  PortalWarehouseListResponse,
   ClientInvoiceDto,
   ClientInvoiceLineRecordsResponse,
   ClientInvoiceListResponse,
@@ -3394,6 +3400,39 @@ export async function fetchApiPortalPurchaseOrder(
   options?: { signal?: AbortSignal },
 ): Promise<PortalPurchaseOrderDetailResponse> {
   const { data, error } = await portalControllerPurchaseOrder({ path: { tenantId, poId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/**
+ * Story 21-7b — the portal's one write: announces this client's inbound
+ * shipment (`asn.announce`; the client is the session's, never the body's).
+ * Answers the bare `PortalAsnDetail`; the key is per draft.
+ */
+export async function fetchApiPortalAnnounceAsn(
+  tenantId: string,
+  body: PortalCreateAsnDto,
+  idempotencyKey: string,
+): Promise<PortalAsnDetailResponse> {
+  const { data, error } = await portalControllerAnnounceAsn({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 21-7b — this client's non-kit SKUs (the announce form's options); keyset by code. */
+export async function fetchApiPortalSkus(tenantId: string, options?: PortalPageOptions): Promise<PortalSkuPageResponse> {
+  const { data, error } = await portalControllerSkus({ path: { tenantId }, query: portalPageQuery(options), signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 21-7b — the tenant's warehouses a client may announce into (name and city; unpaginated). */
+export async function fetchApiPortalWarehouses(tenantId: string, options?: { signal?: AbortSignal }): Promise<PortalWarehouseListResponse> {
+  const { data, error } = await portalControllerWarehouses({ path: { tenantId }, signal: options?.signal });
   if (error || !data) throw portalError(error);
   return data;
 }

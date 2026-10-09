@@ -6342,6 +6342,36 @@ export type PortalAsnPageResponse = {
     nextCursor: string | null;
 };
 
+export type PortalAsnLineInputDto = {
+    /**
+     * One of this client's SKUs (portal/skus) — never a kit
+     */
+    skuId: string;
+    /**
+     * Announced quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    announcedQty: number;
+};
+
+export type PortalCreateAsnDto = {
+    /**
+     * The warehouse the shipment arrives at (portal/warehouses)
+     */
+    warehouseId: string;
+    /**
+     * Your own ASN reference — unique per company; 1–64 characters, counted in code points
+     */
+    asnCode: string;
+    /**
+     * When the shipment is expected (ISO-8601 UTC, Z-suffixed); optional
+     */
+    expectedAt?: string | null;
+    /**
+     * At least one line with one of this client's SKUs
+     */
+    lines: Array<PortalAsnLineInputDto>;
+};
+
 export type PortalAsnLineDto = {
     skuCode: string | null;
     skuName: string | null;
@@ -6402,6 +6432,38 @@ export type PortalPurchaseOrderDetailResponse = {
     receivedTotal: number;
     createdAt: string;
     lines: Array<PortalPurchaseOrderLineDto>;
+};
+
+export type PortalSkuDto = {
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * The SKU base UoM — announced quantities are in it
+     */
+    baseUom: string;
+    /**
+     * Decimal places the unit admits (0 = whole units only)
+     */
+    uomPrecision: number;
+};
+
+export type PortalSkuPageResponse = {
+    items: Array<PortalSkuDto>;
+    nextCursor: string | null;
+};
+
+export type PortalWarehouseDto = {
+    warehouseId: string;
+    warehouseName: string;
+    /**
+     * The origin city — tells apart two warehouses of one name
+     */
+    city: string | null;
+};
+
+export type PortalWarehouseListResponse = {
+    items: Array<PortalWarehouseDto>;
 };
 
 export type PortalInvoiceTotalsDto = {
@@ -16020,6 +16082,62 @@ export type PortalControllerAsnsResponses = {
 
 export type PortalControllerAsnsResponse = PortalControllerAsnsResponses[keyof PortalControllerAsnsResponses];
 
+export type PortalControllerAnnounceAsnData = {
+    body: PortalCreateAsnDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/inbound/asns';
+};
+
+export type PortalControllerAnnounceAsnErrors = {
+    /**
+     * Missing (idempotency-key-required) or malformed (idempotency-key-invalid) Idempotency-Key; an invalid body — a clientId or a line id, no lines or more than 200, a code over 64 characters, a malformed expectedAt, or a quantity finer than its unit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended); or the user may not announce for this client (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse is not the tenant's, or a line's SKU is unknown or not this client's (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A line names a kit SKU (kit-cannot-hold-stock), the client already has this code (duplicate-asn-code), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PortalControllerAnnounceAsnError = PortalControllerAnnounceAsnErrors[keyof PortalControllerAnnounceAsnErrors];
+
+export type PortalControllerAnnounceAsnResponses = {
+    /**
+     * The announced ASN, in the shape of GET portal/inbound/asns/{asnId} (a matching Idempotency-Key replays it)
+     */
+    201: PortalAsnDetailResponse;
+};
+
+export type PortalControllerAnnounceAsnResponse = PortalControllerAnnounceAsnResponses[keyof PortalControllerAnnounceAsnResponses];
+
 export type PortalControllerAsnData = {
     body?: never;
     path: {
@@ -16141,6 +16259,78 @@ export type PortalControllerPurchaseOrderResponses = {
 };
 
 export type PortalControllerPurchaseOrderResponse = PortalControllerPurchaseOrderResponses[keyof PortalControllerPurchaseOrderResponses];
+
+export type PortalControllerSkusData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/portal/skus';
+};
+
+export type PortalControllerSkusErrors = {
+    /**
+     * A malformed cursor (invalid-cursor) or a limit outside 1–100 (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerSkusError = PortalControllerSkusErrors[keyof PortalControllerSkusErrors];
+
+export type PortalControllerSkusResponses = {
+    200: PortalSkuPageResponse;
+};
+
+export type PortalControllerSkusResponse = PortalControllerSkusResponses[keyof PortalControllerSkusResponses];
+
+export type PortalControllerWarehousesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/warehouses';
+};
+
+export type PortalControllerWarehousesErrors = {
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerWarehousesError = PortalControllerWarehousesErrors[keyof PortalControllerWarehousesErrors];
+
+export type PortalControllerWarehousesResponses = {
+    200: PortalWarehouseListResponse;
+};
+
+export type PortalControllerWarehousesResponse = PortalControllerWarehousesResponses[keyof PortalControllerWarehousesResponses];
 
 export type PortalControllerInvoicesData = {
     body?: never;

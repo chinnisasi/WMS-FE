@@ -63,6 +63,21 @@ export function asnProgressLabel(entry: { linesComplete: number; lineCount: numb
   return `${entry.linesComplete} of ${entry.lineCount} lines received`;
 }
 
+/**
+ * Story 21-7b — the minimal SKU option the draft line rows render: an id,
+ * the code and name the picker shows, and the unit (with its precision, the
+ * quantity step). The operator's `SkuResponse` satisfies it as is; the
+ * portal maps its own `PortalSkuDto` through `portalSkuOption` (lib/portal),
+ * so no operator type reaches the portal.
+ */
+export interface LineOption {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+  readonly uom: string;
+  readonly uomPrecision: number;
+}
+
 /** One draft line as the forms hold it: the SKU, the typed quantity, and (amend) the line it updates. */
 export interface AsnDraftLine {
   readonly id?: string;
