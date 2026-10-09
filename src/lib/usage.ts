@@ -88,16 +88,29 @@ function inclusiveDays(from: string, to: string): number {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** A real calendar date in `YYYY-MM-DD` — shape AND existence (`2026-02-31` is refused, as the backend's `isIsoDate` does). */
+function isRealDate(value: string): boolean {
+  if (!ISO_DATE.test(value)) return false;
+  const ms = Date.parse(`${value}T00:00:00Z`);
+  return !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === value;
+}
+
 /**
  * The custom range → a period, or a problem the form shows (and sends
- * nothing): both dates, `from` not after `to`, at most 366 days — the rules
- * the backend answers 400 to, mirrored so a guaranteed refusal is never sent.
+ * nothing): both dates, `from` not after `to`, at most `maxDays` days — the
+ * rules the backend answers 400 to, mirrored so a guaranteed refusal is never
+ * sent. Story 21-8 generalised the bound (default: the usage read's 366) so
+ * the service report reuses the same parser with its own backend bound.
  */
-export function parseCustomRange(from: string, to: string): { period: { from: string; to: string }; problem: null } | { period: null; problem: string } {
-  if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) return { period: null, problem: 'Pick both a start and an end date.' };
+export function parseCustomRange(
+  from: string,
+  to: string,
+  maxDays: number = MAX_USAGE_DAYS,
+): { period: { from: string; to: string }; problem: null } | { period: null; problem: string } {
+  if (!isRealDate(from) || !isRealDate(to)) return { period: null, problem: 'Pick both a start and an end date.' };
   if (from > to) return { period: null, problem: 'The start date is after the end date.' };
-  if (inclusiveDays(from, to) > MAX_USAGE_DAYS) {
-    return { period: null, problem: `A period covers at most ${MAX_USAGE_DAYS} days.` };
+  if (inclusiveDays(from, to) > maxDays) {
+    return { period: null, problem: `A period covers at most ${maxDays} days.` };
   }
   return { period: { from, to }, problem: null };
 }

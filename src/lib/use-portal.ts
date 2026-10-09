@@ -13,6 +13,7 @@ import {
   fetchApiPortalOrders,
   fetchApiPortalPurchaseOrder,
   fetchApiPortalPurchaseOrders,
+  fetchApiPortalService,
   fetchApiPortalStock,
 } from '@/lib/api/client';
 import type {
@@ -27,9 +28,11 @@ import type {
   PortalSkuDto,
   PortalStockRowDto,
   PortalWarehouseDto,
+  ServiceReportDto,
 } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { PORTAL_SKU_MAX_PAGES, PORTAL_SKU_PAGE_LIMIT, portalReadReason } from '@/lib/portal';
+import { portalServiceReason } from '@/lib/service-report';
 import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
 
 /**
@@ -39,8 +42,10 @@ import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
  * was requested for, a `cancelled` flag in the effect cleanup, the stale
  * result filtered at render (never a setState in an effect), and a
  * `reload()` that clears the result first so a Retry is visibly in flight.
- * Portal reads take no warehouse — the scope is the tenant (the session's
- * client is the server's to apply) plus the list's own filter.
+ * Portal reads are scoped by the tenant (the session's client is the
+ * server's to apply) plus the list's own filter. Only the Service page
+ * (story 21-8) takes a warehouse — as a filter in its detail key, never as
+ * a scope of its own.
  */
 
 export interface PortalPage<T> {
@@ -115,6 +120,7 @@ function usePortalDetail<T>(
   id: string | null,
   subject: string,
   fetchOne: (tenantId: string, id: string) => Promise<T>,
+  reason: (error: unknown) => string = (error) => portalReadReason(error, subject),
 ): ResourceState<T> & Reloadable {
   const tenantId = useTenantId();
   const [revision, setRevision] = useState(0);
@@ -128,7 +134,7 @@ function usePortalDetail<T>(
         const data = await fetchOne(tenantId, id);
         if (!cancelled) setResult({ tenantId, id, state: { state: 'ready', data } });
       } catch (error) {
-        if (!cancelled) setResult({ tenantId, id, state: { state: 'failed', reason: portalReadReason(error, subject) } });
+        if (!cancelled) setResult({ tenantId, id, state: { state: 'failed', reason: reason(error) } });
       }
     })();
     return () => {
@@ -230,4 +236,27 @@ export function usePortalSkuOptions(): ResourceState<PortalSkuOptions> & Reloada
 /** The warehouses a client may announce into (the tenant's, by name). */
 export function usePortalWarehouses(): ResourceState<readonly PortalWarehouseDto[]> & Reloadable {
   return usePortalDetail('warehouses', 'the warehouses', async (tenantId) => (await fetchApiPortalWarehouses(tenantId)).items);
+}
+
+// ── story 21-8: the Service page ────────────────────────────────────────────
+
+/**
+ * This client's service report over an inclusive IST period, optionally one
+ * warehouse — keyed `${from}|${to}|${warehouseId ?? ''}`, so changing any of
+ * them refetches. Null `period` (an unparsable draft) sends nothing.
+ */
+export function usePortalService(
+  period: { readonly from: string; readonly to: string } | null,
+  warehouseId: string | null,
+): ResourceState<ServiceReportDto> & Reloadable {
+  const key = period === null ? null : `${period.from}|${period.to}|${warehouseId ?? ''}`;
+  return usePortalDetail(
+    key,
+    'your service report',
+    (tenantId, id) => {
+      const [from, to, warehouse] = id.split('|') as [string, string, string];
+      return fetchApiPortalService(tenantId, { from, to, warehouseId: warehouse === '' ? null : warehouse });
+    },
+    portalServiceReason,
+  );
 }

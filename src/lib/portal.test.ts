@@ -37,12 +37,13 @@ describe('portal routing (story 21-7)', () => {
     expect(loginNotice('other')).toBeNull();
   });
 
-  test('the four portal surfaces, in order', () => {
+  test('the five portal surfaces, in order (21-8 adds Service)', () => {
     expect(PORTAL_NAV.map((item) => [item.label, item.href])).toEqual([
       ['Stock', '/portal/stock'],
       ['Orders', '/portal/orders'],
       ['Inbound', '/portal/inbound'],
       ['Invoices', '/portal/invoices'],
+      ['Service', '/portal/service'],
     ]);
   });
 

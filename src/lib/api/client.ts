@@ -125,6 +125,8 @@ import {
   rateCardsControllerDiscard,
   rateCardsControllerInForce,
   billingUsageControllerUsage,
+  reportingControllerClientService,
+  portalControllerService,
   rateCardsControllerList,
   rateCardsControllerReplaceLines,
   clientsControllerUpdateTaxDetails,
@@ -171,6 +173,7 @@ import type {
   PortalSkuPageResponse,
   PortalStockPageResponse,
   PortalWarehouseListResponse,
+  ServiceReportDto,
   ClientInvoiceDto,
   ClientInvoiceLineRecordsResponse,
   ClientInvoiceListResponse,
@@ -1070,6 +1073,38 @@ export async function fetchApiClientUsage(
     throw unwrapError(error, 400);
   }
   return data;
+}
+
+/**
+ * Story 21-8 — one client's service report (dock-to-stock, pick accuracy,
+ * dispatch timeliness) over an inclusive IST date period, optionally one
+ * warehouse (absent: every warehouse). Member-open; the portal's
+ * `fetchApiPortalService` answers the identical body for its own client.
+ */
+export async function fetchApiClientServiceReport(
+  tenantId: string,
+  clientId: string,
+  period: { from: string; to: string; warehouseId?: string | null },
+  options?: { signal?: AbortSignal },
+): Promise<ServiceReportDto> {
+  const { data, error } = await reportingControllerClientService({
+    path: { tenantId, clientId },
+    query: serviceQuery(period),
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** The service report's query: the period, plus the warehouse only when one is chosen (never `warehouseId=`). */
+function serviceQuery(period: { from: string; to: string; warehouseId?: string | null }): { from: string; to: string; warehouseId?: string } {
+  return {
+    from: period.from,
+    to: period.to,
+    ...(period.warehouseId === undefined || period.warehouseId === null ? {} : { warehouseId: period.warehouseId }),
+  };
 }
 
 export async function fetchApiCreateRateCard(
@@ -3450,6 +3485,20 @@ export async function fetchApiPortalInvoice(
   options?: { signal?: AbortSignal },
 ): Promise<PortalInvoiceDetailResponse> {
   const { data, error } = await portalControllerInvoice({ path: { tenantId, invoiceId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/**
+ * Story 21-8 — this client's service report (the session's client — never a
+ * `clientId` in the query): the same body as the operator's report.
+ */
+export async function fetchApiPortalService(
+  tenantId: string,
+  period: { from: string; to: string; warehouseId?: string | null },
+  options?: { signal?: AbortSignal },
+): Promise<ServiceReportDto> {
+  const { data, error } = await portalControllerService({ path: { tenantId }, query: serviceQuery(period), signal: options?.signal });
   if (error || !data) throw portalError(error);
   return data;
 }

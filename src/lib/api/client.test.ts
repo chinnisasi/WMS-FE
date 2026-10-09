@@ -28,6 +28,8 @@ import {
   fetchApiListRateCards,
   fetchApiRateCardInForce,
   fetchApiClientUsage,
+  fetchApiClientServiceReport,
+  fetchApiPortalService,
   fetchApiReplaceRateCardLines,
   fetchApiImportCatalog,
   fetchApiListClients,
@@ -1636,6 +1638,36 @@ describe('rate-card wrappers (story 21-3)', () => {
     expect(new URL(lastRequest!.url).searchParams.get('to')).toBe('2026-09-30');
     expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
     expect(usage.storageCompleteThrough).toBe('2026-09-30');
+    clearSession();
+  });
+
+  test('the service report (21-8): the operator GET carries from/to, the warehouse only when chosen, no key; the portal GET never a clientId', async () => {
+    writeSession(SESSION);
+    const REPORT = {
+      from: '2026-09-01',
+      to: '2026-09-30',
+      warehouseId: null,
+      asOf: '2026-10-07T04:30:00.000Z',
+      targetHours: 24,
+      dockToStock: { medianMinutes: null, placements: 0 },
+      pickAccuracy: { accuracy: null, linesDispatched: 0, linesShortPicked: 0, packFailures: 0, packFailuresCountingSince: null },
+      dispatchTimeliness: { ordersDispatched: 0, onTime: 0, onTimeRate: null, medianMinutes: null, lateNotDispatched: 0 },
+    };
+    stubFetch(200, REPORT);
+    const report = await fetchApiClientServiceReport(SESSION.tenant.id, CLIENT_ID, { from: '2026-09-01', to: '2026-09-30', warehouseId: null });
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/reporting/clients/${CLIENT_ID}/service`);
+    expect([...new URL(lastRequest!.url).searchParams.keys()].sort()).toEqual(['from', 'to']);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(report.targetHours).toBe(24);
+
+    const WH = '0198f7a2-1b3c-7d4e-8f90-0000000000aa';
+    await fetchApiClientServiceReport(SESSION.tenant.id, CLIENT_ID, { from: '2026-09-01', to: '2026-09-30', warehouseId: WH });
+    expect(new URL(lastRequest!.url).searchParams.get('warehouseId')).toBe(WH);
+
+    await fetchApiPortalService(SESSION.tenant.id, { from: '2026-09-01', to: '2026-09-30', warehouseId: WH });
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/portal/service`);
+    expect([...new URL(lastRequest!.url).searchParams.keys()].sort()).toEqual(['from', 'to', 'warehouseId']);
     clearSession();
   });
 

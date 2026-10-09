@@ -5489,6 +5489,89 @@ export type ReportingOverviewResponse = {
     tiles: ReportingTilesDto;
 };
 
+export type ServiceDockToStockDto = {
+    /**
+     * Median minutes from the GRN being recorded to the placement being recorded, over this client's placements recorded in the period (negative intervals excluded), 1 dp; null with none
+     */
+    medianMinutes: number | null;
+    /**
+     * Placements of this client's SKUs recorded in the period (the median's population)
+     */
+    placements: number;
+};
+
+export type ServicePickAccuracyDto = {
+    /**
+     * Of the order lines dispatched in the period, the share that never had a short pick (a short later recovered still counts against the line), 0–1 to 4 dp; null with no line dispatched
+     */
+    accuracy: number | null;
+    /**
+     * Order lines of this client's orders first dispatched in the period (one dispatch.dispatched event per line)
+     */
+    linesDispatched: number;
+    /**
+     * Of those lines, the ones with any short-picked picklist line
+     */
+    linesShortPicked: number;
+    /**
+     * Failed pack verifications recorded in the period for this client's orders — shown beside the ratio, never folded into it
+     */
+    packFailures: number;
+    /**
+     * When failed pack verifications began to be recorded (0058) — a period starting before it is a partial count; null if unknown
+     */
+    packFailuresCountingSince: string | null;
+};
+
+export type ServiceDispatchTimelinessDto = {
+    /**
+     * This client's orders first dispatched in the period — the same count the client is invoiced for
+     */
+    ordersDispatched: number;
+    /**
+     * Of those, the orders dispatched within targetHours of being received (orders.created_at — the server ingestion time, not the buyer order time)
+     */
+    onTime: number;
+    /**
+     * onTime ÷ ordersDispatched, 0–1 to 4 dp; null with none dispatched
+     */
+    onTimeRate: number | null;
+    /**
+     * Median minutes from received to dispatched, over orders (clamped at 0), 1 dp; null with none
+     */
+    medianMinutes: number | null;
+    /**
+     * Orders received in the period, not cancelled, received more than targetHours before asOf, and not dispatched as of asOf — the backlog the dispatched figures cannot see
+     */
+    lateNotDispatched: number;
+};
+
+export type ServiceReportDto = {
+    /**
+     * First IST date of the period (inclusive)
+     */
+    from: string;
+    /**
+     * Last IST date of the period (inclusive)
+     */
+    to: string;
+    /**
+     * The warehouse the report is narrowed to; null for every warehouse
+     */
+    warehouseId: string | null;
+    /**
+     * When the report was computed — the period is read up to here at most
+     */
+    asOf: string;
+    /**
+     * The dispatch timeliness target in hours (fixed)
+     */
+    targetHours: number;
+    dockToStock: ServiceDockToStockDto;
+    pickAccuracy: ServicePickAccuracyDto;
+    dispatchTimeliness: ServiceDispatchTimelinessDto;
+};
+
 export type ClientTaxDetailsDto = {
     legalName: string | null;
     gstin: string | null;
@@ -14670,6 +14753,63 @@ export type ReportingControllerOverviewResponses = {
 
 export type ReportingControllerOverviewResponse = ReportingControllerOverviewResponses[keyof ReportingControllerOverviewResponses];
 
+export type ReportingControllerClientServiceData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query: {
+        /**
+         * First IST date of the period (inclusive), YYYY-MM-DD
+         */
+        from: string;
+        /**
+         * Last IST date of the period (inclusive), YYYY-MM-DD — at most 366 days after `from`, never before it
+         */
+        to: string;
+        /**
+         * One warehouse of the tenant; absent means every warehouse
+         */
+        warehouseId?: string;
+    };
+    url: '/tenants/{tenantId}/reporting/clients/{clientId}/service';
+};
+
+export type ReportingControllerClientServiceErrors = {
+    /**
+     * A malformed clientId or warehouseId, a from/to that is not a real YYYY-MM-DD date, from after to, or a period longer than 366 days (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such client, or no such warehouse, in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The report did not finish within its 5 s budget — try a shorter period (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ReportingControllerClientServiceError = ReportingControllerClientServiceErrors[keyof ReportingControllerClientServiceErrors];
+
+export type ReportingControllerClientServiceResponses = {
+    200: ServiceReportDto;
+};
+
+export type ReportingControllerClientServiceResponse = ReportingControllerClientServiceResponses[keyof ReportingControllerClientServiceResponses];
+
 export type ClientsControllerListClientsData = {
     body?: never;
     path: {
@@ -16331,6 +16471,62 @@ export type PortalControllerWarehousesResponses = {
 };
 
 export type PortalControllerWarehousesResponse = PortalControllerWarehousesResponses[keyof PortalControllerWarehousesResponses];
+
+export type PortalControllerServiceData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query: {
+        /**
+         * First IST date of the period (inclusive), YYYY-MM-DD
+         */
+        from: string;
+        /**
+         * Last IST date of the period (inclusive), YYYY-MM-DD — at most 366 days after `from`, never before it
+         */
+        to: string;
+        /**
+         * One warehouse of the tenant; absent means every warehouse
+         */
+        warehouseId?: string;
+    };
+    url: '/tenants/{tenantId}/portal/service';
+};
+
+export type PortalControllerServiceErrors = {
+    /**
+     * A from/to that is not a real YYYY-MM-DD date, from after to, a period longer than 366 days, a malformed warehouseId, or any other query parameter — a clientId included (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such warehouse in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The report did not finish within its 5 s budget — try a shorter period (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type PortalControllerServiceError = PortalControllerServiceErrors[keyof PortalControllerServiceErrors];
+
+export type PortalControllerServiceResponses = {
+    200: ServiceReportDto;
+};
+
+export type PortalControllerServiceResponse = PortalControllerServiceResponses[keyof PortalControllerServiceResponses];
 
 export type PortalControllerInvoicesData = {
     body?: never;

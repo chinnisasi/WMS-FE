@@ -69,7 +69,7 @@ export function loginNotice(portal: string | undefined): string | null {
 }
 
 export interface PortalNavItem {
-  readonly id: 'stock' | 'orders' | 'inbound' | 'invoices';
+  readonly id: 'stock' | 'orders' | 'inbound' | 'invoices' | 'service';
   readonly label: string;
   readonly href: string;
 }
@@ -79,6 +79,8 @@ export const PORTAL_NAV: readonly PortalNavItem[] = [
   { id: 'orders', label: 'Orders', href: '/portal/orders' },
   { id: 'inbound', label: 'Inbound', href: '/portal/inbound' },
   { id: 'invoices', label: 'Invoices', href: '/portal/invoices' },
+  // Story 21-8 — how the operation performed for this client.
+  { id: 'service', label: 'Service', href: '/portal/service' },
 ];
 
 /** The shell header's company line: the client brand's name, else its code, else a neutral word. */
