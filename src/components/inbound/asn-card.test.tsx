@@ -11,7 +11,7 @@ import { AsnsCard } from './asn-card';
  * Story 21-6 — the ASN card's claims a `src/lib` test cannot make:
  *   1. every role READS the list (code, client once the tenant holds more
  *      than its own, status, received of announced) and a row's lines, and
- *      sees the 21-6b handheld notice;
+ *      no longer sees the 21-6 handheld notice (retired by 21-6b);
  *   2. only `asn.manage` (owner, ops manager) is offered Announce, Amend,
  *      Close short and Cancel — absent, not disabled, for an operator — and
  *      each transition only where the row's status allows it;
@@ -202,7 +202,10 @@ describe('AsnsCard', () => {
   test('an operator reads the list, the client column and a row’s lines — and is offered no mutation at all', async () => {
     view = await mount('operator');
     const text = view.container.textContent ?? '';
-    expect(text).toContain('Receiving against ASNs arrives with the next handheld update.');
+    // Story 21-6b: the handheld receives against ASNs now — the 21-6 notice is gone.
+    expect(text).not.toContain('next handheld update');
+    // The header copy beside where the notice sat still renders.
+    expect(text).toContain('Peenya — newest first. A client announces a shipment; receiving books against it like a PO.');
     const rows = [...view.container.querySelectorAll('tbody tr')].map((row) => row.textContent ?? '');
     expect(rows[0]).toContain('ASN-PART');
     expect(rows[0]).toContain('ACME');

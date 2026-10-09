@@ -27,13 +27,6 @@ export function notifyInboundChanged(): void {
 
 export type AsnStatus = AsnDto['status'];
 
-/**
- * Decision 1 — the handheld that receives against an ASN is story 21-6b.
- * Until it ships, an ASN is received only through the device API; the card
- * says so in these words.
- */
-export const ASN_HANDHELD_NOTICE = 'Receiving against ASNs arrives with the next handheld update.';
-
 /** The backend's bounds, mirrored (`asn.command.ts` / `inbound.dto.ts`). */
 export const MAX_ASN_LINES = 200;
 export const MAX_ASN_CODE_LENGTH = 64;

@@ -10,7 +10,6 @@ import {
 } from '@/lib/api/client';
 import type { AsnDto, AsnEntryDto, ClientDto, SkuResponse } from '@/lib/api/generated';
 import {
-  ASN_HANDHELD_NOTICE,
   ASN_STATUS_LABEL,
   MAX_ASN_CODE_LENGTH,
   MAX_ASN_NOTE_LENGTH,
@@ -52,8 +51,9 @@ import { ReadFailure } from '@/components/outbound/shell';
  * only where the row's state allows it. Pessimistic throughout: every row
  * shown is the server's answer.
  *
- * Until story 21-6b ships the handheld flow, an ASN is received only through
- * the device API — the card says so (`ASN_HANDHELD_NOTICE`).
+ * Story 21-6b shipped the handheld flow (an open ASN is received on the
+ * device like a PO), so the 21-6 "arrives with the next handheld update"
+ * notice is gone.
  */
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string };
@@ -153,7 +153,6 @@ export function AsnsCard({
               ? 'Pick a warehouse to review its announced shipments.'
               : `${warehouseLabel} — newest first. A client announces a shipment; receiving books against it like a PO.`}
           </div>
-          <div className="text-xs text-(--muted-foreground)">{ASN_HANDHELD_NOTICE}</div>
         </div>
         {canManage && warehouseId !== null && !creating && (
           <button type="button" onClick={() => setCreating(true)} className={primaryClass}>
