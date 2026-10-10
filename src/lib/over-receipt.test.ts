@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from '@/lib/api/client';
-import { approvedReason, decisionReason, openQtyLabel, overReceiptDocumentLabel, qcReason } from './over-receipt';
+import {
+  approvedReason,
+  decisionReason,
+  excessHeadline,
+  isLateOverReceipt,
+  isUnmatchedOverReceipt,
+  openQtyLabel,
+  overReceiptDocumentLabel,
+  qcReason,
+} from './over-receipt';
 
 /**
  * The story 3.3 surface copy decisions: an approved over-receipt
@@ -128,7 +137,50 @@ describe('story 21-6 — the queue is document-neutral', () => {
   });
 
   test('the approve outcome names the line kind that took the excess', () => {
-    expect(approvedReason({})).toBe('The excess applied to the PO line and the ledger.');
-    expect(approvedReason({ asnId: 'a-1' })).toBe('The excess applied to the ASN line and the ledger.');
+    expect(approvedReason({ poLineId: 'pl-1' })).toBe('The excess applied to the PO line and the ledger.');
+    expect(approvedReason({ poLineId: null, asnId: 'a-1', asnLineId: 'al-1' })).toBe(
+      'The excess applied to the ASN line and the ledger.',
+    );
+  });
+});
+
+describe('story 21-9 — late receipts and unmatched lines', () => {
+  test('a closed or cancelled document is named with its status on a PENDING row only; an open one never', () => {
+    expect(overReceiptDocumentLabel({ poId: null, asnId: 'a-1', asnCode: 'ASN-9', status: 'pending' }, null, 'cancelled')).toBe('ASN ASN-9 · cancelled');
+    expect(overReceiptDocumentLabel({ poId: 'po-1', status: 'pending' }, 'PO-0004', 'closed')).toBe('PO PO-0004 · closed');
+    expect(overReceiptDocumentLabel({ poId: 'po-1', status: 'pending' }, 'PO-0004', 'open')).toBe('PO PO-0004');
+    expect(overReceiptDocumentLabel({ poId: null, asnId: 'a-1', asnCode: 'ASN-9', status: 'pending' }, null, 'received')).toBe('ASN ASN-9');
+    expect(overReceiptDocumentLabel({ poId: 'po-1', status: 'pending' }, 'PO-0004', null)).toBe('PO PO-0004');
+    // A DECIDED row whose document closed later is not a late receipt.
+    expect(overReceiptDocumentLabel({ poId: 'po-1', status: 'approved' }, 'PO-0004', 'closed')).toBe('PO PO-0004');
+    expect(overReceiptDocumentLabel({ poId: null, asnId: 'a-1', asnCode: 'ASN-9', status: 'rejected' }, null, 'closed')).toBe('ASN ASN-9');
+  });
+
+  test('late = a PENDING row on a closed or cancelled document', () => {
+    expect(isLateOverReceipt({ status: 'pending' }, 'cancelled')).toBe(true);
+    expect(isLateOverReceipt({ status: 'pending' }, 'closed')).toBe(true);
+    expect(isLateOverReceipt({ status: 'pending' }, 'received')).toBe(false);
+    expect(isLateOverReceipt({ status: 'pending' }, null)).toBe(false);
+    expect(isLateOverReceipt({ status: 'approved' }, 'closed')).toBe(false);
+    expect(isLateOverReceipt({ status: 'rejected' }, 'cancelled')).toBe(false);
+  });
+
+  test('the headline: "+N unmatched" for a null-line row (never "over open"), "+N late receipt" for a late row, else "+N over open"', () => {
+    expect(excessHeadline('3 each', { unmatched: true, late: false })).toBe('+3 each unmatched');
+    expect(excessHeadline('3 each', { unmatched: true, late: true })).toBe('+3 each unmatched');
+    expect(excessHeadline('3 each', { unmatched: false, late: true })).toBe('+3 each late receipt');
+    expect(excessHeadline('3 each', { unmatched: false, late: false })).toBe('+3 each over open');
+  });
+
+  test('unmatched = an ASN row without asnLineId, or a PO row whose poLineId is null', () => {
+    expect(isUnmatchedOverReceipt({ poLineId: null, asnId: 'a-1' })).toBe(true);
+    expect(isUnmatchedOverReceipt({ poLineId: null, asnId: 'a-1', asnLineId: 'al-1' })).toBe(false);
+    expect(isUnmatchedOverReceipt({ poLineId: null })).toBe(true);
+    expect(isUnmatchedOverReceipt({ poLineId: 'pl-1' })).toBe(false);
+  });
+
+  test('approving a null-line row credits no line', () => {
+    expect(approvedReason({ poLineId: null })).toBe('Applied to stock; no line credited.');
+    expect(approvedReason({ poLineId: null, asnId: 'a-1' })).toBe('Applied to stock; no line credited.');
   });
 });

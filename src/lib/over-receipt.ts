@@ -22,20 +22,69 @@ export function openQtyLabel(openQty: number, uom?: QuantityUom | null): string 
 }
 
 /**
+ * Story 21-9 — the document statuses that make an over-receipt LATE: a
+ * receipt that landed after its PO closed or its ASN was cancelled or
+ * closed pends whole (nothing applied), so "over open" no longer describes
+ * it. Read from the PO / ASN detail the queue already fetches — no BE field.
+ */
+const TERMINAL_DOCUMENT_STATUSES: ReadonlySet<string> = new Set(['closed', 'cancelled']);
+
+/**
+ * Story 21-9 — whether a row is a LATE receipt: PENDING on a closed or
+ * cancelled document (unknown status → not late). The status is the
+ * document's CURRENT one, so only a pending row can be judged: a close or
+ * cancel is refused while a row is pending, so a terminal document under a
+ * pending row means the receipt came after it. A decided row's document may
+ * have closed later — it keeps the neutral wording.
+ */
+export function isLateOverReceipt(entry: { status: string }, documentStatus: string | null): boolean {
+  return entry.status === 'pending' && documentStatus !== null && TERMINAL_DOCUMENT_STATUSES.has(documentStatus);
+}
+
+/**
+ * Story 21-9 — an over-receipt pending against its document with NO line (a
+ * late receipt's line that matched none: no reference, a SKU mismatch, a
+ * removed line). An ASN row carries `asnLineId` only when it names a line;
+ * a PO row's `poLineId` is null then.
+ */
+export function isUnmatchedOverReceipt(entry: { poLineId: string | null; asnId?: string; asnLineId?: string }): boolean {
+  return entry.asnId !== undefined ? entry.asnLineId === undefined : entry.poLineId === null;
+}
+
+/**
  * Story 21-6 — the document an over-receipt pended against, named for the
  * card: a PO (its code resolved by the caller, null while unknown) or an
  * ASN (its code rides the row). Every over-receipt carries exactly one.
+ * Story 21-9: a closed or cancelled document says so ("· cancelled").
  */
 export function overReceiptDocumentLabel(
-  entry: { poId: string | null; asnId?: string; asnCode?: string },
+  entry: { poId: string | null; asnId?: string; asnCode?: string; status?: string },
   poCode: string | null,
+  documentStatus: string | null = null,
 ): string {
-  if (entry.asnId !== undefined) return `ASN ${entry.asnCode ?? '—'}`;
-  return entry.poId === null ? '—' : `PO ${poCode ?? '—'}`;
+  const suffix = isLateOverReceipt({ status: entry.status ?? 'pending' }, documentStatus) ? ` · ${documentStatus}` : '';
+  if (entry.asnId !== undefined) return `ASN ${entry.asnCode ?? '—'}${suffix}`;
+  return entry.poId === null ? '—' : `PO ${poCode ?? '—'}${suffix}`;
 }
 
-/** The approve outcome, document-neutral (a PO line or an ASN line takes the excess). */
-export function approvedReason(entry: { asnId?: string }): string {
+/**
+ * Story 21-9 — the card's headline quantity: "+N unmatched" for a row with
+ * no line (there is no line to be over), "+N late receipt" for a late row
+ * (the whole receipt pends — there was no open quantity to be over), else
+ * "+N over open" for an excess past an open line.
+ */
+export function excessHeadline(quantity: string, kind: { unmatched: boolean; late: boolean }): string {
+  if (kind.unmatched) return `+${quantity} unmatched`;
+  return kind.late ? `+${quantity} late receipt` : `+${quantity} over open`;
+}
+
+/**
+ * The approve outcome, document-neutral (a PO line or an ASN line takes the
+ * excess). Story 21-9: a row with no line credits none — the units go to
+ * stock and nothing else moves.
+ */
+export function approvedReason(entry: { poLineId: string | null; asnId?: string; asnLineId?: string }): string {
+  if (isUnmatchedOverReceipt(entry)) return 'Applied to stock; no line credited.';
   return entry.asnId === undefined
     ? 'The excess applied to the PO line and the ledger.'
     : 'The excess applied to the ASN line and the ledger.';
