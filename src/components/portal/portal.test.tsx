@@ -12,7 +12,7 @@ import { render, type Rendered } from '../../lib/test/render';
  *      redirects before any operator hook mounts) — and does fetch `/me` for
  *      an operator, so the assertion bites;
  *   2. the portal shell sends a staff session back to /settings, renders the
- *      client's name and the four nav items for a portal session, and reads
+ *      client's name and the five nav items for a portal session, and reads
  *      `portal/me` — never an operator route;
  *   3. a `client-suspended` refusal clears the session and lands on the
  *      login notice;
@@ -31,6 +31,7 @@ let PortalStock: ComponentType;
 let PortalOrders: ComponentType;
 let PortalInbound: ComponentType;
 let PortalInvoices: ComponentType;
+let PortalService: ComponentType;
 
 beforeAll(async () => {
   const real = await import('next/navigation');
@@ -49,6 +50,7 @@ beforeAll(async () => {
   ({ PortalOrders } = await import('./portal-orders'));
   ({ PortalInbound } = await import('./portal-inbound'));
   ({ PortalInvoices } = await import('./portal-invoices'));
+  ({ PortalService } = await import('./portal-service'));
 });
 
 const TENANT_ID = '0198f7a2-1b3c-7d4e-8f90-112233445566';
@@ -208,7 +210,7 @@ describe('PortalShell', () => {
     expect(requests).toEqual([]);
   });
 
-  test("a portal session renders the client's name, the four portal surfaces and reads portal/me only", async () => {
+  test("a portal session renders the client's name, the five portal surfaces and reads portal/me only", async () => {
     writeSession(PORTAL_SESSION);
     routes = { '/portal/me': [200, PORTAL_ME] };
     view = render(
@@ -219,7 +221,7 @@ describe('PortalShell', () => {
     await settle();
     expect(view.container.querySelector('[data-testid="portal-company"]')!.textContent).toBe('Brand A Apparel');
     const nav = [...view.container.querySelectorAll('nav[aria-label="Portal"] a')].map((a) => a.textContent);
-    expect(nav).toEqual(['Stock', 'Orders', 'Inbound', 'Invoices']);
+    expect(nav).toEqual(['Stock', 'Orders', 'Inbound', 'Invoices', 'Service']);
     expect(view.container.querySelector('[data-testid="portal-page"]')).not.toBeNull();
     expect(requests).toEqual([`GET /api/v1/tenants/${TENANT_ID}/portal/me`]);
     expect(replaces).toEqual([]);
@@ -749,5 +751,112 @@ describe('Announce a shipment (story 21-7b)', () => {
     window.removeEventListener('wms-portal-suspended', onSuspended);
     expect(announced).toBe(1);
     expect(container.querySelector('form [role="alert"]')!.textContent).toBe("Your company's portal access is suspended.");
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Story 21-8 — the Service page.
+// ──────────────────────────────────────────────────────────────────────────
+describe('PortalService (21-8)', () => {
+  const W1 = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const W2 = '0198f7a2-1b3c-7d4e-8f90-0000000000a2';
+  const REPORT = {
+    from: '2026-09-11',
+    to: '2026-10-10',
+    warehouseId: null,
+    asOf: '2026-10-10T04:30:00.000Z',
+    targetHours: 24,
+    dockToStock: { medianMinutes: 95, placements: 12 },
+    pickAccuracy: { accuracy: null, linesDispatched: 0, linesShortPicked: 0, packFailures: 0, packFailuresCountingSince: null },
+    dispatchTimeliness: { ordersDispatched: 5, onTime: 4, onTimeRate: 0.8, medianMinutes: 600, lateNotDispatched: 3 },
+  };
+
+  function setValue(element: HTMLInputElement | HTMLSelectElement, value: string): void {
+    const proto = element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+    act(() => {
+      setter.call(element, value);
+      element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    });
+  }
+
+  const serviceUrls = () => urls.filter((url) => url.includes('/portal/service'));
+
+  async function open(): Promise<HTMLElement> {
+    view = render(<PortalService />);
+    await settle();
+    return view.container;
+  }
+
+  beforeEach(() => {
+    writeSession(PORTAL_SESSION);
+    routes = {
+      '/portal/service': [200, REPORT],
+      '/portal/warehouses': [
+        200,
+        { items: [{ warehouseId: W1, warehouseName: 'Main', city: 'Bengaluru' }, { warehouseId: W2, warehouseName: 'North', city: 'Delhi' }] },
+      ],
+    };
+  });
+
+  test('renders the three tiles — null reads "No data" — and every request is a portal route, never with a clientId', async () => {
+    const container = await open();
+    const tiles = [...container.querySelectorAll('[role="group"]')].map((tile) => tile.getAttribute('aria-label'));
+    expect(tiles).toEqual(['Dock-to-stock (median): 1 h 35 min', 'Pick accuracy: No data', 'Dispatched within 24 h: 80%']);
+    expect(container.textContent).toContain('3 orders late, not yet dispatched');
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.filter((r) => !r.includes(`/api/v1/tenants/${TENANT_ID}/portal/`))).toEqual([]);
+    expect(serviceUrls()).toHaveLength(1);
+    const query = new URL(`http://x${serviceUrls()[0]!}`).searchParams;
+    expect([...query.keys()].sort()).toEqual(['from', 'to']);
+  });
+
+  test('changing the period or the warehouse refetches with it; a refused period is never sent', async () => {
+    const container = await open();
+    const from = container.querySelector('[aria-label="Report from"]') as HTMLInputElement;
+    const to = container.querySelector('[aria-label="Report to"]') as HTMLInputElement;
+    setValue(from, '2026-09-01');
+    setValue(to, '2026-09-30');
+    await settle();
+    expect(serviceUrls().at(-1)).toContain('from=2026-09-01');
+    expect(serviceUrls().at(-1)).toContain('to=2026-09-30');
+    setValue(container.querySelector('[aria-label="Report warehouse"]') as HTMLSelectElement, W2);
+    await settle();
+    expect(serviceUrls().at(-1)).toContain(`warehouseId=${W2}`);
+    const sent = serviceUrls().length;
+    // 367 days — the server's 400; nothing is sent, the problem shows.
+    setValue(from, '2025-09-01');
+    setValue(to, '2026-09-02');
+    await settle();
+    expect(serviceUrls()).toHaveLength(sent);
+    expect(container.querySelector('[role="alert"]')!.textContent).toBe('A period covers at most 366 days.');
+  });
+
+  test('the warehouse filter shows only when the tenant has more than one warehouse', async () => {
+    routes['/portal/warehouses'] = [200, { items: [{ warehouseId: W1, warehouseName: 'Main', city: 'Bengaluru' }] }];
+    const container = await open();
+    expect(container.querySelector('[aria-label="Report warehouse"]')).toBeNull();
+    expect(serviceUrls().every((url) => !url.includes('warehouseId'))).toBe(true);
+  });
+
+  test('a 404 reads that the warehouse is gone; a 503 asks for a shorter period', async () => {
+    routes['/portal/service'] = [404, { code: 'not-found', status: 404, title: 'Warehouse not found' }];
+    let container = await open();
+    expect(container.textContent).toContain('That warehouse is no longer available');
+    view!.unmount();
+    routes['/portal/service'] = [503, { code: 'report-unavailable', status: 503, title: 'Report unavailable', detail: 'slow' }];
+    container = await open();
+    expect(container.textContent).toContain('The report took too long — try a shorter period');
+  });
+
+  test('a client-suspended refusal fires the portal event', async () => {
+    routes['/portal/service'] = [403, { code: 'client-suspended', status: 403, title: 'Suspended' }];
+    let announced = 0;
+    const onSuspended = () => void (announced += 1);
+    window.addEventListener('wms-portal-suspended', onSuspended);
+    const container = await open();
+    window.removeEventListener('wms-portal-suspended', onSuspended);
+    expect(announced).toBeGreaterThanOrEqual(1);
+    expect(container.textContent).toContain("Your company's portal access is suspended.");
   });
 });

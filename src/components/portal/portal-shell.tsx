@@ -12,7 +12,7 @@ import { SignOutButton } from '@/components/auth/sign-out';
 
 /**
  * Story 21-7 — the client portal's own shell: a brand header (the client's
- * name from the session), the four portal surfaces, sign-out. It mounts NO
+ * name from the session), the portal surfaces (five since 21-8), sign-out. It mounts NO
  * operator component — no sidebar, no warehouse switcher, no command
  * palette — so nothing in it can fire an operator request.
  *
