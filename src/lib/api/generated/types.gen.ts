@@ -5670,6 +5670,13 @@ export type UpdateClientTaxDetailsDto = {
     billingPincode?: string | null;
 };
 
+export type UpdateClientStatusDto = {
+    /**
+     * The status to move the client to: `suspended` stops its portal (sign-in, every portal call, ASN announce), new portal users and new rate-card drafts and activation; `active` restores them. Operator work continues either way
+     */
+    status: 'active' | 'suspended';
+};
+
 export type RateCardLineResponseDto = {
     chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
     basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
@@ -15010,6 +15017,63 @@ export type ClientsControllerUpdateTaxDetailsResponses = {
 };
 
 export type ClientsControllerUpdateTaxDetailsResponse = ClientsControllerUpdateTaxDetailsResponses[keyof ClientsControllerUpdateTaxDetailsResponses];
+
+export type ClientsControllerUpdateClientStatusData = {
+    body: UpdateClientStatusDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/status';
+};
+
+export type ClientsControllerUpdateClientStatusErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, a status other than active or suspended, or the tenant's own self client (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The client has departed — its status cannot change (client-not-active), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerUpdateClientStatusError = ClientsControllerUpdateClientStatusErrors[keyof ClientsControllerUpdateClientStatusErrors];
+
+export type ClientsControllerUpdateClientStatusResponses = {
+    /**
+     * The client after the change (a matching Idempotency-Key replays it)
+     */
+    200: ClientResponse;
+};
+
+export type ClientsControllerUpdateClientStatusResponse = ClientsControllerUpdateClientStatusResponses[keyof ClientsControllerUpdateClientStatusResponses];
 
 export type RateCardsControllerInForceData = {
     body?: never;

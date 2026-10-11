@@ -8,6 +8,11 @@ import {
   clientCell,
   clientLabel,
   clientReason,
+  clientStatusAction,
+  clientStatusLabel,
+  clientStatusQuestion,
+  clientStatusSuccess,
+  clientStatusTarget,
   correctClientReason,
   importClientChoice,
   importClientParam,
@@ -220,6 +225,55 @@ describe('the refusal mappers branch on the code', () => {
       'The order mixes SKUs of clients ACME, self',
     );
     expect(mixedClientReason(problem('mixed-client', 409))).toMatch(/more than one client/);
+  });
+});
+
+describe('story 21-10 — suspend and reactivate', () => {
+  test('clientReason: every arm the status action can meet', () => {
+    expect(clientReason(problem('client-not-active', 409, 'Client "GONE" has departed — its status cannot change.'), 'suspended')).toBe(
+      'This client has departed — its status cannot change.',
+    );
+    expect(clientReason(problem('validation-failed', 400, 'The self client cannot be suspended or reactivated'), 'suspended')).toBe(
+      'The self client cannot be suspended or reactivated',
+    );
+    expect(clientReason(problem('role-denied', 403), 'suspended')).toBe('Only an owner can manage clients.');
+    expect(clientReason(problem('permission-denied', 403), 'reactivated')).toBe(
+      'Your session belongs to another tenant — sign in again.',
+    );
+    expect(clientReason(problem('not-found', 404), 'reactivated')).toBe('That client no longer exists — refresh the page.');
+    expect(clientReason(problem('idempotency-key-reuse', 422), 'suspended')).toBe('This submission was already processed.');
+    expect(clientReason(problem('conflict', 409), 'suspended')).toBe(
+      'The same submission is still in flight — retry to read the settled result.',
+    );
+    expect(clientReason(problem('validation-failed', 400), 'suspended')).toBe('That status change is not allowed.');
+    expect(clientReason(problem('validation-failed', 400), 'created')).toBe('Check the code and name and try again.');
+    // Outside a status action the departed wording never applies — the server's detail does.
+    expect(clientReason(problem('client-not-active', 409, 'Client GONE is departed'), 'renamed')).toBe('Client GONE is departed');
+    expect(clientReason(problem('client-not-active', 409), 'created')).toBe('This client is not active.');
+    expect(clientReason(problem('weird', 500), 'suspended')).toBe('Client not suspended (weird).');
+    expect(clientReason(problem('weird', 500), 'reactivated')).toBe('Client not reactivated (weird).');
+    expect(clientReason(new Error('offline'), 'reactivated')).toBe(UNREACHABLE_REASON);
+  });
+
+  test('the status labels, the eligible action per row, and the PATCH target', () => {
+    expect(clientStatusLabel('active')).toBe('Active');
+    expect(clientStatusLabel('suspended')).toBe('Suspended');
+    expect(clientStatusLabel('departed')).toBe('Departed');
+    expect(clientStatusAction(ACME)).toBe('suspend');
+    expect(clientStatusAction(client({ status: 'suspended' }))).toBe('reactivate');
+    expect(clientStatusAction(client({ status: 'departed' }))).toBeNull();
+    expect(clientStatusAction(SELF)).toBeNull();
+    expect(clientStatusTarget('suspend')).toBe('suspended');
+    expect(clientStatusTarget('reactivate')).toBe('active');
+  });
+
+  test('the confirmation and success copy', () => {
+    expect(clientStatusQuestion('suspend', 'Acme Foods')).toBe(
+      'Suspend Acme Foods? Its portal users are signed out on their next action and cannot sign in or announce shipments; no new portal users can be invited and no new rate card can be drafted or activated. Warehouse work and billing continue (it cannot see invoices in the portal while suspended). Open ASNs stay open.',
+    );
+    expect(clientStatusQuestion('reactivate', 'Acme Foods')).toBe('Reactivate Acme Foods? Its portal users can sign in again.');
+    expect(clientStatusSuccess(client({ status: 'suspended' }))).toBe('Acme Foods is suspended.');
+    expect(clientStatusSuccess(ACME)).toBe('Acme Foods is active again.');
   });
 });
 

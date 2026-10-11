@@ -193,12 +193,64 @@ export function mixedClientReason(problem: ApiProblem): string {
   return problem.detail ?? 'These SKUs belong to more than one client — one document is for one client.';
 }
 
-/** Client create / rename refusals. */
-export function clientReason(error: unknown, action: 'created' | 'renamed'): string {
+/** Story 21-10 — the Status column's words (the API's lowercase status, never shown raw). */
+export function clientStatusLabel(status: ClientDto['status']): string {
+  switch (status) {
+    case 'active':
+      return 'Active';
+    case 'suspended':
+      return 'Suspended';
+    case 'departed':
+      return 'Departed';
+    default:
+      return status;
+  }
+}
+
+/** Story 21-10 — the row actions that move a client between `active` and `suspended`. */
+export type ClientStatusAction = 'suspend' | 'reactivate';
+
+/**
+ * The status action a row offers, or null: Suspend on an active brand,
+ * Reactivate on a suspended one, nothing on the tenant's own `self` client
+ * (the server refuses it 400) or a departed one (409 `client-not-active`).
+ * The caller gates on `clients.manage` as well.
+ */
+export function clientStatusAction(client: ClientDto): ClientStatusAction | null {
+  if (client.systemOwned) return null;
+  if (client.status === 'active') return 'suspend';
+  if (client.status === 'suspended') return 'reactivate';
+  return null;
+}
+
+/** The status the PATCH sends for an action. */
+export function clientStatusTarget(action: ClientStatusAction): 'active' | 'suspended' {
+  return action === 'suspend' ? 'suspended' : 'active';
+}
+
+/** The confirmation question — what suspension stops and what it does not. */
+export function clientStatusQuestion(action: ClientStatusAction, name: string): string {
+  return action === 'suspend'
+    ? `Suspend ${name}? Its portal users are signed out on their next action and cannot sign in or announce shipments; no new portal users can be invited and no new rate card can be drafted or activated. Warehouse work and billing continue (it cannot see invoices in the portal while suspended). Open ASNs stay open.`
+    : `Reactivate ${name}? Its portal users can sign in again.`;
+}
+
+/** The success sentence, built from the RESPONSE's client. */
+export function clientStatusSuccess(client: ClientDto): string {
+  return client.status === 'suspended' ? `${client.name} is suspended.` : `${client.name} is active again.`;
+}
+
+/** Client create / rename / suspend / reactivate refusals. */
+export function clientReason(error: unknown, action: 'created' | 'renamed' | 'suspended' | 'reactivated'): string {
+  const statusAction = action === 'suspended' || action === 'reactivated';
   if (error instanceof ApiProblem) {
     switch (error.code) {
       case 'duplicate-client-code':
         return error.detail ?? 'Another client already uses that code.';
+      case 'client-not-active':
+        return statusAction
+          ? 'This client has departed — its status cannot change.'
+          : (error.detail ?? 'This client is not active.');
       case 'not-found':
         return 'That client no longer exists — refresh the page.';
       case 'role-denied':
@@ -212,7 +264,7 @@ export function clientReason(error: unknown, action: 'created' | 'renamed'): str
       case 'unauthenticated':
         return 'Your session expired — sign in again.';
       case 'validation-failed':
-        return error.detail ?? 'Check the code and name and try again.';
+        return error.detail ?? (statusAction ? 'That status change is not allowed.' : 'Check the code and name and try again.');
       default:
         return error.detail ?? `Client not ${action} (${error.code}).`;
     }
