@@ -1,8 +1,13 @@
 'use client';
 
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiCreateClient, fetchApiRenameClient, fetchApiUpdateClientTaxDetails } from '@/lib/api/client';
+import {
+  fetchApiCreateClient,
+  fetchApiRenameClient,
+  fetchApiUpdateClientStatus,
+  fetchApiUpdateClientTaxDetails,
+} from '@/lib/api/client';
 import type { ClientDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
@@ -10,6 +15,11 @@ import {
   clientLabel,
   clientNameProblem,
   clientReason,
+  clientStatusAction,
+  clientStatusLabel,
+  clientStatusQuestion,
+  clientStatusSuccess,
+  clientStatusTarget,
   notifyClientsChanged,
   parseClientDraft,
   parseTaxDetailsDraft,
@@ -17,6 +27,7 @@ import {
   taxDetailsFieldsOf,
   taxDetailsReason,
   taxDetailsSummary,
+  type ClientStatusAction,
   type TaxDetailField,
   type TaxDetailsFields,
 } from '@/lib/clients';
@@ -27,6 +38,7 @@ import { useClients } from '@/lib/use-clients';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { ReadFailure } from '@/components/outbound/shell';
+import { ConfirmRow } from '@/components/settings/confirm-row';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -37,9 +49,19 @@ const rowButtonClass =
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
 
 /**
+ * The one open panel below the table (story 21-10 folded the rename and
+ * tax-details states into it): opening one closes any other.
+ */
+type Panel =
+  | { kind: 'rename'; client: ClientDto }
+  | { kind: 'tax'; client: ClientDto }
+  | { kind: ClientStatusAction; client: ClientDto };
+
+/**
  * The clients card (story 21-2b) — the client brands this tenant holds goods
  * for. Every member reads the list (status included); an owner
- * (`clients.manage`) registers a client and renames one. The tenant's own
+ * (`clients.manage`) registers a client, renames one, and (story 21-10)
+ * suspends or reactivates one. The tenant's own
  * `self` client is shown as the company itself and is never renamed here —
  * its name mirrors the tenant's.
  *
@@ -80,14 +102,25 @@ function ClientsCardSessioned() {
   // Story 21-5 — the tax details are `billing.invoice`'s (owner + accountant):
   // whoever clears an invoice's recipient gaps fixes them here.
   const canInvoice = roleHasCapability(role, 'billing.invoice');
-  const [renaming, setRenaming] = useState<ClientDto | null>(null);
-  const [taxing, setTaxing] = useState<ClientDto | null>(null);
+  const [panel, setPanel] = useState<Panel | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  // The panel as it is NOW — a status response that lands after the owner
+  // opened another panel must neither close nor overwrite it.
+  const panelRef = useRef<Panel | null>(null);
+  useEffect(() => {
+    panelRef.current = panel;
+  }, [panel]);
+  const stillOpen = (kind: Panel['kind'], clientId: string) =>
+    panelRef.current?.kind === kind && panelRef.current.client.id === clientId;
+  const open = (next: Panel) => {
+    setPanel(next);
+    setOutcome(null);
+  };
 
   const columns: readonly DataTableColumn<ClientDto>[] = [
     { key: 'code', header: 'Code', render: (client) => <span className="font-mono">{client.code}</span> },
     { key: 'name', header: 'Client', render: (client) => clientLabel(client, tenantName) },
-    { key: 'status', header: 'Status', render: (client) => client.status },
+    { key: 'status', header: 'Status', render: (client) => clientStatusLabel(client.status) },
     // Story 21-5 — every member reads a brand's tax details (what its invoices print).
     { key: 'tax', header: 'Tax details', render: (client) => <span className="text-xs">{taxDetailsSummary(client)}</span> },
     ...(canManage || canInvoice
@@ -95,37 +128,34 @@ function ClientsCardSessioned() {
           {
             key: 'actions',
             header: '',
-            render: (client: ClientDto) =>
-              client.systemOwned ? null : (
+            render: (client: ClientDto) => {
+              if (client.systemOwned) return null;
+              const statusAction = canManage ? clientStatusAction(client) : null;
+              return (
                 <div className="flex gap-1">
                   {canManage ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRenaming(client);
-                        setTaxing(null);
-                        setOutcome(null);
-                      }}
-                      className={rowButtonClass}
-                    >
+                    <button type="button" onClick={() => open({ kind: 'rename', client })} className={rowButtonClass}>
                       Rename
                     </button>
                   ) : null}
                   {canInvoice ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTaxing(client);
-                        setRenaming(null);
-                        setOutcome(null);
-                      }}
-                      className={rowButtonClass}
-                    >
+                    <button type="button" onClick={() => open({ kind: 'tax', client })} className={rowButtonClass}>
                       Tax details
                     </button>
                   ) : null}
+                  {statusAction !== null ? (
+                    <button
+                      type="button"
+                      aria-label={`${statusAction === 'suspend' ? 'Suspend' : 'Reactivate'} ${client.code}`}
+                      onClick={() => open({ kind: statusAction, client })}
+                      className={rowButtonClass}
+                    >
+                      {statusAction === 'suspend' ? 'Suspend' : 'Reactivate'}
+                    </button>
+                  ) : null}
                 </div>
-              ),
+              );
+            },
           } satisfies DataTableColumn<ClientDto>,
         ]
       : []),
@@ -165,13 +195,13 @@ function ClientsCardSessioned() {
         />
       ) : null}
 
-      {canManage && renaming !== null ? (
+      {canManage && panel?.kind === 'rename' ? (
         <RenameClientForm
-          key={renaming.id}
-          client={renaming}
-          onClose={() => setRenaming(null)}
+          key={panel.client.id}
+          client={panel.client}
+          onClose={() => setPanel(null)}
           onRenamed={(client) => {
-            setRenaming(null);
+            setPanel(null);
             setOutcome({ tone: 'accepted', word: `${client.code} renamed`, reason: `It now reads “${client.name}”.` });
             notifyClientsChanged();
           }}
@@ -179,13 +209,13 @@ function ClientsCardSessioned() {
         />
       ) : null}
 
-      {canInvoice && taxing !== null ? (
+      {canInvoice && panel?.kind === 'tax' ? (
         <TaxDetailsForm
-          key={taxing.id}
-          client={taxing}
-          onClose={() => setTaxing(null)}
+          key={panel.client.id}
+          client={panel.client}
+          onClose={() => setPanel(null)}
           onSaved={(client, changed) => {
-            setTaxing(null);
+            setPanel(null);
             setOutcome(
               changed
                 ? { tone: 'accepted', word: `${client.code} tax details saved`, reason: 'Refresh a draft invoice to pick them up — an issued invoice keeps what it printed.' }
@@ -194,6 +224,36 @@ function ClientsCardSessioned() {
             if (changed) notifyClientsChanged();
           }}
           onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Tax details not saved', reason })}
+        />
+      ) : null}
+
+      {canManage && (panel?.kind === 'suspend' || panel?.kind === 'reactivate') ? (
+        // Keyed by action AND client: Reactivate right after Suspend mounts a
+        // fresh confirmation, so it mints a fresh Idempotency-Key.
+        <ConfirmRow<ClientDto>
+          key={`${panel.kind}-${panel.client.id}`}
+          question={clientStatusQuestion(panel.kind, panel.client.name)}
+          confirmLabel={panel.kind === 'suspend' ? `Suspend ${panel.client.code}` : `Reactivate ${panel.client.code}`}
+          ariaLabel={panel.kind === 'suspend' ? 'Confirm suspend' : 'Confirm reactivate'}
+          run={(key, tenantId) => fetchApiUpdateClientStatus(tenantId, panel.client.id, clientStatusTarget(panel.kind), key)}
+          reason={(error) => clientReason(error, panel.kind === 'suspend' ? 'suspended' : 'reactivated')}
+          onClose={() => setPanel(null)}
+          onDone={(client) => {
+            const { kind } = panel;
+            if (stillOpen(kind, client.id)) {
+              setPanel((p) => (p?.kind === kind && p.client.id === client.id ? null : p));
+              setOutcome({
+                tone: 'accepted',
+                word: client.status === 'suspended' ? `${client.code} suspended` : `${client.code} reactivated`,
+                reason: clientStatusSuccess(client),
+              });
+            }
+            notifyClientsChanged();
+          }}
+          onRejected={(reason) => {
+            if (!stillOpen(panel.kind, panel.client.id)) return;
+            setOutcome({ tone: 'rejected', word: panel.kind === 'suspend' ? 'Not suspended' : 'Not reactivated', reason });
+          }}
         />
       ) : null}
 

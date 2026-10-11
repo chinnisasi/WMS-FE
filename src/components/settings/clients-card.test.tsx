@@ -19,6 +19,10 @@ import { ImportCatalogCard } from './import-catalog';
  *      an Idempotency-Key;
  *   4. the import card shows the single-client hint with one client, and a
  *      required picker with NO default once several exist.
+ * Story 21-10 adds: the Status column's words; Suspend / Reactivate only for
+ * an owner and only on an eligible row; the PATCH with its Idempotency-Key
+ * and `{status}` body; the key reused on a retry of one confirmation and
+ * fresh for the next; the list reloaded after success.
  */
 
 const TENANT_ID = '0198f7a2-1b3c-7d4e-8f90-112233445566';
@@ -53,6 +57,10 @@ interface Recorded {
 let requests: Recorded[] = [];
 let clientRows: unknown[] = [];
 let clientsFail = false;
+/** Story 21-10 — how many status PATCHes fail (503) before one succeeds. */
+let statusFailures = 0;
+/** Story 21-10 — when set, a status PATCH waits for this promise before answering. */
+let statusGate: Promise<void> | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -81,6 +89,17 @@ function stubRouter(): void {
     if (method === 'POST' && pathname.endsWith('/catalog/imports')) {
       return json(201, { importId: 'i-1', mode: 'initial', committedRows: 1, failedRows: 0, skippedRows: 0, errors: [], clientId: 'c-acme' });
     }
+    if (method === 'PATCH' && pathname.endsWith('/status')) {
+      if (statusGate !== null) await statusGate;
+      if (statusFailures > 0) {
+        statusFailures -= 1;
+        return json(503, { code: 'unavailable', title: 'Down', status: 503, detail: 'Try again.' });
+      }
+      const id = pathname.split('/').at(-2);
+      const status = (body as { status: string }).status;
+      clientRows = clientRows.map((row) => ((row as { id: string }).id === id ? { ...(row as object), status } : row));
+      return json(200, { client: clientRows.find((row) => (row as { id: string }).id === id) });
+    }
     if (method === 'PATCH' && pathname.endsWith('/tax-details')) {
       return json(200, { client: { ...ACME, status: 'active' } });
     }
@@ -98,6 +117,8 @@ beforeEach(() => {
   requests = [];
   clientRows = [SELF, ACME];
   clientsFail = false;
+  statusFailures = 0;
+  statusGate = null;
   stubRouter();
 });
 
@@ -136,7 +157,9 @@ describe('ClientsCard', () => {
     const text = view.container.textContent ?? '';
     expect(text).toContain('Priya Spices (your company)');
     expect(text).toContain('ACME — Acme Foods');
-    expect(text).toContain('suspended');
+    // Story 21-10 — the status reads as a word, never the raw lowercase value.
+    expect(text).toContain('Suspended');
+    expect(text).not.toContain('suspended');
     expect(view.container.querySelector('form[aria-label="New client"]')).not.toBeNull();
     // One Rename — on ACME's row, none on the self row.
     expect(buttons(view.container, 'Rename')).toHaveLength(1);
@@ -152,6 +175,9 @@ describe('ClientsCard', () => {
       expect(buttons(view.container, 'Rename')).toHaveLength(0);
       // Story 21-5 — the tax details are billing.invoice's (owner + accountant), never on the self row.
       expect(buttons(view.container, 'Tax details')).toHaveLength(role === 'accountant' ? 1 : 0);
+      // Story 21-10 — suspend / reactivate are clients.manage's (owner-only).
+      expect(buttons(view.container, 'Suspend')).toHaveLength(0);
+      expect(buttons(view.container, 'Reactivate')).toHaveLength(0);
     });
   }
 
@@ -221,6 +247,129 @@ describe('ClientsCard', () => {
     expect(post?.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(view.container.textContent).toContain('GLOBEX created');
     expect(requests.filter((r) => r.method === 'GET').length).toBeGreaterThan(listReadsBefore);
+  });
+
+  describe('story 21-10: suspend and reactivate', () => {
+    const GLOBEX = { ...ACME, id: 'c-globex', code: 'GLOBEX', name: 'Globex Ltd', status: 'active' };
+    const GONE = { ...ACME, id: 'c-gone', code: 'GONE', name: 'Gone Brand', status: 'departed' };
+    const patches = () => requests.filter((r) => r.method === 'PATCH' && r.pathname.endsWith('/status'));
+
+    async function press(label: string): Promise<void> {
+      await act(async () => {
+        buttons(view!.container, label)[0]!.click();
+      });
+      await settle();
+    }
+
+    test('the labels render; an owner sees Suspend on an active brand, Reactivate on a suspended one, nothing on self or a departed one', async () => {
+      clientRows = [SELF, ACME, GLOBEX, GONE];
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      const statusCells = [...view.container.querySelectorAll('tbody tr')].map((row) => row.querySelectorAll('td')[2]?.textContent);
+      expect(statusCells).toEqual(['Active', 'Suspended', 'Active', 'Departed']);
+      expect(buttons(view.container, 'Suspend')).toHaveLength(1);
+      expect(buttons(view.container, 'Suspend')[0]!.getAttribute('aria-label')).toBe('Suspend GLOBEX');
+      expect(buttons(view.container, 'Reactivate')).toHaveLength(1);
+      expect(buttons(view.container, 'Reactivate')[0]!.getAttribute('aria-label')).toBe('Reactivate ACME');
+    });
+
+    test('Suspend confirms, PATCHes {status} with an Idempotency-Key, reloads the list; Reactivate right after uses a fresh key', async () => {
+      clientRows = [SELF, GLOBEX];
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await press('Suspend');
+      const confirm = view.container.querySelector('[role="group"][aria-label="Confirm suspend"]')!;
+      expect(confirm.textContent).toContain(
+        'Suspend Globex Ltd? Its portal users are signed out on their next action and cannot sign in or announce shipments; no new portal users can be invited and no new rate card can be drafted or activated. Warehouse work and billing continue (it cannot see invoices in the portal while suspended). Open ASNs stay open.',
+      );
+      expect(patches()).toHaveLength(0);
+      const readsBefore = requests.filter((r) => r.method === 'GET').length;
+      await press('Suspend GLOBEX');
+      expect(patches()).toHaveLength(1);
+      expect(patches()[0]!.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-globex/status`);
+      expect(patches()[0]!.body).toEqual({ status: 'suspended' });
+      expect(patches()[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(view.container.textContent).toContain('Globex Ltd is suspended.');
+      expect(requests.filter((r) => r.method === 'GET').length).toBeGreaterThan(readsBefore);
+      // The confirmation unmounted on success; the reloaded row offers Reactivate.
+      expect(view.container.querySelector('[aria-label="Confirm suspend"]')).toBeNull();
+      await press('Reactivate');
+      expect(view.container.querySelector('[aria-label="Confirm reactivate"]')!.textContent).toContain(
+        'Reactivate Globex Ltd? Its portal users can sign in again.',
+      );
+      await press('Reactivate GLOBEX');
+      expect(patches()).toHaveLength(2);
+      expect(patches()[1]!.body).toEqual({ status: 'active' });
+      expect(patches()[1]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(patches()[1]!.key).not.toBe(patches()[0]!.key);
+      expect(view.container.textContent).toContain('Globex Ltd is active again.');
+    });
+
+    test('a failed confirm keeps the confirmation open and its retry reuses the key', async () => {
+      clientRows = [SELF, GLOBEX];
+      statusFailures = 1;
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await press('Suspend');
+      await press('Suspend GLOBEX');
+      expect(view.container.textContent).toContain('Not suspended');
+      expect(view.container.querySelector('[aria-label="Confirm suspend"]')).not.toBeNull();
+      await press('Suspend GLOBEX');
+      expect(patches()).toHaveLength(2);
+      expect(patches()[1]!.key).toBe(patches()[0]!.key);
+      expect(view.container.textContent).toContain('Globex Ltd is suspended.');
+    });
+
+    test('Keep is disabled while the request is in flight', async () => {
+      clientRows = [SELF, GLOBEX];
+      let release!: () => void;
+      statusGate = new Promise<void>((resolve) => (release = resolve));
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await press('Suspend');
+      expect(buttons(view.container, 'Keep')[0]!.disabled).toBe(false);
+      await press('Suspend GLOBEX');
+      expect(buttons(view.container, 'Keep')[0]!.disabled).toBe(true);
+      release();
+      await settle();
+      expect(view.container.textContent).toContain('Globex Ltd is suspended.');
+    });
+
+    test('a late status response leaves a panel opened meanwhile open and un-overwritten', async () => {
+      clientRows = [SELF, GLOBEX];
+      let release!: () => void;
+      statusGate = new Promise<void>((resolve) => (release = resolve));
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await press('Suspend');
+      await press('Suspend GLOBEX');
+      // While the suspend is in flight the owner opens Rename on the same row.
+      await press('Rename');
+      expect(view.container.querySelector('form[aria-label="Rename GLOBEX"]')).not.toBeNull();
+      release();
+      await settle();
+      expect(patches()).toHaveLength(1);
+      expect(view.container.querySelector('form[aria-label="Rename GLOBEX"]')).not.toBeNull();
+      expect(view.container.textContent).not.toContain('Globex Ltd is suspended.');
+      // The list still reloads: the row now offers Reactivate.
+      expect(buttons(view.container, 'Reactivate')).toHaveLength(1);
+    });
+
+    test('Keep closes the confirmation and sends nothing', async () => {
+      clientRows = [SELF, GLOBEX];
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await press('Suspend');
+      await press('Keep');
+      expect(view.container.querySelector('[aria-label="Confirm suspend"]')).toBeNull();
+      expect(patches()).toHaveLength(0);
+    });
   });
 
   test('a reserved code is refused client-side and nothing is sent', async () => {

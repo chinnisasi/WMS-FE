@@ -45,6 +45,7 @@ import { FeedbackBanner } from '@/components/feedback/banner';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { ReadFailure } from '@/components/outbound/shell';
 import { ClientUsage } from '@/components/settings/client-usage';
+import { ConfirmRow } from '@/components/settings/confirm-row';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -290,7 +291,7 @@ function ClientRateCards({ client, canManage }: { client: ClientDto; canManage: 
       ) : null}
 
       {canManage && (open?.kind === 'cancel' || open?.kind === 'discard') ? (
-        <ConfirmRow
+        <CardConfirmRow
           key={`${open.kind}-${open.card.id}`}
           panel={open}
           consequence={cancelConsequence(open.card, items, inForceId, inForce.asOf)}
@@ -475,8 +476,13 @@ function ActivateForm({
   );
 }
 
-/** The cancel / discard confirmation — the key lives with the confirmation (per-confirmation). */
-function ConfirmRow({
+/**
+ * The cancel / discard confirmation on the shared `ConfirmRow` — the key
+ * lives with the confirmation (per-confirmation): this mounts per
+ * confirmation (keyed), so the key minted on the first press is reused by
+ * every retry of it.
+ */
+function CardConfirmRow({
   panel,
   consequence,
   onClose,
@@ -490,49 +496,25 @@ function ConfirmRow({
   onDone: (result: Outcome) => void;
   onRejected: (reason: string) => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  // Per-confirmation: this component mounts per confirmation (keyed), so
-  // the key minted on the first press is reused by every retry of it.
-  const keyRef = useRef<string | null>(null);
-  const inFlight = useRef(false);
   const { card } = panel;
-
-  async function confirm() {
-    if (inFlight.current) return;
-    const session = readSession();
-    if (session === null) return;
-    inFlight.current = true;
-    setBusy(true);
-    keyRef.current ??= ulid();
-    try {
-      if (panel.kind === 'cancel') {
-        const cancelled = await fetchApiCancelRateCard(session.tenant.id, card.id, keyRef.current);
-        onDone({ tone: 'accepted', ...cancelledOutcome(cancelled, consequence) });
-      } else {
-        await fetchApiDiscardRateCard(session.tenant.id, card.id, keyRef.current);
-        onDone({ tone: 'accepted', word: 'Draft discarded', reason: 'It is gone; nothing was ever billed from it.' });
-      }
-    } catch (error) {
-      onRejected(rateCardReason(error, panel.kind === 'cancel' ? 'cancelled' : 'discarded'));
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
-  }
-
-  const question =
-    panel.kind === 'cancel'
-      ? `Cancel the card from ${formatIstDate(card.effectiveFrom ?? '')}? ${consequence}`
-      : 'Discard this draft?';
+  const cancel = panel.kind === 'cancel';
   return (
-    <div role="group" aria-label={panel.kind === 'cancel' ? 'Confirm cancel' : 'Confirm discard'} className="flex flex-wrap items-center gap-2">
-      <span>{question}</span>
-      <button type="button" disabled={busy} onClick={confirm} className={primaryButtonClass}>
-        {panel.kind === 'cancel' ? 'Cancel card' : 'Discard draft'}
-      </button>
-      <button type="button" onClick={onClose} className={rowButtonClass}>
-        Keep
-      </button>
-    </div>
+    <ConfirmRow<Outcome>
+      question={cancel ? `Cancel the card from ${formatIstDate(card.effectiveFrom ?? '')}? ${consequence}` : 'Discard this draft?'}
+      confirmLabel={cancel ? 'Cancel card' : 'Discard draft'}
+      ariaLabel={cancel ? 'Confirm cancel' : 'Confirm discard'}
+      run={async (key, tenantId) => {
+        if (cancel) {
+          const cancelled = await fetchApiCancelRateCard(tenantId, card.id, key);
+          return { tone: 'accepted', ...cancelledOutcome(cancelled, consequence) };
+        }
+        await fetchApiDiscardRateCard(tenantId, card.id, key);
+        return { tone: 'accepted', word: 'Draft discarded', reason: 'It is gone; nothing was ever billed from it.' };
+      }}
+      reason={(error) => rateCardReason(error, cancel ? 'cancelled' : 'discarded')}
+      onDone={onDone}
+      onRejected={onRejected}
+      onClose={onClose}
+    />
   );
 }

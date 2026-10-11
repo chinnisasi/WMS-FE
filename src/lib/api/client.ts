@@ -129,6 +129,7 @@ import {
   portalControllerService,
   rateCardsControllerList,
   rateCardsControllerReplaceLines,
+  clientsControllerUpdateClientStatus,
   clientsControllerUpdateTaxDetails,
   clientInvoicesControllerDiscard,
   clientInvoicesControllerDispute,
@@ -181,6 +182,7 @@ import type {
   ClientInvoiceResponse,
   IssueClientInvoiceResponse,
   PrepareClientInvoicesResponse,
+  UpdateClientStatusDto,
   UpdateClientTaxDetailsDto,
   AcceptInviteDto,
   AcceptInviteResponse,
@@ -830,6 +832,28 @@ export async function fetchApiUpdateClientTaxDetails(
   const { data, error } = await clientsControllerUpdateTaxDetails({
     path: { tenantId, clientId },
     body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.client;
+}
+
+/**
+ * Story 21-10 — suspend (`suspended`) or reactivate (`active`) a client
+ * brand (owner-only). An unchanged status answers 200 with the client as it
+ * is (the key is stored server-side, so a retry replays).
+ */
+export async function fetchApiUpdateClientStatus(
+  tenantId: string,
+  clientId: string,
+  status: UpdateClientStatusDto['status'],
+  idempotencyKey: string,
+): Promise<ClientDto> {
+  const { data, error } = await clientsControllerUpdateClientStatus({
+    path: { tenantId, clientId },
+    body: { status },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
