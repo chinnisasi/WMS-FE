@@ -164,3 +164,141 @@ describe('OverReceiptQueue — documents (story 21-6)', () => {
     expect(paths.filter((path) => path.endsWith(`/inbound/asns/${ASN_ID}`))).toHaveLength(1);
   });
 });
+
+describe('OverReceiptQueue — late receipts (story 21-9)', () => {
+  const LATE_ASN = 'a-late';
+  const LATE_PO = 'po-late';
+  const LATE_ENTRIES: Record<string, unknown>[] = [
+    entry('7', { asnId: LATE_ASN, asnLineId: 'al-7', asnCode: 'ASN-L' }, 2), // lined, cancelled ASN
+    entry('8', { asnId: LATE_ASN, asnCode: 'ASN-L' }, 1), // unmatched, cancelled ASN
+    entry('9', { poId: LATE_PO, poLineId: null }, 4), // unmatched, closed PO
+  ];
+
+  function stubLate(): void {
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      const request = input instanceof Request ? input : new Request(input.toString());
+      const { pathname } = new URL(request.url);
+      paths.push(pathname);
+      if (pathname.endsWith('/receiving/over-receipts')) return json(200, { items: LATE_ENTRIES, nextCursor: null });
+      const approve = /\/receiving\/over-receipts\/([^/]+)\/approve$/.exec(pathname);
+      if (approve !== null) {
+        const decided = LATE_ENTRIES.find((e) => e.id === approve[1])!;
+        return json(200, { overReceipt: { ...decided, status: 'approved', decidedBy: 'u-1', decidedAt: '2026-10-11T00:00:00.000Z' } });
+      }
+      if (pathname.endsWith(`/inbound/asns/${LATE_ASN}`)) {
+        return json(200, {
+          asn: {
+            id: LATE_ASN,
+            code: 'ASN-L',
+            clientId: 'c-1',
+            status: 'cancelled',
+            expectedAt: null,
+            lineCount: 1,
+            linesComplete: 0,
+            announcedTotal: 10,
+            receivedTotal: 0,
+            createdAt: '2026-10-08T00:00:00.000Z',
+            warehouseId: 'wh-1',
+            statusNote: 'Client withdrew it',
+            updatedAt: '2026-10-08T00:00:00.000Z',
+            lines: [{ id: 'al-7', skuId: 's-1', announcedQty: 10, receivedQty: 0, openQty: 10 }],
+          },
+        });
+      }
+      if (pathname.endsWith(`/inbound/purchase-orders/${LATE_PO}`)) {
+        return json(200, {
+          purchaseOrder: {
+            id: LATE_PO,
+            tenantId: TENANT_ID,
+            warehouseId: 'wh-1',
+            vendorId: 'v-1',
+            code: 'PO-0009',
+            status: 'closed',
+            carriedFromPoId: null,
+            createdAt: '2026-10-08T00:00:00.000Z',
+            updatedAt: '2026-10-08T00:00:00.000Z',
+            lines: [{ id: 'pl-9', poId: LATE_PO, skuId: 's-1', orderedQty: 4, receivedQty: 0, openQty: 4, unitCostPaise: 100, expectedDate: null, status: 'cancelled', createdAt: '2026-10-08T00:00:00.000Z' }],
+          },
+        });
+      }
+      if (pathname.endsWith('/catalog/skus')) return json(200, { items: [SKU], nextCursor: null });
+      if (pathname.endsWith('/users')) return json(200, { items: [], nextCursor: null });
+      return json(404, { code: 'not-found', title: 'Unrouted in this test', status: 404 });
+    }) as unknown as typeof fetch);
+  }
+
+  test('a terminal document is named "· cancelled" / "· closed" on pending rows; a lined late row reads "+N late receipt" with no open figure; a null-line row reads "+N unmatched" and "Unmatched line" with no line context', async () => {
+    stubLate();
+    writeSession(SESSION);
+    view = render(<OverReceiptQueue />);
+    await settle();
+    const cards = [...view.container.querySelectorAll('article')].map((card) => card.textContent ?? '');
+    expect(cards).toHaveLength(3);
+    expect(cards[0]).toContain('ASN ASN-L · cancelled');
+    expect(cards[0]).toContain('+2 each late receipt');
+    expect(cards[0]).not.toContain('over open');
+    expect(cards[0]).toContain('Line: 10 each announced · 0 each received-to-date');
+    expect(cards[0]).not.toContain('open');
+    expect(cards[0]).not.toContain('Unmatched line');
+    expect(cards[1]).toContain('ASN ASN-L · cancelled');
+    expect(cards[1]).toContain('+1 each unmatched');
+    expect(cards[1]).toContain('Unmatched line — it matched no current ASN line; approving it credits none.');
+    expect(cards[1]).not.toContain('Line:');
+    expect(cards[2]).toContain('PO PO-0009 · closed');
+    expect(cards[2]).toContain('+4 each unmatched');
+    expect(cards[2]).toContain('Unmatched line — it matched no current PO line; approving it credits none.');
+    expect(cards[2]).not.toContain('Line:');
+  });
+
+  test('a DECIDED row whose document closed later keeps the neutral wording', async () => {
+    const decided = LATE_ENTRIES.map((e) => ({ ...e, status: 'approved', decidedBy: 'u-1', decidedAt: '2026-10-11T00:00:00.000Z' }));
+    LATE_ENTRIES.splice(0, LATE_ENTRIES.length, ...decided);
+    try {
+      stubLate();
+      writeSession(SESSION);
+      view = render(<OverReceiptQueue />);
+      await settle();
+      const cards = [...view.container.querySelectorAll('article')].map((card) => card.textContent ?? '');
+      expect(cards[0]).toContain('ASN ASN-L');
+      expect(cards[0]).not.toContain('· cancelled');
+      expect(cards[0]).toContain('+2 each over open');
+      expect(cards[0]).toContain('10 each open');
+      expect(cards[2]).toContain('PO PO-0009');
+      expect(cards[2]).not.toContain('· closed');
+      expect(cards[2]).toContain('+4 each unmatched');
+    } finally {
+      LATE_ENTRIES.splice(0, LATE_ENTRIES.length, ...decided.map((e) => ({ ...e, status: 'pending', decidedBy: null, decidedAt: null })));
+    }
+  });
+
+  test('a null-line row on an OPEN document (a re-targeted receipt) reads "+N unmatched", never "over open"', async () => {
+    writeSession(SESSION);
+    ENTRIES.push(entry('4', { poId: PO_ID, poLineId: null }, 5));
+    try {
+      view = render(<OverReceiptQueue />);
+      await settle();
+      const cards = [...view.container.querySelectorAll('article')].map((card) => card.textContent ?? '');
+      expect(cards[3]).toContain('PO PO-0004');
+      expect(cards[3]).not.toContain('PO PO-0004 ·');
+      expect(cards[3]).toContain('+5 each unmatched');
+      expect(cards[3]).not.toContain('over open');
+      expect(cards[3]).toContain('Unmatched line');
+    } finally {
+      ENTRIES.pop();
+    }
+  });
+
+  test('approving a null-line row says it went to stock and credited no line', async () => {
+    stubLate();
+    writeSession(SESSION);
+    view = render(<OverReceiptQueue />);
+    await settle();
+    const card = [...view.container.querySelectorAll('article')][2]!;
+    const approve = [...card.querySelectorAll('button')].find((b) => b.textContent === 'Approve')!;
+    await act(async () => {
+      approve.click();
+    });
+    await settle();
+    expect(view.container.textContent).toContain('Applied to stock; no line credited.');
+  });
+});

@@ -9,7 +9,15 @@ import {
 import type { OverReceiptDto, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { quantityLabel } from '@/lib/format-quantity';
-import { approvedReason, decisionReason, openQtyLabel, overReceiptDocumentLabel } from '@/lib/over-receipt';
+import {
+  approvedReason,
+  decisionReason,
+  excessHeadline,
+  isLateOverReceipt,
+  isUnmatchedOverReceipt,
+  openQtyLabel,
+  overReceiptDocumentLabel,
+} from '@/lib/over-receipt';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useOverReceipts, useSkuMap, useUserMap } from '@/lib/use-inbound';
@@ -21,7 +29,12 @@ import { FeedbackBanner } from '@/components/feedback/banner';
  * that received past a document line's open quantity — a PO line, or (story
  * 21-6) an ASN line — applied the within-open part immediately and parked
  * the excess here; Approve applies the excess (a new `grn.received` ledger
- * event + the line's receivedQty), Reject leaves it unapplied. Every decision is audit-trailed server-side; the buttons carry
+ * event + the line's receivedQty), Reject leaves it unapplied. Story 21-9: a
+ * receipt that arrived after its PO closed or its ASN was cancelled or
+ * closed pends here WHOLE ("+N late receipt", the document named "·
+ * cancelled" / "· closed"), and a line that matched no document line pends
+ * as an "Unmatched line" — approving it puts the units in stock and credits
+ * no line. Every decision is audit-trailed server-side; the buttons carry
  * a fresh ULID Idempotency-Key so a double click replays, never duplicates.
  *
  * The surface itself is nav-gated behind `review.decide`; the buttons are
@@ -108,9 +121,10 @@ function OverReceiptQueueSessioned() {
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Over-receipts</h2>
         <div className="text-(--muted-foreground)">
-          Units received beyond a PO or ASN line&apos;s open quantity pend here until a decision:
-          approve applies the excess, reject leaves it unapplied — both audit-trailed. A PO or
-          ASN cannot close while one of its over-receipts waits here.
+          Units received beyond a PO or ASN line&apos;s open quantity — or after the PO closed
+          or the ASN was cancelled or closed — pend here until a decision: approve puts them in
+          stock, reject leaves them unapplied — both audit-trailed. An open PO or ASN cannot
+          close while one of its over-receipts waits here.
         </div>
       </div>
 
@@ -143,8 +157,13 @@ function OverReceiptQueueSessioned() {
             <OverReceiptCard
               key={entry.id}
               entry={entry}
-              documentLabel={overReceiptDocumentLabel(entry, queue?.poCodes[entry.poId ?? ''] ?? null)}
+              documentLabel={overReceiptDocumentLabel(
+                entry,
+                queue?.poCodes[entry.poId ?? ''] ?? null,
+                documentStatusOf(entry, queue),
+              )}
               line={lineContext(entry, queue)}
+              late={isLateOverReceipt(entry, documentStatusOf(entry, queue))}
               skuLabel={skus?.[entry.skuId]?.code ?? null}
               sku={skus?.[entry.skuId]}
               requestedBy={users?.[entry.requestedBy]?.email ?? null}
@@ -176,21 +195,30 @@ function OverReceiptQueueSessioned() {
   );
 }
 
+/** Story 21-9 — the row's document status (null while the detail read has not resolved it). */
+function documentStatusOf(
+  entry: OverReceiptDto,
+  queue: { documentStatuses: Readonly<Record<string, string>> } | null,
+): string | null {
+  const documentId = entry.asnId ?? entry.poId;
+  return documentId === null ? null : (queue?.documentStatuses[documentId] ?? null);
+}
+
 /**
  * The document line's context: a PO line's ordered / received / open, or
  * (story 21-6) an ASN line's announced / received / open. Null while the
- * detail read has not resolved it.
+ * detail read has not resolved it, and (story 21-9) on a row with no line.
  */
 function lineContext(
   entry: OverReceiptDto,
   queue: { poLines: Readonly<Record<string, { orderedQty: number; receivedQty: number; openQty: number }>>; asnLines: Readonly<Record<string, { announcedQty: number; receivedQty: number; openQty: number }>> } | null,
 ): LineContext | null {
-  if (queue === null) return null;
+  if (queue === null || isUnmatchedOverReceipt(entry)) return null;
   if (entry.asnLineId !== undefined) {
     const line = queue.asnLines[entry.asnLineId];
     return line === undefined ? null : { expected: line.announcedQty, expectedWord: 'announced', receivedQty: line.receivedQty, openQty: line.openQty };
   }
-  if (entry.poLineId === null) return null;
+  if (entry.poLineId === null) return null; // unreachable — narrows the type
   const line = queue.poLines[entry.poLineId];
   return line === undefined ? null : { expected: line.orderedQty, expectedWord: 'ordered', receivedQty: line.receivedQty, openQty: line.openQty };
 }
@@ -205,6 +233,7 @@ interface LineContext {
 function OverReceiptCard({
   entry,
   documentLabel,
+  late,
   line,
   skuLabel,
   sku,
@@ -215,6 +244,7 @@ function OverReceiptCard({
 }: {
   entry: OverReceiptDto;
   documentLabel: string;
+  late: boolean;
   line: LineContext | null;
   skuLabel: string | null;
   sku: SkuResponse | undefined;
@@ -231,13 +261,20 @@ function OverReceiptCard({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-mono text-xs">{documentLabel}</span>
         <span className="font-mono text-xs">{skuLabel ?? '(unknown SKU)'}</span>
-        <span className="font-medium">+{qty(entry.excessQty)} over open</span>
+        <span className="font-medium">{excessHeadline(qty(entry.excessQty), { unmatched: isUnmatchedOverReceipt(entry), late })}</span>
         <span className="font-mono text-xs text-(--muted-foreground)">{entry.grnCode}</span>
       </div>
+      {isUnmatchedOverReceipt(entry) && (
+        <div className="text-xs text-(--muted-foreground)">
+          Unmatched line — it matched no current {entry.asnId !== undefined ? 'ASN' : 'PO'} line; approving it credits none.
+        </div>
+      )}
       {line !== null && (
         <div className="text-xs text-(--muted-foreground)">
-          Line: {qty(line.expected)} {line.expectedWord} · {qty(line.receivedQty)} received-to-date ·{' '}
-          {openQtyLabel(line.openQty, sku)} open
+          Line: {qty(line.expected)} {line.expectedWord} · {qty(line.receivedQty)} received-to-date
+          {/* Story 21-9: a late row's line belongs to a closed or cancelled
+              document — it cannot receive, so it has no open figure. */}
+          {!late && <> · {openQtyLabel(line.openQty, sku)} open</>}
         </div>
       )}
       <div className="text-xs text-(--muted-foreground)">

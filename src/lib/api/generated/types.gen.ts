@@ -2899,11 +2899,11 @@ export type GrnLineDto = {
     id: string;
     grnId: string;
     /**
-     * The PO line credited — null on a blind, ASN or unmatched line
+     * The PO line credited — null on a blind, ASN or unmatched line. Story 21-9: on a late receipt (a closed PO) the line the excess pends against, null when it matched none
      */
     poLineId: string | null;
     /**
-     * Story 21-6 — the ASN line credited; present only when one was
+     * Story 21-6 — the ASN line credited; present only when one was. Story 21-9: on a late receipt (a cancelled or closed ASN) the line the excess pends against, when it matched one
      */
     asnLineId?: string;
     skuId: string;
@@ -2914,11 +2914,11 @@ export type GrnLineDto = {
      */
     qty: number;
     /**
-     * The within-open portion applied immediately
+     * The within-open portion applied immediately — 0 on every line of a late receipt (story 21-9)
      */
     appliedQty: number;
     /**
-     * The excess pended for approval
+     * The excess pended for approval — the whole quantity on a late receipt against a closed or cancelled document (story 21-9)
      */
     excessQty: number;
     /**
@@ -2939,7 +2939,7 @@ export type RejectedGrnLineDto = {
     skuId: string;
     qty: number;
     /**
-     * Machine reason
+     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients
      */
     code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found';
     /**
@@ -2967,7 +2967,14 @@ export type GoodsReceiptDto = {
      * Server-assigned code (GRN-<n>, unique per tenant)
      */
     code: string;
+    /**
+     * The PO booked against. Story 21-9: a receipt against a closed PO with an open carried successor is booked against the successor, named here
+     */
     poId: string | null;
+    /**
+     * Story 21-9 — the successor PO's code; present only on a receipt re-targeted from a closed PO to its open successor
+     */
+    poCode?: string;
     /**
      * Story 21-6 — the ASN received against; present only on an ASN receipt
      */
@@ -3405,13 +3412,16 @@ export type OverReceiptDto = {
     grnCode: string;
     grnLineId: string;
     poId: string | null;
+    /**
+     * The PO line the excess pends against — null on an ASN receipt's over-receipt, and (story 21-9) on a late receipt's line that matched no PO line: approving that credits no line
+     */
     poLineId: string | null;
     /**
      * Story 21-6 — present only on an ASN receipt's over-receipt
      */
     asnId?: string;
     /**
-     * Story 21-6 — the ASN line; present only on an ASN receipt's over-receipt
+     * Story 21-6 — the ASN line; present only on an ASN receipt's over-receipt that names one (story 21-9: absent on a late receipt's line that matched no ASN line)
      */
     asnLineId?: string;
     /**
@@ -11195,7 +11205,7 @@ export type ReceivingControllerSubmitGoodsReceiptErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The PO is not open (po-not-open, naming the status), the ASN is not announced or partially received (asn-not-open), the document belongs to another warehouse (document-warehouse-mismatch), a GRN line names a kit SKU — a kit never receives stock (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
+     * The document belongs to another warehouse (document-warehouse-mismatch — checked before the document's status, so a closed or cancelled document of another warehouse answers this too), the document has a status receiving does not know (po-not-open / asn-not-open — DEFENSIVE since story 21-9: a closed PO or a cancelled/closed ASN no longer refuses, the receipt pends for approval), a GRN line names a kit SKU — a kit never receives stock (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -11208,7 +11218,7 @@ export type ReceivingControllerSubmitGoodsReceiptError = ReceivingControllerSubm
 
 export type ReceivingControllerSubmitGoodsReceiptResponses = {
     /**
-     * GRN recorded: server-assigned code, per-line physical/applied/excess quantities, ledger events for the applied portion (the idempotency snapshot)
+     * GRN recorded: server-assigned code, per-line physical/applied/excess quantities, ledger events for the applied portion (the idempotency snapshot). Story 21-9: a receipt against a closed PO or a cancelled/closed ASN is no longer refused — every line pends as an over-receipt against that document (applied 0); a closed PO with an open carried successor is booked against the successor instead (poId/poCode name it)
      */
     201: GoodsReceiptResponse;
 };

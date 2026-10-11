@@ -253,11 +253,19 @@ export interface OverReceiptsPage {
   /** Cursor for the Next button; null on the last page. */
   nextCursor: string | null;
   /**
-   * poId → PO code. Every over-receipt carries a PO line OR (story 21-6) an
-   * ASN line — a blind receipt cannot over-receive; an ASN's code rides the
-   * row itself (`asnCode`).
+   * poId → PO code. Every over-receipt carries a PO OR (story 21-6) an ASN —
+   * a blind receipt cannot over-receive; an ASN's code rides the row itself
+   * (`asnCode`). Story 21-9: the LINE is optional — a late receipt's line
+   * that matched no document line pends against the document alone
+   * (`poLineId` null, or no `asnLineId`).
    */
   poCodes: Readonly<Record<string, string>>;
+  /**
+   * Story 21-9 — poId / asnId → the document's status, read from the same
+   * detail fetches (no BE field): a `closed` / `cancelled` document makes
+   * its rows late receipts.
+   */
+  documentStatuses: Readonly<Record<string, string>>;
   /** poLineId → the PO line's ordered / received / open context. */
   poLines: Readonly<Record<string, PurchaseOrderLineDto>>;
   /** Story 21-6 — asnLineId → the ASN line's announced / received / open context. */
@@ -303,6 +311,7 @@ export function useOverReceipts(
         );
         if (cancelled) return;
         const poCodes: Record<string, string> = {};
+        const documentStatuses: Record<string, string> = {};
         const poLines: Record<string, PurchaseOrderLineDto> = {};
         const asnLines: Record<string, AsnLineDto> = {};
         // Story 21-6 — the ASN lines' context: ONE detail read per distinct
@@ -313,6 +322,7 @@ export function useOverReceipts(
           asnIds.map(async (asnId) => {
             try {
               const detail = await fetchApiGetAsn(tenantId, asnId);
+              documentStatuses[asnId] = detail.asn.status;
               for (const line of detail.asn.lines) asnLines[line.id] = line;
             } catch {
               // the cards still render; the line context is omitted
@@ -326,6 +336,7 @@ export function useOverReceipts(
             try {
               const detail = await fetchApiGetPurchaseOrder(tenantId, entry.poId);
               poCodes[entry.poId] = detail.purchaseOrder.code;
+              documentStatuses[entry.poId] = detail.purchaseOrder.status;
               const line = detail.purchaseOrder.lines.find((l) => l.id === entry.poLineId);
               if (line !== undefined) poLines[line.id] = line;
             } catch {
@@ -342,6 +353,7 @@ export function useOverReceipts(
               items: result.items,
               nextCursor: result.nextCursor ?? null,
               poCodes,
+              documentStatuses,
               poLines,
               asnLines,
             },
