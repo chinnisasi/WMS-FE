@@ -7,7 +7,7 @@
  * never sends a filter the backend would refuse.
  */
 import { ApiProblem } from '@/lib/api/client';
-import type { AuditEventDto, ReportingControllerAuditData, UserResponse } from '@/lib/api/generated';
+import type { AuditEventDto, AuditTrailResponse, ReportingControllerAuditData, UserResponse } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
 type AuditQuery = NonNullable<ReportingControllerAuditData['query']>;
@@ -78,8 +78,22 @@ export const AUDIT_TARGET_OPTIONS: readonly { value: AuditTargetType; label: str
 /** The backend's `actionPrefix` shape (the DTO's `AUDIT_ACTION_PREFIX_RE`). */
 export const AUDIT_ACTION_PREFIX_RE = /^[a-z][a-z_.-]{0,63}$/;
 
-/** The actor filter's "System" choice — sent as the response's own `systemActorId`, never a hard-coded id. */
+/** The actor filter's "System" choice. */
 export const SYSTEM_ACTOR_OPTION = 'system';
+
+/**
+ * The system actor's id, typed as the GENERATED `AuditTrailResponse['systemActorId']`
+ * literal: the backend publishes it as a one-value enum, so a backend change
+ * fails this file's compile instead of silently filtering on a stale id. The
+ * filter needs no successful read first (a 503 on the first page must not
+ * disable "System").
+ */
+export const SYSTEM_ACTOR_ID: AuditTrailResponse['systemActorId'] = '01900000-0000-7000-8000-000000000000';
+
+/** The random tail of a UUIDv7 — its first 8 characters are the timestamp, near-identical across a day's rows. */
+export function shortIdTail(id: string): string {
+  return id.slice(-8);
+}
 
 /** The filter inputs, as the section holds them (component state — lost on reload). */
 export interface AuditFilterDraft {
@@ -124,12 +138,10 @@ export function istDayEnd(date: string): string {
 /**
  * The draft → the query to send, or a problem shown instead (nothing is
  * sent). Refuses what the backend would 400: a malformed action prefix, a
- * `from` after `to`. `systemActorId` comes from the last response (the
- * backend publishes it) — until one has loaded, "System" cannot be sent.
+ * `from` after `to`. "System" sends `SYSTEM_ACTOR_ID`.
  */
 export function parseAuditFilters(
   draft: AuditFilterDraft,
-  systemActorId: string | null,
 ): { query: AuditFilterQuery; problem: null } | { query: null; problem: string } {
   const prefix = draft.actionPrefix.trim();
   if (prefix !== '' && !AUDIT_ACTION_PREFIX_RE.test(prefix)) {
@@ -142,8 +154,7 @@ export function parseAuditFilters(
   }
   let actorUserId: string | undefined;
   if (draft.actor === SYSTEM_ACTOR_OPTION) {
-    if (systemActorId === null) return { query: null, problem: 'The system actor is not known yet — wait for the trail to load.' };
-    actorUserId = systemActorId;
+    actorUserId = SYSTEM_ACTOR_ID;
   } else if (draft.actor !== '') {
     actorUserId = draft.actor;
   }
@@ -162,7 +173,14 @@ export function parseAuditFilters(
 /** A canonical key of the filter tuple — the cursor is scoped to it, and the table is keyed on it. */
 export function auditFilterKey(query: AuditFilterQuery | null): string {
   if (query === null) return 'invalid';
-  return JSON.stringify([query.actorUserId ?? '', query.actionPrefix ?? '', query.targetType ?? '', query.from ?? '', query.to ?? '']);
+  return JSON.stringify([
+    query.actorUserId ?? '',
+    query.actionPrefix ?? '',
+    query.targetType ?? '',
+    query.targetId ?? '',
+    query.from ?? '',
+    query.to ?? '',
+  ]);
 }
 
 const IST_DATE_TIME = new Intl.DateTimeFormat('en-IN', {
@@ -206,19 +224,19 @@ export function auditHappenedLabel(row: Pick<AuditEventDto, 'recordedAt' | 'occu
   return `happened ${part('hour')}:${part('minute')}`;
 }
 
-/** Who: the member's email; "System" for the system actor; a short id for a user no longer listed. */
+/** Who: the member's email; "System" for the system actor; the id's random tail for a user no longer listed. */
 export function auditActorLabel(
   row: Pick<AuditEventDto, 'actorKind' | 'actorUserId'>,
   users: Readonly<Record<string, Pick<UserResponse, 'email'>>> | null,
 ): string {
   if (row.actorKind === 'system') return 'System';
-  return users?.[row.actorUserId]?.email ?? row.actorUserId.slice(0, 8);
+  return users?.[row.actorUserId]?.email ?? shortIdTail(row.actorUserId);
 }
 
-/** Target: the type in words plus a short id — plain text (no deep links; story 9-3a). */
+/** Target: the type in words plus the id's random tail — plain text (no deep links; story 9-3a). */
 export function auditTargetLabel(row: Pick<AuditEventDto, 'targetType' | 'targetId'>): string {
   const label = (AUDIT_TARGET_LABEL as Readonly<Record<string, string>>)[row.targetType] ?? row.targetType;
-  return `${label} ${row.targetId.slice(0, 8)}`;
+  return `${label} ${shortIdTail(row.targetId)}`;
 }
 
 export const AUDIT_ROLE_DENIED = 'Only the owner can read the audit trail';

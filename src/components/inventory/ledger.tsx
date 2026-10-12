@@ -207,7 +207,10 @@ function LedgerTable({ warehouseId, drill }: { warehouseId: string; drill: Ledge
 }
 
 /** The drilled table's empty line: the dashboard's, or the document's own (story 9-3a). */
-function ledgerDrillEmptyMessage(drill: LedgerDrill): string {
+export function ledgerDrillEmptyMessage(drill: LedgerDrill): string {
   const document = ledgerDrillDocument(drill);
-  return document === null ? 'No ledger events match this figure.' : `No ledger events for ${ledgerDocName(document)} yet.`;
+  if (document === null) return 'No ledger events match this figure.';
+  return document.doc === 'po'
+    ? `No receipt events for ${ledgerDocName(document)} yet.`
+    : `No ledger events for ${ledgerDocName(document)} yet.`;
 }

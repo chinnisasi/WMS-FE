@@ -62,7 +62,7 @@ function AuditTrailSection() {
 
   const apply = (event: FormEvent) => {
     event.preventDefault();
-    const parsed = parseAuditFilters(draft, trail.state === 'ready' ? trail.data.systemActorId : null);
+    const parsed = parseAuditFilters(draft);
     if (parsed.problem !== null) {
       setProblem(parsed.problem);
       return;
@@ -176,10 +176,11 @@ function AuditTrailSection() {
       {trail.state === 'failed' ? (
         <ReadFailure word="Audit trail unavailable" reason={trail.reason} onRetry={trail.reload} />
       ) : (
-        // Keyed on the applied filter tuple: a filter change remounts the
-        // table, so its Prev/Next stack starts again at page 1.
+        // Keyed on the applied filter tuple AND the reload epoch: a filter
+        // change or a Retry (which reads page 1 again) remounts the table, so
+        // its Prev/Next stack restarts with the hook's cursor.
         <DataTable<AuditEventDto>
-          key={auditFilterKey(applied)}
+          key={`${auditFilterKey(applied)}#${trail.epoch}`}
           columns={columns}
           rows={trail.state === 'ready' ? trail.data.items : []}
           nextCursor={trail.state === 'ready' ? trail.data.nextCursor : null}

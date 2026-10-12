@@ -67,6 +67,8 @@ const ROWS = [
 
 let urls: string[] = [];
 let auditReply: [number, unknown] = [200, { items: ROWS, nextCursor: 'CURSOR-2', systemActorId: SYSTEM_ID }];
+/** Story 9-3a patch — a queue of one-shot replies served before `auditReply` (a failing page, then recovery). */
+let auditQueue: [number, unknown][] = [];
 let usersFail = false;
 
 function json(status: number, body: unknown): Response {
@@ -78,13 +80,17 @@ let view: Rendered | undefined;
 beforeEach(() => {
   urls = [];
   auditReply = [200, { items: ROWS, nextCursor: 'CURSOR-2', systemActorId: SYSTEM_ID }];
+  auditQueue = [];
   usersFail = false;
   writeSession(session('owner'));
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
     const { pathname, search } = new URL(request.url);
     urls.push(`${pathname}${search}`);
-    if (pathname.endsWith('/reporting/audit')) return json(auditReply[0], auditReply[1]);
+    if (pathname.endsWith('/reporting/audit')) {
+      const next = auditQueue.shift() ?? auditReply;
+      return json(next[0], next[1]);
+    }
     if (pathname.endsWith('/users')) {
       if (usersFail) return json(503, { code: 'service-unavailable', status: 503, title: 'Unavailable', detail: 'The users read is down.' });
       return json(200, {
@@ -152,9 +158,10 @@ describe('AuditTrail (9-3a)', () => {
     expect(lastAudit().search).toBe('');
     const rows = [...container.querySelectorAll('tbody tr')].map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent));
     expect(rows).toEqual([
-      ['12 Oct 2026, 15:30:00happened 13:30', 'owner@example.com', 'putaway.placed', 'Putaway 0198f7a2'],
-      ['12 Oct 2026, 14:30:00', 'System', 'replenishment.breach_detected', 'Reorder breach 0198f7a2'],
-      ['12 Oct 2026, 13:30:00', '0198f7a2', 'transfer.created', 'Transfer 0198f7a2'],
+      ['12 Oct 2026, 15:30:00happened 13:30', 'owner@example.com', 'putaway.placed', 'Putaway 00000003'],
+      ['12 Oct 2026, 14:30:00', 'System', 'replenishment.breach_detected', 'Reorder breach 00000002'],
+      // An unknown user and every target: the id's random tail, never the shared timestamp head.
+      ['12 Oct 2026, 13:30:00', '000000u9', 'transfer.created', 'Transfer 00000001'],
     ]);
     // The Target column is text, never a link.
     expect(container.querySelectorAll('tbody a')).toHaveLength(0);
@@ -225,4 +232,31 @@ describe('AuditTrail (9-3a)', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Members not loaded');
     expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
   });
+
+  test('"System" works even when no read has succeeded: the first page 503s, then System is applied with the typed id', async () => {
+    auditReply = [503, { code: 'report-unavailable', status: 503, title: 'x', detail: 'took too long' }];
+    const container = await open();
+    expect(container.textContent).toContain('Narrow the filters or dates');
+    setValue(container.querySelector('[aria-label="Audit actor"]') as HTMLSelectElement, 'system');
+    await apply(container);
+    expect(lastAudit().searchParams.get('actorUserId')).toBe(SYSTEM_ID);
+    expect(container.textContent).not.toContain('not known yet');
+  });
+
+  test('Retry after a failed later page reads page 1 again, and the table restarts with it (Prev disabled)', async () => {
+    const container = await open();
+    const ok = [200, { items: ROWS, nextCursor: 'CURSOR-2', systemActorId: SYSTEM_ID }] as [number, unknown];
+    auditQueue = [[503, { code: 'report-unavailable', status: 503, title: 'x', detail: 'took too long' }], ok];
+    click(button(container, 'Next'));
+    await settle();
+    expect(lastAudit().searchParams.get('cursor')).toBe('CURSOR-2');
+    expect(container.textContent).toContain('Narrow the filters or dates');
+    click(button(container, 'Retry'));
+    await settle();
+    expect(lastAudit().searchParams.has('cursor')).toBe(false);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
+    expect(button(container, 'Prev').disabled).toBe(true);
+    expect(button(container, 'Next').disabled).toBe(false);
+  });
+
 });

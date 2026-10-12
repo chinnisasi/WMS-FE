@@ -7,6 +7,7 @@ import {
   AUDIT_TARGET_OPTIONS,
   AUDIT_UNAVAILABLE,
   EMPTY_AUDIT_FILTERS,
+  SYSTEM_ACTOR_ID,
   SYSTEM_ACTOR_OPTION,
   auditActorLabel,
   auditFilterKey,
@@ -39,7 +40,7 @@ describe('the IST day → instant rule', () => {
   });
 
   test('a row recorded at 23:59 IST on the 12th is inside the day; 00:00 IST on the 13th is not', () => {
-    const query = parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, fromDate: '2026-10-12', toDate: '2026-10-12' }, null).query!;
+    const query = parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, fromDate: '2026-10-12', toDate: '2026-10-12' }).query!;
     const inside = Date.parse('2026-10-12T18:29:00Z'); // 23:59 IST
     const outside = Date.parse('2026-10-12T18:30:00Z'); // 00:00 IST the 13th
     const from = Date.parse(query.from!);
@@ -51,14 +52,13 @@ describe('the IST day → instant rule', () => {
 
 describe('parseAuditFilters', () => {
   test('an empty draft sends no filter at all', () => {
-    expect(parseAuditFilters(EMPTY_AUDIT_FILTERS, null)).toEqual({ query: {}, problem: null });
+    expect(parseAuditFilters(EMPTY_AUDIT_FILTERS)).toEqual({ query: {}, problem: null });
   });
 
   test('every filter, combined: actor, a trimmed prefix, a target type, the IST window', () => {
     expect(
       parseAuditFilters(
         { actor: USER_ID, actionPrefix: '  transfer. ', targetType: 'transfer_order', fromDate: '2026-10-01', toDate: '2026-10-12' },
-        SYSTEM_ID,
       ),
     ).toEqual({
       query: {
@@ -72,21 +72,21 @@ describe('parseAuditFilters', () => {
     });
   });
 
-  test('"System" sends the system actor id the backend published — never one known before a response', () => {
-    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, actor: SYSTEM_ACTOR_OPTION }, SYSTEM_ID).query).toEqual({ actorUserId: SYSTEM_ID });
-    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, actor: SYSTEM_ACTOR_OPTION }, null).query).toBeNull();
+  test('"System" sends the system actor id — typed from the generated response literal, needing no read first', () => {
+    expect(SYSTEM_ACTOR_ID).toBe(SYSTEM_ID);
+    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, actor: SYSTEM_ACTOR_OPTION }).query).toEqual({ actorUserId: SYSTEM_ID });
   });
 
   test('refuses what the backend would 400: from after to, a prefix with `%` or capitals, an impossible date', () => {
-    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, fromDate: '2026-10-13', toDate: '2026-10-12' }, null)).toEqual({
+    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, fromDate: '2026-10-13', toDate: '2026-10-12' })).toEqual({
       query: null,
       problem: 'The start date is after the end date.',
     });
-    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, actionPrefix: 'a%' }, null).query).toBeNull();
-    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, actionPrefix: 'Transfer.' }, null).query).toBeNull();
-    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, fromDate: '2026-02-30' }, null).query).toBeNull();
+    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, actionPrefix: 'a%' }).query).toBeNull();
+    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, actionPrefix: 'Transfer.' }).query).toBeNull();
+    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, fromDate: '2026-02-30' }).query).toBeNull();
     // One day (from = to) is lawful.
-    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, fromDate: '2026-10-12', toDate: '2026-10-12' }, null).problem).toBeNull();
+    expect(parseAuditFilters({ ...EMPTY_AUDIT_FILTERS, fromDate: '2026-10-12', toDate: '2026-10-12' }).problem).toBeNull();
   });
 
   test('the filter key changes with every filter and is stable for the same tuple', () => {
@@ -95,6 +95,8 @@ describe('parseAuditFilters', () => {
     expect(auditFilterKey({ actionPrefix: 'po.' })).not.toBe(a);
     expect(auditFilterKey({ actionPrefix: 'transfer.', targetType: 'order' })).not.toBe(a);
     expect(auditFilterKey({})).not.toBe(a);
+    // The target id is part of the tuple (a cursor is never replayed across targets).
+    expect(auditFilterKey({ actionPrefix: 'transfer.', targetId: '0198f7a2-aaaa-7d4e-8f90-000000000001' })).not.toBe(a);
   });
 });
 
@@ -113,13 +115,14 @@ describe('the cells', () => {
     const users = { [USER_ID]: { email: 'owner@example.com' } };
     expect(auditActorLabel({ actorKind: 'user', actorUserId: USER_ID }, users)).toBe('owner@example.com');
     expect(auditActorLabel({ actorKind: 'system', actorUserId: SYSTEM_ID }, users)).toBe('System');
-    expect(auditActorLabel({ actorKind: 'user', actorUserId: '0198f7a2-ffff-7d4e-8f90-000000000009' }, users)).toBe('0198f7a2');
-    expect(auditActorLabel({ actorKind: 'user', actorUserId: USER_ID }, null)).toBe('0198f7a2');
+    // An unknown user: the id's random TAIL (a UUIDv7's head is its timestamp — alike across a day).
+    expect(auditActorLabel({ actorKind: 'user', actorUserId: '0198f7a2-ffff-7d4e-8f90-000000000009' }, users)).toBe('00000009');
+    expect(auditActorLabel({ actorKind: 'user', actorUserId: USER_ID }, null)).toBe('00000001');
   });
 
   test('Target: the type in words and a short id, plain text; an unknown type prints as itself', () => {
-    expect(auditTargetLabel({ targetType: 'transfer_order', targetId: '0198f7a2-aaaa-7d4e-8f90-000000000001' })).toBe('Transfer 0198f7a2');
-    expect(auditTargetLabel({ targetType: 'spaceship', targetId: '0198f7a2-aaaa-7d4e-8f90-000000000001' })).toBe('spaceship 0198f7a2');
+    expect(auditTargetLabel({ targetType: 'transfer_order', targetId: '0198f7a2-aaaa-7d4e-8f90-000000000001' })).toBe('Transfer 00000001');
+    expect(auditTargetLabel({ targetType: 'spaceship', targetId: '0198f7a2-aaaa-7d4e-8f90-000000000001' })).toBe('spaceship 00000001');
   });
 
   test('the target-type select lists the generated vocabulary, labelled, once each', () => {

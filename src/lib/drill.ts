@@ -440,7 +440,8 @@ export const DISPLAY_ONLY_DRILL_KEYS = ['doc', 'label'] as const;
 export function ledgerDrillDocument(drill: Drill): { doc: LedgerDoc; id: string; label: string } | null {
   if (drill.list !== 'ledger' || drill.doc === undefined) return null;
   const id = drill[LEDGER_DOC_KEYS[drill.doc]] ?? '';
-  return { doc: drill.doc, id, label: drill.label ?? id.slice(0, 8) };
+  // No label: the id's random TAIL — a UUIDv7's head is its timestamp, alike across a day.
+  return { doc: drill.doc, id, label: drill.label ?? id.slice(-8) };
 }
 
 /** Story 9-3a — "GRN GRN-0042", "PO PO-0007", "order 01a2b3c4" — the document as words. */

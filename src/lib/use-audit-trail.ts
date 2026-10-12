@@ -26,11 +26,14 @@ export interface AuditTrailPage {
  * (the `useQcHolds` pattern): a filter change makes the stale cursor a
  * first-page request, never a page of the old filter's keyset under the new
  * one. The result is filtered at render on the same stamp, and `reload()`
- * clears first. `query === null` (a draft the parse refused) reads nothing.
+ * clears first AND drops the requested cursor — Retry reads page 1 again,
+ * and `epoch` (bumped on every reload) keys the table so its Prev/Next stack
+ * restarts with it: the hook's cursor and the table's never disagree.
+ * `query === null` (a draft the parse refused) reads nothing.
  */
 export function useAuditTrail(
   query: AuditFilterQuery | null,
-): ResourceState<AuditTrailPage> & Reloadable & { onCursor: (cursor: string | null) => void } {
+): ResourceState<AuditTrailPage> & Reloadable & { onCursor: (cursor: string | null) => void; epoch: number } {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -78,10 +81,11 @@ export function useAuditTrail(
   );
   const reload = useCallback(() => {
     setResult(null);
+    setRequested(null);
     setRevision((r) => r + 1);
   }, []);
   const stale = scope === null || result === null || result.scope !== scope || result.cursor !== activeCursor;
-  return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload, epoch: revision };
 }
 
 /**

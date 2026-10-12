@@ -398,7 +398,7 @@ describe('document drills — "View ledger" links land on the ledger filtered to
   test.each([
     ['grn', GRN, 'grnId', 'GRN-0042'],
     ['po', PO, 'poId', 'PO-0007'],
-    ['order', ORDER, 'orderId', '0198f7a2'],
+    ['order', ORDER, 'orderId', 'AMZ-401-7712'],
     ['adjustment', PEND, 'adjustmentPendingId', null],
     ['variance', VAR, 'countVarianceId', null],
   ] as const)('%s: href → parse → the request carries the warehouse path and ONLY its key — never doc or label', async (doc, id, key, label) => {
@@ -439,7 +439,8 @@ describe('document drills — "View ledger" links land on the ledger filtered to
     expect(drillBannerWord(po)).toBe('Showing ledger receipts for PO PO-0007');
     // No label: the short id stands in.
     const pend = parseHref(ledgerDocHref('adjustment', PEND, W)) as Drill;
-    expect(drillBannerWord(pend)).toBe('Showing ledger events for adjustment 0198f7a2');
+    // The id's random tail — a UUIDv7's head is its timestamp, alike across a day.
+    expect(drillBannerWord(pend)).toBe('Showing ledger events for adjustment 0000c001');
     const dashboard = parseDrill('ledger', { list: 'ledger', warehouseId: W, type: 'putaway.placed', to: TO }) as Drill;
     expect(drillBannerWord(dashboard)).toBe("Showing the dashboard figure's rows");
   });

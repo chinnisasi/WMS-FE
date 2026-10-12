@@ -799,10 +799,11 @@ export function OrderDetailPanel({
   return (
     <div className="flex flex-col gap-2">
       {warehouseId !== undefined && (
-        // Story 9-3a — the order's pick, pack and dispatch events.
+        // Story 9-3a — the order's pick, pack and dispatch events. The label
+        // is the order's real handle: its channel ref, else the id the list shows.
         <div className="text-xs">
           <Link
-            href={ledgerDocHref('order', orderId, warehouseId, orderId.slice(0, 8))}
+            href={ledgerDocHref('order', orderId, warehouseId, detail.data.externalEventId ?? orderId)}
             className="text-(--primary) underline underline-offset-2"
           >
             View ledger

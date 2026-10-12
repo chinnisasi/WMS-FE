@@ -761,7 +761,7 @@ describe('OrderDetailPanel: "View ledger" (story 9-3a)', () => {
     };
   }
 
-  test('threaded the warehouse (from OrdersTable), it links the order\'s events in that warehouse', async () => {
+  test('threaded the warehouse (from OrdersTable), it links the order\'s events in that warehouse, labelled by the order id', async () => {
     order = plainOrder();
     view = render(<OrderDetailPanel orderId={ORDER_ID} warehouseId={WAREHOUSE} />);
     await settle();
@@ -772,8 +772,16 @@ describe('OrderDetailPanel: "View ledger" (story 9-3a)', () => {
       warehouseId: WAREHOUSE,
       doc: 'order',
       orderId: ORDER_ID,
-      label: '0198f7a2',
+      label: ORDER_ID,
     });
+  });
+
+  test('an ingested order is labelled by its channel ref', async () => {
+    order = { ...plainOrder(), source: 'ingested', externalEventId: 'AMZ-401-7712' };
+    view = render(<OrderDetailPanel orderId={ORDER_ID} warehouseId={WAREHOUSE} />);
+    await settle();
+    const link = [...view.container.querySelectorAll('a')].find((a) => a.textContent === 'View ledger');
+    expect(new URL(`http://x${link!.getAttribute('href')!}`).searchParams.get('label')).toBe('AMZ-401-7712');
   });
 
   test('without a warehouse it offers no link', async () => {

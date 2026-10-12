@@ -37,6 +37,7 @@ let ReplenishmentView: Screen;
 let EwayBills: Screen;
 let Invoices: Screen;
 let Ledger: Screen;
+let ledgerDrillEmptyMessage: (drill: never) => string;
 
 beforeAll(async () => {
   const real = await import('next/navigation');
@@ -55,7 +56,7 @@ beforeAll(async () => {
   ({ ReplenishmentView } = await import('../replenishment/replenishment-view'));
   ({ EwayBills } = await import('../compliance/eway-bills'));
   ({ Invoices } = await import('../compliance/invoices'));
-  ({ Ledger } = await import('../inventory/ledger'));
+  ({ Ledger, ledgerDrillEmptyMessage } = await import('../inventory/ledger'));
   PAGES['/outbound'] = (await import('../../app/(app)/outbound/page')).default;
   PAGES['/conflicts'] = (await import('../../app/(app)/conflicts/page')).default;
   PAGES['/inbound'] = (await import('../../app/(app)/inbound/page')).default;
@@ -655,7 +656,16 @@ describe('story 9-3a — a document drill words the page for its document; the d
     view = await mount('owner', page(Ledger, 'ledger', { list: 'ledger', warehouseId: W2, doc: 'po', poId: PO_ID, label: 'PO-0007' }).element);
     expect(bannerOf(view).textContent).toContain('Showing ledger receipts for PO PO-0007');
     expect(view.container.textContent).toContain('the receipt events of PO PO-0007');
-    for (const r of reads('/inventory/events').filter((r) => r.pathname.includes(W2))) {
+    // The empty state says receipts too (F6).
+    expect(ledgerDrillEmptyMessage(parseDrill('ledger', { list: 'ledger', warehouseId: W2, doc: 'po', poId: PO_ID, label: 'PO-0007' }) as never)).toBe(
+      'No receipt events for PO PO-0007 yet.',
+    );
+    expect(
+      ledgerDrillEmptyMessage(parseDrill('ledger', { list: 'ledger', warehouseId: W2, doc: 'grn', grnId: GRN_ID, label: 'GRN-0042' }) as never),
+    ).toBe('No ledger events for GRN GRN-0042 yet.');
+    const drilled = reads('/inventory/events').filter((r) => r.pathname.includes(W2));
+    expect(drilled.length).toBeGreaterThan(0);
+    for (const r of drilled) {
       expect(entries(r.params)).toEqual([['poId', PO_ID]]);
     }
   });
