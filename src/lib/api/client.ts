@@ -119,6 +119,9 @@ import {
   usersControllerMe,
   usersControllerSetUserRole,
   reportingControllerOverview,
+  notificationsControllerList,
+  notificationsControllerStatus,
+  notificationsControllerOpened,
   rateCardsControllerActivate,
   rateCardsControllerCancel,
   rateCardsControllerCreate,
@@ -309,6 +312,8 @@ import type {
   TenantRegistrationResponse,
   UserListResponse,
   ReportingOverviewResponse,
+  NotificationListResponse,
+  NotificationStatusResponse,
   UserResponse,
   VendorListResponse,
   WarehouseListResponse,
@@ -3623,5 +3628,50 @@ export async function fetchApiPortalService(
 ): Promise<ServiceReportDto> {
   const { data, error } = await portalControllerService({ path: { tenantId }, query: serviceQuery(period), signal: options?.signal });
   if (error || !data) throw portalError(error);
+  return data;
+}
+
+// ── story 9-2 — the notification panel ──────────────────────────────────────
+
+/**
+ * The caller's notification entries, newest raised first (the server routes
+ * by role — a member sees only the sources it can act on). A first page
+ * sends no cursor; `limit` is 1–100 (server default 25).
+ */
+export async function fetchApiListNotifications(
+  tenantId: string,
+  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<NotificationListResponse> {
+  const query = {
+    ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options?.limit === undefined ? {} : { limit: options.limit }),
+  };
+  const { data, error } = await notificationsControllerList({
+    path: { tenantId },
+    query: Object.keys(query).length === 0 ? undefined : query,
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** The bell's dot for the caller — `{hasNew}`, never a count. */
+export async function fetchApiNotificationStatus(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<NotificationStatusResponse> {
+  const { data, error } = await notificationsControllerStatus({ path: { tenantId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * Marks the panel opened (clears the dot). Deliberately NOT the keyed-POST
+ * shape: the route takes no Idempotency-Key — setting "last opened" to now is
+ * naturally idempotent (the API-SURFACE exception).
+ */
+export async function fetchApiMarkNotificationsOpened(tenantId: string): Promise<NotificationStatusResponse> {
+  const { data, error } = await notificationsControllerOpened({ path: { tenantId } });
+  if (error || !data) throw unwrapError(error, 400);
   return data;
 }

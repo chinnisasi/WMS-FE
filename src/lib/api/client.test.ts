@@ -85,6 +85,9 @@ import {
   fetchApiReleaseWave,
   fetchApiReplaceKit,
   fetchApiReportingOverview,
+  fetchApiListNotifications,
+  fetchApiNotificationStatus,
+  fetchApiMarkNotificationsOpened,
   fetchApiResolveExcursion,
   refreshSessionUser,
   fetchApiPortalAsn,
@@ -2066,5 +2069,46 @@ describe('story 9-1b — the drill filters on the list wrappers', () => {
     const url = new URL(lastRequest!.url);
     expect(url.searchParams.getAll('type')).toEqual(['pick.picked']);
     expect(url.searchParams.get('shortPick')).toBe('false');
+  });
+});
+
+describe('notification wrappers (story 9-2)', () => {
+  const base = (): string => `/api/v1/tenants/${SESSION.tenant.id}/notifications`;
+
+  afterEach(() => clearSession());
+
+  test('the list sends no query on a first page, then exactly the cursor and limit given — no key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListNotifications(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(base());
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListNotifications(SESSION.tenant.id, { limit: 10 });
+    expect(Object.fromEntries(new URL(lastRequest!.url).searchParams)).toEqual({ limit: '10' });
+    await fetchApiListNotifications(SESSION.tenant.id, { cursor: 'c-2', limit: 10 });
+    expect(Object.fromEntries(new URL(lastRequest!.url).searchParams)).toEqual({ cursor: 'c-2', limit: '10' });
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+  });
+
+  test('status is a plain GET; opened is a POST with NO Idempotency-Key and no body (the documented exception)', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { hasNew: true });
+    expect(await fetchApiNotificationStatus(SESSION.tenant.id)).toEqual({ hasNew: true });
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/status`);
+    expect(lastRequest!.method).toBe('GET');
+
+    stubFetch(200, { hasNew: false });
+    expect(await fetchApiMarkNotificationsOpened(SESSION.tenant.id)).toEqual({ hasNew: false });
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/opened`);
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(await lastRequest!.text()).toBe('');
+  });
+
+  test('a refusal surfaces as an ApiProblem carrying its code', async () => {
+    writeSession(SESSION);
+    stubFetch(400, { type: 'x', title: 'Malformed pagination cursor', status: 400, code: 'invalid-cursor', detail: 'bad' });
+    await expect(fetchApiListNotifications(SESSION.tenant.id, { cursor: 'bad' })).rejects.toMatchObject({ code: 'invalid-cursor', status: 400 });
   });
 });

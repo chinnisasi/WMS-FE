@@ -1,0 +1,149 @@
+import { describe, expect, test } from 'bun:test';
+
+import { parseDrill, type DrillScreen } from './drill';
+import {
+  bellLabel,
+  istTimeLabel,
+  notificationCategory,
+  notificationDescription,
+  notificationHref,
+  notificationResolvedLabel,
+  relativeTimeLabel,
+  type NotificationEntry,
+  type NotificationLookups,
+} from './notifications';
+
+const W = '0198f7a2-1b3c-7d4e-8f90-99aabbccdd01';
+const SKU = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+const UNKNOWN_SKU = '0198f7a2-1b3c-7d4e-8f90-0000000000ff';
+const CONNECTION = '0198f7a2-1b3c-7d4e-8f90-00000000c0de';
+const RAISED = '2026-10-06T04:30:00.000Z';
+
+const LOOKUPS: NotificationLookups = {
+  sku: (id) => (id === SKU ? { code: 'SPICE-01', uom: 'kg', uomPrecision: 3 } : null),
+  warehouse: (id) => (id === W ? 'MAIN Chennai DC' : `Warehouse ${id.slice(0, 8)}`),
+};
+
+const base = { id: 'n-1', sourceId: '0198f7a2-1b3c-7d4e-8f90-000000000001', raisedAt: RAISED, resolvedAt: null, resolution: null } as const;
+
+/** One OPEN entry per source — the union arms, as the API serves them. */
+const ENTRIES: Readonly<Record<NotificationEntry['sourceType'], NotificationEntry>> = {
+  'stock-adjustment': { ...base, sourceType: 'stock-adjustment', warehouseId: W, summary: { skuId: SKU, quantityDelta: -2.5, reasonCode: 'damaged' } },
+  'count-variance': { ...base, sourceType: 'count-variance', warehouseId: W, summary: { skuId: SKU, delta: 7 } },
+  'over-receipt': { ...base, sourceType: 'over-receipt', warehouseId: W, summary: { grnCode: 'GRN-0042', skuId: SKU, excessQty: 3 } },
+  'rejected-op': { ...base, sourceType: 'rejected-op', warehouseId: null, summary: { opType: 'pick.record', problemCode: 'pick-bin-short' } },
+  'reorder-breach': { ...base, sourceType: 'reorder-breach', warehouseId: W, summary: { skuId: SKU, atpQty: 1.5, pointQty: 4 } },
+  'batch-alert': { ...base, sourceType: 'batch-alert', warehouseId: W, summary: { kind: 'aged', skuId: SKU, batchCode: 'LOT-7', ageDays: 40 } },
+  'qc-hold': { ...base, sourceType: 'qc-hold', warehouseId: W, summary: { skuId: SKU, reason: 'Seal broken' } },
+  'channel-sync': { ...base, sourceType: 'channel-sync', warehouseId: null, summary: { connectionId: CONNECTION } },
+};
+
+function resolved(entry: NotificationEntry, resolution: string): NotificationEntry {
+  return { ...entry, resolvedAt: '2026-10-06T05:00:00.000Z', resolution } as NotificationEntry;
+}
+
+describe('notification copy', () => {
+  test('a category per source (the batch alert by its kind)', () => {
+    expect(Object.values(ENTRIES).map(notificationCategory)).toEqual([
+      'Adjustment awaiting approval',
+      'Count variance over threshold',
+      'Over-receipt awaiting approval',
+      'Device op rejected',
+      'Reorder point breached',
+      'Aged batch',
+      'QC hold placed',
+      'Channel sync failing',
+    ]);
+    const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
+    expect(notificationCategory(expiring)).toBe('Batch nearing expiry');
+  });
+
+  test('a one-line description from the summary: SKU code, quantities at the unit’s precision, the warehouse label', () => {
+    expect(Object.values(ENTRIES).map((entry) => notificationDescription(entry, LOOKUPS))).toEqual([
+      'SPICE-01 · −2.500 kg · damaged · MAIN Chennai DC',
+      'SPICE-01 · counted +7.000 kg · MAIN Chennai DC',
+      'GRN-0042 · SPICE-01 · 3.000 kg over · MAIN Chennai DC',
+      'pick.record · pick-bin-short',
+      'SPICE-01 · ATP 1.500 kg below 4.000 kg · MAIN Chennai DC',
+      'SPICE-01 · batch LOT-7 · 40 days old · MAIN Chennai DC',
+      'SPICE-01 · Seal broken · MAIN Chennai DC',
+      'Connection 0198f7a2 — deliveries are failing',
+    ]);
+    // The expiry arm names the IST date (18:30Z is the next IST day).
+    const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
+    expect(notificationDescription(expiring, LOOKUPS)).toBe('SPICE-01 · batch LOT-8 · expires 21 Oct 2026 · MAIN Chennai DC');
+    // Unknown SKU and warehouse degrade to short ids, never a blank.
+    const unknown = { ...ENTRIES['qc-hold'], warehouseId: '0198f7a2-ffff-7d4e-8f90-99aabbccdd09', summary: { skuId: UNKNOWN_SKU, reason: 'Wet' } } as NotificationEntry;
+    expect(notificationDescription(unknown, LOOKUPS)).toBe('SKU 0198f7a2 · Wet · Warehouse 0198f7a2');
+  });
+
+  test('resolved: null while open; "Resolved · {resolution}" once cleared', () => {
+    expect(notificationResolvedLabel(ENTRIES['over-receipt'])).toBeNull();
+    expect(notificationResolvedLabel(resolved(ENTRIES['over-receipt'], 'approved'))).toBe('Resolved · approved');
+    expect(notificationResolvedLabel(resolved(ENTRIES['reorder-breach'], 'policy-removed'))).toBe('Resolved · policy removed');
+    expect(notificationResolvedLabel(resolved(ENTRIES['channel-sync'], 'disconnected'))).toBe('Resolved · disconnected');
+  });
+
+  test('relative time from the fetch instant, the IST absolute instant for its title, the bell’s accessible name', () => {
+    const at = Date.parse(RAISED);
+    expect(relativeTimeLabel(RAISED, at + 30_000)).toBe('just now');
+    expect(relativeTimeLabel(RAISED, at - 5_000)).toBe('just now');
+    expect(relativeTimeLabel(RAISED, at + 5 * 60_000)).toBe('5 min ago');
+    expect(relativeTimeLabel(RAISED, at + 3 * 3_600_000 + 1)).toBe('3 h ago');
+    expect(relativeTimeLabel(RAISED, at + 50 * 3_600_000)).toBe('2 d ago');
+    expect(istTimeLabel(RAISED)).toBe('06 Oct 2026, 10:00 IST');
+    expect(bellLabel(false)).toBe('Notifications');
+    expect(bellLabel(true)).toBe('Notifications, new');
+  });
+});
+
+describe('click-through links', () => {
+  test('each source opens its screen: open and resolved', () => {
+    const expected: Record<NotificationEntry['sourceType'], [string, string]> = {
+      'over-receipt': [`/conflicts?list=over-receipts&warehouseId=${W}&status=pending`, `/conflicts?list=over-receipts&warehouseId=${W}`],
+      'batch-alert': [`/replenishment?list=batch-alerts&warehouseId=${W}&kind=aged`, `/replenishment?list=batch-alerts&warehouseId=${W}&kind=aged`],
+      'stock-adjustment': ['/conflicts', '/conflicts'],
+      'count-variance': ['/conflicts', '/conflicts'],
+      'rejected-op': ['/conflicts', '/conflicts'],
+      'reorder-breach': ['/replenishment', '/replenishment'],
+      'qc-hold': ['/inbound', '/inbound'],
+      'channel-sync': ['/channels', '/channels'],
+    };
+    for (const [sourceType, entry] of Object.entries(ENTRIES)) {
+      const [open, done] = expected[sourceType as NotificationEntry['sourceType']];
+      expect(notificationHref(entry)).toBe(open);
+      expect(notificationHref(resolved(entry, 'x'))).toBe(done);
+    }
+    // An over-receipt raised before its event carried a warehouse.
+    expect(notificationHref({ ...ENTRIES['over-receipt'], warehouseId: null } as NotificationEntry)).toBe('/conflicts?list=over-receipts&status=pending');
+  });
+
+  test('every drill link parses under 9-1b’s parseDrill — a typed drill on its screen, never unsupported', () => {
+    const screenOf: Record<string, DrillScreen> = { '/conflicts': 'conflicts', '/replenishment': 'replenishment' };
+    const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
+    const all = [
+      ...Object.values(ENTRIES),
+      ...Object.values(ENTRIES).map((entry) => resolved(entry, 'x')),
+      expiring,
+      { ...ENTRIES['over-receipt'], warehouseId: null } as NotificationEntry,
+    ];
+    let drills = 0;
+    for (const entry of all) {
+      const href = notificationHref(entry);
+      const [path, query] = href.split('?') as [string, string | undefined];
+      if (query === undefined) continue;
+      drills += 1;
+      const params = Object.fromEntries(new URLSearchParams(query).entries());
+      const drill = parseDrill(screenOf[path]!, params);
+      expect(drill).not.toBeNull();
+      expect(drill).not.toBe('unsupported');
+      expect(typeof drill === 'object' && drill !== null ? drill.list : null).toBe(params.list as never);
+    }
+    expect(drills).toBe(6);
+    expect(parseDrill('conflicts', Object.fromEntries(new URLSearchParams(notificationHref(ENTRIES['over-receipt']).split('?')[1]).entries()))).toEqual({
+      list: 'over-receipts',
+      warehouseId: W,
+      status: 'pending',
+    });
+  });
+});
