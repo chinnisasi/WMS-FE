@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { restoreGlobals, stubGlobal } from './test/globals';
 import {
   describeDrill,
+  drillBannerWord,
   drillKey,
+  ledgerDocHref,
   parseDrill,
   warehouseDisplayLabel,
   type Drill,
@@ -374,5 +376,78 @@ describe('describeDrill — the banner sentence', () => {
   test('an unknown warehouse is named by its short id', () => {
     expect(describeDrill({ list: 'putaway', warehouseId: W }, [])).toBe('Awaiting putaway · Warehouse 0198f7a2');
     expect(describeDrill({ list: 'putaway', warehouseId: W }, null)).toBe('Awaiting putaway · Warehouse 0198f7a2');
+  });
+});
+
+// ── Story 9-3a — the document drills ("View ledger") ─────────────────────────
+
+describe('document drills — "View ledger" links land on the ledger filtered to one document', () => {
+  const WAREHOUSES = [{ id: W, code: 'MAIN', name: 'Chennai DC' }];
+  const GRN = '0198f7a2-1b3c-7d4e-8f90-00000000a001';
+  const PO = '0198f7a2-1b3c-7d4e-8f90-00000000b001';
+  const PEND = '0198f7a2-1b3c-7d4e-8f90-00000000c001';
+  const VAR = '0198f7a2-1b3c-7d4e-8f90-00000000d001';
+  const ORDER = '0198f7a2-1b3c-7d4e-8f90-00000000e001';
+
+  function parseHref(href: string): ParsedDrill {
+    const [route, search = ''] = href.split('?') as [string, string?];
+    expect(route).toBe('/inventory/ledger');
+    return parseDrill('ledger', paramsRecord(new URLSearchParams(search)));
+  }
+
+  test.each([
+    ['grn', GRN, 'grnId', 'GRN-0042'],
+    ['po', PO, 'poId', 'PO-0007'],
+    ['order', ORDER, 'orderId', '0198f7a2'],
+    ['adjustment', PEND, 'adjustmentPendingId', null],
+    ['variance', VAR, 'countVarianceId', null],
+  ] as const)('%s: href → parse → the request carries the warehouse path and ONLY its key — never doc or label', async (doc, id, key, label) => {
+    const drill = parseHref(ledgerDocHref(doc, id, W, label));
+    expect(drill).toMatchObject({ list: 'ledger', warehouseId: W, doc, [key]: id });
+    const url = await send(drill as Drill, null);
+    expect(url.pathname).toBe(`/api/v1/tenants/${T}/warehouses/${W}/inventory/events`);
+    expect(sortedEntries(url.searchParams.entries())).toEqual([[key, id]]);
+    expect(url.searchParams.has('doc')).toBe(false);
+    expect(url.searchParams.has('label')).toBe(false);
+  });
+
+  test('the document drill uses ITS warehouse — whatever the link was clicked from', () => {
+    const other = '0198f7a2-1b3c-7d4e-8f90-0000000000b2';
+    expect(parseHref(ledgerDocHref('grn', GRN, other, 'GRN-1'))).toMatchObject({ warehouseId: other });
+  });
+
+  test('unsupported: a doc with another doc\'s key, a doc without its key, a document key without doc, an extra key, a bad doc, an oversized label', () => {
+    const p = (params: Record<string, string>) => parseDrill('ledger', { list: 'ledger', warehouseId: W, ...params });
+    expect(p({ doc: 'grn', poId: PO })).toBe('unsupported');
+    expect(p({ doc: 'grn' })).toBe('unsupported');
+    expect(p({ grnId: GRN })).toBe('unsupported');
+    expect(p({ label: 'GRN-1', type: 'grn.received' })).toBe('unsupported');
+    expect(p({ doc: 'grn', grnId: GRN, type: 'grn.received' })).toBe('unsupported');
+    expect(p({ doc: 'grn', grnId: GRN, orderId: ORDER })).toBe('unsupported');
+    expect(p({ doc: 'invoice', grnId: GRN })).toBe('unsupported');
+    expect(p({ doc: 'grn', grnId: 'not-a-uuid' })).toBe('unsupported');
+    expect(p({ doc: 'grn', grnId: GRN, label: 'x'.repeat(121) })).toBe('unsupported');
+    // The dashboard's own order drill (orderId without doc) is unchanged.
+    expect(p({ orderId: ORDER, type: 'pick.picked' })).toMatchObject({ orderId: ORDER });
+  });
+
+  test('the banner and the description name the document; the dashboard wording is unchanged', () => {
+    const grn = parseHref(ledgerDocHref('grn', GRN, W, 'GRN-0042')) as Drill;
+    expect(drillBannerWord(grn)).toBe('Showing ledger events for GRN GRN-0042');
+    expect(describeDrill(grn, WAREHOUSES)).toBe('Ledger events of GRN GRN-0042 · MAIN Chennai DC');
+    const po = parseHref(ledgerDocHref('po', PO, W, 'PO-0007')) as Drill;
+    expect(drillBannerWord(po)).toBe('Showing ledger receipts for PO PO-0007');
+    // No label: the short id stands in.
+    const pend = parseHref(ledgerDocHref('adjustment', PEND, W)) as Drill;
+    expect(drillBannerWord(pend)).toBe('Showing ledger events for adjustment 0198f7a2');
+    const dashboard = parseDrill('ledger', { list: 'ledger', warehouseId: W, type: 'putaway.placed', to: TO }) as Drill;
+    expect(drillBannerWord(dashboard)).toBe("Showing the dashboard figure's rows");
+  });
+
+  test('a document drill has its own remount key (label included), distinct from a plain visit', () => {
+    const a = parseHref(ledgerDocHref('grn', GRN, W, 'GRN-1'));
+    expect(drillKey(a)).toBe(drillKey(parseHref(ledgerDocHref('grn', GRN, W, 'GRN-1'))));
+    expect(drillKey(a)).not.toBe(drillKey(null));
+    expect(drillKey(a)).not.toBe(drillKey(parseHref(ledgerDocHref('grn', GRN, W, 'GRN-2'))));
   });
 });

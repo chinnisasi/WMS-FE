@@ -5,7 +5,15 @@ import { useSyncExternalStore } from 'react';
 
 import type { LedgerEventDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { drillFor, ledgerTypeLabel, warehouseDisplayLabel, type LedgerDrill, type ParsedDrill } from '@/lib/drill';
+import {
+  drillFor,
+  ledgerDocName,
+  ledgerDrillDocument,
+  ledgerTypeLabel,
+  warehouseDisplayLabel,
+  type LedgerDrill,
+  type ParsedDrill,
+} from '@/lib/drill';
 import {
   ledgerArmLabel,
   ledgerBinsLabel,
@@ -71,10 +79,19 @@ function LedgerSessioned({ drill }: { drill: LedgerDrill | null }) {
   // warehouses read says — the drill names its warehouse itself.
   if (drill !== null) {
     const label = warehouseDisplayLabel(warehouses.state === 'ready' ? items : null, drill.warehouseId);
+    // Story 9-3a — a document drill ("View ledger") names its document; the
+    // dashboard's drills keep their wording.
+    const document = ledgerDrillDocument(drill);
     return (
       <Section title="Ledger">
         <DrillBanner drill={drill} />
-        <div className="text-(--muted-foreground)">{label} — the dashboard figure's ledger events, newest first.</div>
+        <div className="text-(--muted-foreground)">
+          {document === null
+            ? `${label} — the dashboard figure's ledger events, newest first.`
+            : document.doc === 'po'
+              ? `${label} — the receipt events of ${ledgerDocName(document)}, newest first (its putaways name their GRN).`
+              : `${label} — the ledger events of ${ledgerDocName(document)}, newest first.`}
+        </div>
         <LedgerTable key={drill.warehouseId} warehouseId={drill.warehouseId} drill={drill} />
       </Section>
     );
@@ -182,9 +199,15 @@ function LedgerTable({ warehouseId, drill }: { warehouseId: string; drill: Ledge
         events.state === 'loading'
           ? 'Loading the ledger…'
           : drill !== null
-            ? 'No ledger events match this figure.'
+            ? ledgerDrillEmptyMessage(drill)
             : 'No ledger events in this warehouse yet.'
       }
     />
   );
+}
+
+/** The drilled table's empty line: the dashboard's, or the document's own (story 9-3a). */
+function ledgerDrillEmptyMessage(drill: LedgerDrill): string {
+  const document = ledgerDrillDocument(drill);
+  return document === null ? 'No ledger events match this figure.' : `No ledger events for ${ledgerDocName(document)} yet.`;
 }

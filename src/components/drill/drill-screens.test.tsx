@@ -212,6 +212,9 @@ let putawayItems: unknown[] | 'fail' = [PUTAWAY_TASK];
 let warehouseRows: unknown[] = WAREHOUSES;
 let warehousesFail = false;
 let grnMode: 'ok' | 'fail' | 'hold' = 'ok';
+/** Story 9-3a — the rows the GRN and PO cards list (empty unless a test sets them). */
+let grnRows: unknown[] = [];
+let poRows: unknown[] = [];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -246,8 +249,9 @@ function stubRouter(): void {
     if (p.endsWith('/receiving/goods-receipts')) {
       if (grnMode === 'hold') return new Promise<Response>(() => undefined);
       if (grnMode === 'fail') return json(500, { code: 'internal-error', title: 'Internal Server Error', status: 500, detail: 'GRN read failed' });
-      return paged(url.searchParams);
+      return paged(url.searchParams, grnRows);
     }
+    if (p.endsWith('/inbound/purchase-orders')) return paged(url.searchParams, poRows);
     if (p.endsWith('/replenishment/batch-alerts')) return paged(url.searchParams, drilled ? [ALERT_ROW] : []);
     if (p.endsWith('/eway/bills')) return paged(url.searchParams, drilled ? [GENERATED_BILL, PENDING_BILL] : []);
     if (p.endsWith('/invoices')) return paged(url.searchParams);
@@ -288,6 +292,8 @@ beforeEach(() => {
   warehouseRows = WAREHOUSES;
   warehousesFail = false;
   grnMode = 'ok';
+  grnRows = [];
+  poRows = [];
   try {
     localStorage.clear();
   } catch {
@@ -360,7 +366,29 @@ interface Case {
   readonly normal: (r: Recorded) => void;
 }
 
-const DRILL_ONLY_KEYS = ['from', 'to', 'source', 'backordered', 'blind', 'type', 'skuId', 'orderId', 'shortPick', 'kind', 'cursor'];
+const DRILL_ONLY_KEYS = [
+  'from',
+  'to',
+  'source',
+  'backordered',
+  'blind',
+  'type',
+  'skuId',
+  'orderId',
+  'shortPick',
+  'kind',
+  'cursor',
+  // Story 9-3a — the document drill's keys (and its display-only pair).
+  'grnId',
+  'poId',
+  'adjustmentPendingId',
+  'countVarianceId',
+  'doc',
+  'label',
+];
+
+/** Story 9-3a — the GRN a document drill names. */
+const GRN_ID = '0198f7a2-1b3c-7d4e-8f90-00000000a001';
 
 const tablist = (label: string) => (r: Rendered) => r.container.querySelector(`[role="tablist"][aria-label="${label}"]`) !== null;
 
@@ -472,6 +500,25 @@ const CASES: readonly Case[] = [
       expect([...r.params.keys()]).toEqual([]);
     },
   },
+  {
+    // Story 9-3a — a GRN card's "View ledger": the GRN's OWN warehouse (W2,
+    // not the active W1), its one key — never `doc` or `label`, which are
+    // the banner's words only.
+    name: 'Ledger — a document drill (GRN, View ledger)',
+    component: () => Ledger,
+    screen: 'ledger',
+    route: '/inventory/ledger',
+    params: { list: 'ledger', warehouseId: W2, doc: 'grn', grnId: GRN_ID, label: 'GRN-0042' },
+    list: '/inventory/events',
+    sent: { grnId: GRN_ID },
+    pathWarehouse: W2,
+    banner: ['Showing ledger events for GRN GRN-0042', 'Ledger events of GRN GRN-0042', 'NORTH Delhi DC'],
+    controls: () => false,
+    normal: (r) => {
+      expect(r.pathname).toContain(`/warehouses/${W1}/inventory/events`);
+      expect([...r.params.keys()]).toEqual([]);
+    },
+  },
 ];
 
 describe.each([...CASES])('$name', (c) => {
@@ -533,8 +580,94 @@ describe.each([...CASES])('$name', (c) => {
   });
 });
 
+describe('story 9-3a — "View ledger" on the inbound cards uses the DOCUMENT\'s warehouse, never the active one', () => {
+  test('the GRN card links its GRN (code as the label); the PO card links "Receipts in the ledger" for the warehouse it receives into', async () => {
+    grnRows = [
+      {
+        id: GRN_ID,
+        tenantId: T,
+        warehouseId: W2,
+        code: 'GRN-0042',
+        poId: null,
+        blindReasonCode: 'unannounced-delivery',
+        status: 'recorded',
+        recordedBy: 'u-1',
+        occurredAt: '2026-10-06T08:00:00.000Z',
+        recordedAt: '2026-10-06T08:00:00.000Z',
+        lineCount: 3,
+        totalUnits: 3,
+        appliedUnits: 3,
+        createdAt: '2026-10-06T08:00:00.000Z',
+      },
+    ];
+    const PO_ID = '0198f7a2-1b3c-7d4e-8f90-00000000b001';
+    poRows = [
+      {
+        id: PO_ID,
+        tenantId: T,
+        warehouseId: W2,
+        vendorId: 'v-1',
+        code: 'PO-0007',
+        status: 'open',
+        carriedFromPoId: null,
+        lines: [],
+        createdAt: '2026-10-06T08:00:00.000Z',
+        updatedAt: '2026-10-06T08:00:00.000Z',
+      },
+    ];
+    pathname = '/inbound';
+    view = await mount('owner', page(InboundCards, 'inbound', {}).element);
+    const links = [...view.container.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')]);
+    const grnLink = links.find(([text]) => text === 'View ledger');
+    expect(grnLink).toBeDefined();
+    const grnParams = new URL(`http://x${grnLink![1]}`).searchParams;
+    expect(new URL(`http://x${grnLink![1]}`).pathname).toBe('/inventory/ledger');
+    expect(Object.fromEntries(grnParams)).toEqual({ list: 'ledger', warehouseId: W2, doc: 'grn', grnId: GRN_ID, label: 'GRN-0042' });
+    const poLink = links.find(([text]) => text === 'Receipts in the ledger');
+    expect(poLink).toBeDefined();
+    expect(Object.fromEntries(new URL(`http://x${poLink![1]}`).searchParams)).toEqual({
+      list: 'ledger',
+      warehouseId: W2,
+      doc: 'po',
+      poId: PO_ID,
+      label: 'PO-0007',
+    });
+    // The active warehouse is untouched.
+    expect(readActiveWarehouseId(T)).toBe(W1);
+  });
+});
+
+describe('story 9-3a — a document drill words the page for its document; the dashboard wording stays', () => {
+  test('the GRN drill: the description names the GRN; a dashboard drill keeps "the dashboard figure\'s ledger events"', async () => {
+    pathname = '/inventory/ledger';
+    view = await mount('owner', page(Ledger, 'ledger', { list: 'ledger', warehouseId: W2, doc: 'grn', grnId: GRN_ID, label: 'GRN-0042' }).element);
+    expect(view.container.textContent).toContain('NORTH Delhi DC — the ledger events of GRN GRN-0042, newest first.');
+    expect(view.container.textContent).not.toContain("the dashboard figure's");
+    view.unmount();
+    view = await mount('owner', page(Ledger, 'ledger', { list: 'ledger', warehouseId: W2, type: 'putaway.placed', to: TO }).element);
+    expect(view.container.textContent).toContain("the dashboard figure's ledger events");
+    expect(bannerOf(view).textContent).toContain("Showing the dashboard figure's rows");
+  });
+
+  test('the PO drill says receipts', async () => {
+    pathname = '/inventory/ledger';
+    const PO_ID = '0198f7a2-1b3c-7d4e-8f90-00000000b001';
+    view = await mount('owner', page(Ledger, 'ledger', { list: 'ledger', warehouseId: W2, doc: 'po', poId: PO_ID, label: 'PO-0007' }).element);
+    expect(bannerOf(view).textContent).toContain('Showing ledger receipts for PO PO-0007');
+    expect(view.container.textContent).toContain('the receipt events of PO PO-0007');
+    for (const r of reads('/inventory/events').filter((r) => r.pathname.includes(W2))) {
+      expect(entries(r.params)).toEqual([['poId', PO_ID]]);
+    }
+  });
+});
+
 describe('the normal view still has its controls (so the "hidden" assertions bite)', () => {
-  const WITHOUT_CONTROLS = ['Inbound — goods receipts', 'Compliance — invoices', 'Ledger (path-scoped)'];
+  const WITHOUT_CONTROLS = [
+    'Inbound — goods receipts',
+    'Compliance — invoices',
+    'Ledger (path-scoped)',
+    'Ledger — a document drill (GRN, View ledger)',
+  ];
   test.each(CASES.filter((c) => !WITHOUT_CONTROLS.includes(c.name)))(
     '$name',
     async (c) => {

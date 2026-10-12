@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
@@ -39,7 +40,7 @@ import {
   type Outcome,
   type OrderStatus,
 } from '@/lib/outbound-orders';
-import type { OrdersDrill } from '@/lib/drill';
+import { ledgerDocHref, type OrdersDrill } from '@/lib/drill';
 import { useOrderDetail, useOutboundOrders, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { clientCell, showClients, skusForOrderClient } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
@@ -733,7 +734,7 @@ function OrdersTable({
           nextCursor={orders.state === 'ready' ? orders.data.nextCursor : null}
           onCursor={orders.onCursor}
           renderExpanded={(order) =>
-            expandedId === order.id ? <OrderDetailPanel orderId={order.id} /> : null
+            expandedId === order.id ? <OrderDetailPanel orderId={order.id} warehouseId={warehouseId} /> : null
           }
           emptyMessage={
             orders.state === 'loading'
@@ -760,7 +761,14 @@ function OrdersTable({
  * parent/child grouping on this panel alone rather than driving the whole
  * surface (its list, filter and warehouse picker are out of scope there).
  */
-export function OrderDetailPanel({ orderId }: { orderId: string }) {
+export function OrderDetailPanel({
+  orderId,
+  warehouseId,
+}: {
+  orderId: string;
+  /** Story 9-3a — the order's warehouse (threaded from `OrdersTable`): its "View ledger" link. */
+  warehouseId?: string;
+}) {
   const detail = useOrderDetail(orderId);
   const skus = useOutboundSkus();
   // The SKU map only decorates: a line falls back to its raw `skuId` rather
@@ -790,6 +798,17 @@ export function OrderDetailPanel({ orderId }: { orderId: string }) {
 
   return (
     <div className="flex flex-col gap-2">
+      {warehouseId !== undefined && (
+        // Story 9-3a — the order's pick, pack and dispatch events.
+        <div className="text-xs">
+          <Link
+            href={ledgerDocHref('order', orderId, warehouseId, orderId.slice(0, 8))}
+            className="text-(--primary) underline underline-offset-2"
+          >
+            View ledger
+          </Link>
+        </div>
+      )}
       <div className="text-xs text-(--muted-foreground)">
         {orderTotalsLabel(
           lineTotals(groups.map(({ line }) => line)),

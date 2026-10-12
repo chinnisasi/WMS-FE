@@ -851,6 +851,17 @@ export type DeviceSelfTestEchoResponse = {
     receivedAt: string;
 };
 
+export type PushRegistrationDto = {
+    /**
+     * The Expo push token (`ExponentPushToken[…]` or `ExpoPushToken[…]`)
+     */
+    token: string;
+    /**
+     * The warehouse this handheld works in (new-work pushes are scoped to it)
+     */
+    warehouseId: string;
+};
+
 export type SyncReportAttributionDto = {
     /**
      * The op's own device label (as sealed at enqueue)
@@ -1176,8 +1187,70 @@ export type AdjustmentPolicyResponse = {
     updatedAt: string;
 };
 
+export type AdjustmentPendingEntryDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    binId: string;
+    skuId: string;
+    /**
+     * Signed base-UoM delta frozen at request
+     */
+    quantityDelta: number;
+    /**
+     * The closed adjustment vocabulary value
+     */
+    reasonCode: string;
+    /**
+     * The requester's note, carried verbatim
+     */
+    note: string;
+    /**
+     * The override draw’s FEFO-override reason (present only on override draws; restored into the approved event’s referenceDoc)
+     */
+    batchOverrideReason: string | null;
+    /**
+     * The resolved catalog batch id (null when the request had none)
+     */
+    batchId: string | null;
+    /**
+     * The resolved serial ids, request order (null when the request had none)
+     */
+    serialIds: Array<string> | null;
+    /**
+     * The named handling units (catch-weight arm), request order (null when absent)
+     */
+    handlingUnitIds: Array<string> | null;
+    /**
+     * ISO-8601 UTC business time of the requested adjustment
+     */
+    occurredAt: string;
+    /**
+     * The requester
+     */
+    requestedBy: string;
+    /**
+     * ISO-8601 UTC request commit time
+     */
+    requestedAt: string;
+    /**
+     * pending | approved | rejected — 'pending' on the 202, the decided value on the queue after a decision
+     */
+    status: string;
+    decidedBy: string | null;
+    decidedAt: string | null;
+    /**
+     * The policy threshold (base UoM) as it read at request time — frozen context
+     */
+    thresholdQuantityAtRequest: number;
+    /**
+     * True only when an approval posted this adjustment from story 9-3a on (the row recorded its first event): its events are listed by `GET …/inventory/events?adjustmentPendingId=`. False while pending, on a reject, and for an approval decided before 9-3a
+     */
+    ledgerLinked: boolean;
+};
+
 export type AdjustmentPendingListResponse = {
-    items: Array<AdjustmentPendingDto>;
+    items: Array<AdjustmentPendingEntryDto>;
     nextCursor?: string | null;
 };
 
@@ -1242,6 +1315,14 @@ export type LedgerReferenceDocDto = {
      * Story 21-6 — the exact ASN line credited (grn-receipt arm only)
      */
     asnLineId?: string;
+    /**
+     * Story 9-3a — the pending adjustment an approval posted this event for (manual-adjustment arm, approvals only)
+     */
+    adjustmentPendingId?: string;
+    /**
+     * Story 9-3a — the count variance an approve-adjust resolution corrected (manual-adjustment arm, resolutions only)
+     */
+    countVarianceId?: string;
 };
 
 export type LedgerEventDto = {
@@ -4218,6 +4299,10 @@ export type CountVarianceEntryResponseDto = {
      * The consulted ledger seqs
      */
     consideredEventSeqs: Array<number> | null;
+    /**
+     * Story 9-3a — true only when an approve-adjust resolution from 9-3a on posted this variance's correction (the row recorded the event): it is listed by `GET …/inventory/events?countVarianceId=`. False while open, on a recount, and for a resolution before 9-3a
+     */
+    ledgerLinked: boolean;
     createdAt: string;
 };
 
@@ -5580,6 +5665,50 @@ export type ServiceReportDto = {
     dockToStock: ServiceDockToStockDto;
     pickAccuracy: ServicePickAccuracyDto;
     dispatchTimeliness: ServiceDispatchTimelinessDto;
+};
+
+export type AuditEventDto = {
+    id: string;
+    /**
+     * When the server recorded the action (`created_at`) — the trail is ordered, paged and windowed on this
+     */
+    recordedAt: string;
+    /**
+     * When the action itself happened. Server time for most actions; a few writers (putaway, an offline op resolved later, an excursion) stamp the device or command time, which can be hours before `recordedAt`
+     */
+    occurredAt: string;
+    /**
+     * The acting user — or the reserved system actor when `actorKind` is `system`
+     */
+    actorUserId: string;
+    /**
+     * `system`: a scheduler or sweep (no user row); `user`: a member of the tenant
+     */
+    actorKind: 'user' | 'system';
+    /**
+     * The action, `<subject>.<verb>`
+     */
+    action: string;
+    /**
+     * The kind of thing the action changed (one of the `targetType` filter values)
+     */
+    targetType: string;
+    /**
+     * The id of the thing the action changed
+     */
+    targetId: string;
+};
+
+export type AuditTrailResponse = {
+    items: Array<AuditEventDto>;
+    /**
+     * Cursor for the next (older) page; null on the last page
+     */
+    nextCursor: string | null;
+    /**
+     * The reserved system actor's id (schedulers and sweeps; `actorKind: system`) — send it as `actorUserId` to list the system's actions. Published here so no client hard-codes it
+     */
+    systemActorId: '01900000-0000-7000-8000-000000000000';
 };
 
 export type ClientTaxDetailsDto = {
@@ -8668,6 +8797,82 @@ export type DevicesControllerSelfTestEchoResponses = {
 
 export type DevicesControllerSelfTestEchoResponse = DevicesControllerSelfTestEchoResponses[keyof DevicesControllerSelfTestEchoResponses];
 
+export type DevicesControllerUnregisterPushData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/push-registration';
+};
+
+export type DevicesControllerUnregisterPushErrors = {
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Token belongs to another tenant (permission-denied), or the device is unknown, revoked or bound to another operator (device-revoked)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type DevicesControllerUnregisterPushError = DevicesControllerUnregisterPushErrors[keyof DevicesControllerUnregisterPushErrors];
+
+export type DevicesControllerUnregisterPushResponses = {
+    /**
+     * Cleared (or nothing was registered)
+     */
+    204: void;
+};
+
+export type DevicesControllerUnregisterPushResponse = DevicesControllerUnregisterPushResponses[keyof DevicesControllerUnregisterPushResponses];
+
+export type DevicesControllerRegisterPushData = {
+    body: PushRegistrationDto;
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/push-registration';
+};
+
+export type DevicesControllerRegisterPushErrors = {
+    /**
+     * Malformed body — not an Expo push token, or warehouseId not a uuid (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Token belongs to another tenant (permission-denied), or the device is unknown, revoked or bound to another operator (device-revoked)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type DevicesControllerRegisterPushError = DevicesControllerRegisterPushErrors[keyof DevicesControllerRegisterPushErrors];
+
+export type DevicesControllerRegisterPushResponses = {
+    /**
+     * Registered
+     */
+    204: void;
+};
+
+export type DevicesControllerRegisterPushResponse = DevicesControllerRegisterPushResponses[keyof DevicesControllerRegisterPushResponses];
+
 export type DevicesControllerRecordSyncReportData = {
     body: RecordSyncReportDto;
     headers: {
@@ -9155,6 +9360,26 @@ export type InventoryControllerListEventsData = {
          */
         shortPick?: boolean;
         /**
+         * Story 9-3a — only events of this goods receipt (`referenceDoc.grnId`): its receipt events AND its putaway placements
+         */
+        grnId?: string;
+        /**
+         * Story 9-3a — only events naming this purchase order (`referenceDoc.poId`): its RECEIPT events only — a putaway names its GRN, not the PO
+         */
+        poId?: string;
+        /**
+         * Story 9-3a — only events of this transfer order (`referenceDoc.transferId`) on this warehouse — both legs on its chain
+         */
+        transferId?: string;
+        /**
+         * Story 9-3a — only the events an approval posted for this pending adjustment (`referenceDoc.adjustmentPendingId`; approvals from 9-3a on)
+         */
+        adjustmentPendingId?: string;
+        /**
+         * Story 9-3a — only the correction an approve-adjust resolution posted for this count variance (`referenceDoc.countVarianceId`; resolutions from 9-3a on)
+         */
+        countVarianceId?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -9165,7 +9390,7 @@ export type InventoryControllerListEventsData = {
 
 export type InventoryControllerListEventsErrors = {
     /**
-     * Malformed skuId/binId/orderId query, an unregistered type, a from/to that is not an ISO-8601 instant, from not before to, a shortPick other than true/false, a malformed cursor, or an out-of-range limit (validation-failed / invalid-cursor)
+     * Malformed skuId/binId/orderId/grnId/poId/transferId/adjustmentPendingId/countVarianceId query, an unregistered type, a from/to that is not an ISO-8601 instant, from not before to, a shortPick other than true/false, a malformed cursor, or an out-of-range limit (validation-failed / invalid-cursor)
      */
     400: ProblemDetailsDto;
     /**
@@ -15097,6 +15322,75 @@ export type ReportingControllerClientServiceResponses = {
 };
 
 export type ReportingControllerClientServiceResponse = ReportingControllerClientServiceResponses[keyof ReportingControllerClientServiceResponses];
+
+export type ReportingControllerAuditData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Only actions by this user
+         */
+        actorUserId?: string;
+        /**
+         * Only actions starting with this prefix — a lowercase stem (`transfer.`, `stock_adjustment.`). Matched literally: `_` and `%` are never wildcards
+         */
+        actionPrefix?: string;
+        /**
+         * Only actions on this kind of target
+         */
+        targetType?: 'advance_shipment_notice' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+        /**
+         * Only actions on this target
+         */
+        targetId?: string;
+        /**
+         * Only actions RECORDED at or after this instant (`recordedAt` — the server commit stamp, never `occurredAt`). ISO-8601 with a zone designator
+         */
+        from?: string;
+        /**
+         * Only actions RECORDED strictly before this instant (exclusive). Must be after `from`
+         */
+        to?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/reporting/audit';
+};
+
+export type ReportingControllerAuditErrors = {
+    /**
+     * A malformed actorUserId/targetId, an actionPrefix outside the stem shape (e.g. carrying `%`), an unknown targetType, a from/to that is not an ISO-8601 instant, from not before to, a malformed cursor, or an out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied); a role without `audit.view` — every role but the owner (role-denied); or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The read did not finish within its 5 s budget — narrow the filters or the dates (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ReportingControllerAuditError = ReportingControllerAuditErrors[keyof ReportingControllerAuditErrors];
+
+export type ReportingControllerAuditResponses = {
+    200: AuditTrailResponse;
+};
+
+export type ReportingControllerAuditResponse = ReportingControllerAuditResponses[keyof ReportingControllerAuditResponses];
 
 export type ClientsControllerListClientsData = {
     body?: never;

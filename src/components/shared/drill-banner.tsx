@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 
-import { describeDrill, UNSUPPORTED_DRILL_COPY, type Drill } from '@/lib/drill';
+import { describeDrill, drillBannerWord, UNSUPPORTED_DRILL_COPY, type Drill } from '@/lib/drill';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -39,7 +39,7 @@ export function DrillBanner({ drill }: { drill: Drill }) {
     <div data-testid="drill-banner">
       <FeedbackBanner
         tone="warning"
-        word="Showing the dashboard figure's rows"
+        word={drillBannerWord(drill)}
         reason={describeDrill(drill, items)}
         action={
           <button type="button" className={buttonClass} onClick={() => router.push(pathname)}>

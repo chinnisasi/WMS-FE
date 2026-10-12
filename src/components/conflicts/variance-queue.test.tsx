@@ -59,6 +59,7 @@ function variance(over: Record<string, unknown> = {}): Record<string, unknown> {
     resolvedAt: null,
     recountTaskId: null,
     consideredEventSeqs: null,
+    ledgerLinked: false,
     createdAt: '2026-09-20T00:00:00.000Z',
     ...over,
   };
@@ -372,5 +373,28 @@ describe('VarianceQueue: a failed warehouses read (story 21-11b)', () => {
     expect(view.container.textContent).not.toContain(' · W1');
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
     expect(view.container.textContent).not.toContain('Warehouses not loaded');
+  });
+});
+
+describe('story 9-3a — "View ledger" on a resolved variance', () => {
+  test('only an adjusted variance that recorded its correction links — by its variance id, in its own warehouse; a recount or an unlinked one does not', async () => {
+    const LINKED = '0198f7a2-1b3c-7d4e-8f90-0000000000c1';
+    const OLD = '0198f7a2-1b3c-7d4e-8f90-0000000000c2';
+    const RECOUNTED = '0198f7a2-1b3c-7d4e-8f90-0000000000c3';
+    const resolved = { resolvedBy: 'u-1', resolvedAt: '2026-09-21T00:00:00.000Z' };
+    varianceRows = [
+      variance({ id: LINKED, status: 'adjusted', ledgerLinked: true, consideredEventSeqs: [1], ...resolved }),
+      variance({ id: OLD, status: 'adjusted', ledgerLinked: false, consideredEventSeqs: [1], ...resolved }),
+      variance({ id: RECOUNTED, status: 'recounted', ledgerLinked: false, recountTaskId: 'task-2', ...resolved }),
+    ];
+    view = await mount();
+    const links = [...view.container.querySelectorAll('a')].filter((a) => a.textContent === 'View ledger');
+    expect(links).toHaveLength(1);
+    expect(Object.fromEntries(new URL(`http://x${links[0]!.getAttribute('href')!}`).searchParams)).toEqual({
+      list: 'ledger',
+      warehouseId: WAREHOUSE_ID,
+      doc: 'variance',
+      countVarianceId: LINKED,
+    });
   });
 });

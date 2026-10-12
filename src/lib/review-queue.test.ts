@@ -46,6 +46,7 @@ function variance(over: Partial<CountVarianceEntryResponseDto> = {}): CountVaria
     recountTaskId: null,
     resolvedBy: null,
     resolvedAt: null,
+    ledgerLinked: false,
     createdAt: '2026-09-01T00:00:00.000Z',
     ...over,
   };

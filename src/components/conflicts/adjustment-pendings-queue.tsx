@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRef, useState, useSyncExternalStore } from 'react';
 
 import {
@@ -7,8 +8,9 @@ import {
   fetchApiApproveAdjustmentPending,
   fetchApiRejectAdjustmentPending,
 } from '@/lib/api/client';
-import type { AdjustmentPendingDto, SkuResponse } from '@/lib/api/generated';
+import type { AdjustmentPendingEntryDto, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { ledgerDocHref } from '@/lib/drill';
 import { quantityLabel } from '@/lib/format-quantity';
 import { adjustmentDecisionReason } from '@/lib/review-queue';
 import { roleHasCapability } from '@/lib/users';
@@ -57,7 +59,7 @@ const TAB_LABEL: Record<AdjustmentPendingStatus, string> = {
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
 
 /** The list row the card renders — the DTO itself; the alias says what it is. */
-type AdjustmentPendingView = AdjustmentPendingDto;
+type AdjustmentPendingView = AdjustmentPendingEntryDto;
 
 export function AdjustmentPendingsQueue() {
   const sessioned = useSyncExternalStore(
@@ -340,6 +342,18 @@ function AdjustmentPendingCard({
           </>
         )}
       </div>
+      {entry.status === 'approved' && entry.ledgerLinked && (
+        // Story 9-3a — an approval from 9-3a on recorded the event it posted;
+        // a rejected or older approval has no link (never a wrong list).
+        <div className="text-xs">
+          <Link
+            href={ledgerDocHref('adjustment', entry.id, entry.warehouseId)}
+            className="text-(--primary) underline underline-offset-2"
+          >
+            View ledger
+          </Link>
+        </div>
+      )}
       {pending && canApprove && (
         <div className="flex justify-end gap-2">
           <button

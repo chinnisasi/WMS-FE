@@ -33,8 +33,15 @@ import {
 
 const withCursor = (cursor: string | null) => (cursor === null ? {} : { cursor });
 
+/**
+ * Story 9-3a — a document drill's `doc` and `label` are display-only (the
+ * banner's words): they are stripped here, so the request carries exactly the
+ * filter keys the backend knows (an unknown one would be a 400).
+ */
 export function fetchLedgerDrill(tenantId: string, drill: LedgerDrill, cursor: string | null) {
-  const { warehouseId, ...query } = drillFilter(drill);
+  const { warehouseId, doc: _doc, label: _label, ...query } = drillFilter(drill);
+  void _doc;
+  void _label;
   return fetchApiListLedgerEvents(tenantId, warehouseId, { ...query, ...withCursor(cursor) });
 }
 

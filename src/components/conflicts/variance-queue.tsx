@@ -1,10 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiResolveVariance } from '@/lib/api/client';
 import type { LedgerEventDto, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { ledgerDocHref } from '@/lib/drill';
 import { quantityLabel } from '@/lib/format-quantity';
 import { isOwnerOnlyVariance, resolveDraftProblem, varianceResolveReason } from '@/lib/review-queue';
 import { roleHasCapability } from '@/lib/users';
@@ -362,6 +364,18 @@ function VarianceCard({
           </span>
         )}
       </div>
+      {entry.status === 'adjusted' && entry.ledgerLinked && (
+        // Story 9-3a — the correction this resolution posted; a recounted
+        // variance (or one resolved before 9-3a) has no link.
+        <div className="text-xs">
+          <Link
+            href={ledgerDocHref('variance', entry.id, entry.warehouseId)}
+            className="text-(--primary) underline underline-offset-2"
+          >
+            View ledger
+          </Link>
+        </div>
+      )}
       {open && canDecide && (
         <div className="flex flex-wrap justify-end gap-2">
           <button

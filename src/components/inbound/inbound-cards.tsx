@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
@@ -31,7 +32,14 @@ import { clientCell, showClients } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { ulid } from '@/lib/ulid';
 import { grnDocument } from '@/lib/asns';
-import { drillFor, warehouseDisplayLabel, type GrnsDrill, type ParsedDrill, type PutawayDrill } from '@/lib/drill';
+import {
+  drillFor,
+  ledgerDocHref,
+  warehouseDisplayLabel,
+  type GrnsDrill,
+  type ParsedDrill,
+  type PutawayDrill,
+} from '@/lib/drill';
 import { usePutawayTasks } from '@/lib/use-putaway';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
@@ -217,6 +225,20 @@ function PurchaseOrdersCard({
       header: 'Created',
       render: (po) => <time dateTime={po.createdAt}>{new Date(po.createdAt).toLocaleString()}</time>,
     },
+    {
+      // Story 9-3a — the PO's receipt events, in the warehouse it receives
+      // into (a putaway names its GRN, not the PO — hence "Receipts").
+      key: 'ledger',
+      header: 'Ledger',
+      render: (po) => (
+        <Link
+          href={ledgerDocHref('po', po.id, po.warehouseId, po.code)}
+          className="text-xs text-(--primary) underline underline-offset-2"
+        >
+          Receipts in the ledger
+        </Link>
+      ),
+    },
   ];
 
   return (
@@ -309,6 +331,20 @@ function GoodsReceiptsCard({
       key: 'recordedAt',
       header: 'Recorded',
       render: (grn) => <time dateTime={grn.recordedAt}>{new Date(grn.recordedAt).toLocaleString()}</time>,
+    },
+    {
+      // Story 9-3a — the GRN's receipts and putaways, in its OWN warehouse
+      // (never the active one).
+      key: 'ledger',
+      header: 'Ledger',
+      render: (grn) => (
+        <Link
+          href={ledgerDocHref('grn', grn.id, grn.warehouseId, grn.code)}
+          className="text-xs text-(--primary) underline underline-offset-2"
+        >
+          View ledger
+        </Link>
+      ),
     },
   ];
 
