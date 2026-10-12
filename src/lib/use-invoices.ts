@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiGetInvoice, fetchApiListInvoices } from '@/lib/api/client';
+import { useKeyedDrill } from '@/lib/use-drill';
 import type { InvoiceDto, InvoiceEntryDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { INVOICES_CHANGED_EVENT, invoiceDetailReason, invoiceListReason } from '@/lib/invoices';
 import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
+import type { InvoicesDrill } from '@/lib/drill';
+import { fetchInvoicesDrill } from '@/lib/drill-fetch';
 
 /**
  * The /compliance Invoices section's reads (story 8-1), in the shape
@@ -22,8 +25,18 @@ export interface InvoicesPage {
   nextCursor: string | null;
 }
 
-/** One cursor page of the tenant's invoices, newest first. Open to any member. */
-export function useInvoices(): ResourceState<InvoicesPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+/**
+ * One cursor page of the tenant's invoices, newest first. Open to any member.
+ *
+ * Story 9-1b — given an Overview drill, the page is exactly the drill's rows
+ * (its warehouse and issue window, sent verbatim); fixed for the hook's
+ * lifetime (the screen remounts on a drill change).
+ */
+export function useInvoices(
+  drillProp: InvoicesDrill | null = null,
+): ResourceState<InvoicesPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+  // Keyed on drillKey, not identity: an RSC refresh must not refetch.
+  const drill = useKeyedDrill(drillProp);
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -49,7 +62,10 @@ export function useInvoices(): ResourceState<InvoicesPage> & Reloadable & { read
     let cancelled = false;
     (async () => {
       try {
-        const page = await fetchApiListInvoices(tenantId, activeCursor === null ? undefined : { cursor: activeCursor });
+        const page =
+          drill === null
+            ? await fetchApiListInvoices(tenantId, activeCursor === null ? undefined : { cursor: activeCursor })
+            : await fetchInvoicesDrill(tenantId, drill, activeCursor);
         if (!cancelled) {
           setResult({
             tenantId,
@@ -66,7 +82,7 @@ export function useInvoices(): ResourceState<InvoicesPage> & Reloadable & { read
     return () => {
       cancelled = true;
     };
-  }, [tenantId, activeCursor, revision]);
+  }, [tenantId, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {

@@ -11,6 +11,7 @@ import {
   fetchApiListReorderPolicies,
   fetchApiListSuggestedPos,
 } from '@/lib/api/client';
+import { useKeyedDrill } from '@/lib/use-drill';
 import type {
   BatchAlertDto,
   BatchDetailResponse,
@@ -22,6 +23,8 @@ import type {
 import { readSession, subscribeSession } from '@/lib/auth';
 import { MAX_PAGE_HOPS } from '@/lib/fetch-all-pages';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
+import type { BatchAlertsDrill } from '@/lib/drill';
+import { fetchBatchAlertsDrill } from '@/lib/drill-fetch';
 import {
   REPLENISHMENT_CHANGED_EVENT,
   replenishmentListReason,
@@ -392,13 +395,25 @@ export function useBatchAlerts(
   warehouseId: string | null,
   kind: BatchAlertKindFilter,
   status: BatchAlertStatus,
+  /**
+   * Story 9-1b — drilled mode: the request is exactly the drill's keys
+   * (`kind` and `status` only when the drill names them — never the tabs'),
+   * and a drill naming no warehouse reads tenant-wide (`warehouseId` null).
+   * Fixed for the hook's lifetime: the screen remounts on a drill change.
+   */
+  drillProp: BatchAlertsDrill | null = null,
 ): ResourceState<BatchAlertsPage> &
   Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+  // Keyed on drillKey, not identity: an RSC refresh must not refetch.
+  const drill = useKeyedDrill(drillProp);
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  // The scope a cursor and a result are stamped with: the warehouse, or —
+  // for a drill naming none — the whole tenant.
+  const scope = warehouseId ?? (drill === null ? null : '*');
   const [requested, setRequested] = useState<{
     tenantId: string;
     warehouseId: string;
@@ -409,7 +424,7 @@ export function useBatchAlerts(
   const activeCursor =
     requested !== null &&
     requested.tenantId === tenantId &&
-    requested.warehouseId === warehouseId &&
+    requested.warehouseId === scope &&
     requested.kind === kind &&
     requested.status === status
       ? requested.cursor
@@ -431,28 +446,31 @@ export function useBatchAlerts(
   }, []);
 
   useEffect(() => {
-    if (tenantId === null || warehouseId === null) return;
+    if (tenantId === null || scope === null) return;
     let cancelled = false;
     (async () => {
       // `all` is no query at all — the kind axis is plain `kind`, riding the
       // effect's dependency list directly.
       const kindQuery = kind === 'all' ? undefined : kind;
       try {
-        const page = await fetchApiListBatchAlerts(
-          tenantId,
-          activeCursor === null
-            ? { warehouseId, status, ...(kindQuery === undefined ? {} : { kind: kindQuery }) }
-            : {
-                warehouseId,
-                status,
-                cursor: activeCursor,
-                ...(kindQuery === undefined ? {} : { kind: kindQuery }),
-              },
-        );
+        const page =
+          drill !== null
+            ? await fetchBatchAlertsDrill(tenantId, drill, activeCursor)
+            : await fetchApiListBatchAlerts(
+                tenantId,
+                activeCursor === null
+                  ? { warehouseId: scope, status, ...(kindQuery === undefined ? {} : { kind: kindQuery }) }
+                  : {
+                      warehouseId: scope,
+                      status,
+                      cursor: activeCursor,
+                      ...(kindQuery === undefined ? {} : { kind: kindQuery }),
+                    },
+              );
         if (!cancelled) {
           setResult({
             tenantId,
-            warehouseId,
+            warehouseId: scope,
             kind,
             status,
             requested: activeCursor,
@@ -466,7 +484,7 @@ export function useBatchAlerts(
         if (!cancelled) {
           setResult({
             tenantId,
-            warehouseId,
+            warehouseId: scope,
             kind,
             status,
             requested: activeCursor,
@@ -478,14 +496,14 @@ export function useBatchAlerts(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, kind, status, activeCursor, revision]);
+  }, [tenantId, scope, drill, kind, status, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
-      if (tenantId === null || warehouseId === null) return;
-      setRequested({ tenantId, warehouseId, kind, status, cursor });
+      if (tenantId === null || scope === null) return;
+      setRequested({ tenantId, warehouseId: scope, kind, status, cursor });
     },
-    [tenantId, warehouseId, kind, status],
+    [tenantId, scope, kind, status],
   );
   const reload = useCallback(() => {
     setRequested(null);
@@ -495,10 +513,10 @@ export function useBatchAlerts(
 
   const stale =
     tenantId === null ||
-    warehouseId === null ||
+    scope === null ||
     result === null ||
     result.tenantId !== tenantId ||
-    result.warehouseId !== warehouseId ||
+    result.warehouseId !== scope ||
     result.kind !== kind ||
     result.status !== status ||
     result.requested !== activeCursor;

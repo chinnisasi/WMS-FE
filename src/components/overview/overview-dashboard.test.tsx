@@ -235,8 +235,8 @@ afterEach(() => {
   restoreGlobals();
 });
 
-async function mount(): Promise<Rendered> {
-  writeSession(SESSION);
+async function mount(role: StoredSession['user']['role'] = SESSION.user.role): Promise<Rendered> {
+  writeSession({ ...SESSION, user: { ...SESSION.user, role } });
   const rendered = render(<OverviewDashboard health="ok · wms-be" />);
   await settle();
   return rendered;
@@ -267,9 +267,33 @@ describe('the tiles', () => {
     const href = link.getAttribute('href')!;
     expect(href.startsWith('/conflicts?')).toBe(true);
     const params = new URLSearchParams(href.split('?')[1]);
+    expect(params.get('list')).toBe('over-receipts');
     expect(params.get('warehouseId')).toBe(W1);
     expect(params.get('from')).toBe(TODAY_FROM);
     expect(params.get('to')).toBe(NOW.toISOString());
+  });
+
+  test('9-1b — ledger drills link the Ledger page with `list` and the path warehouse', async () => {
+    view = await mount();
+    const dock = view.container.querySelector('[aria-label^="Dock-to-stock"]')!;
+    const link = [...dock.querySelectorAll('a')].find((a) => a.textContent === 'Open Ledger')!;
+    const href = link.getAttribute('href')!;
+    expect(href.startsWith('/inventory/ledger?list=ledger')).toBe(true);
+    const params = new URLSearchParams(href.split('?')[1]);
+    expect(params.get('warehouseId')).toBe(W1);
+    expect(params.get('type')).toBe('putaway.placed');
+    // No tile still links the bare /inventory placeholder.
+    const hrefs = [...view.container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
+    expect(hrefs.some((h) => h === '/inventory' || h.startsWith('/inventory?'))).toBe(false);
+  });
+
+  test('9-1b decision 5 — a role without review.decide gets no over-receipt link (other drills still link)', async () => {
+    view = await mount('accountant');
+    const hrefs = [...view.container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
+    expect(hrefs.some((h) => h.startsWith('/conflicts'))).toBe(false);
+    expect(hrefs.some((h) => h.startsWith('/inbound?list=grns'))).toBe(true);
+    const over = view.container.querySelector('[aria-label="Over-receipts: 1"]')!;
+    expect(over.querySelector('a[href^="/conflicts"]')).toBeNull();
   });
 
   test('drills with no web screen (picklist lines, pack failures, refusals) render no link', async () => {

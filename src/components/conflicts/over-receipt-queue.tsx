@@ -21,7 +21,9 @@ import {
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useOverReceipts, useSkuMap, useUserMap } from '@/lib/use-inbound';
+import type { OverReceiptsDrill } from '@/lib/drill';
 
+import { DrillBanner } from '@/components/shared/drill-banner';
 import { FeedbackBanner } from '@/components/feedback/banner';
 
 /**
@@ -54,7 +56,13 @@ const TAB_LABEL: Record<StatusTab, string> = {
   rejected: 'Rejected',
 };
 
-export function OverReceiptQueue() {
+/**
+ * Story 9-1b — drilled (`drill` set): the drill's rows, filtered server-side
+ * by exactly its keys, under the banner. The status tabs are hidden and
+ * never sent — a windowed drill carries no status, and forcing `pending`
+ * would drop the approved and rejected rows the figure counts.
+ */
+export function OverReceiptQueue({ drill = null }: { drill?: OverReceiptsDrill | null } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -70,12 +78,12 @@ export function OverReceiptQueue() {
       </div>
     );
   }
-  return <OverReceiptQueueSessioned />;
+  return <OverReceiptQueueSessioned drill={drill} />;
 }
 
-function OverReceiptQueueSessioned() {
+function OverReceiptQueueSessioned({ drill }: { drill: OverReceiptsDrill | null }) {
   const [tab, setTab] = useState<StatusTab>('pending');
-  const queue = useOverReceipts(tab);
+  const queue = useOverReceipts(tab, drill);
   const skus = useSkuMap();
   const users = useUserMap();
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
@@ -128,28 +136,34 @@ function OverReceiptQueueSessioned() {
         </div>
       </div>
 
-      <div className="flex gap-1 text-xs" role="tablist" aria-label="Over-receipt status">
-        {statusTabs.map((s) => (
-          <button
-            key={s}
-            type="button"
-            role="tab"
-            aria-selected={tab === s}
-            onClick={() => setTab(s)}
-            className={`rounded-sm border border-(--border) px-2 py-1 ${
-              tab === s ? 'bg-(--muted) font-medium' : 'hover:bg-(--muted)'
-            }`}
-          >
-            {TAB_LABEL[s]}
-          </button>
-        ))}
-      </div>
+      {drill !== null && <DrillBanner drill={drill} />}
+
+      {drill === null && (
+        <div className="flex gap-1 text-xs" role="tablist" aria-label="Over-receipt status">
+          {statusTabs.map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="tab"
+              aria-selected={tab === s}
+              onClick={() => setTab(s)}
+              className={`rounded-sm border border-(--border) px-2 py-1 ${
+                tab === s ? 'bg-(--muted) font-medium' : 'hover:bg-(--muted)'
+              }`}
+            >
+              {TAB_LABEL[s]}
+            </button>
+          ))}
+        </div>
+      )}
 
       {queue !== null && queue.items.length === 0 ? (
         <div className="rounded-md border border-(--border) p-3 text-(--muted-foreground)">
-          {tab === 'pending'
-            ? 'No over-receipts waiting on a decision.'
-            : `No ${tab} over-receipts.`}
+          {drill !== null
+            ? 'No over-receipts match this figure.'
+            : tab === 'pending'
+              ? 'No over-receipts waiting on a decision.'
+              : `No ${tab} over-receipts.`}
         </div>
       ) : (
         <div className="flex flex-col gap-2">

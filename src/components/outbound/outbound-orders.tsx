@@ -39,6 +39,7 @@ import {
   type Outcome,
   type OrderStatus,
 } from '@/lib/outbound-orders';
+import type { OrdersDrill } from '@/lib/drill';
 import { useOrderDetail, useOutboundOrders, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { clientCell, showClients, skusForOrderClient } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
@@ -48,6 +49,7 @@ import { ulid } from '@/lib/ulid';
 
 import { StateSelect } from '@/components/address/state-select';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { DrillBanner } from '@/components/shared/drill-banner';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
 import {
@@ -75,21 +77,34 @@ import {
  * for `orders.manage` (Owner + Ops Manager — deliberately not Operator). The
  * nav entry itself stays ungated. The backend's per-command role read is the
  * authority either way.
+ *
+ * Story 9-1b — drilled (`drill` set): the drill's rows, server-filtered,
+ * under the banner; the page-scoped status filter is hidden and never
+ * applied (the server already filtered). Decision 7: the row actions
+ * (cancel) stay; the page-level create form is hidden while drilled.
  */
-export function OutboundOrders({ tenantId, warehouseId, warehouseLabel, role }: OutboundSurfaceProps) {
+export function OutboundOrders({
+  tenantId,
+  warehouseId,
+  warehouseLabel,
+  role,
+  drill = null,
+}: OutboundSurfaceProps & { readonly drill?: OrdersDrill | null }) {
   const canManageOrders = roleHasCapability(role, 'orders.manage');
   return (
     <Section title="Orders">
+      {drill !== null && <DrillBanner drill={drill} />}
       <div className="text-(--muted-foreground)">
         {warehouseLabel === null
           ? 'Outbound orders'
           : `${warehouseLabel} — newest first. Acceptance reserves stock line by line.`}
       </div>
-      {canManageOrders && <OrderCreateForm tenantId={tenantId} warehouseId={warehouseId} />}
+      {canManageOrders && drill === null && <OrderCreateForm tenantId={tenantId} warehouseId={warehouseId} />}
       <OrdersTable
         tenantId={tenantId}
         warehouseId={warehouseId}
         canManageOrders={canManageOrders}
+        drill={drill}
       />
     </Section>
   );
@@ -503,12 +518,14 @@ function OrdersTable({
   tenantId,
   warehouseId,
   canManageOrders,
+  drill,
 }: {
   tenantId: string;
   warehouseId: string;
   canManageOrders: boolean;
+  drill: OrdersDrill | null;
 }) {
-  const orders = useOutboundOrders(warehouseId);
+  const orders = useOutboundOrders(warehouseId, drill);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -533,7 +550,8 @@ function OrdersTable({
   }, [onCursor]);
 
   const loaded = orders.state === 'ready' ? orders.data.items : [];
-  const rows = filterPage(loaded, statusFilter);
+  // Drilled: the server already filtered; the page-scoped filter never applies.
+  const rows = drill === null ? filterPage(loaded, statusFilter) : loaded;
   // Story 21-2b — the client column, only once the tenant holds more than
   // its own client.
   const clients = readyClients(useClients());
@@ -655,29 +673,32 @@ function OrdersTable({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <label className="flex flex-col gap-1">
-          {/* The list API offers cursor + limit and nothing else — no status
-              filter, no sort, no search. Naming the scope in the control is
-              what keeps it from implying it searched the whole warehouse. */}
-          <span className="text-xs text-(--muted-foreground)">Filter this page</span>
-          <select
-            className={`${selectClass} w-auto py-1`}
-            value={statusFilter ?? ''}
-            onChange={(e) => setStatusFilter(e.target.value === '' ? null : (e.target.value as OrderStatus))}
-          >
-            <option value="">All statuses</option>
-            {ORDER_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {orderStatusLabel(status)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="text-xs text-(--muted-foreground)">
-          {pageFilterCount(rows.length, loaded.length)}
-        </span>
-      </div>
+      {/* Drilled: no page-scoped status control — the server filtered. */}
+      {drill === null && (
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <label className="flex flex-col gap-1">
+            {/* The list API offers cursor + limit and nothing else — no status
+                filter, no sort, no search. Naming the scope in the control is
+                what keeps it from implying it searched the whole warehouse. */}
+            <span className="text-xs text-(--muted-foreground)">Filter this page</span>
+            <select
+              className={`${selectClass} w-auto py-1`}
+              value={statusFilter ?? ''}
+              onChange={(e) => setStatusFilter(e.target.value === '' ? null : (e.target.value as OrderStatus))}
+            >
+              <option value="">All statuses</option>
+              {ORDER_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {orderStatusLabel(status)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="text-xs text-(--muted-foreground)">
+            {pageFilterCount(rows.length, loaded.length)}
+          </span>
+        </div>
+      )}
 
       {confirmTarget !== null && (
         <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">

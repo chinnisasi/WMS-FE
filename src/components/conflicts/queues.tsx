@@ -8,6 +8,8 @@ import { RejectedOpsQueue } from '@/components/conflicts/rejected-ops-queue';
 import { VarianceQueue } from '@/components/conflicts/variance-queue';
 import { AdjustmentPendingsQueue } from '@/components/conflicts/adjustment-pendings-queue';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { drillFor, type ParsedDrill } from '@/lib/drill';
+import { DrillUnavailable } from '@/components/shared/drill-banner';
 import type { Capability } from '@/lib/users';
 import { roleHasCapability } from '@/lib/users';
 
@@ -57,7 +59,16 @@ const QUEUES: readonly {
 
 type Queue = 'over-receipts' | 'variances' | 'adjustment-pendings' | 'excursions' | 'rejected-ops';
 
-export function ConflictsQueues() {
+/**
+ * Story 9-1b — an Overview drill (`list=over-receipts`) selects the
+ * over-receipts tab and drills it. A role that cannot see that tab reads
+ * "This list isn't available to you" (defensive: the Overview withholds the
+ * link from such a role — decision 5). While drilled, the queue tab strip
+ * is hidden: switching away would leave the drill applied off-screen, with
+ * no banner to Clear it.
+ */
+export function ConflictsQueues({ drill = null }: { drill?: ParsedDrill } = {}) {
+  const overReceiptsDrill = drillFor(drill, 'over-receipts');
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
   // render) so a /me bootstrap role rewrite re-renders the tab filtering.
   const role = useSyncExternalStore(
@@ -75,6 +86,9 @@ export function ConflictsQueues() {
         );
 
   const [queue, setQueue] = useState<Queue>('over-receipts');
+  if (overReceiptsDrill !== null && role !== undefined && !visible.some((q) => q.id === 'over-receipts')) {
+    return <DrillUnavailable />;
+  }
   // Keyed derivation, not a reset effect: a role rewrite can invalidate the
   // selected tab in the same render.
   const active = visible.some((q) => q.id === queue) ? queue : (visible[0]?.id ?? null);
@@ -91,24 +105,26 @@ export function ConflictsQueues() {
         </div>
       ) : (
         <>
-          <div className="flex gap-1 text-xs" role="tablist" aria-label="Conflicts queue">
-            {visible.map((q) => (
-              <button
-                key={q.id}
-                type="button"
-                role="tab"
-                aria-selected={active === q.id}
-                onClick={() => setQueue(q.id)}
-                className={`rounded-sm border border-(--border) px-3 py-1 ${
-                  active === q.id ? 'bg-(--muted) font-medium' : 'hover:bg-(--muted)'
-                }`}
-              >
-                {q.label}
-              </button>
-            ))}
-          </div>
+          {overReceiptsDrill === null && (
+            <div className="flex gap-1 text-xs" role="tablist" aria-label="Conflicts queue">
+              {visible.map((q) => (
+                <button
+                  key={q.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active === q.id}
+                  onClick={() => setQueue(q.id)}
+                  className={`rounded-sm border border-(--border) px-3 py-1 ${
+                    active === q.id ? 'bg-(--muted) font-medium' : 'hover:bg-(--muted)'
+                  }`}
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
+          )}
           {active === 'over-receipts' ? (
-            <OverReceiptQueue />
+            <OverReceiptQueue drill={overReceiptsDrill} />
           ) : active === 'variances' ? (
             <VarianceQueue />
           ) : active === 'adjustment-pendings' ? (

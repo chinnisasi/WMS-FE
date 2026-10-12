@@ -22,6 +22,7 @@ import { quantityLabel } from '@/lib/format-quantity';
 import type {
   GoodsReceiptEntryDto,
   PurchaseOrderLineDto,
+  PutawayTaskDto,
   QcHoldDto,
   SkuResponse,
 } from '@/lib/api/generated';
@@ -30,11 +31,14 @@ import { clientCell, showClients } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { ulid } from '@/lib/ulid';
 import { grnDocument } from '@/lib/asns';
+import { drillFor, warehouseDisplayLabel, type GrnsDrill, type ParsedDrill, type PutawayDrill } from '@/lib/drill';
+import { usePutawayTasks } from '@/lib/use-putaway';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { DrillBanner } from '@/components/shared/drill-banner';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
-import { Section } from '@/components/shared/surface';
+import { ReadFailure, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 /**
@@ -48,9 +52,15 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
  *
  * Warehouse scoping follows the sidebar switcher's pick (per-viewer, like
  * zone-bin-setup), falling back to the tenant's first warehouse.
+ *
+ * Story 9-1b — "Awaiting putaway" (the derived putaway tasks) is always on
+ * the page, for the active warehouse (decision 6). An Overview drill names
+ * ONE section: `list=grns` drills the goods receipts, `list=putaway` the
+ * putaway list — each to the drill's warehouse, under a banner; every other
+ * card renders normally for the active warehouse, which a drill never writes.
  */
 
-export function InboundCards() {
+export function InboundCards({ drill = null }: { drill?: ParsedDrill } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -66,10 +76,12 @@ export function InboundCards() {
       </div>
     );
   }
-  return <InboundCardsSessioned />;
+  return <InboundCardsSessioned drill={drill} />;
 }
 
-function InboundCardsSessioned() {
+function InboundCardsSessioned({ drill }: { drill: ParsedDrill }) {
+  const grnsDrill = drillFor(drill, 'grns');
+  const putawayDrill = drillFor(drill, 'putaway');
   const warehouseRead = useTenantWarehouses();
   // Loading reads as before; a failed read renders below (21-11b).
   const { tenantId, items: warehouses } =
@@ -86,6 +98,9 @@ function InboundCardsSessioned() {
       ? activeId
       : (warehouses[0]?.id ?? null);
   const warehouse = warehouses.find((w) => w.id === warehouseId);
+  // A drilled card names the drill's warehouse with the one shared label
+  // (its short id while the list is not in hand — never "Pick a warehouse").
+  const drillLabel = (id: string) => warehouseDisplayLabel(warehouses, id);
 
   // Story 21-11b: the warehouse picker failed to load — say so, with Retry,
   // rather than four cards with no warehouse to read.
@@ -104,7 +119,25 @@ function InboundCardsSessioned() {
       )}
       <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
       <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
-      <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+      {grnsDrill === null ? (
+        <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+      ) : (
+        // The drill's warehouse (or every warehouse, when the drill names none).
+        <GoodsReceiptsCard
+          warehouseId={grnsDrill.warehouseId ?? null}
+          warehouseLabel={grnsDrill.warehouseId === undefined ? 'All warehouses' : drillLabel(grnsDrill.warehouseId)}
+          drill={grnsDrill}
+        />
+      )}
+      {putawayDrill === null ? (
+        <PutawayCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+      ) : (
+        <PutawayCard
+          warehouseId={putawayDrill.warehouseId}
+          warehouseLabel={drillLabel(putawayDrill.warehouseId)}
+          drill={putawayDrill}
+        />
+      )}
       <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
     </div>
   );
@@ -229,11 +262,14 @@ function PoLineRow({ line, sku }: { line: PurchaseOrderLineDto; sku: SkuResponse
 function GoodsReceiptsCard({
   warehouseId,
   warehouseLabel,
+  drill = null,
 }: {
   warehouseId: string | null;
   warehouseLabel: string | null;
+  /** Story 9-1b — the drill's rows, server-filtered, under the banner. */
+  drill?: GrnsDrill | null;
 }) {
-  const grns = useGoodsReceipts(warehouseId);
+  const grns = useGoodsReceipts(warehouseId, drill);
 
   const columns: readonly DataTableColumn<GoodsReceiptEntryDto>[] = [
     { key: 'code', header: 'GRN code', render: (grn) => <span className="font-mono text-xs">{grn.code}</span> },
@@ -242,7 +278,8 @@ function GoodsReceiptsCard({
       key: 'document',
       header: 'Document',
       render: (grn) => {
-        const document = grnDocument(grn, grn.poId === null ? null : (grns?.poCodes[grn.poId] ?? null));
+        const poCodes = grns.state === 'ready' ? grns.data.poCodes : {};
+        const document = grnDocument(grn, grn.poId === null ? null : (poCodes[grn.poId] ?? null));
         return document.kind === 'blind' ? (
           <span className="rounded-sm bg-(--muted) px-1.5 py-0.5 text-xs">{document.label}</span>
         ) : (
@@ -279,6 +316,7 @@ function GoodsReceiptsCard({
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Goods receipt notes</h2>
+        {drill !== null && <DrillBanner drill={drill} />}
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its receipts.'
@@ -286,13 +324,98 @@ function GoodsReceiptsCard({
         </div>
       </div>
 
-      <DataTable<GoodsReceiptEntryDto>
-        columns={columns}
-        rows={grns?.items ?? []}
-        nextCursor={grns?.nextCursor ?? null}
-        onCursor={grns?.onCursor}
-        emptyMessage={warehouseId === null ? 'Create a warehouse first.' : 'No receipts recorded yet.'}
-      />
+      {grns.state === 'failed' ? (
+        <ReadFailure word="Goods receipts unavailable" reason={grns.reason} onRetry={grns.reload} />
+      ) : (
+        // Mounted while a page loads: its Prev/Next cursor is internal state.
+        <DataTable<GoodsReceiptEntryDto>
+          columns={columns}
+          rows={grns.state === 'ready' ? grns.data.items : []}
+          nextCursor={grns.state === 'ready' ? grns.data.nextCursor : null}
+          onCursor={grns.onCursor}
+          emptyMessage={
+            grns.state === 'loading'
+              ? 'Loading receipts…'
+              : drill !== null
+                ? 'No receipts match this figure.'
+                : warehouseId === null
+                  ? 'Create a warehouse first.'
+                  : 'No receipts recorded yet.'
+          }
+        />
+      )}
+    </section>
+  );
+}
+
+/**
+ * Story 9-1b — "Awaiting putaway": the warehouse's derived putaway tasks
+ * (GRN lines whose applied stock still sits in the system Receiving bin),
+ * read-only and unpaged — the route returns every task at once. The
+ * quantity is the task's own `qty` (min(applied, Receiving on-hand)) at the
+ * SKU's declared precision; the suggested bin is the server's
+ * capacity-only suggestion, or "—" when no bin has room. The Overview's
+ * awaiting-putaway figure drills here (`list=putaway`), scoped to the
+ * drill's warehouse under the banner.
+ */
+function PutawayCard({
+  warehouseId,
+  warehouseLabel,
+  drill = null,
+}: {
+  warehouseId: string | null;
+  warehouseLabel: string | null;
+  drill?: PutawayDrill | null;
+}) {
+  const tasks = usePutawayTasks(warehouseId);
+  const skus = useSkuMap();
+
+  const columns: readonly DataTableColumn<PutawayTaskDto & { id: string }>[] = [
+    { key: 'grnCode', header: 'GRN', render: (task) => <span className="font-mono text-xs">{task.grnCode}</span> },
+    { key: 'skuCode', header: 'SKU', render: (task) => <span className="font-mono text-xs">{task.skuCode}</span> },
+    {
+      key: 'batchCode',
+      header: 'Batch',
+      render: (task) => <span className="font-mono text-xs">{task.batchCode ?? '—'}</span>,
+    },
+    {
+      key: 'qty',
+      header: 'Quantity',
+      numeric: true,
+      render: (task) => quantityLabel(task.qty, skus?.[task.skuId] ?? null),
+    },
+    {
+      key: 'suggestedBin',
+      header: 'Suggested bin',
+      render: (task) => <span className="font-mono text-xs">{task.suggestedBin?.binCode ?? '—'}</span>,
+    },
+  ];
+
+  return (
+    <section
+      className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm"
+      data-testid="awaiting-putaway"
+    >
+      <div className="flex flex-col gap-0.5">
+        <h2 className="font-medium">Awaiting putaway</h2>
+        {drill !== null && <DrillBanner drill={drill} />}
+        <div className="text-(--muted-foreground)">
+          {warehouseLabel === null
+            ? 'Received stock still in the Receiving bin, oldest receipt first.'
+            : `${warehouseLabel} — received stock still in the Receiving bin, oldest receipt first.`}
+        </div>
+      </div>
+      {warehouseId === null ? (
+        <div className="text-(--muted-foreground)">Create a warehouse first.</div>
+      ) : tasks.state === 'failed' ? (
+        <ReadFailure word="Putaway tasks unavailable" reason={tasks.reason} onRetry={tasks.reload} />
+      ) : (
+        <DataTable<PutawayTaskDto & { id: string }>
+          columns={columns}
+          rows={tasks.state === 'ready' ? tasks.data.map((task) => ({ ...task, id: task.grnLineId })) : []}
+          emptyMessage={tasks.state === 'loading' ? 'Loading putaway tasks…' : 'Nothing awaiting putaway'}
+        />
+      )}
     </section>
   );
 }

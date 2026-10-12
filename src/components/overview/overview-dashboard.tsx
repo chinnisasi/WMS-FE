@@ -9,7 +9,8 @@ import type {
   ReportingWindowedFigureDto,
 } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { drillHref, drillLinkText } from '@/lib/drill-routes';
+import { drillLinkHref, drillLinkText } from '@/lib/drill-routes';
+import { roleHasCapability, type Capability } from '@/lib/users';
 import {
   asOfLabel,
   countingSinceNote,
@@ -158,6 +159,7 @@ function OverviewTiles({
     return () => clearTimeout(timer);
   }, [data]);
   const stale = isOverviewStale(data, currentTime());
+  const can = useCan();
   const t = data.tiles;
   const d7From = data.window.d7From;
   const refresh = (
@@ -183,24 +185,24 @@ function OverviewTiles({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiTile
           label="Dock-to-stock (median)"
-          {...windowedTile(t.dockToStock.medianMinutes, 'minutes', t.dockToStock.state)}
+          {...windowedTile(t.dockToStock.medianMinutes, 'minutes', t.dockToStock.state, can)}
         >
           <SubFigures state={t.dockToStock.state}>
             <LiveLine label="Awaiting putaway" figure={t.dockToStock.awaitingPutaway} kind="count" />
           </SubFigures>
         </KpiTile>
 
-        <KpiTile label="Pick lines" {...windowedTile(t.pickRate.pickLines, 'count', t.pickRate.state)}>
+        <KpiTile label="Pick lines" {...windowedTile(t.pickRate.pickLines, 'count', t.pickRate.state, can)}>
           <SubFigures state={t.pickRate.state}>
             <LiveLine label="Last hour" figure={t.pickRate.lastHour} kind="count" />
           </SubFigures>
         </KpiTile>
 
-        <KpiTile label="Short-picked lines" {...windowedTile(t.shortPicks.shortLines, 'count', t.shortPicks.state)} />
+        <KpiTile label="Short-picked lines" {...windowedTile(t.shortPicks.shortLines, 'count', t.shortPicks.state, can)} />
 
         <KpiTile
           label="Over-receipts"
-          {...windowedTile(t.grnVariances.overReceipts, 'count', t.grnVariances.state)}
+          {...windowedTile(t.grnVariances.overReceipts, 'count', t.grnVariances.state, can)}
         >
           <SubFigures state={t.grnVariances.state}>
             <LiveLine label="Pending decision" figure={t.grnVariances.pendingOverReceipts} kind="count" />
@@ -210,7 +212,7 @@ function OverviewTiles({
 
         <KpiTile
           label="Order accuracy — defects (SM-3)"
-          {...windowedTile(t.orderAccuracy.defectsPer1000, 'per1000', t.orderAccuracy.state)}
+          {...windowedTile(t.orderAccuracy.defectsPer1000, 'per1000', t.orderAccuracy.state, can)}
         >
           <SubFigures state={t.orderAccuracy.state}>
             <WindowedLine label="Short lines" figure={t.orderAccuracy.shortLines} kind="count" />
@@ -222,7 +224,7 @@ function OverviewTiles({
 
         <KpiTile
           label="Oversell — backordered channel orders (SM-4)"
-          {...windowedTile(t.oversell.backorderedOrders, 'count', t.oversell.state)}
+          {...windowedTile(t.oversell.backorderedOrders, 'count', t.oversell.state, can)}
         >
           <SubFigures state={t.oversell.state}>
             <WindowedLine label="Prevented (refused)" figure={t.oversell.prevented} kind="count" />
@@ -232,7 +234,7 @@ function OverviewTiles({
 
         <KpiTile
           label="Open expiry alerts"
-          {...liveTile(t.expiryAlerts.openExpiryUpcoming, 'count', t.expiryAlerts.state)}
+          {...liveTile(t.expiryAlerts.openExpiryUpcoming, 'count', t.expiryAlerts.state, can)}
         >
           <SubFigures state={t.expiryAlerts.state}>
             <LiveLine label="Open aged-stock alerts" figure={t.expiryAlerts.openAged} kind="count" />
@@ -243,7 +245,7 @@ function OverviewTiles({
         <KpiTile
           label="Channel sync health"
           value={t.syncHealth.connections === null ? '' : String(t.syncHealth.connections.length)}
-          href={drillHref(t.syncHealth.drill)}
+          href={drillLinkHref(t.syncHealth.drill, can)}
           linkText={drillLinkText(t.syncHealth.drill.apiPath) ?? undefined}
           unavailable={t.syncHealth.state === 'unavailable'}
           secondary="connected channels"
@@ -271,7 +273,7 @@ function OverviewTiles({
 
         <KpiTile
           label="Ready to dispatch"
-          {...liveTile(t.dispatchPipeline.readyToDispatch, 'count', t.dispatchPipeline.state)}
+          {...liveTile(t.dispatchPipeline.readyToDispatch, 'count', t.dispatchPipeline.state, can)}
         >
           <SubFigures state={t.dispatchPipeline.state}>
             <LiveLine label="Accepted, not packed" figure={t.dispatchPipeline.accepted} kind="count" />
@@ -282,7 +284,7 @@ function OverviewTiles({
 
         <KpiTile
           label="E-way bills by gateway (SM-8)"
-          {...windowedTile(t.sm8.gatewayShare, 'percent', t.sm8.state)}
+          {...windowedTile(t.sm8.gatewayShare, 'percent', t.sm8.state, can)}
         >
           <SubFigures state={t.sm8.state}>
             <WindowedLine label="No manual pricing (invoices)" figure={t.sm8.noManualPricingShare} kind="percent" />
@@ -294,23 +296,48 @@ function OverviewTiles({
   );
 }
 
+/**
+ * Story 9-1b — what the viewer's role can open: a drill whose target section
+ * needs a capability the role lacks renders no link (decision 5 — the
+ * over-receipt tab needs `review.decide`; the Overview is member-open).
+ * Subscribed, so a /me bootstrap role rewrite re-renders the links.
+ */
+function useCan(): (capability: Capability) => boolean {
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  return (capability) => roleHasCapability(role, capability);
+}
+
 /** A windowed primary figure: today's value, the 7-day line beneath, today's drill as the link. */
-function windowedTile(figure: ReportingWindowedFigureDto, kind: FigureKind, state: 'ok' | 'unavailable') {
+function windowedTile(
+  figure: ReportingWindowedFigureDto,
+  kind: FigureKind,
+  state: 'ok' | 'unavailable',
+  can: (capability: Capability) => boolean,
+) {
   return {
     value: formatFigure(figure.today.value, kind),
     valueCaption: 'Today (IST)',
     secondary: sevenDayCaption(figure.d7.value, kind),
-    href: drillHref(figure.today.drill),
+    href: drillLinkHref(figure.today.drill, can),
     linkText: drillLinkText(figure.today.drill.apiPath) ?? undefined,
     unavailable: state === 'unavailable',
   };
 }
 
 /** A live primary figure: no window, so no 7-day line. */
-function liveTile(figure: ReportingFigureDto, kind: FigureKind, state: 'ok' | 'unavailable') {
+function liveTile(
+  figure: ReportingFigureDto,
+  kind: FigureKind,
+  state: 'ok' | 'unavailable',
+  can: (capability: Capability) => boolean,
+) {
   return {
     value: formatFigure(figure.value, kind),
-    href: drillHref(figure.drill),
+    href: drillLinkHref(figure.drill, can),
     linkText: drillLinkText(figure.drill.apiPath) ?? undefined,
     unavailable: state === 'unavailable',
   };
@@ -331,7 +358,7 @@ function MaybeLink({
   label: string;
   children: React.ReactNode;
 }) {
-  const href = drillHref(drill);
+  const href = drillLinkHref(drill, useCan());
   if (href === null) return <span>{children}</span>;
   return (
     <Link
