@@ -38,11 +38,13 @@ import {
   type Outcome,
 } from '@/lib/invoices';
 import { useInvoiceDetail, useInvoices } from '@/lib/use-invoices';
+import { drillFor, type InvoicesDrill, type ParsedDrill } from '@/lib/drill';
 import { useSkuMap } from '@/lib/use-inbound';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { DrillBanner } from '@/components/shared/drill-banner';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass } from '@/components/outbound/shell';
 
@@ -58,7 +60,12 @@ import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass
  * server's, re-read after a mutation; nothing is computed here but labels.
  */
 
-export function Invoices() {
+/**
+ * Story 9-1b — an Overview drill (`list=invoices`) lists exactly the drill's
+ * invoices (warehouse + issue window, filtered server-side) under a banner.
+ * Decision 7: the page-level generate-for-order form is hidden while drilled.
+ */
+export function Invoices({ drill = null }: { drill?: ParsedDrill } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -72,17 +79,17 @@ export function Invoices() {
       </Section>
     );
   }
-  return <InvoicesSessioned />;
+  return <InvoicesSessioned drill={drillFor(drill, 'invoices')} />;
 }
 
-function InvoicesSessioned() {
+function InvoicesSessioned({ drill }: { drill: InvoicesDrill | null }) {
   const role = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.user.role,
     () => undefined,
   );
   const canGenerate = roleHasCapability(role, 'invoice.generate');
-  const list = useInvoices();
+  const list = useInvoices(drill);
   const skus = useSkuMap();
   const [openId, setOpenId] = useState<string | null>(null);
   // A generate can insert a NEW row at the top of the newest-first keyset:
@@ -156,7 +163,9 @@ function InvoicesSessioned() {
         and a supplier GSTIN exists; it takes its number when it issues.
       </div>
 
-      {canGenerate && <GenerateForOrder onGenerated={() => onGenerated()} />}
+      {drill !== null && <DrillBanner drill={drill} />}
+
+      {canGenerate && drill === null && <GenerateForOrder onGenerated={() => onGenerated()} />}
 
       {shownOutcome !== null && (
         <FeedbackBanner tone={shownOutcome.tone} word={shownOutcome.word} reason={shownOutcome.reason} />
@@ -175,7 +184,13 @@ function InvoicesSessioned() {
           rows={list.state === 'ready' ? list.data.items : []}
           nextCursor={list.state === 'ready' ? list.data.nextCursor : null}
           onCursor={list.onCursor}
-          emptyMessage={list.state === 'loading' ? 'Loading invoices…' : 'No invoices yet — they are generated when orders dispatch.'}
+          emptyMessage={
+            list.state === 'loading'
+              ? 'Loading invoices…'
+              : drill !== null
+                ? 'No invoices match this figure.'
+                : 'No invoices yet — they are generated when orders dispatch.'
+          }
           renderExpanded={(row) =>
             row.id === openId ? (
               <InvoiceDetail invoiceId={row.id} canGenerate={canGenerate} skus={skus} onGenerated={onGenerated} />

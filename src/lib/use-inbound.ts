@@ -16,6 +16,7 @@ import {
   fetchApiListVendors,
   fetchApiListZones,
 } from '@/lib/api/client';
+import { useKeyedDrill } from '@/lib/use-drill';
 import type {
   AsnLineDto,
   BinResponse,
@@ -32,8 +33,12 @@ import type {
 } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CATALOG_CHANGED_EVENT } from '@/lib/catalog';
+import type { GrnsDrill, OverReceiptsDrill } from '@/lib/drill';
+import { fetchGrnsDrill, fetchOverReceiptsDrill } from '@/lib/drill-fetch';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { USERS_CHANGED_EVENT } from '@/lib/users';
+import { readReason } from '@/lib/outbound-orders';
+import type { Reloadable, ResourceState } from '@/lib/resource-state';
 
 /**
  * The PO list is headers-only (the lines ride the detail read), so the card
@@ -157,9 +162,19 @@ export interface GoodsReceiptsPage {
   poCodes: Readonly<Record<string, string>>;
 }
 
+/**
+ * Story 9-1b — given an Overview drill, the page is the drill's rows (its
+ * warehouse, blind flag and window, exactly); the caller passes the drill's
+ * warehouse (or null for a tenant-wide drill) as `warehouseId`. 9-1b also
+ * gave it the `ResourceState` shape (frontend guide §1.1): a failed read is
+ * `failed` with a reason, never "no receipts", and `reload()` clears first.
+ */
 export function useGoodsReceipts(
   warehouseId: string | null,
-): (GoodsReceiptsPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
+  drillProp: GrnsDrill | null = null,
+): ResourceState<GoodsReceiptsPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+  // Keyed on drillKey, not identity: an RSC refresh must not refetch.
+  const drill = useKeyedDrill(drillProp);
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -179,7 +194,7 @@ export function useGoodsReceipts(
     tenantId: string;
     warehouseId: string | null;
     requested: string | null;
-    page: GoodsReceiptsPage;
+    state: ResourceState<GoodsReceiptsPage>;
   } | null>(null);
 
   useEffect(() => {
@@ -187,14 +202,17 @@ export function useGoodsReceipts(
     let cancelled = false;
     (async () => {
       try {
-        const result = await fetchApiListGoodsReceipts(
-          tenantId,
-          activeCursor === null
-            ? warehouseId === null
-              ? undefined
-              : { warehouseId }
-            : { warehouseId: warehouseId ?? undefined, cursor: activeCursor },
-        );
+        const result =
+          drill === null
+            ? await fetchApiListGoodsReceipts(
+                tenantId,
+                activeCursor === null
+                  ? warehouseId === null
+                    ? undefined
+                    : { warehouseId }
+                  : { warehouseId: warehouseId ?? undefined, cursor: activeCursor },
+              )
+            : await fetchGrnsDrill(tenantId, drill, activeCursor);
         if (cancelled) return;
         // Resolve the referenced POs' codes so rows show `PO-0004`, not a uuid.
         const poCodes: Record<string, string> = {};
@@ -214,17 +232,24 @@ export function useGoodsReceipts(
             tenantId,
             warehouseId,
             requested: activeCursor,
-            page: { items: result.items, nextCursor: result.nextCursor ?? null, poCodes },
+            state: { state: 'ready', data: { items: result.items, nextCursor: result.nextCursor ?? null, poCodes } },
           });
         }
-      } catch {
-        // Quiet chrome on failure — the render-time key check hides stale data.
+      } catch (error) {
+        if (!cancelled) {
+          setPage({
+            tenantId,
+            warehouseId,
+            requested: activeCursor,
+            state: { state: 'failed', reason: readReason(error, 'the goods receipts') },
+          });
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, activeCursor, revision]);
+  }, [tenantId, warehouseId, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
@@ -233,18 +258,20 @@ export function useGoodsReceipts(
     },
     [tenantId, warehouseId],
   );
-  const reload = useCallback(() => setRevision((r) => r + 1), []);
+  // Clear first, and restart from page one (a stale cursor's Retry would fail forever).
+  const reload = useCallback(() => {
+    setRequested(null);
+    setPage(null);
+    setRevision((r) => r + 1);
+  }, []);
 
-  if (
+  const stale =
     tenantId === null ||
     page === null ||
     page.tenantId !== tenantId ||
     page.warehouseId !== warehouseId ||
-    page.requested !== activeCursor
-  ) {
-    return null;
-  }
-  return { ...page.page, onCursor, reload };
+    page.requested !== activeCursor;
+  return { ...(stale ? ({ state: 'loading' } as const) : page.state), onCursor, reload };
 }
 
 /** One keyset page of the over-receipt queue (the Conflicts & Reviews read). */
@@ -272,9 +299,18 @@ export interface OverReceiptsPage {
   asnLines: Readonly<Record<string, AsnLineDto>>;
 }
 
+/**
+ * Story 9-1b — given an Overview drill, the page is the drill's rows: the
+ * request carries exactly the drill's keys (never the `status` tab), and
+ * the cursor rides back verbatim. The drill is fixed for the hook's
+ * lifetime (the screen remounts on a drill change).
+ */
 export function useOverReceipts(
   status: 'pending' | 'approved' | 'rejected',
+  drillProp: OverReceiptsDrill | null = null,
 ): (OverReceiptsPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
+  // Keyed on drillKey, not identity: an RSC refresh must not refetch.
+  const drill = useKeyedDrill(drillProp);
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -305,10 +341,13 @@ export function useOverReceipts(
     let cancelled = false;
     (async () => {
       try {
-        const result = await fetchApiListOverReceipts(
-          tenantId,
-          activeCursor === null ? { status } : { status, cursor: activeCursor },
-        );
+        const result =
+          drill === null
+            ? await fetchApiListOverReceipts(
+                tenantId,
+                activeCursor === null ? { status } : { status, cursor: activeCursor },
+              )
+            : await fetchOverReceiptsDrill(tenantId, drill, activeCursor);
         if (cancelled) return;
         const poCodes: Record<string, string> = {};
         const documentStatuses: Record<string, string> = {};
@@ -366,7 +405,7 @@ export function useOverReceipts(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, status, activeCursor, revision]);
+  }, [tenantId, status, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {

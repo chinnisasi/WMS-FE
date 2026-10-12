@@ -44,6 +44,7 @@ import {
   fetchApiApproveAdjustmentPending,
   fetchApiListAdjustmentPendings,
   fetchApiListLedgerEvents,
+  fetchApiListPutawayTasks,
   fetchApiListVariances,
   fetchApiRejectAdjustmentPending,
   fetchApiResolveVariance,
@@ -2028,5 +2029,42 @@ describe('portal wrappers (story 21-7)', () => {
     stubFetch(404, { code: 'not-found', status: 404 });
     await fetchApiPortalOrder(T, ID).catch(() => undefined);
     expect(announced.filter((type) => type === PORTAL_SUSPENDED_EVENT)).toHaveLength(0);
+  });
+});
+
+describe('story 9-1b — the drill filters on the list wrappers', () => {
+  const T9 = '0198f7a2-1b3c-7d4e-8f90-112233445566';
+  const W9 = '0198f7a2-1b3c-7d4e-8f90-99aabbccddee';
+
+  afterEach(() => {
+    restoreGlobals();
+  });
+
+  test('the putaway task list: the warehouse rides the query, nothing else', async () => {
+    stubFetch(200, { items: [] });
+    await fetchApiListPutawayTasks(T9, W9);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${T9}/putaway/tasks`);
+    expect([...url.searchParams.entries()]).toEqual([['warehouseId', W9]]);
+  });
+
+  test('a first page with no options still sends no query', async () => {
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListOrders(T9, W9);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListInvoices(T9);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListLedgerEvents(T9, W9);
+    expect(new URL(lastRequest!.url).search).toBe('');
+  });
+
+  test('booleans serialise as true/false and a one-element type as one `type`', async () => {
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListOrders(T9, W9, { source: 'ingested', backordered: true });
+    expect(new URL(lastRequest!.url).searchParams.get('backordered')).toBe('true');
+    await fetchApiListLedgerEvents(T9, W9, { type: ['pick.picked'], shortPick: false });
+    const url = new URL(lastRequest!.url);
+    expect(url.searchParams.getAll('type')).toEqual(['pick.picked']);
+    expect(url.searchParams.get('shortPick')).toBe('false');
   });
 });

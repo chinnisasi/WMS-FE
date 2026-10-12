@@ -7,9 +7,12 @@ import {
   fetchApiListOrders,
   fetchApiListSkus,
 } from '@/lib/api/client';
+import { useKeyedDrill } from '@/lib/use-drill';
 import type { OrderDto, OrderEntryDto, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CATALOG_CHANGED_EVENT } from '@/lib/catalog';
+import type { OrdersDrill } from '@/lib/drill';
+import { fetchOrdersDrill } from '@/lib/drill-fetch';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { detailReason, readReason } from '@/lib/outbound-orders';
 import { OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
@@ -36,11 +39,20 @@ export interface OutboundOrdersPage {
  * status filter, no sort, no search. The surface's status control therefore
  * filters what this returns and says so; it never claims to have searched
  * the warehouse.
+ *
+ * Story 9-1b — drilled mode: given an Overview drill, the page is the
+ * drill's rows, filtered SERVER-side by exactly the drill's keys (its
+ * warehouse in the path — the caller passes `drill.warehouseId`). The
+ * cursor rides back verbatim. The screen remounts on a drill change, so the
+ * drill is fixed for the hook's lifetime.
  */
 export function useOutboundOrders(
   warehouseId: string | null,
+  drillProp: OrdersDrill | null = null,
 ): ResourceState<OutboundOrdersPage> &
   Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+  // Keyed on drillKey, not identity: an RSC refresh must not refetch.
+  const drill = useKeyedDrill(drillProp);
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -77,11 +89,14 @@ export function useOutboundOrders(
     let cancelled = false;
     (async () => {
       try {
-        const page = await fetchApiListOrders(
-          tenantId,
-          warehouseId,
-          activeCursor === null ? undefined : { cursor: activeCursor },
-        );
+        const page =
+          drill === null
+            ? await fetchApiListOrders(
+                tenantId,
+                warehouseId,
+                activeCursor === null ? undefined : { cursor: activeCursor },
+              )
+            : await fetchOrdersDrill(tenantId, drill, activeCursor);
         if (!cancelled) {
           setResult({
             tenantId,
@@ -109,7 +124,7 @@ export function useOutboundOrders(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, activeCursor, revision]);
+  }, [tenantId, warehouseId, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {

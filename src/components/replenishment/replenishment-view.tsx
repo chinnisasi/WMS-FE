@@ -51,6 +51,7 @@ import {
 } from '@/lib/replenishment';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
+import { drillFor, warehouseDisplayLabel, type BatchAlertsDrill, type ParsedDrill } from '@/lib/drill';
 import { useSkuMap, useUserMap, useVendorMap } from '@/lib/use-inbound';
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import {
@@ -67,6 +68,7 @@ import {
   writeActiveWarehouseId,
 } from '@/lib/warehouses';
 
+import { DrillBanner } from '@/components/shared/drill-banner';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 import {
@@ -114,7 +116,13 @@ import {
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
 
-export function ReplenishmentView() {
+/**
+ * Story 9-1b — an Overview drill (`list=batch-alerts`) drills the expiry &
+ * aging alert queue only: the drill's warehouse, kind, status and window,
+ * sent exactly, under a banner, with the kind and status tabs hidden. Every
+ * other section renders normally for the active warehouse.
+ */
+export function ReplenishmentView({ drill = null }: { drill?: ParsedDrill } = {}) {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
   const sessioned = useSyncExternalStore(
     subscribeSession,
@@ -136,10 +144,11 @@ export function ReplenishmentView() {
       </Section>
     );
   }
-  return <ReplenishmentSessioned />;
+  return <ReplenishmentSessioned drill={drill} />;
 }
 
-function ReplenishmentSessioned() {
+function ReplenishmentSessioned({ drill }: { drill: ParsedDrill }) {
+  const alertsDrill = drillFor(drill, 'batch-alerts');
   const warehouses = useOutboundWarehouses();
   const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
   const items = warehouses.state === 'ready' ? warehouses.data.items : [];
@@ -198,7 +207,8 @@ function ReplenishmentSessioned() {
   return (
     <div className="flex flex-col gap-4">
       {refreshNote}
-      {items.length > 1 && (
+      {/* Hidden while drilled: the picker writes the active warehouse (decision 2). */}
+      {items.length > 1 && alertsDrill === null && (
         <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
           <label className="flex items-center gap-2 text-xs">
             <span className="text-(--muted-foreground)">Warehouse</span>
@@ -223,13 +233,26 @@ function ReplenishmentSessioned() {
         warehouseLabel={warehouseLabel}
         canManage={canManage}
       />
-      <BatchAlertQueue
-        key={`batch-alerts-${warehouseId}`}
-        tenantId={tenantId}
-        warehouseId={warehouseId}
-        warehouseLabel={warehouseLabel}
-        canManage={canManage}
-      />
+      {alertsDrill === null ? (
+        <BatchAlertQueue
+          key={`batch-alerts-${warehouseId}`}
+          tenantId={tenantId}
+          warehouseId={warehouseId}
+          warehouseLabel={warehouseLabel}
+          canManage={canManage}
+        />
+      ) : (
+        <BatchAlertQueue
+          key="batch-alerts-drilled"
+          tenantId={tenantId}
+          warehouseId={alertsDrill.warehouseId ?? null}
+          warehouseLabel={
+            alertsDrill.warehouseId === undefined ? null : warehouseDisplayLabel(items, alertsDrill.warehouseId)
+          }
+          canManage={canManage}
+          drill={alertsDrill}
+        />
+      )}
       <SuggestedPoQueue
         key={`drafts-${warehouseId}`}
         tenantId={tenantId}
@@ -495,15 +518,19 @@ function BatchAlertQueue({
   warehouseId,
   warehouseLabel,
   canManage,
+  drill = null,
 }: {
   tenantId: string;
-  warehouseId: string;
+  /** Null only for a drill that names no warehouse (tenant-wide). */
+  warehouseId: string | null;
   warehouseLabel: string | null;
   canManage: boolean;
+  /** Story 9-1b — the drill's rows, server-filtered; the tabs are hidden and never sent. */
+  drill?: BatchAlertsDrill | null;
 }) {
   const [kind, setKind] = useState<BatchAlertKindFilter>('all');
   const [tab, setTab] = useState<BatchAlertStatus>('open');
-  const queue = useBatchAlerts(warehouseId, kind, tab);
+  const queue = useBatchAlerts(warehouseId, kind, tab, drill);
   const policy = useExpiryPolicy();
   const skus = useSkuMap();
   const users = useUserMap();
@@ -576,26 +603,29 @@ function BatchAlertQueue({
             ? policy.reason
             : 'Reading the tenant’s alert config…'}
       </div>
-      <div className="text-xs text-(--muted-foreground)">{batchAlertQueueIntro(tab)}</div>
-      <div className="flex flex-wrap items-center gap-4">
-        {/* The kind filter — a batch can carry BOTH kinds; `all` is the merge. */}
-        <StatusTabs
-          statuses={BATCH_ALERT_KIND_FILTERS}
-          labels={Object.fromEntries(
-            BATCH_ALERT_KIND_FILTERS.map((k) => [k, kindLabel(k)]),
-          ) as Record<BatchAlertKindFilter, string>}
-          value={kind}
-          ariaLabel="Batch alert kind"
-          onSelect={setKind}
-        />
-        <StatusTabs
-          statuses={BATCH_ALERT_STATUSES}
-          labels={BATCH_ALERT_TAB_LABEL}
-          value={tab}
-          ariaLabel="Batch alert status"
-          onSelect={setTab}
-        />
-      </div>
+      {drill !== null && <DrillBanner drill={drill} />}
+      {drill === null && <div className="text-xs text-(--muted-foreground)">{batchAlertQueueIntro(tab)}</div>}
+      {drill === null && (
+        <div className="flex flex-wrap items-center gap-4">
+          {/* The kind filter — a batch can carry BOTH kinds; `all` is the merge. */}
+          <StatusTabs
+            statuses={BATCH_ALERT_KIND_FILTERS}
+            labels={Object.fromEntries(
+              BATCH_ALERT_KIND_FILTERS.map((k) => [k, kindLabel(k)]),
+            ) as Record<BatchAlertKindFilter, string>}
+            value={kind}
+            ariaLabel="Batch alert kind"
+            onSelect={setKind}
+          />
+          <StatusTabs
+            statuses={BATCH_ALERT_STATUSES}
+            labels={BATCH_ALERT_TAB_LABEL}
+            value={tab}
+            ariaLabel="Batch alert status"
+            onSelect={setTab}
+          />
+        </div>
+      )}
       {queue.state === 'failed' ? (
         <ReadFailure
           word="Batch alerts unavailable"
@@ -604,7 +634,9 @@ function BatchAlertQueue({
         />
       ) : queue.state === 'ready' && queue.data.items.length === 0 ? (
         <div className="rounded-md border border-(--border) p-3 text-(--muted-foreground)">
-          {kind === 'all'
+          {drill !== null
+            ? 'No batch alerts match this figure.'
+            : kind === 'all'
             ? `No ${tab === 'open' ? 'open' : BATCH_ALERT_TAB_LABEL[tab].toLowerCase()} batch alerts.`
             : `No ${BATCH_ALERT_TAB_LABEL[tab].toLowerCase()} ${BATCH_ALERT_KIND_LABEL[kind].toLowerCase()} batch alerts.`}
         </div>

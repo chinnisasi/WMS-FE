@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiListEwayBills, fetchApiListEwayGstinSettings, fetchApiListEwayStateThresholds } from '@/lib/api/client';
+import { useKeyedDrill } from '@/lib/use-drill';
 import type { EwayBillDto, EwayGstinSettingDto, EwayStateThresholdDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { EWAY_CHANGED_EVENT, ewayListReason, type EwayTab } from '@/lib/eway';
 import { INVOICES_CHANGED_EVENT } from '@/lib/invoices';
+import type { EwayDrill } from '@/lib/drill';
+import { fetchEwayDrill } from '@/lib/drill-fetch';
 import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
 
 /**
@@ -91,11 +94,21 @@ export interface EwayBillsPage {
   nextCursor: string | null;
 }
 
-/** One cursor page of the bills in one status tab, optionally one GSTIN's. */
+/**
+ * One cursor page of the bills in one status tab, optionally one GSTIN's.
+ *
+ * Story 9-1b — drilled mode: the request is exactly the drill's keys
+ * (warehouse, source, window; a status only when the drill names one) —
+ * never the tab's status or the GSTIN filter. Fixed for the hook's
+ * lifetime: the screen remounts on a drill change.
+ */
 export function useEwayBills(
   tab: EwayTab,
   gstin: string | null,
+  drillProp: EwayDrill | null = null,
 ): ResourceState<EwayBillsPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+  // Keyed on drillKey, not identity: an RSC refresh must not refetch.
+  const drill = useKeyedDrill(drillProp);
   const tenantId = useTenantId();
   // The cursor is stamped with the scope it was requested for: a cursor from
   // another tab or GSTIN filter is a first-page request, never replayed.
@@ -117,11 +130,14 @@ export function useEwayBills(
     let cancelled = false;
     (async () => {
       try {
-        const page = await fetchApiListEwayBills(tenantId, {
-          status: tab,
-          ...(gstin === null ? {} : { gstin }),
-          ...(activeCursor === null ? {} : { cursor: activeCursor }),
-        });
+        const page =
+          drill === null
+            ? await fetchApiListEwayBills(tenantId, {
+                status: tab,
+                ...(gstin === null ? {} : { gstin }),
+                ...(activeCursor === null ? {} : { cursor: activeCursor }),
+              })
+            : await fetchEwayDrill(tenantId, drill, activeCursor);
         if (!cancelled) {
           setResult({ tenantId, tab, gstin, requested: activeCursor, state: { state: 'ready', data: { items: page.items, nextCursor: page.nextCursor ?? null } } });
         }
@@ -132,7 +148,7 @@ export function useEwayBills(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, tab, gstin, activeCursor, revision]);
+  }, [tenantId, tab, gstin, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {

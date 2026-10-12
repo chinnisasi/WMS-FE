@@ -52,10 +52,12 @@ import {
 } from '@/lib/eway';
 import { GST_STATE_NAMES, formatRupees, invoiceDateLabel, placeOfSupplyLabel, type Outcome } from '@/lib/invoices';
 import { useEwayBills, useEwayGstinSettings, useEwayStateThresholds } from '@/lib/use-eway';
+import { drillFor, type EwayDrill, type ParsedDrill } from '@/lib/drill';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { DrillBanner } from '@/components/shared/drill-banner';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import {
   ReadFailure,
@@ -80,7 +82,16 @@ import {
  * `eway.manage`; the settings panel without `eway.configure` (owner).
  */
 
-export function EwayBills() {
+/**
+ * Story 9-1b — an Overview drill (`list=eway`) lists exactly the drill's
+ * bills (warehouse, source, window — and a status only when the drill names
+ * one), filtered server-side, under a banner. The status tabs, the GSTIN
+ * filter, the selection and the bulk NIC download are hidden: the rows span
+ * statuses, and none of those controls is the figure's. Decision 7: a
+ * PENDING row keeps its own row actions (Act → Part B / record / dismiss /
+ * Generate, on `eway.manage`); no other row offers any.
+ */
+export function EwayBills({ drill = null }: { drill?: ParsedDrill } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -94,10 +105,10 @@ export function EwayBills() {
       </Section>
     );
   }
-  return <EwayBillsSessioned />;
+  return <EwayBillsSessioned drill={drillFor(drill, 'eway')} />;
 }
 
-function EwayBillsSessioned() {
+function EwayBillsSessioned({ drill }: { drill: EwayDrill | null }) {
   const role = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.user.role,
@@ -109,7 +120,7 @@ function EwayBillsSessioned() {
   const [tab, setTab] = useState<EwayTab>('pending');
   const [gstinFilter, setGstinFilter] = useState('');
   const settings = useEwayGstinSettings();
-  const list = useEwayBills(tab, gstinFilter === '' ? null : gstinFilter);
+  const list = useEwayBills(tab, gstinFilter === '' ? null : gstinFilter, drill);
   const [pageEpoch, setPageEpoch] = useState(0);
 
   // The selection belongs to ONE scope (tab + filter): a switch invalidates it
@@ -174,7 +185,8 @@ function EwayBillsSessioned() {
   }
 
   const columns: DataTableColumn<EwayBillDto>[] = [];
-  if (tab === 'pending' && canManage) {
+  // Drilled: no selection, no per-row actions — the rows span statuses.
+  if (drill === null && tab === 'pending' && canManage) {
     columns.push({
       key: 'select',
       header: '',
@@ -205,7 +217,33 @@ function EwayBillsSessioned() {
   });
   columns.push({ key: 'buyer', header: 'Buyer', render: (bill) => (bill.b2b ? `B2B ${bill.consigneeGstin ?? ''}` : 'B2C') });
   columns.push({ key: 'value', header: 'Value', numeric: true, render: (bill) => formatRupees(bill.consignmentValuePaise) });
-  if (tab === 'pending') {
+  if (drill !== null) {
+    columns.push({ key: 'status', header: 'Status', render: (bill) => EWAY_TAB_LABEL[bill.status] });
+    columns.push({ key: 'ewbNo', header: 'EWB number', render: (bill) => <span className="font-mono text-xs">{bill.ewbNo ?? '—'}</span> });
+    columns.push({
+      key: 'source',
+      header: 'Source',
+      render: (bill) => (bill.source === null ? '—' : bill.source === 'gateway' ? 'Gateway' : 'Recorded'),
+    });
+    if (canManage) {
+      columns.push({
+        key: 'act',
+        header: '',
+        render: (bill) =>
+          bill.status === 'pending' ? (
+            <button
+              type="button"
+              className={rowButtonClass}
+              aria-expanded={openId === bill.id}
+              aria-controls={expandedRowId(bill.id)}
+              onClick={() => setOpenId(openId === bill.id ? null : bill.id)}
+            >
+              {openId === bill.id ? 'Close' : 'Act'}
+            </button>
+          ) : null,
+      });
+    }
+  } else if (tab === 'pending') {
     columns.push({
       key: 'rule',
       header: 'Threshold',
@@ -267,44 +305,48 @@ function EwayBillsSessioned() {
     >
       <div className="text-(--muted-foreground)">{QUEUE_COPY}</div>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <div role="tablist" aria-label="E-way bill status" className="flex gap-1">
-          {EWAY_TABS.map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="tab"
-              aria-selected={tab === t}
-              className={tab === t ? primaryClass : buttonClass}
-              onClick={() => {
-                setTab(t);
-                setOpenId(null);
-              }}
-            >
-              {EWAY_TAB_LABEL[t]}
-            </button>
-          ))}
-        </div>
-        <label className="flex flex-col gap-1">
-          <span className={labelClass}>Supplier GSTIN</span>
-          <select className={selectClass} value={gstinFilter} onChange={(e) => setGstinFilter(e.target.value)} aria-label="Supplier GSTIN">
-            <option value="">All GSTINs</option>
-            {gstins.map((gstin) => (
-              <option key={gstin} value={gstin}>
-                {gstin}
-              </option>
+      {drill !== null && <DrillBanner drill={drill} />}
+
+      {drill === null && (
+        <div className="flex flex-wrap items-end gap-3">
+          <div role="tablist" aria-label="E-way bill status" className="flex gap-1">
+            {EWAY_TABS.map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                className={tab === t ? primaryClass : buttonClass}
+                onClick={() => {
+                  setTab(t);
+                  setOpenId(null);
+                }}
+              >
+                {EWAY_TAB_LABEL[t]}
+              </button>
             ))}
-          </select>
-        </label>
-        {tab === 'pending' && canManage && (
-          <div className="flex items-center gap-2">
-            <button type="button" className={primaryClass} disabled={ready.length === 0 || exporting} onClick={download}>
-              {exporting ? 'Downloading…' : downloadLabel(ready.length)}
-            </button>
-            {skipped !== null && <span className="text-xs text-(--muted-foreground)">{skipped}</span>}
           </div>
-        )}
-      </div>
+          <label className="flex flex-col gap-1">
+            <span className={labelClass}>Supplier GSTIN</span>
+            <select className={selectClass} value={gstinFilter} onChange={(e) => setGstinFilter(e.target.value)} aria-label="Supplier GSTIN">
+              <option value="">All GSTINs</option>
+              {gstins.map((gstin) => (
+                <option key={gstin} value={gstin}>
+                  {gstin}
+                </option>
+              ))}
+            </select>
+          </label>
+          {tab === 'pending' && canManage && (
+            <div className="flex items-center gap-2">
+              <button type="button" className={primaryClass} disabled={ready.length === 0 || exporting} onClick={download}>
+                {exporting ? 'Downloading…' : downloadLabel(ready.length)}
+              </button>
+              {skipped !== null && <span className="text-xs text-(--muted-foreground)">{skipped}</span>}
+            </div>
+          )}
+        </div>
+      )}
 
       {shownOutcome !== null && <FeedbackBanner tone={shownOutcome.tone} word={shownOutcome.word} reason={shownOutcome.reason} />}
 
@@ -318,9 +360,15 @@ function EwayBillsSessioned() {
           rows={rows}
           nextCursor={list.state === 'ready' ? list.data.nextCursor : null}
           onCursor={list.onCursor}
-          emptyMessage={list.state === 'loading' ? 'Loading e-way bills…' : `No ${EWAY_TAB_LABEL[tab].toLowerCase()} e-way bills.`}
+          emptyMessage={
+            list.state === 'loading'
+              ? 'Loading e-way bills…'
+              : drill !== null
+                ? 'No e-way bills match this figure.'
+                : `No ${EWAY_TAB_LABEL[tab].toLowerCase()} e-way bills.`
+          }
           renderExpanded={(bill) =>
-            canManage && tab === 'pending' && bill.id === openId ? <BillActions bill={bill} onSettled={settled} labelOf={labelOf} canConfigure={canConfigure} /> : null
+            canManage && (drill === null ? tab === 'pending' : bill.status === 'pending') && bill.id === openId ? <BillActions bill={bill} onSettled={settled} labelOf={labelOf} canConfigure={canConfigure} /> : null
           }
         />
       )}

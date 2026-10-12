@@ -155,6 +155,7 @@ import {
   portalControllerSkus,
   portalControllerStock,
   portalControllerWarehouses,
+  putawayControllerListPutawayTasks,
 } from './generated/sdk.gen';
 import { ensureSessionHint, readSession, clearSession, writeSession, PORTAL_SUSPENDED_EVENT } from '../auth';
 import type {
@@ -318,6 +319,8 @@ import type {
   WaveResponse,
   ZoneListResponse,
   ZoneResponse,
+  PutawayTaskListResponse,
+  InventoryControllerListEventsData,
 } from './generated/types.gen';
 
 /**
@@ -424,6 +427,19 @@ function problemExtensions(error: object): Record<string, unknown> {
  * A non-problem JSON error body (a 500 with `{ message: 'boom' }`) is still an
  * answer from the server and still becomes `ApiProblem('request-failed')`.
  */
+/**
+ * Story 9-1b — a list query of exactly the options the caller set: an
+ * undefined option is dropped, and no option at all sends no query (a first
+ * page of the normal view stays query-free, as every wrapper's test pins).
+ */
+function definedQuery<Q extends Record<string, unknown>>(
+  options: Q,
+): { [K in keyof Q]?: Exclude<Q[K], undefined> } | undefined {
+  const query: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(options)) if (value !== undefined) query[key] = value;
+  return Object.keys(query).length === 0 ? undefined : (query as { [K in keyof Q]?: Exclude<Q[K], undefined> });
+}
+
 function unwrapError(error: unknown, fallbackStatus: number): Error {
   if (isProblemDetails(error)) {
     return new ApiProblem(error.code, error.status ?? fallbackStatus, error.detail, error.title, problemExtensions(error));
@@ -1644,17 +1660,48 @@ export async function fetchApiGetPurchaseOrder(
 /** The GRN list (story 3.3) — one warehouse's (or the tenant's) receipts. */
 export async function fetchApiListGoodsReceipts(
   tenantId: string,
-  options?: { warehouseId?: string; cursor?: string; signal?: AbortSignal },
+  options?: {
+    warehouseId?: string;
+    /** Story 9-1b — the drill's filters (21-6 `blind`; 9-1 `from`/`to`). */
+    blind?: boolean;
+    from?: string;
+    to?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
 ): Promise<GoodsReceiptListResponse> {
+  const query = definedQuery({
+    warehouseId: options?.warehouseId,
+    blind: options?.blind,
+    from: options?.from,
+    to: options?.to,
+    cursor: options?.cursor,
+  });
   const { data, error } = await receivingControllerListGoodsReceipts({
     path: { tenantId },
-    query:
-      options?.warehouseId === undefined && options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query,
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 9-1b — the warehouse's derived putaway tasks (one per GRN line whose
+ * applied stock still sits in the system Receiving bin), oldest receipt
+ * first. Unpaged: the route returns `{items}` and takes only the warehouse.
+ * Arms: 400 malformed warehouseId, 404 a foreign warehouse.
+ */
+export async function fetchApiListPutawayTasks(
+  tenantId: string,
+  warehouseId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PutawayTaskListResponse> {
+  const { data, error } = await putawayControllerListPutawayTasks({
+    path: { tenantId },
+    query: { warehouseId },
     signal: options?.signal,
   });
   if (error || !data) {
@@ -1666,17 +1713,26 @@ export async function fetchApiListGoodsReceipts(
 /** The over-receipt queue (story 3.3) — the Conflicts & Reviews read. */
 export async function fetchApiListOverReceipts(
   tenantId: string,
-  options?: { status?: 'pending' | 'approved' | 'rejected'; cursor?: string; signal?: AbortSignal },
+  options?: {
+    status?: 'pending' | 'approved' | 'rejected';
+    /** Story 9-1b — the drill's filters (9-1). */
+    warehouseId?: string;
+    from?: string;
+    to?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
 ): Promise<OverReceiptListResponse> {
+  const query = definedQuery({
+    status: options?.status,
+    warehouseId: options?.warehouseId,
+    from: options?.from,
+    to: options?.to,
+    cursor: options?.cursor,
+  });
   const { data, error } = await receivingControllerListOverReceipts({
     path: { tenantId },
-    query:
-      options?.status === undefined && options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.status === undefined ? {} : { status: options.status }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query,
     signal: options?.signal,
   });
   if (error || !data) {
@@ -1822,17 +1878,30 @@ export async function fetchApiListStock(
 export async function fetchApiListOrders(
   tenantId: string,
   warehouseId: string,
-  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+  options?: {
+    /** Story 9-1b — the drill's filters (9-1); the normal view sends none. */
+    status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+    source?: 'manual' | 'ingested';
+    backordered?: boolean;
+    from?: string;
+    to?: string;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<OrderListResponse> {
+  const query = definedQuery({
+    status: options?.status,
+    source: options?.source,
+    backordered: options?.backordered,
+    from: options?.from,
+    to: options?.to,
+    cursor: options?.cursor,
+    limit: options?.limit,
+  });
   const { data, error } = await outboundControllerListOrders({
     path: { tenantId, warehouseId },
-    query:
-      options?.cursor === undefined && options?.limit === undefined
-        ? undefined
-        : {
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-            ...(options.limit === undefined ? {} : { limit: options.limit }),
-          },
+    query,
     signal: options?.signal,
   });
   if (error || !data) {
@@ -2330,11 +2399,23 @@ export async function fetchApiResolveExcursion(
  */
 export async function fetchApiListInvoices(
   tenantId: string,
-  options?: { cursor?: string; signal?: AbortSignal },
+  options?: {
+    /** Story 9-1b — the drill's filters (9-1). */
+    warehouseId?: string;
+    from?: string;
+    to?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
 ): Promise<InvoiceListResponse> {
   const { data, error } = await invoicingControllerListInvoices({
     path: { tenantId },
-    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    query: definedQuery({
+      warehouseId: options?.warehouseId,
+      from: options?.from,
+      to: options?.to,
+      cursor: options?.cursor,
+    }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -2422,6 +2503,11 @@ export async function fetchApiGenerateInvoice(
 export interface EwayBillListOptions {
   status?: 'pending' | 'generated' | 'dismissed';
   gstin?: string;
+  /** Story 9-1b — the drill's filters (9-1). */
+  warehouseId?: string;
+  source?: 'manual' | 'gateway';
+  from?: string;
+  to?: string;
   cursor?: string;
   limit?: number;
   signal?: AbortSignal;
@@ -2436,6 +2522,10 @@ export async function fetchApiListEwayBills(tenantId: string, options: EwayBillL
   const query: NonNullable<Parameters<typeof ewayControllerListBills>[0]['query']> = {};
   if (options.status !== undefined) query.status = options.status;
   if (options.gstin !== undefined) query.gstin = options.gstin;
+  if (options.warehouseId !== undefined) query.warehouseId = options.warehouseId;
+  if (options.source !== undefined) query.source = options.source;
+  if (options.from !== undefined) query.from = options.from;
+  if (options.to !== undefined) query.to = options.to;
   if (options.cursor !== undefined) query.cursor = options.cursor;
   if (options.limit !== undefined) query.limit = options.limit;
   const { data, error } = await ewayControllerListBills({
@@ -2791,19 +2881,29 @@ export async function fetchApiListLedgerEvents(
   warehouseId: string,
   options?: {
     binId?: string;
+    /** Story 9-1b — the drill's filters (9-1): a one-element `type` list, the window, an SKU, an order, a short-pick flag. */
+    type?: Readonly<NonNullable<NonNullable<InventoryControllerListEventsData['query']>['type']>>;
+    from?: string;
+    to?: string;
+    skuId?: string;
+    orderId?: string;
+    shortPick?: boolean;
     cursor?: string;
     signal?: AbortSignal;
   },
 ): Promise<LedgerEventListResponse> {
   const { data, error } = await inventoryControllerListEvents({
     path: { tenantId, warehouseId },
-    query:
-      options?.binId === undefined && options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.binId === undefined ? {} : { binId: options.binId }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query: definedQuery({
+      binId: options?.binId,
+      type: options?.type === undefined ? undefined : [...options.type],
+      from: options?.from,
+      to: options?.to,
+      skuId: options?.skuId,
+      orderId: options?.orderId,
+      shortPick: options?.shortPick,
+      cursor: options?.cursor,
+    }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -3063,24 +3163,23 @@ export async function fetchApiListBatchAlerts(
     kind?: 'expiry_upcoming' | 'aged';
     status?: 'open' | 'resolved' | 'dismissed';
     warehouseId?: string;
+    /** Story 9-1b — the drill's window (9-1). */
+    from?: string;
+    to?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
 ): Promise<BatchAlertListResponse> {
   const { data, error } = await replenishmentControllerListBatchAlerts({
     path: { tenantId },
-    query:
-      options?.kind === undefined &&
-      options?.status === undefined &&
-      options?.warehouseId === undefined &&
-      options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.kind === undefined ? {} : { kind: options.kind }),
-            ...(options.status === undefined ? {} : { status: options.status }),
-            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query: definedQuery({
+      kind: options?.kind,
+      status: options?.status,
+      warehouseId: options?.warehouseId,
+      from: options?.from,
+      to: options?.to,
+      cursor: options?.cursor,
+    }),
     signal: options?.signal,
   });
   if (error || !data) {

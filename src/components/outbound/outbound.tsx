@@ -5,6 +5,7 @@ import { useSyncExternalStore } from 'react';
 
 import type { UserResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { drillFor, warehouseDisplayLabel, type ParsedDrill } from '@/lib/drill';
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import {
   readActiveWarehouseId,
@@ -29,8 +30,14 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
  * page that could disagree with each other. There is one picker now, and every
  * surface is keyed on the warehouse it resolves, so a switch resets each
  * surface's cursor, filter, expanded row and pending confirmation together.
+ *
+ * Story 9-1b — an Overview drill (`list=orders`) drills the ORDERS section
+ * only: it lists the drill's warehouse (named in the link, never written to
+ * the active warehouse) under a banner, and the warehouse picker is hidden —
+ * it writes the active warehouse. Waves and pack & dispatch render normally
+ * for the active warehouse.
  */
-export function Outbound() {
+export function Outbound({ drill = null }: { drill?: ParsedDrill } = {}) {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
   const sessioned = useSyncExternalStore(
     subscribeSession,
@@ -52,10 +59,11 @@ export function Outbound() {
       </Section>
     );
   }
-  return <OutboundSessioned />;
+  return <OutboundSessioned drill={drill} />;
 }
 
-function OutboundSessioned() {
+function OutboundSessioned({ drill }: { drill: ParsedDrill }) {
+  const ordersDrill = drillFor(drill, 'orders');
   const warehouses = useOutboundWarehouses();
   const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
   const items = warehouses.state === 'ready' ? warehouses.data.items : [];
@@ -109,11 +117,14 @@ function OutboundSessioned() {
       <WarehousesRefreshNote reason={warehouses.data.refreshFailed} onRetry={warehouses.reload} />
     ) : null;
   const warehouseLabel = warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`;
+  // The drilled orders section reads the DRILL's warehouse, never the active one.
+  const ordersWarehouseId = ordersDrill === null ? warehouseId : ordersDrill.warehouseId;
+  const ordersWarehouseLabel = ordersDrill === null ? warehouseLabel : warehouseDisplayLabel(items, ordersWarehouseId);
 
   return (
     <div className="flex flex-col gap-4">
       {refreshNote}
-      {items.length > 1 && (
+      {items.length > 1 && ordersDrill === null && (
         <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
           <label className="flex items-center gap-2 text-xs">
             <span className="text-(--muted-foreground)">Warehouse</span>
@@ -132,11 +143,12 @@ function OutboundSessioned() {
         </div>
       )}
       <OutboundOrders
-        key={`orders-${warehouseId}`}
+        key={`orders-${ordersWarehouseId}`}
         tenantId={tenantId}
-        warehouseId={warehouseId}
-        warehouseLabel={warehouseLabel}
+        warehouseId={ordersWarehouseId}
+        warehouseLabel={ordersWarehouseLabel}
         role={role}
+        drill={ordersDrill}
       />
       <OutboundWaves
         key={`waves-${warehouseId}`}
