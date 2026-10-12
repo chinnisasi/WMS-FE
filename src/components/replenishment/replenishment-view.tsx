@@ -68,6 +68,7 @@ import {
 } from '@/lib/warehouses';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 import {
   ReadFailure,
   Section,
@@ -166,11 +167,7 @@ function ReplenishmentSessioned() {
   if (warehouses.state === 'failed') {
     return (
       <Section title="Replenishment">
-        <ReadFailure
-          word="Warehouses unavailable"
-          reason={warehouses.reason}
-          onRetry={warehouses.reload}
-        />
+        <WarehousesFailure state={warehouses} />
       </Section>
     );
   }
@@ -191,10 +188,16 @@ function ReplenishmentSessioned() {
     );
   }
 
+  // Decision 3 (21-11b): a failed refresh keeps the last-good list, with one line.
+  const refreshNote =
+    warehouses.state === 'ready' && warehouses.data.refreshFailed !== null ? (
+      <WarehousesRefreshNote reason={warehouses.data.refreshFailed} onRetry={warehouses.reload} />
+    ) : null;
   const warehouseLabel = warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`;
 
   return (
     <div className="flex flex-col gap-4">
+      {refreshNote}
       {items.length > 1 && (
         <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
           <label className="flex items-center gap-2 text-xs">

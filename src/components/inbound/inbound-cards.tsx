@@ -34,6 +34,8 @@ import { grnDocument } from '@/lib/asns';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
+import { Section } from '@/components/shared/surface';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 /**
  * The Inbound surface (stories 3.1 / 3.3) — the review half of receiving:
@@ -68,10 +70,10 @@ export function InboundCards() {
 }
 
 function InboundCardsSessioned() {
-  const { tenantId, items: warehouses } = useTenantWarehouses() ?? {
-    tenantId: null,
-    items: [] as readonly never[],
-  };
+  const warehouseRead = useTenantWarehouses();
+  // Loading reads as before; a failed read renders below (21-11b).
+  const { tenantId, items: warehouses } =
+    warehouseRead.state === 'ready' ? warehouseRead.data : { tenantId: null, items: [] as readonly never[] };
   const activeId = useSyncExternalStore(
     subscribeActiveWarehouse,
     () => (tenantId === null ? null : readActiveWarehouseId(tenantId)),
@@ -85,8 +87,21 @@ function InboundCardsSessioned() {
       : (warehouses[0]?.id ?? null);
   const warehouse = warehouses.find((w) => w.id === warehouseId);
 
+  // Story 21-11b: the warehouse picker failed to load — say so, with Retry,
+  // rather than four cards with no warehouse to read.
+  if (warehouseRead.state === 'failed') {
+    return (
+      <Section title="Inbound">
+        <WarehousesFailure state={warehouseRead} />
+      </Section>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      {warehouseRead.state === 'ready' && warehouseRead.data.refreshFailed !== null && (
+        <WarehousesRefreshNote reason={warehouseRead.data.refreshFailed} onRetry={warehouseRead.reload} />
+      )}
       <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
       <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
       <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />

@@ -18,8 +18,8 @@ import type {
 } from '@/lib/api/generated';
 import { formatRupees } from '@/lib/invoices';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
-import { chargeLabel, formatIstDate, istDateOf } from '@/lib/rate-cards';
-import { groupDecimal } from '@/lib/usage';
+import { basisLabel, chargeLabel, formatIstDate, istDateOf } from '@/lib/rate-cards';
+import { chargeQuantityLabel } from '@/lib/usage';
 
 // ── the module broadcaster ───────────────────────────────────────────────────
 
@@ -174,29 +174,14 @@ export function lineDescription(line: Pick<ClientInvoiceLineDto, 'chargeCode' | 
   return `${chargeLabel(line.chargeCode)}${unit} · ${formatIstDate(line.segmentFrom)} – ${formatIstDate(line.segmentTo)}`;
 }
 
-const COUNT_NOUNS: Readonly<Record<Exclude<ClientInvoiceLineDto['chargeCode'], 'storage'>, readonly [string, string]>> = {
-  inbound_handling: ['receipt line', 'receipt lines'],
-  pick: ['pick', 'picks'],
-  outbound_handling: ['order', 'orders'],
-};
-
-/** The quantity: storage in base-unit-days (`1,500 each-days`), the rest as counts. The server's exact string, grouped only. */
+/** The quantity: storage in base-unit-days (`1,500 each-days`), the rest as counts. The one label source is `chargeQuantityLabel` (`usage.ts`). */
 export function lineQuantityLabel(line: Pick<ClientInvoiceLineDto, 'chargeCode' | 'uom' | 'quantity'>): string {
-  if (line.chargeCode === 'storage') return `${groupDecimal(line.quantity)} ${line.uom ?? 'unit'}-days`;
-  const [one, many] = COUNT_NOUNS[line.chargeCode];
-  return `${groupDecimal(line.quantity)} ${line.quantity === '1' ? one : many}`;
+  return chargeQuantityLabel(line.chargeCode, line.quantity, line.uom);
 }
 
-const RATE_UNITS: Readonly<Record<ClientInvoiceLineDto['chargeCode'], string>> = {
-  storage: 'per 1,000 units/day',
-  inbound_handling: 'per receipt line',
-  pick: 'per pick',
-  outbound_handling: 'per order',
-};
-
-/** The rate: `₹3.30 per 1,000 units/day`, or "Unpriced" on a draft line nothing prices. */
-export function lineRateLabel(line: Pick<ClientInvoiceLineDto, 'chargeCode' | 'unitAmountPaise'>): string {
-  return line.unitAmountPaise === null ? 'Unpriced' : `${formatRupees(line.unitAmountPaise)} ${RATE_UNITS[line.chargeCode]}`;
+/** The rate: `₹3.30 per 1,000 units per day` (the line's own stored basis, through the rate cards' `basisLabel`), or "Unpriced" on a draft line nothing prices. */
+export function lineRateLabel(line: Pick<ClientInvoiceLineDto, 'basis' | 'unitAmountPaise'>): string {
+  return line.unitAmountPaise === null ? 'Unpriced' : `${formatRupees(line.unitAmountPaise)} ${basisLabel(line.basis)}`;
 }
 
 /** The taxable value: the line amount, or "—" when unpriced. */

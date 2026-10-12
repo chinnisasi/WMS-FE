@@ -3,10 +3,10 @@
 import type { ServiceReportDto } from '@/lib/api/generated';
 import { asOfLabel } from '@/lib/overview';
 import { serviceTiles } from '@/lib/service-report';
-import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
+import type { Reloadable, ResourceState } from '@/lib/resource-state';
 
 import { KpiTile } from '@/components/kpi-tile';
-import { ReadFailure } from '@/components/outbound/shell';
+import { ReadFailure } from '@/components/shared/surface';
 
 export const serviceInputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';

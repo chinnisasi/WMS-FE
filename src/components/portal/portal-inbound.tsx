@@ -33,8 +33,9 @@ import { roleHasCapability } from '@/lib/users';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
-import { LineRows } from '@/components/inbound/asn-card';
-import { ReadFailure, Section, buttonClass, inputClass, primaryClass, rowButtonClass, selectClass } from '@/components/outbound/shell';
+import { LineRows } from '@/components/shared/line-rows';
+import { ReadFailure, Section, buttonClass, inputClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
+import { WarehousesFailure } from '@/components/shared/warehouses-failure';
 
 /**
  * Story 21-7 — the portal's Inbound surface: this company's advance
@@ -229,7 +230,7 @@ function AnnounceForm({
 
   if (skus.state === 'failed') return frame(<ReadFailure word="SKUs not loaded" reason={skus.reason} onRetry={skus.reload} />);
   if (warehouses.state === 'failed') {
-    return frame(<ReadFailure word="Warehouses not loaded" reason={warehouses.reason} onRetry={warehouses.reload} />);
+    return frame(<WarehousesFailure state={warehouses} />);
   }
   if (skus.state === 'loading' || warehouses.state === 'loading') {
     return frame(<div className="text-(--muted-foreground)">Loading the form…</div>);

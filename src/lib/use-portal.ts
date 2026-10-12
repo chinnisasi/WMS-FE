@@ -33,7 +33,7 @@ import type {
 import { readSession, subscribeSession } from '@/lib/auth';
 import { PORTAL_SKU_MAX_PAGES, PORTAL_SKU_PAGE_LIMIT, portalReadReason } from '@/lib/portal';
 import { portalServiceReason } from '@/lib/service-report';
-import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
+import type { Reloadable, ResourceState } from '@/lib/resource-state';
 
 /**
  * Story 21-7 — the client portal's loaders, in the house shape

@@ -27,6 +27,8 @@ import { notifyZonesChanged } from '@/lib/zones';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { Section } from '@/components/shared/surface';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -87,7 +89,10 @@ export function ZonesBinsSetup() {
 }
 
 function ZonesBinsSetupSessioned() {
-  const { tenantId, items: warehouses } = useTenantWarehouses() ?? { tenantId: null, items: [] };
+  const warehouseRead = useTenantWarehouses();
+  // Loading reads as before (no tenant yet); a failed read renders below.
+  const { tenantId, items: warehouses } =
+    warehouseRead.state === 'ready' ? warehouseRead.data : { tenantId: null, items: [] };
   const activeId = useSyncExternalStore(
     subscribeActiveWarehouse,
     () => (tenantId === null ? null : readActiveWarehouseId(tenantId)),
@@ -108,6 +113,14 @@ function ZonesBinsSetupSessioned() {
   const selectedZoneId =
     zoneId !== null && zones?.some((z) => z.id === zoneId) ? zoneId : (zones?.[0]?.id ?? null);
   const bins = useZoneBins(warehouseId, selectedZoneId);
+
+  if (warehouseRead.state === 'failed') {
+    return (
+      <Section title="Zones and bins">
+        <WarehousesFailure state={warehouseRead} />
+      </Section>
+    );
+  }
 
   if (tenantId === null) return null;
 
@@ -167,6 +180,9 @@ function ZonesBinsSetupSessioned() {
         )}
       </div>
 
+      {warehouseRead.state === 'ready' && warehouseRead.data.refreshFailed !== null && (
+        <WarehousesRefreshNote reason={warehouseRead.data.refreshFailed} onRetry={warehouseRead.reload} />
+      )}
       {zones === null ? (
         <div className="text-(--muted-foreground)">Loading zones…</div>
       ) : (

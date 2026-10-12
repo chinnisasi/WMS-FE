@@ -61,6 +61,8 @@ const REPORT = {
 
 let urls: string[] = [];
 let serviceReply: [number, unknown] = [200, REPORT];
+/** Story 21-11b — the warehouses read fails while this is true. */
+let warehousesFail = false;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -71,6 +73,7 @@ let view: Rendered | undefined;
 beforeEach(() => {
   urls = [];
   serviceReply = [200, REPORT];
+  warehousesFail = false;
   writeSession(SESSION);
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
@@ -84,6 +87,9 @@ beforeEach(() => {
           client(BRAND_B, 'BRAND-B', 'Brand B', 'suspended'),
         ],
       });
+    }
+    if (pathname.endsWith('/warehouses') && warehousesFail) {
+      return json(503, { code: 'service-unavailable', status: 503, title: 'Unavailable', detail: 'The warehouses read is down.' });
     }
     if (pathname.endsWith('/warehouses')) return json(200, { items: [warehouse(W1, 'Main'), warehouse(W2, 'North')], nextCursor: null });
     if (pathname.endsWith('/service')) return json(serviceReply[0], serviceReply[1]);
@@ -199,5 +205,27 @@ describe('ClientService (21-8)', () => {
     await settle();
     expect(serviceUrls()).toHaveLength(2);
     expect(container.textContent).toContain('The report took too long — try a shorter period');
+  });
+
+  test('21-11b: a failed warehouses read takes the picker slot with Retry; the report still reads for all warehouses; Retry refetches', async () => {
+    warehousesFail = true;
+    const container = await open();
+    expect(container.querySelector('[aria-label="Report warehouse"]')).toBeNull();
+    const alert = container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain('Warehouses not loaded');
+    expect(alert.textContent).toContain('The warehouses read is down.');
+    // The report is not hidden — it reads every warehouse.
+    expect(serviceUrls()).toHaveLength(1);
+    expect(lastService().searchParams.has('warehouseId')).toBe(false);
+    const warehouseReads = () => urls.filter((url) => url.split('?')[0]!.endsWith('/warehouses')).length;
+    const before = warehouseReads();
+    warehousesFail = false;
+    const retry = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Retry')!;
+    act(() => void retry.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await settle();
+    expect(warehouseReads()).toBe(before + 1);
+    expect(container.textContent).not.toContain('Warehouses not loaded');
+    const select = container.querySelector('[aria-label="Report warehouse"]') as HTMLSelectElement;
+    expect([...select.options].map((option) => option.textContent)).toEqual(['All warehouses', 'Main', 'North']);
   });
 });

@@ -5,7 +5,7 @@ import { quantityWithUom } from '@/lib/portal';
 import { usePortalStock } from '@/lib/use-portal';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
-import { ReadFailure, Section } from '@/components/outbound/shell';
+import { ReadFailure, Section } from '@/components/shared/surface';
 
 type StockRow = PortalStockRowDto & { id: string };
 

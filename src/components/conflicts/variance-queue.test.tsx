@@ -93,6 +93,8 @@ function json(status: number, body: unknown): Response {
 
 let requests: { method: string; pathname: string; query: string; body: unknown; headers: Record<string, string> }[] = [];
 let varianceRows: Record<string, unknown>[] = [];
+/** Story 21-11b — the tenant warehouses read answers 503 while this is true. */
+let warehousesFail = false;
 /** The next resolve answer; a forced non-200 simulates the 409 race arm. */
 let nextResolveStatus = 200;
 /** Makes the ledger timeline walk fail (the ledger Retry pin). */
@@ -112,6 +114,9 @@ function stubRouter(): void {
       body = null;
     }
     requests.push({ method, pathname, query: url.search, body, headers });
+    if (method === 'GET' && pathname.endsWith('/warehouses') && warehousesFail) {
+      return json(503, { code: 'service-unavailable', title: 'Unavailable', status: 503, detail: 'The warehouses read is down.' });
+    }
     if (method === 'GET' && pathname.endsWith('/warehouses')) {
       return json(200, {
         items: [{ id: WAREHOUSE_ID, code: 'W1', name: 'Main', origin: {}, createdAt: '2026-09-01T00:00:00.000Z' }],
@@ -171,6 +176,7 @@ let view: Rendered | undefined;
 
 beforeEach(() => {
   requests = [];
+  warehousesFail = false;
   nextResolveStatus = 200;
   eventsFail = false;
   varianceRows = [variance()];
@@ -352,5 +358,19 @@ describe('VarianceQueue: the read-only render (story 5-5)', () => {
     // The only buttons are the status tabs, never a decision affordance.
     const labels = [...view.container.querySelectorAll('button')].map((b) => b.textContent);
     expect(labels).toEqual(['Open', 'Adjusted', 'Recounted']);
+  });
+});
+
+describe('VarianceQueue: a failed warehouses read (story 21-11b)', () => {
+  test('a label-only lookup degrades to the warehouse id — no banner', async () => {
+    view = await mount();
+    expect(view.container.textContent).toContain(' · W1');
+    view.unmount();
+    warehousesFail = true;
+    view = await mount();
+    expect(view.container.textContent).toContain(` · ${WAREHOUSE_ID}`);
+    expect(view.container.textContent).not.toContain(' · W1');
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    expect(view.container.textContent).not.toContain('Warehouses not loaded');
   });
 });

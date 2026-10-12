@@ -15,6 +15,8 @@ import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ReadFailure, selectClass } from '@/components/outbound/shell';
+import { Section } from '@/components/shared/surface';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 /**
  * The temperature-excursion review queue (story 12-5's read, surfaced by
@@ -63,7 +65,10 @@ export function ExcursionQueue() {
 }
 
 function ExcursionQueueSessioned() {
-  const { tenantId, items: warehouses } = useTenantWarehouses() ?? { tenantId: null, items: [] };
+  const warehouseRead = useTenantWarehouses();
+  // Loading reads as before; a failed read renders below (21-11b).
+  const { tenantId, items: warehouses } =
+    warehouseRead.state === 'ready' ? warehouseRead.data : { tenantId: null, items: [] };
   const activeId = useSyncExternalStore(
     subscribeActiveWarehouse,
     () => (tenantId === null ? null : readActiveWarehouseId(tenantId)),
@@ -144,6 +149,14 @@ function ExcursionQueueSessioned() {
     }
   }
 
+  if (warehouseRead.state === 'failed') {
+    return (
+      <Section title="Excursions">
+        <WarehousesFailure state={warehouseRead} />
+      </Section>
+    );
+  }
+
   if (tenantId === null) return null;
 
   return (
@@ -175,6 +188,9 @@ function ExcursionQueueSessioned() {
         )}
       </div>
 
+      {warehouseRead.state === 'ready' && warehouseRead.data.refreshFailed !== null && (
+        <WarehousesRefreshNote reason={warehouseRead.data.refreshFailed} onRetry={warehouseRead.reload} />
+      )}
       <div className="flex gap-1 text-xs" role="tablist" aria-label="Excursion status">
         {statusTabs.map((s) => (
           <button

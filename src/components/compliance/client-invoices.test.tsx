@@ -285,7 +285,7 @@ describe('ClientInvoices', () => {
       'Storage (each) · 1 Sep 2026 – 30 Sep 2026',
       '996729',
       '1,500 each-days',
-      '₹3.30 per 1,000 units/day',
+      '₹3.30 per 1,000 units per day',
       '₹4.95',
       '18%',
       '₹0.89',

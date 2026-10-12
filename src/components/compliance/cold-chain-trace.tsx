@@ -11,6 +11,8 @@ import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { useSkuMap } from '@/lib/use-inbound';
 
 import { ReadFailure, selectClass } from '@/components/outbound/shell';
+import { Section } from '@/components/shared/surface';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 /**
  * The `/compliance` cold-chain trace viewer (story 12-6's FR-45 read,
@@ -45,7 +47,10 @@ export function ColdChainTrace() {
 }
 
 function ColdChainTraceSessioned() {
-  const { tenantId, items: warehouses } = useTenantWarehouses() ?? { tenantId: null, items: [] };
+  const warehouseRead = useTenantWarehouses();
+  // Loading reads as before; a failed read renders below (21-11b).
+  const { tenantId, items: warehouses } =
+    warehouseRead.state === 'ready' ? warehouseRead.data : { tenantId: null, items: [] };
   const activeId = useSyncExternalStore(
     subscribeActiveWarehouse,
     () => (tenantId === null ? null : readActiveWarehouseId(tenantId)),
@@ -80,6 +85,14 @@ function ColdChainTraceSessioned() {
 
   const trace = useColdChainTrace(warehouseId, orderId);
 
+  if (warehouseRead.state === 'failed') {
+    return (
+      <Section title="Cold-chain trace">
+        <WarehousesFailure state={warehouseRead} />
+      </Section>
+    );
+  }
+
   if (tenantId === null) return null;
 
   function lookup(event: React.FormEvent) {
@@ -108,6 +121,9 @@ function ColdChainTraceSessioned() {
         </div>
       </div>
 
+      {warehouseRead.state === 'ready' && warehouseRead.data.refreshFailed !== null && (
+        <WarehousesRefreshNote reason={warehouseRead.data.refreshFailed} onRetry={warehouseRead.reload} />
+      )}
       {warehouses.length > 0 && warehouseId !== null && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <label className="flex flex-1 flex-col gap-1">

@@ -32,6 +32,7 @@ import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouse
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { KpiTile } from '@/components/kpi-tile';
 import { buttonClass, ReadFailure } from '@/components/outbound/shell';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 /**
  * The Overview (story 9-1, FR-27): ten live KPI tiles for one warehouse —
@@ -96,7 +97,7 @@ function OverviewSessioned() {
     return <div className="text-sm text-(--muted-foreground)">Loading warehouses…</div>;
   }
   if (warehouses.state === 'failed') {
-    return <ReadFailure word="Warehouses unavailable" reason={warehouses.reason} onRetry={warehouses.reload} />;
+    return <WarehousesFailure state={warehouses} />;
   }
   if (warehouseId === null) {
     return (
@@ -110,19 +111,27 @@ function OverviewSessioned() {
     );
   }
   const warehouse = items.find((w) => w.id === warehouseId);
+  // Decision 3 (21-11b): a failed refresh keeps the last-good list, with one line.
+  const refreshNote =
+    warehouses.state === 'ready' && warehouses.data.refreshFailed !== null ? (
+      <WarehousesRefreshNote reason={warehouses.data.refreshFailed} onRetry={warehouses.reload} />
+    ) : null;
 
-  if (overview.state === 'loading') {
-    return <div className="text-sm text-(--muted-foreground)">Loading the overview…</div>;
-  }
-  if (overview.state === 'failed') {
-    return <ReadFailure word="Overview unavailable" reason={overview.reason} onRetry={overview.reload} />;
-  }
   return (
-    <OverviewTiles
-      data={overview.data}
-      warehouseLabel={warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`}
-      onRefresh={overview.reload}
-    />
+    <div className="flex flex-col gap-2">
+      {refreshNote}
+      {overview.state === 'loading' ? (
+        <div className="text-sm text-(--muted-foreground)">Loading the overview…</div>
+      ) : overview.state === 'failed' ? (
+        <ReadFailure word="Overview unavailable" reason={overview.reason} onRetry={overview.reload} />
+      ) : (
+        <OverviewTiles
+          data={overview.data}
+          warehouseLabel={warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`}
+          onRefresh={overview.reload}
+        />
+      )}
+    </div>
   );
 }
 

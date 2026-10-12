@@ -25,7 +25,6 @@ import {
   parseAsnCreate,
   parseAsnNote,
   type AsnDraftLine,
-  type LineOption,
 } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { clientCell, clientLabel, showClients, skusOfClient } from '@/lib/clients';
@@ -41,6 +40,7 @@ import { ulid } from '@/lib/ulid';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ReadFailure } from '@/components/outbound/shell';
+import { lineButtonClass as buttonClass, lineInputClass as inputClass, LineRows } from '@/components/shared/line-rows';
 
 /**
  * Story 21-6 — the Inbound surface's advance shipment notices: a client
@@ -59,10 +59,8 @@ import { ReadFailure } from '@/components/outbound/shell';
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string };
 
-const buttonClass = 'rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60';
 const primaryClass =
   'rounded-sm bg-(--primary) px-3 py-1 text-xs font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60';
-const inputClass = 'rounded-sm border border-(--border) bg-(--background) px-2 py-1 text-xs';
 
 export function AsnsCard({
   warehouseId,
@@ -206,78 +204,6 @@ export function AsnsCard({
 
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
     </section>
-  );
-}
-
-/**
- * Draft line rows: SKU picker (the client's SKUs only) + quantity, add/remove.
- * Story 21-7b — exported and generic over the minimal `LineOption`, so the
- * portal's announce form renders the same rows from its own SKU list (mapped
- * by `portalSkuOption`) without importing an operator type.
- */
-export function LineRows<O extends LineOption>({
-  lines,
-  options,
-  skus,
-  onChange,
-  lockedIds,
-}: {
-  lines: readonly AsnDraftLine[];
-  options: readonly O[];
-  skus: Readonly<Record<string, O>> | null;
-  onChange: (next: AsnDraftLine[]) => void;
-  /** Lines that have received stock: their SKU is fixed (the server refuses a change). */
-  lockedIds?: ReadonlySet<string>;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      {lines.map((line, index) => {
-        const locked = line.id !== undefined && (lockedIds?.has(line.id) ?? false);
-        const sku = skus?.[line.skuId];
-        return (
-          <div key={line.id ?? `new-${index}`} className="flex flex-wrap items-center gap-2">
-            <select
-              aria-label={`Line ${index + 1} SKU`}
-              value={line.skuId}
-              disabled={locked}
-              onChange={(event) => onChange(lines.map((l, i) => (i === index ? { ...l, skuId: event.target.value } : l)))}
-              className={inputClass}
-            >
-              <option value="">Pick a SKU…</option>
-              {options.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.code} — {option.name}
-                </option>
-              ))}
-              {/* A row's current SKU stays listed even when the options exclude it. */}
-              {line.skuId !== '' && !options.some((option) => option.id === line.skuId) && (
-                <option value={line.skuId}>{sku?.code ?? line.skuId}</option>
-              )}
-            </select>
-            <input
-              type="number"
-              aria-label={`Line ${index + 1} quantity`}
-              min={0}
-              step={sku === undefined || sku.uomPrecision === 0 ? 1 : 10 ** -sku.uomPrecision}
-              value={line.qty}
-              onChange={(event) => onChange(lines.map((l, i) => (i === index ? { ...l, qty: event.target.value } : l)))}
-              className={`${inputClass} w-28`}
-            />
-            {sku !== undefined && <span className="text-xs text-(--muted-foreground)">{sku.uom}</span>}
-            {!locked && lines.length > 1 && (
-              <button type="button" onClick={() => onChange(lines.filter((_, i) => i !== index))} className={buttonClass}>
-                Remove
-              </button>
-            )}
-          </div>
-        );
-      })}
-      <div>
-        <button type="button" onClick={() => onChange([...lines, { skuId: '', qty: '' }])} className={buttonClass}>
-          Add line
-        </button>
-      </div>
-    </div>
   );
 }
 

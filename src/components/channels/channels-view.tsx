@@ -65,6 +65,7 @@ import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import { useChannelConnections } from '@/lib/use-channels';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 import {
   ReadFailure,
   Section,
@@ -142,11 +143,7 @@ function ChannelsSessioned() {
   if (warehouses.state === 'failed') {
     return (
       <Section title="Channels">
-        <ReadFailure
-          word="Context unavailable"
-          reason={warehouses.reason}
-          onRetry={warehouses.reload}
-        />
+        <WarehousesFailure state={warehouses} />
       </Section>
     );
   }
@@ -158,8 +155,14 @@ function ChannelsSessioned() {
     );
   }
 
+  // Decision 3 (21-11b): a failed refresh keeps the last-good list, with one line.
+  const refreshNote =
+    warehouses.state === 'ready' && warehouses.data.refreshFailed !== null ? (
+      <WarehousesRefreshNote reason={warehouses.data.refreshFailed} onRetry={warehouses.reload} />
+    ) : null;
   return (
     <div className="flex flex-col gap-4">
+      {refreshNote}
       <ConnectionList
         tenantId={tenantId}
         warehouses={warehouses.state === 'ready' ? warehouses.data.items : []}

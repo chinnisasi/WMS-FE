@@ -16,6 +16,7 @@ import {
   serviceInputClass,
   serviceLabelClass,
 } from '@/components/reports/service-tiles';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 const ALL_WAREHOUSES = '';
 
@@ -45,7 +46,7 @@ export function ClientService() {
   const list = clients.state === 'ready' ? clients.data : [];
   // The chosen client while it is still listed, else the first (keyed derivation, no reset effect).
   const clientId = list.find((client) => client.id === chosenClient)?.id ?? list[0]?.id ?? null;
-  const warehouseItems = warehouses?.items ?? [];
+  const warehouseItems = warehouses.state === 'ready' ? warehouses.data.items : [];
   // A warehouse that left the list falls back to every warehouse.
   const activeWarehouse = warehouseItems.some((w) => w.id === warehouseId) ? warehouseId : ALL_WAREHOUSES;
   const parsed = parseServicePeriod(from, to);
@@ -76,22 +77,34 @@ export function ClientService() {
               </select>
             </label>
             <ServicePeriodInputs from={from} to={to} onFrom={setFrom} onTo={setTo} />
-            <label className="flex min-w-48 flex-col gap-1">
-              <span className={serviceLabelClass}>Warehouse</span>
-              <select
-                className={serviceInputClass}
-                value={activeWarehouse}
-                aria-label="Report warehouse"
-                onChange={(event) => setWarehouseId(event.target.value)}
-              >
-                <option value={ALL_WAREHOUSES}>All warehouses</option>
-                {warehouseItems.map((warehouse) => (
-                  <option key={warehouse.id} value={warehouse.id}>
-                    {warehouse.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {warehouses.state === 'failed' ? (
+              // 21-11b: the failure takes the picker's slot; the report still
+              // reads for "All warehouses".
+              <div className="min-w-48">
+                <WarehousesFailure state={warehouses} />
+              </div>
+            ) : (
+              <label className="flex min-w-48 flex-col gap-1">
+                <span className={serviceLabelClass}>Warehouse</span>
+                <select
+                  className={serviceInputClass}
+                  value={activeWarehouse}
+                  aria-label="Report warehouse"
+                  onChange={(event) => setWarehouseId(event.target.value)}
+                >
+                  <option value={ALL_WAREHOUSES}>All warehouses</option>
+                  {warehouseItems.map((warehouse) => (
+                    <option key={warehouse.id} value={warehouse.id}>
+                      {warehouse.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {warehouses.state === 'ready' && warehouses.data.refreshFailed !== null && (
+              // Decision 3 (21-11b): the last-good list stays, with one line.
+              <WarehousesRefreshNote reason={warehouses.data.refreshFailed} onRetry={warehouses.reload} />
+            )}
             <button type="button" className={serviceButtonClass} onClick={report.reload} disabled={parsed.period === null || clientId === null}>
               Refresh
             </button>

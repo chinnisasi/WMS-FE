@@ -125,19 +125,27 @@ export function groupDecimal(value: string): string {
   return `${negative ? '−' : ''}${grouped}${fraction === undefined ? '' : `.${fraction}`}`;
 }
 
+/** The count nouns for the non-storage charges — the ONE copy (usage and client invoices both render through `chargeQuantityLabel`). */
 const COUNT_NOUNS: Readonly<Record<Exclude<UsageLineDto['chargeCode'], 'storage'>, readonly [string, string]>> = {
   inbound_handling: ['receipt line', 'receipt lines'],
   pick: ['pick', 'picks'],
   outbound_handling: ['order', 'orders'],
 };
 
+/**
+ * The one charge-quantity label (21-11b): storage as base-unit-days
+ * (`1,234.567 kg-days`), the rest as counts (`3 receipt lines`). The server's
+ * exact decimal string, grouped only.
+ */
+export function chargeQuantityLabel(code: UsageLineDto['chargeCode'], quantity: string, uom: string | null): string {
+  if (code === 'storage') return `${groupDecimal(quantity)} ${uom ?? 'unit'}-days`;
+  const [one, many] = COUNT_NOUNS[code];
+  return `${groupDecimal(quantity)} ${quantity === '1' ? one : many}`;
+}
+
 /** The quantity cell: storage as base-unit-days (`1,234.567 kg-days`), the rest as counts (`3 receipt lines`). */
 export function usageQuantityLabel(line: Pick<UsageLineDto, 'chargeCode' | 'uom' | 'quantity'>): string {
-  if (line.chargeCode === 'storage') {
-    return `${groupDecimal(line.quantity)} ${line.uom === null ? 'unit' : line.uom}-days`;
-  }
-  const [one, many] = COUNT_NOUNS[line.chargeCode];
-  return `${groupDecimal(line.quantity)} ${line.quantity === '1' ? one : many}`;
+  return chargeQuantityLabel(line.chargeCode, line.quantity, line.uom);
 }
 
 /** The base-unit cell: the storage line's UoM, or — for a count. */
