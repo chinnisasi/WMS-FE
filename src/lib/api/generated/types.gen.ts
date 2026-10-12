@@ -6692,6 +6692,277 @@ export type PortalInvoiceDetailResponse = {
     lines: Array<PortalInvoiceLineDto>;
 };
 
+export type StockAdjustmentSummaryDto = {
+    skuId: string;
+    /**
+     * The requested signed adjustment, base units of the SKU’s UoM
+     */
+    quantityDelta: number;
+    reasonCode: string;
+};
+
+export type StockAdjustmentNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'stock-adjustment';
+    summary: StockAdjustmentSummaryDto;
+    resolution: 'approved' | 'rejected' | null;
+};
+
+export type CountVarianceSummaryDto = {
+    skuId: string;
+    /**
+     * Counted − expected, base units
+     */
+    delta: number;
+};
+
+export type CountVarianceNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'count-variance';
+    summary: CountVarianceSummaryDto;
+    resolution: 'adjusted' | 'recounted' | null;
+};
+
+export type OverReceiptSummaryDto = {
+    grnCode: string;
+    skuId: string;
+    /**
+     * The units received beyond the document, base units
+     */
+    excessQty: number;
+};
+
+export type OverReceiptNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'over-receipt';
+    summary: OverReceiptSummaryDto;
+    resolution: 'approved' | 'rejected' | null;
+};
+
+export type RejectedOpSummaryDto = {
+    /**
+     * The device op type, e.g. `grn.submit`
+     */
+    opType: string;
+    /**
+     * The refusal’s problem code
+     */
+    problemCode: string;
+};
+
+export type RejectedOpNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'rejected-op';
+    summary: RejectedOpSummaryDto;
+    resolution: 'applied' | 'recounted' | 'discarded' | null;
+};
+
+export type ReorderBreachSummaryDto = {
+    skuId: string;
+    /**
+     * ATP at detection, base units
+     */
+    atpQty: number;
+    /**
+     * The effective reorder point at detection, base units
+     */
+    pointQty: number;
+};
+
+export type ReorderBreachNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'reorder-breach';
+    summary: ReorderBreachSummaryDto;
+    resolution: 'recovered' | 'dismissed' | 'actioned' | 'policy-removed' | null;
+};
+
+export type BatchAlertSummaryDto = {
+    kind: 'expiry_upcoming' | 'aged';
+    skuId: string;
+    batchCode: string;
+    /**
+     * The batch’s expiry — the expiry_upcoming arm only
+     */
+    expiryDate?: string;
+    /**
+     * The frozen age in whole days — the aged arm only
+     */
+    ageDays?: number;
+};
+
+export type BatchAlertNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'batch-alert';
+    summary: BatchAlertSummaryDto;
+    resolution: 'resolved' | 'dismissed' | null;
+};
+
+export type QcHoldSummaryDto = {
+    skuId: string;
+    reason: string;
+};
+
+export type QcHoldNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'qc-hold';
+    summary: QcHoldSummaryDto;
+    resolution: 'released' | null;
+};
+
+export type ChannelSyncSummaryDto = {
+    connectionId: string;
+};
+
+export type ChannelSyncNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'channel-sync';
+    summary: ChannelSyncSummaryDto;
+    resolution: 'recovered' | 'disconnected' | null;
+};
+
+export type NotificationListResponse = {
+    /**
+     * Visible entries, newest first. A member sees only the sources it can act on.
+     */
+    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto>;
+    nextCursor: string | null;
+};
+
+export type NotificationStatusResponse = {
+    /**
+     * Show the bell’s dot: an open entry you can act on surfaced since you last opened the panel (or you never have). Never a count
+     */
+    hasNew: boolean;
+};
+
 export type ChannelWebhookOrderResponse = {
     outcome: 'accepted' | 'backordered' | 'replayed';
     /**
@@ -16678,6 +16949,115 @@ export type PortalControllerInvoiceResponses = {
 };
 
 export type PortalControllerInvoiceResponse = PortalControllerInvoiceResponses[keyof PortalControllerInvoiceResponses];
+
+export type NotificationsControllerListData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        /**
+         * Page size, default 25
+         */
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/notifications';
+};
+
+export type NotificationsControllerListErrors = {
+    /**
+     * Malformed cursor (invalid-cursor), or a limit outside 1–100 (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type NotificationsControllerListError = NotificationsControllerListErrors[keyof NotificationsControllerListErrors];
+
+export type NotificationsControllerListResponses = {
+    /**
+     * The page (newest first)
+     */
+    200: NotificationListResponse;
+};
+
+export type NotificationsControllerListResponse = NotificationsControllerListResponses[keyof NotificationsControllerListResponses];
+
+export type NotificationsControllerStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/notifications/status';
+};
+
+export type NotificationsControllerStatusErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type NotificationsControllerStatusError = NotificationsControllerStatusErrors[keyof NotificationsControllerStatusErrors];
+
+export type NotificationsControllerStatusResponses = {
+    200: NotificationStatusResponse;
+};
+
+export type NotificationsControllerStatusResponse = NotificationsControllerStatusResponses[keyof NotificationsControllerStatusResponses];
+
+export type NotificationsControllerOpenedData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/notifications/opened';
+};
+
+export type NotificationsControllerOpenedErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type NotificationsControllerOpenedError = NotificationsControllerOpenedErrors[keyof NotificationsControllerOpenedErrors];
+
+export type NotificationsControllerOpenedResponses = {
+    200: NotificationStatusResponse;
+};
+
+export type NotificationsControllerOpenedResponse = NotificationsControllerOpenedResponses[keyof NotificationsControllerOpenedResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;

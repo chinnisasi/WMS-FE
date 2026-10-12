@@ -11,6 +11,7 @@ import { operatorShellRoute } from '@/lib/portal';
 
 import { SignOutButton } from '@/components/auth/sign-out';
 import { CommandPalette } from './command-palette';
+import { NotificationBell } from './notification-bell';
 import { Sidebar, ThemeToggle } from './sidebar';
 import { WarehouseSwitcher } from './warehouse-switcher';
 
@@ -120,10 +121,13 @@ function OperatorShell({ children }: { children: React.ReactNode }) {
               </div>
             </nav>
           </details>
+          {/* Story 9-2 — the notification bell: a sibling layer of the menu,
+              beside Search (it carries the ml-auto that pushes both right). */}
+          <NotificationBell paletteOpen={paletteOpen} />
           <button
             type="button"
             onClick={() => setPaletteOpen(true)}
-            className="ml-auto flex items-center gap-2 rounded-md border border-(--border) px-2 py-1 text-xs text-(--muted-foreground) hover:bg-(--muted)"
+            className="flex items-center gap-2 rounded-md border border-(--border) px-2 py-1 text-xs text-(--muted-foreground) hover:bg-(--muted)"
             aria-label="Open command palette"
           >
             Search <kbd className="data rounded border border-(--border) px-1">⌘K</kbd>

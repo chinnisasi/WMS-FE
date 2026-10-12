@@ -8,6 +8,7 @@ import { RejectedOpsQueue } from '@/components/conflicts/rejected-ops-queue';
 import { VarianceQueue } from '@/components/conflicts/variance-queue';
 import { AdjustmentPendingsQueue } from '@/components/conflicts/adjustment-pendings-queue';
 import { readSession, subscribeSession } from '@/lib/auth';
+import type { ConflictsQueue } from '@/lib/conflicts-queues';
 import { drillFor, type ParsedDrill } from '@/lib/drill';
 import { DrillUnavailable } from '@/components/shared/drill-banner';
 import type { Capability } from '@/lib/users';
@@ -57,7 +58,7 @@ const QUEUES: readonly {
   { id: 'rejected-ops', label: 'Rejected ops', capabilities: ['review.decide'] },
 ];
 
-type Queue = 'over-receipts' | 'variances' | 'adjustment-pendings' | 'excursions' | 'rejected-ops';
+type Queue = ConflictsQueue;
 
 /**
  * Story 9-1b — an Overview drill (`list=over-receipts`) selects the
@@ -66,8 +67,14 @@ type Queue = 'over-receipts' | 'variances' | 'adjustment-pendings' | 'excursions
  * link from such a role — decision 5). While drilled, the queue tab strip
  * is hidden: switching away would leave the drill applied off-screen, with
  * no banner to Clear it.
+ *
+ * Story 9-2 — `initialQueue` (the page's `?queue=` parameter) selects the
+ * starting tab outside a drill.
  */
-export function ConflictsQueues({ drill = null }: { drill?: ParsedDrill } = {}) {
+export function ConflictsQueues({
+  drill = null,
+  initialQueue = null,
+}: { drill?: ParsedDrill; initialQueue?: ConflictsQueue | null } = {}) {
   const overReceiptsDrill = drillFor(drill, 'over-receipts');
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
   // render) so a /me bootstrap role rewrite re-renders the tab filtering.
@@ -85,7 +92,10 @@ export function ConflictsQueues({ drill = null }: { drill?: ParsedDrill } = {}) 
           q.capabilities.some((capability) => roleHasCapability(role, capability)),
         );
 
-  const [queue, setQueue] = useState<Queue>('over-receipts');
+  // Story 9-2: a `?queue=` link (a notification's click-through) opens on
+  // that queue; a drill always means over-receipts. A queue the role cannot
+  // see falls back below like any other.
+  const [queue, setQueue] = useState<Queue>(overReceiptsDrill === null ? (initialQueue ?? 'over-receipts') : 'over-receipts');
   if (overReceiptsDrill !== null && role !== undefined && !visible.some((q) => q.id === 'over-receipts')) {
     return <DrillUnavailable />;
   }
