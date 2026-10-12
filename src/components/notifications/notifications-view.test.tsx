@@ -38,7 +38,7 @@ interface Recorded {
 }
 
 let requests: Recorded[] = [];
-let mode: 'paged' | 'empty' | 'fail' = 'paged';
+let mode: 'paged' | 'empty' | 'fail' | 'future' = 'paged';
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -56,6 +56,9 @@ beforeEach(() => {
     if (p === `/api/v1/tenants/${T}/notifications`) {
       if (mode === 'fail') return json(500, { code: 'internal-error', title: 'Internal Server Error', status: 500, detail: 'Notifications read failed' });
       if (mode === 'empty') return json(200, { items: [], nextCursor: null });
+      if (mode === 'future') {
+        return json(200, { items: [entry('1'), entry('8', { sourceType: 'task-assignment', summary: { taskId: 't' } })], nextCursor: null });
+      }
       return url.searchParams.has('cursor')
         ? json(200, { items: [entry('3', { resolvedAt: '2026-10-06T05:00:00.000Z', resolution: 'released' })], nextCursor: null })
         : json(200, { items: [entry('1'), entry('2')], nextCursor: CURSOR });
@@ -133,5 +136,12 @@ describe('/notifications', () => {
     await act(async () => button('Retry').click());
     await settle();
     expect(entryLinks()).toHaveLength(2);
+  });
+
+  test('an entry of a source this build does not know is dropped, never rendered half-known', async () => {
+    mode = 'future';
+    view = render(NotificationsPage());
+    await settle();
+    expect(entryLinks().map((a) => a.getAttribute('data-notification'))).toEqual(['qc-hold']);
   });
 });

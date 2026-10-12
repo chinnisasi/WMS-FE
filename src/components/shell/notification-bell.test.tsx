@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test';
 import { act } from 'react';
 import type { ComponentType } from 'react';
 
@@ -90,6 +90,22 @@ interface Recorded {
 let requests: Recorded[] = [];
 let hasNew = true;
 let items: unknown[] = [OPEN_OVER_RECEIPT, RESOLVED_QC, OPEN_BATCH, OPEN_CHANNEL];
+let listFails = false;
+/** When set, the next response of that route waits for `release()`. */
+let holdOpened: Deferred | null = null;
+let holdStatus: Deferred | null = null;
+
+interface Deferred {
+  readonly promise: Promise<void>;
+  readonly release: () => void;
+}
+function deferred(): Deferred {
+  let release = () => undefined as void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -102,10 +118,25 @@ function stubApi(): void {
     const method = request.method.toUpperCase();
     requests.push({ method, pathname: url.pathname, params: url.searchParams });
     const p = url.pathname;
-    if (method === 'POST' && p === `/api/v1/tenants/${T}/notifications/opened`) return json(200, { hasNew: false });
+    if (method === 'POST' && p === `/api/v1/tenants/${T}/notifications/opened`) {
+      const hold = holdOpened;
+      if (hold !== null) await hold.promise;
+      // The server's truth: after an open, nothing is new.
+      hasNew = false;
+      return json(200, { hasNew: false });
+    }
     if (method !== 'GET') return json(404, { code: 'not-found', title: 'Unrouted', status: 404 });
-    if (p === `/api/v1/tenants/${T}/notifications/status`) return json(200, { hasNew });
-    if (p === `/api/v1/tenants/${T}/notifications`) return json(200, { items, nextCursor: null });
+    if (p === `/api/v1/tenants/${T}/notifications/status`) {
+      // The answer is decided when the request ARRIVES, like the server's.
+      const answer = hasNew;
+      const hold = holdStatus;
+      if (hold !== null) await hold.promise;
+      return json(200, { hasNew: answer });
+    }
+    if (p === `/api/v1/tenants/${T}/notifications`) {
+      if (listFails) return json(500, { code: 'internal-error', title: 'Internal Server Error', status: 500, detail: 'List failed' });
+      return json(200, { items, nextCursor: null });
+    }
     if (p === `/api/v1/tenants/${T}/catalog/skus`) return json(200, { items: [SKU], nextCursor: null });
     if (p === `/api/v1/tenants/${T}/warehouses`) return json(200, { items: WAREHOUSES, nextCursor: null });
     return json(404, { code: 'not-found', title: 'Unrouted', status: 404 });
@@ -137,6 +168,9 @@ beforeEach(() => {
   requests = [];
   hasNew = true;
   items = [OPEN_OVER_RECEIPT, RESOLVED_QC, OPEN_BATCH, OPEN_CHANNEL];
+  listFails = false;
+  holdOpened = null;
+  holdStatus = null;
   pathname = '/';
   stubApi();
   writeSession(session());
@@ -196,10 +230,15 @@ describe('the bell', () => {
     view!.rerender(<NotificationBell paletteOpen={false} />);
     await settle();
     expect(calls('GET', '/notifications/status')).toHaveLength(2);
-    // Time passing reads nothing (no polling).
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 60));
-    });
+    // Time passing reads nothing (no polling): ten minutes on fake timers.
+    jest.useFakeTimers();
+    try {
+      await act(async () => {
+        jest.advanceTimersByTime(10 * 60_000);
+      });
+    } finally {
+      jest.useRealTimers();
+    }
     await settle();
     expect(calls('GET', '/notifications/status')).toHaveLength(2);
   });
@@ -276,22 +315,83 @@ describe('the bell', () => {
     expect(document.activeElement).toBe(trigger());
   });
 
-  test('an outside click closes it; following a link closes it', async () => {
+  test('an outside click closes it; following a link closes it — focus returns to the bell both ways', async () => {
     await mount();
     await openPanel();
+    expect(document.activeElement).toBe(view!.container.querySelector('[role="region"]'));
     await act(async () => {
       document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     });
     await settle();
     expect(details().open).toBe(false);
+    expect(document.activeElement).toBe(trigger());
 
     await openPanel();
     const link = view!.container.querySelector('a[data-notification="qc-hold"]') as HTMLAnchorElement;
+    link.focus();
     await act(async () => {
       link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
     await settle();
     expect(details().open).toBe(false);
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  test('a failed list records NO open: the dot stays and no opened POST is sent (Retry that loads records it once)', async () => {
+    listFails = true;
+    await mount();
+    await openPanel();
+    expect(view!.container.textContent).toContain('Notifications unavailable');
+    expect(calls('POST', '/notifications/opened')).toHaveLength(0);
+    expect(dot()).not.toBeNull();
+
+    listFails = false;
+    const retry = [...view!.container.querySelectorAll('button')].find((b) => b.textContent === 'Retry')!;
+    await act(async () => retry.click());
+    await settle();
+    expect(calls('POST', '/notifications/opened')).toHaveLength(1);
+    expect(dot()).toBeNull();
+  });
+
+  test('a status read sent while an opened is in flight waits for it — the dot does not re-light', async () => {
+    await mount();
+    holdOpened = deferred();
+    await openPanel();
+    expect(calls('POST', '/notifications/opened')).toHaveLength(1);
+    // A route change while the open is still in flight: no status read yet.
+    pathname = '/inbound';
+    view!.rerender(<NotificationBell paletteOpen={false} />);
+    await settle();
+    expect(calls('GET', '/notifications/status')).toHaveLength(1);
+    holdOpened.release();
+    await settle();
+    // Sent after the open settled — and the server says nothing is new.
+    expect(calls('GET', '/notifications/status')).toHaveLength(2);
+    expect(dot()).toBeNull();
+  });
+
+  test('a status answer whose request began before the open is dropped', async () => {
+    holdStatus = deferred();
+    await mount();
+    expect(calls('GET', '/notifications/status')).toHaveLength(1);
+    const late = holdStatus;
+    holdStatus = null;
+    await openPanel();
+    expect(calls('POST', '/notifications/opened')).toHaveLength(1);
+    // The pre-open read (answered "new" when it arrived) lands now.
+    late.release();
+    await settle();
+    expect(dot()).toBeNull();
+    expect(trigger().getAttribute('aria-label')).toBe('Notifications');
+  });
+
+  test('an entry of a source this build does not know is dropped — the panel renders the rest', async () => {
+    items = [{ ...OPEN_OVER_RECEIPT, id: 'n-9', sourceType: 'task-assignment', summary: { taskId: 't' } }, RESOLVED_QC];
+    await mount();
+    await openPanel();
+    const links = [...view!.container.querySelectorAll('a[data-notification]')];
+    expect(links.map((a) => a.getAttribute('data-notification'))).toEqual(['qc-hold']);
+    expect(calls('POST', '/notifications/opened')).toHaveLength(1);
   });
 
   test('opening the palette closes it; Esc is the palette’s while the palette is open', async () => {

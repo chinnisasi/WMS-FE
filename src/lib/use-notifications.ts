@@ -9,7 +9,7 @@ import {
 } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { warehouseDisplayLabel } from '@/lib/drill';
-import type { NotificationEntry, NotificationLookups } from '@/lib/notifications';
+import { knownNotifications, type NotificationEntry, type NotificationLookups } from '@/lib/notifications';
 import { useSkuMap } from '@/lib/use-inbound';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { readReason } from '@/lib/outbound-orders';
@@ -64,7 +64,12 @@ export function useNotifications(
           setResult({
             tenantId,
             requested: activeCursor,
-            state: { state: 'ready', data: { items: page.items, nextCursor: page.nextCursor ?? null, fetchedAtMs: Date.now() } },
+            // An entry of a source this build does not know (a newer
+            // backend) is dropped here, before anything renders it.
+            state: {
+              state: 'ready',
+              data: { items: knownNotifications(page.items), nextCursor: page.nextCursor ?? null, fetchedAtMs: Date.now() },
+            },
           });
         }
       } catch (error) {
@@ -102,25 +107,33 @@ export function useNotifications(
  * the same pathname and refetches nothing). No polling, no timer.
  *
  * `markOpened` records the panel open server-side and clears the dot from
- * the server's answer. A status read still in flight when the panel opened is
- * dropped (the seq guard, frontend guide §1.3) — it could only re-light a dot
- * the open just cleared. A failed read shows no dot (the bell is chrome; the
- * panel itself reports its own failures).
+ * the server's answer. Two guards keep an open from being undone:
+ *  - a status read still in flight when the panel opened is dropped (the seq
+ *    guard, frontend guide §1.3);
+ *  - a status read that STARTS while an `opened` is in flight waits for it to
+ *    settle first — sent alongside, the server could answer it before the
+ *    open commits and re-light the dot.
+ * A failed read keeps the last answer (the bell is chrome — the panel
+ * reports its own failures; the next pathname change reads again).
  */
 export function useNotificationStatus(pathname: string): { readonly hasNew: boolean; readonly markOpened: () => void } {
   const tenantId = useTenantId();
   const [status, setStatus] = useState<{ tenantId: string; hasNew: boolean } | null>(null);
   const seq = useRef(0);
+  const openedInFlight = useRef<Promise<unknown> | null>(null);
 
   useEffect(() => {
     if (tenantId === null) return;
     const mine = ++seq.current;
     (async () => {
+      const pending = openedInFlight.current;
+      if (pending !== null) await pending.catch(() => undefined);
+      if (mine !== seq.current) return;
       try {
         const answer = await fetchApiNotificationStatus(tenantId);
         if (mine === seq.current) setStatus({ tenantId, hasNew: answer.hasNew });
       } catch {
-        // Quiet chrome: no dot on a failed read.
+        // Keep the last answer.
       }
     })();
   }, [tenantId, pathname]);
@@ -128,14 +141,18 @@ export function useNotificationStatus(pathname: string): { readonly hasNew: bool
   const markOpened = useCallback(() => {
     if (tenantId === null) return;
     const mine = ++seq.current;
-    (async () => {
-      try {
-        const answer = await fetchApiMarkNotificationsOpened(tenantId);
+    const request = fetchApiMarkNotificationsOpened(tenantId);
+    openedInFlight.current = request;
+    request
+      .then((answer) => {
         if (mine === seq.current) setStatus({ tenantId, hasNew: answer.hasNew });
-      } catch {
+      })
+      .catch(() => {
         // The dot stays as it was; the next pathname change re-reads it.
-      }
-    })();
+      })
+      .finally(() => {
+        if (openedInFlight.current === request) openedInFlight.current = null;
+      });
   }, [tenantId]);
 
   const hasNew = status !== null && status.tenantId === tenantId && status.hasNew;

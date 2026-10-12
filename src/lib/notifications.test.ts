@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
+import { CONFLICTS_QUEUES, parseQueueParam } from './conflicts-queues';
 import { parseDrill, type DrillScreen } from './drill';
 import {
   bellLabel,
+  knownNotifications,
   istTimeLabel,
   notificationCategory,
   notificationDescription,
@@ -82,6 +84,8 @@ describe('notification copy', () => {
     expect(notificationResolvedLabel(resolved(ENTRIES['over-receipt'], 'approved'))).toBe('Resolved · approved');
     expect(notificationResolvedLabel(resolved(ENTRIES['reorder-breach'], 'policy-removed'))).toBe('Resolved · policy removed');
     expect(notificationResolvedLabel(resolved(ENTRIES['channel-sync'], 'disconnected'))).toBe('Resolved · disconnected');
+    // Never the tautology "Resolved · resolved" (a batch alert's stock ran out).
+    expect(notificationResolvedLabel(resolved(ENTRIES['batch-alert'], 'resolved'))).toBe('Resolved · cleared');
   });
 
   test('relative time from the fetch instant, the IST absolute instant for its title, the bell’s accessible name', () => {
@@ -102,9 +106,9 @@ describe('click-through links', () => {
     const expected: Record<NotificationEntry['sourceType'], [string, string]> = {
       'over-receipt': [`/conflicts?list=over-receipts&warehouseId=${W}&status=pending`, `/conflicts?list=over-receipts&warehouseId=${W}`],
       'batch-alert': [`/replenishment?list=batch-alerts&warehouseId=${W}&kind=aged`, `/replenishment?list=batch-alerts&warehouseId=${W}&kind=aged`],
-      'stock-adjustment': ['/conflicts', '/conflicts'],
-      'count-variance': ['/conflicts', '/conflicts'],
-      'rejected-op': ['/conflicts', '/conflicts'],
+      'stock-adjustment': ['/conflicts?queue=adjustment-pendings', '/conflicts?queue=adjustment-pendings'],
+      'count-variance': ['/conflicts?queue=variances', '/conflicts?queue=variances'],
+      'rejected-op': ['/conflicts?queue=rejected-ops', '/conflicts?queue=rejected-ops'],
       'reorder-breach': ['/replenishment', '/replenishment'],
       'qc-hold': ['/inbound', '/inbound'],
       'channel-sync': ['/channels', '/channels'],
@@ -128,22 +132,58 @@ describe('click-through links', () => {
       { ...ENTRIES['over-receipt'], warehouseId: null } as NotificationEntry,
     ];
     let drills = 0;
+    let queues = 0;
     for (const entry of all) {
       const href = notificationHref(entry);
       const [path, query] = href.split('?') as [string, string | undefined];
       if (query === undefined) continue;
-      drills += 1;
       const params = Object.fromEntries(new URLSearchParams(query).entries());
+      if (params.list === undefined) {
+        queues += 1;
+        // A queue link: not a drill (parseDrill reads a plain visit), and
+        // the queue is one Conflicts & Reviews knows.
+        expect(path).toBe('/conflicts');
+        expect(parseDrill('conflicts', params)).toBeNull();
+        expect(CONFLICTS_QUEUES as readonly (string | null)[]).toContain(parseQueueParam(params));
+        continue;
+      }
+      drills += 1;
       const drill = parseDrill(screenOf[path]!, params);
       expect(drill).not.toBeNull();
       expect(drill).not.toBe('unsupported');
       expect(typeof drill === 'object' && drill !== null ? drill.list : null).toBe(params.list as never);
     }
     expect(drills).toBe(6);
+    expect(queues).toBe(6);
     expect(parseDrill('conflicts', Object.fromEntries(new URLSearchParams(notificationHref(ENTRIES['over-receipt']).split('?')[1]).entries()))).toEqual({
       list: 'over-receipts',
       warehouseId: W,
       status: 'pending',
     });
+  });
+});
+
+describe('a source this build does not know (a newer backend)', () => {
+  const future = { ...base, sourceType: 'task-assignment', warehouseId: W, summary: { taskId: 'x' } };
+
+  test('knownNotifications drops it and keeps every known arm, in order', () => {
+    const items = [ENTRIES['qc-hold'], future, ENTRIES['channel-sync'], null, 'junk'];
+    expect(knownNotifications(items)).toEqual([ENTRIES['qc-hold'], ENTRIES['channel-sync']]);
+  });
+
+  test('the switches never crash on it: a generic category, no description, the list page', () => {
+    const entry = future as unknown as NotificationEntry;
+    expect(notificationCategory(entry)).toBe('Notification');
+    expect(notificationDescription(entry, LOOKUPS)).toBe('');
+    expect(notificationHref(entry)).toBe('/notifications');
+  });
+
+  test('the ?queue= parameter: only a known queue id, one value', () => {
+    expect(parseQueueParam({ queue: 'variances' })).toBe('variances');
+    expect(parseQueueParam({ queue: 'nope' })).toBeNull();
+    expect(parseQueueParam({ queue: ['variances', 'rejected-ops'] })).toBeNull();
+    expect(parseQueueParam({})).toBeNull();
+    // A queue link beside a drill list is not a lawful drill (unknown key).
+    expect(parseDrill('conflicts', { list: 'over-receipts', queue: 'variances' })).toBe('unsupported');
   });
 });

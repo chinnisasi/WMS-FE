@@ -24,7 +24,8 @@ import { ReadFailure } from '@/components/shared/surface';
  *  - **Focus.** Moves into the panel on open; returns to the bell on close.
  *  - **The body is lazy.** It mounts only while open, so its reads (the
  *    newest 10 entries, the catalog map, the warehouse list) and the
- *    `opened` mark happen only when the panel is actually opened.
+ *    `opened` mark happen only when the panel is actually opened (the mark
+ *    once the list has loaded).
  */
 export function NotificationBell({ paletteOpen }: { paletteOpen: boolean }) {
   const pathname = usePathname();
@@ -113,9 +114,9 @@ function BellGlyph() {
 }
 
 /**
- * The open panel: the newest entries, "See all". Mounting it IS opening the
- * panel — it records the open (`markOpened`, which clears the dot) and takes
- * focus.
+ * The open panel: the newest entries, "See all". It takes focus on mount and
+ * records the open (`markOpened`, which clears the dot) once its entries
+ * have loaded — never for a failed list.
  */
 function NotificationPanelBody({ onNavigate, onOpened }: { onNavigate: () => void; onOpened: () => void }) {
   const entries = useNotifications(NOTIFICATIONS_PANEL_LIMIT);
@@ -124,10 +125,17 @@ function NotificationPanelBody({ onNavigate, onOpened }: { onNavigate: () => voi
 
   useEffect(() => {
     panelRef.current?.focus();
-    onOpened();
-    // Once per open: the body mounts when the panel opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The open is recorded ONCE, when the entries first reach `ready` — a
+  // panel whose list failed has shown nothing, so the dot must stay.
+  const openedSent = useRef(false);
+  useEffect(() => {
+    if (entries.state === 'ready' && !openedSent.current) {
+      openedSent.current = true;
+      onOpened();
+    }
+  }, [entries.state, onOpened]);
 
   return (
     <div

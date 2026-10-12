@@ -1,4 +1,5 @@
 import type { NotificationListResponse } from '@/lib/api/generated';
+import { conflictsQueueHref } from '@/lib/conflicts-queues';
 import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 
 /**
@@ -14,6 +15,46 @@ import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 export type NotificationEntry = NotificationListResponse['items'][number];
 
 export const NOTIFICATIONS_PANEL_LIMIT = 10;
+
+type SourceType = NotificationEntry['sourceType'];
+
+/**
+ * The source types THIS build knows how to draw. A newer backend may add a
+ * source before this client is regenerated; its entries are dropped where
+ * the response is mapped (`knownNotifications`), never rendered half-known.
+ * `satisfies` makes a source added to the generated union without a row
+ * here a compile error.
+ */
+const KNOWN_SOURCE_TYPES = {
+  'stock-adjustment': true,
+  'count-variance': true,
+  'over-receipt': true,
+  'rejected-op': true,
+  'reorder-breach': true,
+  'batch-alert': true,
+  'qc-hold': true,
+  'channel-sync': true,
+} as const satisfies Record<SourceType, true>;
+
+/** The entries this build can render — an unknown `sourceType` is dropped. */
+export function knownNotifications(items: readonly unknown[]): NotificationEntry[] {
+  return items.filter(
+    (item): item is NotificationEntry =>
+      typeof item === 'object' &&
+      item !== null &&
+      Object.prototype.hasOwnProperty.call(KNOWN_SOURCE_TYPES, (item as { sourceType?: unknown }).sourceType as string),
+  );
+}
+
+/**
+ * The exhaustiveness guard for the switches below: unreachable for the
+ * union this build was generated from — and, should an unknown arm slip past
+ * `knownNotifications`, a safe fallback rather than a crash.
+ */
+function unknownSource<T>(entry: never, fallback: T): T {
+  void entry;
+  return fallback;
+}
 
 /** A SKU as the copy needs it: the code, and the unit for a quantity. */
 export interface NotificationSku extends QuantityUom {
@@ -46,6 +87,8 @@ export function notificationCategory(entry: NotificationEntry): string {
       return 'QC hold placed';
     case 'channel-sync':
       return 'Channel sync failing';
+    default:
+      return unknownSource(entry, 'Notification');
   }
 }
 
@@ -124,11 +167,16 @@ export function notificationDescription(entry: NotificationEntry, lookups: Notif
     }
     case 'channel-sync':
       return `Connection ${shortId(entry.summary.connectionId)} — deliveries are failing`;
+    default:
+      return unknownSource(entry, '');
   }
 }
 
 const RESOLUTION_WORD: Readonly<Record<string, string>> = {
   'policy-removed': 'policy removed',
+  // A batch alert auto-resolves when its stock runs out: "Resolved ·
+  // resolved" says nothing, "cleared" says what happened.
+  resolved: 'cleared',
 };
 
 /** `null` while open; `Resolved · approved` once the source cleared. */
@@ -142,7 +190,8 @@ export function notificationResolvedLabel(entry: NotificationEntry): string | nu
  * Where an entry clicks through to. Over-receipts and batch alerts land on
  * their queue drilled (9-1b's `parseDrill` contract — every link here
  * parses): an OPEN over-receipt narrows to the pending ones, a resolved one
- * to its warehouse across statuses. The rest open their screen.
+ * to its warehouse across statuses. Adjustments, variances and rejected ops
+ * open their own Conflicts queue; the rest open their screen.
  */
 export function notificationHref(entry: NotificationEntry): string {
   switch (entry.sourceType) {
@@ -158,16 +207,21 @@ export function notificationHref(entry: NotificationEntry): string {
       params.set('kind', entry.summary.kind);
       return `/replenishment?${params.toString()}`;
     }
+    // Each opens ITS Conflicts queue (`?queue=` — not a drill key).
     case 'stock-adjustment':
+      return conflictsQueueHref('adjustment-pendings');
     case 'count-variance':
+      return conflictsQueueHref('variances');
     case 'rejected-op':
-      return '/conflicts';
+      return conflictsQueueHref('rejected-ops');
     case 'reorder-breach':
       return '/replenishment';
     case 'qc-hold':
       return '/inbound';
     case 'channel-sync':
       return '/channels';
+    default:
+      return unknownSource(entry, '/notifications');
   }
 }
 
