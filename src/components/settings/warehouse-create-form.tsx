@@ -16,6 +16,7 @@ import { notifyWarehousesChanged } from '@/lib/warehouses';
 
 import { StateSelect } from '@/components/address/state-select';
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -300,11 +301,18 @@ function rejectionReason(error: unknown, attemptedCode: string): string {
 export function WarehouseList() {
   // Shared with the switcher: session-identity-scoped, full cursor chain,
   // stale cross-tenant pages filtered by the hook (review loop 2 parity).
-  const { items } = useTenantWarehouses() ?? { items: [] };
+  const warehouses = useTenantWarehouses();
+  // 21-11b: a failed read says so, with Retry — never an empty list.
+  if (warehouses.state === 'failed') return <WarehousesFailure state={warehouses} />;
+  const items = warehouses.state === 'ready' ? warehouses.data.items : [];
 
   if (items.length === 0) return null;
   return (
     <div className="flex flex-col gap-2 text-sm">
+      {warehouses.state === 'ready' && warehouses.data.refreshFailed !== null && (
+        // Decision 3 (21-11b): the last-good list stays, with one line.
+        <WarehousesRefreshNote reason={warehouses.data.refreshFailed} onRetry={warehouses.reload} />
+      )}
       {items.map((warehouse) => (
         <div key={warehouse.id} className="rounded-md border border-(--border) p-3">
           <div className="font-medium">

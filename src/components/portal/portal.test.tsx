@@ -849,6 +849,29 @@ describe('PortalService (21-8)', () => {
     expect(container.textContent).toContain('The report took too long — try a shorter period');
   });
 
+  test('21-11b: a failed warehouses read takes the picker slot with Retry; the report still reads; Retry refetches', async () => {
+    routes['/portal/warehouses'] = [503, { code: 'unavailable', status: 503, title: 'Down', detail: 'The warehouse read failed.' }];
+    const container = await open();
+    expect(container.querySelector('[aria-label="Report warehouse"]')).toBeNull();
+    const alert = container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain('Warehouses not loaded');
+    expect(alert.textContent).toContain('The warehouse read failed.');
+    // The report still reads, for every warehouse.
+    expect(serviceUrls()).toHaveLength(1);
+    expect(serviceUrls()[0]).not.toContain('warehouseId');
+    const warehouseReads = () => urls.filter((url) => url.includes('/portal/warehouses')).length;
+    const before = warehouseReads();
+    routes['/portal/warehouses'] = [
+      200,
+      { items: [{ warehouseId: W1, warehouseName: 'Main', city: 'Bengaluru' }, { warehouseId: W2, warehouseName: 'North', city: 'Delhi' }] },
+    ];
+    click(buttonNamed(container, 'Retry'));
+    await settle();
+    expect(warehouseReads()).toBe(before + 1);
+    expect(container.textContent).not.toContain('Warehouses not loaded');
+    expect(container.querySelector('[aria-label="Report warehouse"]')).not.toBeNull();
+  });
+
   test('a client-suspended refusal fires the portal event', async () => {
     routes['/portal/service'] = [403, { code: 'client-suspended', status: 403, title: 'Suspended' }];
     let announced = 0;

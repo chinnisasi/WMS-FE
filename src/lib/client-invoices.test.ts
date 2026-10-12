@@ -119,12 +119,12 @@ describe('client invoices — the printed document', () => {
   });
 
   test('a line: description with the segment dates, quantity in base-unit-days or counts, the rate per unit', () => {
-    const storage = { chargeCode: 'storage', uom: 'kg', segmentFrom: '2026-09-01', segmentTo: '2026-09-14', quantity: '1234.567', unitAmountPaise: 330, amountPaise: 407 } as const;
+    const storage = { chargeCode: 'storage', basis: 'per_thousand_units_per_day', uom: 'kg', segmentFrom: '2026-09-01', segmentTo: '2026-09-14', quantity: '1234.567', unitAmountPaise: 330, amountPaise: 407 } as const;
     expect(lineDescription(storage)).toBe('Storage (kg) · 1 Sep 2026 – 14 Sep 2026');
     expect(lineQuantityLabel(storage)).toBe('1,234.567 kg-days');
-    expect(lineRateLabel(storage)).toBe('₹3.30 per 1,000 units/day');
+    expect(lineRateLabel(storage)).toBe('₹3.30 per 1,000 units per day');
     expect(lineTaxableLabel(storage)).toBe('₹4.07');
-    const picks = { chargeCode: 'pick', uom: null, segmentFrom: '2026-09-15', segmentTo: '2026-09-30', quantity: '1', unitAmountPaise: null, amountPaise: null } as const;
+    const picks = { chargeCode: 'pick', basis: 'per_pick', uom: null, segmentFrom: '2026-09-15', segmentTo: '2026-09-30', quantity: '1', unitAmountPaise: null, amountPaise: null } as const;
     expect(lineDescription(picks)).toBe('Pick · 15 Sep 2026 – 30 Sep 2026');
     expect(lineQuantityLabel(picks)).toBe('1 pick');
     expect(lineQuantityLabel({ ...picks, chargeCode: 'inbound_handling', quantity: '1200' })).toBe('1,200 receipt lines');

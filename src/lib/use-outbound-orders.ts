@@ -6,36 +6,18 @@ import {
   fetchApiGetOrder,
   fetchApiListOrders,
   fetchApiListSkus,
-  fetchApiListWarehouses,
 } from '@/lib/api/client';
-import type { OrderDto, OrderEntryDto, SkuResponse, WarehouseResponse } from '@/lib/api/generated';
+import type { OrderDto, OrderEntryDto, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CATALOG_CHANGED_EVENT } from '@/lib/catalog';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
-import { fetchAllWarehouses } from '@/lib/fetch-all-warehouses';
 import { detailReason, readReason } from '@/lib/outbound-orders';
 import { OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
-import { WAREHOUSES_CHANGED_EVENT } from '@/lib/warehouses';
+import type { Reloadable, ResourceState } from '@/lib/resource-state';
+import { useTenantWarehouses, type TenantWarehouses } from '@/lib/use-tenant-warehouses';
 
-/**
- * Every read this surface makes reports its own failure.
- *
- * The house hooks swallow a failed fetch into `null`, and a surface that
- * renders `null` as "Loading…" then tells the viewer a fetch is still in
- * flight forever. The I/O matrix asks for the house unreachable copy in a
- * FeedbackBanner instead, so these hooks carry an explicit `failed` arm and
- * the surface renders it with a Retry. Progress copy is never used for a
- * failure.
- */
-export type ResourceState<T> =
-  | { readonly state: 'loading' }
-  | { readonly state: 'ready'; readonly data: T }
-  | { readonly state: 'failed'; readonly reason: string };
-
-/** Every resource hook returns a way to re-run itself — the Retry affordance. */
-export interface Reloadable {
-  readonly reload: () => void;
-}
+/** The read-hook shape lives in `resource-state.ts` (21-11b); re-exported so this module's importers are unchanged. */
+export type { Reloadable, ResourceState } from '@/lib/resource-state';
 
 export interface OutboundOrdersPage {
   items: readonly OrderEntryDto[];
@@ -210,65 +192,14 @@ export function useOrderDetail(orderId: string | null): ResourceState<OrderDto> 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
 }
 
-export interface OutboundWarehouses {
-  readonly tenantId: string;
-  readonly items: readonly WarehouseResponse[];
-}
-
 /**
- * The tenant's warehouses for the surface's picker. The shared
- * `useTenantWarehouses` returns `null` on failure, which renders here as a
- * blank surface with no heading at all — so this surface does the same walk
- * with an explicit failed arm. (Nothing is lost by not sharing: every
- * consumer of that hook runs its own fetch anyway.)
+ * The tenant's warehouses for a surface's picker. Story 21-11b folded this
+ * into the one warehouses hook: it existed only because `useTenantWarehouses`
+ * had no failed arm. Kept as an alias so its callers are unchanged — one
+ * implementation, one behaviour.
  */
-export function useOutboundWarehouses(): ResourceState<OutboundWarehouses> & Reloadable {
-  const tenantId = useSyncExternalStore(
-    subscribeSession,
-    () => readSession()?.tenant.id ?? null,
-    () => null,
-  );
-  const [revision, setRevision] = useState(0);
-  const [result, setResult] = useState<{
-    tenantId: string;
-    state: ResourceState<OutboundWarehouses>;
-  } | null>(null);
-
-  useEffect(() => {
-    const onChange = () => setRevision((r) => r + 1);
-    window.addEventListener(WAREHOUSES_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(WAREHOUSES_CHANGED_EVENT, onChange);
-  }, []);
-
-  useEffect(() => {
-    if (tenantId === null) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const items = await fetchAllWarehouses(tenantId, (id, options) =>
-          fetchApiListWarehouses(id, options),
-        );
-        if (!cancelled) {
-          setResult({ tenantId, state: { state: 'ready', data: { tenantId, items } } });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setResult({
-            tenantId,
-            state: { state: 'failed', reason: readReason(error, 'warehouses') },
-          });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [tenantId, revision]);
-
-  const reload = useCallback(() => setRevision((r) => r + 1), []);
-  const stale = tenantId === null || result === null || result.tenantId !== tenantId;
-  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
-}
+export type OutboundWarehouses = TenantWarehouses;
+export const useOutboundWarehouses = useTenantWarehouses;
 
 /**
  * The tenant's catalog as an id→SKU map — the create form's picker, and the

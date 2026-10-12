@@ -6,6 +6,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
+
 function ChevronDown() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
@@ -43,7 +45,9 @@ export function WarehouseSwitcher({
   className?: string;
   onPicked?: () => void;
 }) {
-  const { tenantId, items } = useTenantWarehouses() ?? { tenantId: null, items: [] };
+  const warehouses = useTenantWarehouses();
+  // Loading reads as today (nothing rendered); a failure renders below.
+  const { tenantId, items } = warehouses.state === 'ready' ? warehouses.data : { tenantId: null, items: [] };
   const activeId = useSyncExternalStore(
     subscribeActiveWarehouse,
     () => (tenantId === null ? null : readActiveWarehouseId(tenantId)),
@@ -73,14 +77,32 @@ export function WarehouseSwitcher({
     };
   }, [open]);
 
+  // Story 21-11b: a failed read is "Warehouses not loaded" + Retry (compact —
+  // the narrow sidebar and the mobile menu), never "No warehouse yet".
+  if (warehouses.state === 'failed') {
+    return (
+      <div className={`border-b border-(--border) px-3 py-2 lg:px-4 ${className}`}>
+        <WarehousesFailure state={warehouses} compact />
+      </div>
+    );
+  }
+
   if (tenantId === null) return null;
 
+  // Decision 3: a failed refresh keeps the last-good list, with one line.
+  const refreshNote =
+    warehouses.state === 'ready' && warehouses.data.refreshFailed !== null ? (
+      <WarehousesRefreshNote reason={warehouses.data.refreshFailed} onRetry={warehouses.reload} />
+    ) : null;
+
+  // A real empty list (`ready`, no warehouses).
   if (items.length === 0) {
     return (
       <div className={`border-b border-(--border) px-3 py-2 lg:px-4 ${className}`}>
         <Link href="/settings" className="text-xs text-(--muted-foreground) underline underline-offset-2">
           No warehouse yet — create one in Settings
         </Link>
+        {refreshNote}
       </div>
     );
   }
@@ -118,6 +140,7 @@ export function WarehouseSwitcher({
         </span>
         <ChevronDown />
       </button>
+      {refreshNote}
       {open && (
         <ul
           role="listbox"

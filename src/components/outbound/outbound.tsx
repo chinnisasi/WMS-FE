@@ -15,7 +15,8 @@ import {
 import { OutboundOrders } from '@/components/outbound/outbound-orders';
 import { OutboundWaves } from '@/components/outbound/outbound-waves';
 import { OutboundPackDispatch } from '@/components/outbound/pack-dispatch';
-import { ReadFailure, Section, selectClass } from '@/components/outbound/shell';
+import { Section, selectClass } from '@/components/outbound/shell';
+import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 /**
  * The Outbound page: orders (story 4.2b), the waves they group into (story
@@ -81,11 +82,7 @@ function OutboundSessioned() {
   if (warehouses.state === 'failed') {
     return (
       <Section title="Outbound">
-        <ReadFailure
-          word="Warehouses unavailable"
-          reason={warehouses.reason}
-          onRetry={warehouses.reload}
-        />
+        <WarehousesFailure state={warehouses} />
       </Section>
     );
   }
@@ -106,10 +103,16 @@ function OutboundSessioned() {
     );
   }
 
+  // Decision 3 (21-11b): a failed refresh keeps the last-good list, with one line.
+  const refreshNote =
+    warehouses.state === 'ready' && warehouses.data.refreshFailed !== null ? (
+      <WarehousesRefreshNote reason={warehouses.data.refreshFailed} onRetry={warehouses.reload} />
+    ) : null;
   const warehouseLabel = warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`;
 
   return (
     <div className="flex flex-col gap-4">
+      {refreshNote}
       {items.length > 1 && (
         <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
           <label className="flex items-center gap-2 text-xs">

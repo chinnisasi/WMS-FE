@@ -14,7 +14,7 @@ import {
 import { usePortalInvoice, usePortalInvoices } from '@/lib/use-portal';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
-import { ReadFailure, Section, rowButtonClass } from '@/components/outbound/shell';
+import { ReadFailure, Section, rowButtonClass } from '@/components/shared/surface';
 
 /**
  * Story 21-7 — the portal's Invoices surface: this company's issued

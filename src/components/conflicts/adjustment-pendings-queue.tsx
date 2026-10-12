@@ -83,7 +83,11 @@ function AdjustmentPendingsQueueSessioned() {
   const queue = useAdjustmentPendings(tab);
   const skus = useSkuMap();
   const users = useUserMap();
-  const { items: warehouses } = useTenantWarehouses() ?? { tenantId: null, items: [] };
+  const warehouseRead = useTenantWarehouses();
+  const warehouses = warehouseRead.state === 'ready' ? warehouseRead.data.items : [];
+  // A label-only lookup (21-11b): a failed warehouses read degrades the label
+  // to the warehouse id — no banner; loading shows no label, as before.
+  const warehousesFailed = warehouseRead.state === 'failed';
   // The page's distinct warehouses drive the bin-code join (enrichment —
   // binCodeLabel renders the honest "(unknown bin)" where a walk has not
   // landed or failed).
@@ -219,7 +223,7 @@ function AdjustmentPendingsQueueSessioned() {
               key={entry.id}
               entry={entry}
               sku={skus?.[entry.skuId]}
-              warehouseLabel={warehouses.find((w) => w.id === entry.warehouseId)?.code ?? null}
+              warehouseLabel={warehouses.find((w) => w.id === entry.warehouseId)?.code ?? (warehousesFailed ? entry.warehouseId : null)}
               binCode={binCodeLabel(binMaps, entry.warehouseId, entry.binId)}
               requestedBy={users?.[entry.requestedBy]?.email ?? null}
               decidedBy={

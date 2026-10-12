@@ -1,43 +1,63 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiListWarehouses } from '@/lib/api/client';
 import type { WarehouseResponse } from '@/lib/api/generated';
 import { fetchAllWarehouses } from '@/lib/fetch-all-warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { readReason } from '@/lib/outbound-orders';
+import type { Reloadable, ResourceState } from '@/lib/resource-state';
 import { WAREHOUSES_CHANGED_EVENT } from '@/lib/warehouses';
 
 export interface TenantWarehouses {
-  /** Non-null only while a session exists — the signed-in tenant. */
-  tenantId: string;
-  items: readonly WarehouseResponse[];
+  /** The signed-in tenant the list was read for. */
+  readonly tenantId: string;
+  readonly items: readonly WarehouseResponse[];
+  /**
+   * Decision 3 (21-11b): a REFETCH failed and `items` is the last-good list —
+   * the reason, for the one-line `WarehousesRefreshNote`. Null after any
+   * successful read.
+   */
+  readonly refreshFailed: string | null;
 }
 
 /**
- * Shared warehouse loader for every surface that shows the tenant's
- * warehouses (sidebar switcher, mobile switcher, the Settings list): the
- * session *identity* (tenant id) drives the fetch, the full keyset cursor
- * chain is followed (bounded 20 hops — review loop 1), and the
- * warehouses-changed event bumps a revision so the effect re-runs.
+ * The ONE warehouses hook (story 21-11b) for every surface that lists the
+ * tenant's warehouses — the sidebar and mobile switchers, the Settings
+ * cards, every warehouse picker. The session *identity* (tenant id) drives
+ * the fetch, the full keyset cursor chain is followed (bounded 20 hops), and
+ * the warehouses-changed event bumps a revision so the effect re-runs.
  *
- * Stale cross-tenant data is filtered at render time (`result.tenantId`
- * changes before the new page lands), matching the repo convention of never
- * calling setState synchronously in an effect.
+ * It returns `ResourceState` with a `failed` arm: before 21-11b it swallowed
+ * a failed read into `null`, and its consumers rendered a failure as "no
+ * warehouses" (the switcher even said "No warehouse yet — create one in
+ * Settings"). A failure renders through `WarehousesFailure`
+ * (`components/shared/warehouses-failure.tsx`). `useOutboundWarehouses` is an
+ * alias of this hook.
+ *
+ * A failed REFETCH (after `WAREHOUSES_CHANGED_EVENT`) keeps the last-good
+ * list and is not silent (decision 3): the ready data carries
+ * `refreshFailed: reason`, which consumers render as the one-line
+ * `WarehousesRefreshNote`; the next successful read clears it. The state goes
+ * to `failed` only when there is no data yet for this tenant. `reload()`
+ * clears a `failed` state first, so Retry reads as loading rather than a
+ * second identical failure.
+ *
+ * Stale cross-tenant data is filtered at render (`result.tenantId`), never by
+ * a setState in an effect.
  */
-export function useTenantWarehouses(): TenantWarehouses | null {
+export function useTenantWarehouses(): ResourceState<TenantWarehouses> & Reloadable {
   // `null` = unknown (server render) or signed out.
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
-  // Bumped by the warehouses-changed event (setState in a subscription
-  // callback, never synchronously in an effect).
+  // Bumped by the warehouses-changed event and by reload() (setState in a
+  // subscription callback, never synchronously in an effect).
   const [revision, setRevision] = useState(0);
-  const [page, setPage] = useState<{ tenantId: string; items: readonly WarehouseResponse[] } | null>(
-    null,
-  );
+  const [result, setResult] = useState<{ tenantId: string; state: ResourceState<TenantWarehouses> } | null>(null);
 
   useEffect(() => {
     const onChange = () => setRevision((r) => r + 1);
@@ -50,14 +70,18 @@ export function useTenantWarehouses(): TenantWarehouses | null {
     let cancelled = false;
     (async () => {
       try {
-        const items = await fetchAllWarehouses(tenantId, (id, options) =>
-          fetchApiListWarehouses(id, options),
+        const items = await fetchAllWarehouses(tenantId, (id, options) => fetchApiListWarehouses(id, options));
+        if (!cancelled) setResult({ tenantId, state: { state: 'ready', data: { tenantId, items, refreshFailed: null } } });
+      } catch (error) {
+        if (cancelled) return;
+        const reason = readReason(error, 'warehouses');
+        // Keep the last-good list for this tenant, flagged (decision 3); fail
+        // only with no data yet.
+        setResult((previous) =>
+          previous !== null && previous.tenantId === tenantId && previous.state.state === 'ready'
+            ? { tenantId, state: { state: 'ready', data: { ...previous.state.data, refreshFailed: reason } } }
+            : { tenantId, state: { state: 'failed', reason } },
         );
-        // A failed fetch leaves the previous tenant's page in state — the
-        // tenantId check at render (not a setState-in-effect) hides it.
-        if (!cancelled) setPage({ tenantId, items });
-      } catch {
-        // Consumers render quiet chrome on failure — surfaces report API errors.
       }
     })();
     return () => {
@@ -65,6 +89,13 @@ export function useTenantWarehouses(): TenantWarehouses | null {
     };
   }, [tenantId, revision]);
 
-  if (tenantId === null || page === null || page.tenantId !== tenantId) return null;
-  return { tenantId, items: page.items };
+  const reload = useCallback(() => {
+    // Clear a failure first, so the refetch reads as loading, not as the
+    // same failure again (IMPLEMENTATION-GUIDE §1).
+    setResult((previous) => (previous !== null && previous.state.state === 'failed' ? null : previous));
+    setRevision((r) => r + 1);
+  }, []);
+
+  const stale = tenantId === null || result === null || result.tenantId !== tenantId;
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
 }

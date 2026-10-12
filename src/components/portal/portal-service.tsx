@@ -5,7 +5,8 @@ import { useState } from 'react';
 import { defaultServicePeriod, parseServicePeriod } from '@/lib/service-report';
 import { usePortalService, usePortalWarehouses } from '@/lib/use-portal';
 
-import { Section } from '@/components/outbound/shell';
+import { Section } from '@/components/shared/surface';
+import { WarehousesFailure } from '@/components/shared/warehouses-failure';
 import {
   ServicePeriodInputs,
   ServiceReportView,
@@ -41,7 +42,13 @@ export function PortalService() {
     <Section title="Service">
       <div className="flex flex-wrap items-end gap-2">
         <ServicePeriodInputs from={from} to={to} onFrom={setFrom} onTo={setTo} />
-        {showWarehouses ? (
+        {warehouses.state === 'failed' ? (
+          // 21-11b: the failure takes the picker's slot; the report still
+          // reads for "All warehouses".
+          <div className="min-w-48">
+            <WarehousesFailure state={warehouses} />
+          </div>
+        ) : showWarehouses ? (
           <label className="flex min-w-48 flex-col gap-1">
             <span className={serviceLabelClass}>Warehouse</span>
             <select
