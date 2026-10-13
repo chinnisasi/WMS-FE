@@ -128,6 +128,7 @@ import {
   rateCardsControllerDiscard,
   rateCardsControllerInForce,
   billingUsageControllerUsage,
+  reportingControllerAudit,
   reportingControllerClientService,
   portalControllerService,
   rateCardsControllerList,
@@ -179,6 +180,8 @@ import type {
   PortalStockPageResponse,
   PortalWarehouseListResponse,
   ServiceReportDto,
+  AuditTrailResponse,
+  ReportingControllerAuditData,
   ClientInvoiceDto,
   ClientInvoiceLineRecordsResponse,
   ClientInvoiceListResponse,
@@ -1135,6 +1138,36 @@ export async function fetchApiClientServiceReport(
   const { data, error } = await reportingControllerClientService({
     path: { tenantId, clientId },
     query: serviceQuery(period),
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 9-3a — one page of the tenant's audit trail (owner-only, `audit.view`;
+ * any other role is 403 `role-denied`). Every filter is optional and sent only
+ * when present; the cursor goes back verbatim.
+ */
+export async function fetchApiAuditTrail(
+  tenantId: string,
+  query: Omit<NonNullable<ReportingControllerAuditData['query']>, 'cursor' | 'limit'>,
+  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<AuditTrailResponse> {
+  const { data, error } = await reportingControllerAudit({
+    path: { tenantId },
+    query: definedQuery({
+      actorUserId: query.actorUserId,
+      actionPrefix: query.actionPrefix,
+      targetType: query.targetType,
+      targetId: query.targetId,
+      from: query.from,
+      to: query.to,
+      cursor: options?.cursor,
+      limit: options?.limit,
+    }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -2893,6 +2926,11 @@ export async function fetchApiListLedgerEvents(
     skuId?: string;
     orderId?: string;
     shortPick?: boolean;
+    /** Story 9-3a — a document's events ("View ledger"): one `referenceDoc` key each. */
+    grnId?: string;
+    poId?: string;
+    adjustmentPendingId?: string;
+    countVarianceId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
@@ -2907,6 +2945,10 @@ export async function fetchApiListLedgerEvents(
       skuId: options?.skuId,
       orderId: options?.orderId,
       shortPick: options?.shortPick,
+      grnId: options?.grnId,
+      poId: options?.poId,
+      adjustmentPendingId: options?.adjustmentPendingId,
+      countVarianceId: options?.countVarianceId,
       cursor: options?.cursor,
     }),
     signal: options?.signal,

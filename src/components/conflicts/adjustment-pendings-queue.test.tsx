@@ -58,6 +58,7 @@ function pending(over: Record<string, unknown> = {}): Record<string, unknown> {
     decidedBy: null,
     decidedAt: null,
     thresholdQuantityAtRequest: 2,
+    ledgerLinked: false,
     ...over,
   };
 }
@@ -299,5 +300,29 @@ describe('AdjustmentPendingsQueue: a failed warehouses read (story 21-11b)', () 
     expect(view.container.textContent).not.toContain(' · W1');
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
     expect(view.container.textContent).not.toContain('Warehouses not loaded');
+  });
+});
+
+describe('story 9-3a — "View ledger" on a decided adjustment', () => {
+  test('only an approved adjustment that recorded its event links — to its own warehouse, by its pending id; a rejected or unlinked one does not', async () => {
+    const LINKED = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+    const OLD = '0198f7a2-1b3c-7d4e-8f90-0000000000a2';
+    const REJECTED = '0198f7a2-1b3c-7d4e-8f90-0000000000a3';
+    pendingRows = [
+      pending({ id: LINKED, status: 'approved', decidedBy: 'u-1', decidedAt: '2026-09-21T00:00:00.000Z', ledgerLinked: true }),
+      pending({ id: OLD, status: 'approved', decidedBy: 'u-1', decidedAt: '2026-09-21T00:00:00.000Z', ledgerLinked: false }),
+      pending({ id: REJECTED, status: 'rejected', decidedBy: 'u-1', decidedAt: '2026-09-21T00:00:00.000Z', ledgerLinked: false }),
+    ];
+    view = await mount();
+    const links = [...view.container.querySelectorAll('a')].filter((a) => a.textContent === 'View ledger');
+    expect(links).toHaveLength(1);
+    const href = links[0]!.getAttribute('href')!;
+    expect(href.startsWith('/inventory/ledger?')).toBe(true);
+    expect(Object.fromEntries(new URL(`http://x${href}`).searchParams)).toEqual({
+      list: 'ledger',
+      warehouseId: WAREHOUSE_ID,
+      doc: 'adjustment',
+      adjustmentPendingId: LINKED,
+    });
   });
 });

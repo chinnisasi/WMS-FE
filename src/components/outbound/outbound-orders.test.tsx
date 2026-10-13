@@ -740,3 +740,53 @@ describe('OrderCreateForm: the State select and the buyer legal name (story 8-1d
     expect(creates[0]!.body.consigneeGstin).toBe('29AAPCD1234K1Z5');
   });
 });
+
+describe('OrderDetailPanel: "View ledger" (story 9-3a)', () => {
+  const ORDER_ID = '0198f7a2-1b3c-7d4e-8f90-00000000e001';
+  const WAREHOUSE = '0198f7a2-1b3c-7d4e-8f90-99aabbccdd02';
+
+  function plainOrder() {
+    return {
+      id: ORDER_ID,
+      tenantId: TENANT_ID,
+      warehouseId: WAREHOUSE,
+      status: 'dispatched',
+      source: 'manual',
+      integrationId: null,
+      externalEventId: null,
+      destination: null,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+      lines: [line({ id: 'line-1', skuId: 'pad-sku', qty: 1, parentLineId: null })],
+    };
+  }
+
+  test('threaded the warehouse (from OrdersTable), it links the order\'s events in that warehouse, labelled by the order id', async () => {
+    order = plainOrder();
+    view = render(<OrderDetailPanel orderId={ORDER_ID} warehouseId={WAREHOUSE} />);
+    await settle();
+    const link = [...view.container.querySelectorAll('a')].find((a) => a.textContent === 'View ledger');
+    expect(link).toBeDefined();
+    expect(Object.fromEntries(new URL(`http://x${link!.getAttribute('href')!}`).searchParams)).toEqual({
+      list: 'ledger',
+      warehouseId: WAREHOUSE,
+      doc: 'order',
+      orderId: ORDER_ID,
+      label: ORDER_ID,
+    });
+  });
+
+  test('an ingested order is labelled by its channel ref', async () => {
+    order = { ...plainOrder(), source: 'ingested', externalEventId: 'AMZ-401-7712' };
+    view = render(<OrderDetailPanel orderId={ORDER_ID} warehouseId={WAREHOUSE} />);
+    await settle();
+    const link = [...view.container.querySelectorAll('a')].find((a) => a.textContent === 'View ledger');
+    expect(new URL(`http://x${link!.getAttribute('href')!}`).searchParams.get('label')).toBe('AMZ-401-7712');
+  });
+
+  test('without a warehouse it offers no link', async () => {
+    order = plainOrder();
+    view = await mount(ORDER_ID);
+    expect([...view.container.querySelectorAll('a')].some((a) => a.textContent === 'View ledger')).toBe(false);
+  });
+});

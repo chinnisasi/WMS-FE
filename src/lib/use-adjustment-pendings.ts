@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiListAdjustmentPendings } from '@/lib/api/client';
-import type { AdjustmentPendingDto } from '@/lib/api/generated';
+import type { AdjustmentPendingEntryDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { adjustmentListReason } from '@/lib/review-queue';
 import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
@@ -19,7 +19,7 @@ export const ADJUSTMENT_PENDING_STATUSES = ['pending', 'approved', 'rejected'] a
 export type AdjustmentPendingStatus = (typeof ADJUSTMENT_PENDING_STATUSES)[number];
 
 export interface AdjustmentPendingsPage {
-  items: readonly AdjustmentPendingDto[];
+  items: readonly AdjustmentPendingEntryDto[];
   /** Cursor for the queue's Next button; null on the last page. */
   nextCursor: string | null;
 }

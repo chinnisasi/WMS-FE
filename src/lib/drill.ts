@@ -121,6 +121,34 @@ interface DrillWindow {
   readonly to?: string;
 }
 
+/**
+ * Story 9-3a — the documents that link to their ledger events ("View
+ * ledger"), and the one `referenceDoc` key each filters on. A document drill
+ * names its kind in `doc` (display-only, stripped before the request) and
+ * carries EXACTLY that key plus `warehouseId` (and an optional `label`).
+ */
+export const LEDGER_DOC_KEYS = {
+  grn: 'grnId',
+  po: 'poId',
+  order: 'orderId',
+  adjustment: 'adjustmentPendingId',
+  variance: 'countVarianceId',
+} as const;
+export type LedgerDoc = keyof typeof LEDGER_DOC_KEYS;
+export const LEDGER_DOCS = Object.keys(LEDGER_DOC_KEYS) as readonly LedgerDoc[];
+
+/** The document's noun on the banner and the page ("ledger events for GRN GRN-0042"). */
+export const LEDGER_DOC_NOUN: Readonly<Record<LedgerDoc, string>> = {
+  grn: 'GRN',
+  po: 'PO',
+  order: 'order',
+  adjustment: 'adjustment',
+  variance: 'count variance',
+};
+
+/** A display label's ceiling — it is shown, never sent; a longer one makes the link unsupported. */
+export const MAX_DRILL_LABEL_LENGTH = 120;
+
 export interface LedgerDrill extends DrillWindow {
   readonly list: 'ledger';
   /** Path-scoped: the timeline route's `{warehouseId}`. */
@@ -130,6 +158,14 @@ export interface LedgerDrill extends DrillWindow {
   readonly skuId?: string;
   readonly orderId?: string;
   readonly shortPick?: boolean;
+  /** Story 9-3a — a document drill's kind (display-only; never sent). */
+  readonly doc?: LedgerDoc;
+  /** Story 9-3a — the document's human label, e.g. its GRN code (display-only; never sent). */
+  readonly label?: string;
+  readonly grnId?: string;
+  readonly poId?: string;
+  readonly adjustmentPendingId?: string;
+  readonly countVarianceId?: string;
 }
 
 export interface OrdersDrill extends DrillWindow {
@@ -199,7 +235,7 @@ export function drillFor<L extends DrillList>(drill: ParsedDrill | undefined, li
 
 // ── parsing ──────────────────────────────────────────────────────────────────
 
-type FieldKind = 'uuid' | 'instant' | 'boolean' | 'type' | { readonly oneOf: readonly string[] };
+type FieldKind = 'uuid' | 'instant' | 'boolean' | 'type' | 'label' | { readonly oneOf: readonly string[] };
 
 interface ListSpec {
   readonly fields: Readonly<Record<string, FieldKind>>;
@@ -216,7 +252,21 @@ const WINDOW: Readonly<Record<string, FieldKind>> = { from: 'instant', to: 'inst
  */
 const SPECS: Readonly<Record<DrillList, ListSpec>> = {
   ledger: {
-    fields: { warehouseId: 'uuid', type: 'type', skuId: 'uuid', orderId: 'uuid', shortPick: 'boolean', ...WINDOW },
+    fields: {
+      warehouseId: 'uuid',
+      type: 'type',
+      skuId: 'uuid',
+      orderId: 'uuid',
+      shortPick: 'boolean',
+      ...WINDOW,
+      // Story 9-3a — the document drill (see `documentDrillShapeOk`).
+      doc: { oneOf: LEDGER_DOCS },
+      label: 'label',
+      grnId: 'uuid',
+      poId: 'uuid',
+      adjustmentPendingId: 'uuid',
+      countVarianceId: 'uuid',
+    },
     required: ['warehouseId'],
   },
   orders: {
@@ -284,6 +334,7 @@ function parseValue(kind: FieldKind, raw: string): string | boolean | readonly s
   if (kind === 'instant') return isCalendarInstant(raw) ? raw : undefined;
   if (kind === 'boolean') return raw === 'true' ? true : raw === 'false' ? false : undefined;
   if (kind === 'type') return (LEDGER_EVENT_TYPES as readonly string[]).includes(raw) ? [raw] : undefined;
+  if (kind === 'label') return raw.trim() !== '' && raw.length <= MAX_DRILL_LABEL_LENGTH ? raw : undefined;
   return kind.oneOf.includes(raw) ? raw : undefined;
 }
 
@@ -319,9 +370,41 @@ export function parseDrill(screen: DrillScreen, params: SearchParamsRecord): Par
     drill[key] = value;
   }
   if (spec.required.some((key) => drill[key] === undefined)) return 'unsupported';
+  if (list === 'ledger' && !documentDrillShapeOk(drill)) return 'unsupported';
   // `SPECS` is the runtime twin of the `Drill` union: every key was checked
   // against its list's fields and parsed to that field's type above.
   return drill as unknown as Drill;
+}
+
+/** The keys only a document drill may carry (`orderId` is also a dashboard key). */
+const DOCUMENT_ONLY_KEYS: readonly string[] = ['doc', 'label', 'grnId', 'poId', 'adjustmentPendingId', 'countVarianceId'];
+
+/**
+ * Story 9-3a — a ledger drill's document rule: with a `doc`, exactly its key
+ * (`LEDGER_DOC_KEYS`) is present, beside `warehouseId` and an optional
+ * `label` — nothing else (`doc=grn&poId=X` is unsupported). Without a `doc`,
+ * none of the document-only keys may appear (the dashboard's drills never
+ * carry them).
+ */
+function documentDrillShapeOk(drill: Readonly<Record<string, unknown>>): boolean {
+  const keys = Object.keys(drill).filter((key) => key !== 'list');
+  const doc = drill.doc as LedgerDoc | undefined;
+  if (doc === undefined) return !keys.some((key) => DOCUMENT_ONLY_KEYS.includes(key));
+  const allowed = new Set(['doc', 'label', 'warehouseId', LEDGER_DOC_KEYS[doc]]);
+  return drill[LEDGER_DOC_KEYS[doc]] !== undefined && keys.every((key) => allowed.has(key));
+}
+
+/**
+ * Story 9-3a — the "View ledger" link of one document: `/inventory/ledger`
+ * filtered to the document's own warehouse and its one reference key, with
+ * the document's kind and label for the banner (display-only — the request
+ * strips both). `parseDrill('ledger', …)` reads it back to the same drill.
+ */
+export function ledgerDocHref(doc: LedgerDoc, id: string, warehouseId: string, label?: string | null): string {
+  const params = new URLSearchParams({ list: 'ledger', warehouseId, doc, [LEDGER_DOC_KEYS[doc]]: id });
+  const shown = label?.trim();
+  if (shown !== undefined && shown !== '') params.set('label', shown.slice(0, MAX_DRILL_LABEL_LENGTH));
+  return `/inventory/ledger?${params.toString()}`;
 }
 
 /**
@@ -348,6 +431,31 @@ export function drillFilter<D extends Drill>(drill: D): Omit<D, 'list'> {
   const filter: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(drill)) if (key !== 'list') filter[key] = value;
   return filter as Omit<D, 'list'>;
+}
+
+/** Story 9-3a — the document drill's display-only keys, which a request never carries. */
+export const DISPLAY_ONLY_DRILL_KEYS = ['doc', 'label'] as const;
+
+/** Story 9-3a — the document a ledger drill names, or null for a dashboard drill. */
+export function ledgerDrillDocument(drill: Drill): { doc: LedgerDoc; id: string; label: string } | null {
+  if (drill.list !== 'ledger' || drill.doc === undefined) return null;
+  const id = drill[LEDGER_DOC_KEYS[drill.doc]] ?? '';
+  // No label: the id's random TAIL — a UUIDv7's head is its timestamp, alike across a day.
+  return { doc: drill.doc, id, label: drill.label ?? id.slice(-8) };
+}
+
+/** Story 9-3a — "GRN GRN-0042", "PO PO-0007", "order 01a2b3c4" — the document as words. */
+export function ledgerDocName(document: { doc: LedgerDoc; label: string }): string {
+  return `${LEDGER_DOC_NOUN[document.doc]} ${document.label}`;
+}
+
+/** The banner's headline: the dashboard wording, or "Showing ledger events for GRN GRN-0042" for a document drill. */
+export function drillBannerWord(drill: Drill): string {
+  const document = ledgerDrillDocument(drill);
+  if (document === null) return "Showing the dashboard figure's rows";
+  return document.doc === 'po'
+    ? `Showing ledger receipts for ${ledgerDocName(document)}`
+    : `Showing ledger events for ${ledgerDocName(document)}`;
 }
 
 // ── the banner's words ───────────────────────────────────────────────────────
@@ -419,6 +527,14 @@ export interface DrillWarehouse {
  * short id when it is not in hand). Pure.
  */
 export function describeDrill(drill: Drill, warehouses: readonly DrillWarehouse[] | null): string {
+  // Story 9-3a — a document drill names the document, then its warehouse.
+  const document = ledgerDrillDocument(drill);
+  if (document !== null) {
+    return [
+      document.doc === 'po' ? `Receipt events of ${ledgerDocName(document)}` : `Ledger events of ${ledgerDocName(document)}`,
+      warehouseDisplayLabel(warehouses, drill.warehouseId!),
+    ].join(' · ');
+  }
   const parts: string[] = [LIST_LABEL[drill.list]];
   if ('type' in drill && drill.type !== undefined) parts.push(drill.type.map(ledgerTypeLabel).join(', '));
   if ('status' in drill && drill.status !== undefined) parts.push(STATUS_LABEL[drill.status] ?? drill.status);

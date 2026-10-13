@@ -29,6 +29,7 @@ import {
   fetchApiRateCardInForce,
   fetchApiClientUsage,
   fetchApiClientServiceReport,
+  fetchApiAuditTrail,
   fetchApiPortalService,
   fetchApiReplaceRateCardLines,
   fetchApiImportCatalog,
@@ -1642,6 +1643,32 @@ describe('rate-card wrappers (story 21-3)', () => {
     expect(new URL(lastRequest!.url).searchParams.get('to')).toBe('2026-09-30');
     expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
     expect(usage.storageCompleteThrough).toBe('2026-09-30');
+    clearSession();
+  });
+
+  test('the audit trail (9-3a): a GET to reporting/audit with no query on an unfiltered first page; filters and the cursor only when given; no key', async () => {
+    writeSession(SESSION);
+    const SYSTEM = '01900000-0000-7000-8000-000000000000';
+    stubFetch(200, { items: [], nextCursor: null, systemActorId: SYSTEM });
+    const page = await fetchApiAuditTrail(SESSION.tenant.id, {});
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/reporting/audit`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(page.systemActorId).toBe(SYSTEM);
+
+    await fetchApiAuditTrail(
+      SESSION.tenant.id,
+      { actionPrefix: 'transfer.', targetType: 'transfer_order', from: '2026-10-12T00:00:00+05:30', to: '2026-10-13T00:00:00+05:30' },
+      { cursor: 'CURSOR-2' },
+    );
+    expect(Object.fromEntries(new URL(lastRequest!.url).searchParams)).toEqual({
+      actionPrefix: 'transfer.',
+      targetType: 'transfer_order',
+      from: '2026-10-12T00:00:00+05:30',
+      to: '2026-10-13T00:00:00+05:30',
+      cursor: 'CURSOR-2',
+    });
     clearSession();
   });
 

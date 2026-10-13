@@ -186,6 +186,12 @@ export const CAPABILITIES = [
   // everything — the fence keeps an owner off portal routes). NOT by the Ops
   // Manager (see OPS_EXCLUDED_CAPABILITIES) — staff key ASNs via `asn.manage`.
   'asn.announce',
+  // Story 9-3a — read the audit trail (the /reports Audit section, FR-28).
+  // OWNER-ONLY (see OWNER_ONLY_CAPABILITIES): the trail names every member's
+  // actions — the user-management rationale. A READ capability: the section
+  // renders only for a role that holds it; the backend's facade guard is the
+  // authority (403 role-denied).
+  'audit.view',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -207,6 +213,8 @@ const OWNER_ONLY_CAPABILITIES: readonly Capability[] = [
   'eway.configure',
   // Story 21-2b — client admin is the owner's (the commercial relationship).
   'clients.manage',
+  // Story 9-3a — the audit trail is the owner's to read.
+  'audit.view',
 ];
 
 /**
