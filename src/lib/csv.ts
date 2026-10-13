@@ -36,7 +36,15 @@ export function csvNumber(value: string | number): string {
  * exactly).
  */
 export function downloadText(filename: string, text: string, type = 'text/csv;charset=utf-8'): void {
-  const blob = new Blob([text], { type });
+  downloadBlob(filename, new Blob([text], { type }));
+}
+
+/**
+ * Story 9-3b — hands a fetched `blob` to the browser as a file download (the
+ * audit export: the server's bytes, fetched with the bearer header, which a
+ * plain link cannot carry). The same anchor dance as `downloadText`.
+ */
+export function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;

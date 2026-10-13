@@ -129,6 +129,9 @@ import {
   rateCardsControllerInForce,
   billingUsageControllerUsage,
   reportingControllerAudit,
+  reportingControllerDownloadAuditExport,
+  reportingControllerListAuditExports,
+  reportingControllerRequestAuditExport,
   reportingControllerClientService,
   portalControllerService,
   rateCardsControllerList,
@@ -182,6 +185,9 @@ import type {
   ServiceReportDto,
   AuditTrailResponse,
   ReportingControllerAuditData,
+  AuditExportDto,
+  AuditExportListResponse,
+  AuditExportRequestDto,
   ClientInvoiceDto,
   ClientInvoiceLineRecordsResponse,
   ClientInvoiceListResponse,
@@ -1172,6 +1178,58 @@ export async function fetchApiAuditTrail(
   });
   if (error || !data) {
     throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 9-3b — queues an export of the audit trail under the APPLIED filters
+ * (owner-only). The caller mints a fresh Idempotency-Key per click: a key
+ * reused across clicks would replay the first export's stale `queued`
+ * snapshot. Always 202.
+ */
+export async function fetchApiRequestAuditExport(
+  tenantId: string,
+  body: AuditExportRequestDto,
+  idempotencyKey: string,
+): Promise<AuditExportDto> {
+  const { data, error, response } = await reportingControllerRequestAuditExport({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data;
+}
+
+/** Story 9-3b — the caller's own last 20 audit exports, newest first (unpaged). */
+export async function fetchApiAuditExports(tenantId: string, options?: { signal?: AbortSignal }): Promise<AuditExportListResponse> {
+  const { data, error, response } = await reportingControllerListAuditExports({
+    path: { tenantId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data;
+}
+
+/**
+ * Story 9-3b — a ready export's file, as a Blob (`parseAs: 'blob'`). The
+ * server sends the gzipped CSV with `Content-Encoding: gzip`, so the
+ * browser's fetch hands back the inflated CSV. A refusal (404, 409) is still
+ * problem+json — the generated client parses an error body as JSON whatever
+ * `parseAs` says — and becomes an `ApiProblem`.
+ */
+export async function fetchApiAuditExportFile(tenantId: string, exportId: string): Promise<Blob> {
+  const { data, error, response } = await reportingControllerDownloadAuditExport({
+    path: { tenantId, exportId },
+    parseAs: 'blob',
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
   }
   return data;
 }
