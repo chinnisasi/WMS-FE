@@ -39,6 +39,12 @@ const ENTRIES: Readonly<Record<NotificationEntry['sourceType'], NotificationEntr
   'qc-hold': { ...base, sourceType: 'qc-hold', warehouseId: W, summary: { skuId: SKU, reason: 'Seal broken' } },
   'channel-sync': { ...base, sourceType: 'channel-sync', warehouseId: null, summary: { connectionId: CONNECTION } },
   'audit-export': { ...base, sourceType: 'audit-export', warehouseId: null, summary: { status: 'ready', rowCount: 102345 } },
+  'ledger-chain-break': {
+    ...base,
+    sourceType: 'ledger-chain-break',
+    warehouseId: W,
+    summary: { kind: 'chain', firstSeq: 1042, reason: 'hash mismatch at seq 1042', detectedBy: 'anchor' },
+  },
 };
 
 function resolved(entry: NotificationEntry, resolution: string): NotificationEntry {
@@ -57,6 +63,7 @@ describe('notification copy', () => {
       'QC hold placed',
       'Channel sync failing',
       'Audit export',
+      'Ledger integrity',
     ]);
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
     expect(notificationCategory(expiring)).toBe('Batch nearing expiry');
@@ -73,6 +80,7 @@ describe('notification copy', () => {
       'SPICE-01 · Seal broken · MAIN Chennai DC',
       'Connection 0198f7a2 — deliveries are failing',
       'Audit export ready — 1,02,345 events',
+      'Ledger chain broken at #1042 — MAIN Chennai DC',
     ]);
     // The expiry arm names the IST date (18:30Z is the next IST day).
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
@@ -93,6 +101,14 @@ describe('notification copy', () => {
       'Audit export failed — something went wrong; run it again',
     );
     expect(notificationResolvedLabel(resolved(ENTRIES['audit-export'], 'expired'))).toBe('Resolved · expired');
+  });
+
+  test('the ledger chain break (9-3c): a chain break and a WORM mismatch name the seq and the warehouse; it resolves acknowledged', () => {
+    const worm = { ...ENTRIES['ledger-chain-break'], summary: { kind: 'worm', firstSeq: 1, reason: 'WORM copy missing', detectedBy: 'reverify' } } as NotificationEntry;
+    expect(notificationDescription(worm, LOOKUPS)).toBe('WORM copy mismatch at #1 — MAIN Chennai DC');
+    const elsewhere = { ...ENTRIES['ledger-chain-break'], warehouseId: '0198f7a2-ffff-7d4e-8f90-99aabbccdd09' } as NotificationEntry;
+    expect(notificationDescription(elsewhere, LOOKUPS)).toBe('Ledger chain broken at #1042 — Warehouse 0198f7a2');
+    expect(notificationResolvedLabel(resolved(ENTRIES['ledger-chain-break'], 'acknowledged'))).toBe('Resolved · acknowledged');
   });
 
   test('resolved: null while open; "Resolved · {resolution}" once cleared', () => {
@@ -130,6 +146,8 @@ describe('click-through links', () => {
       'channel-sync': ['/channels', '/channels'],
       // Story 9-3b — the "Your exports" list, never a download.
       'audit-export': ['/reports#audit-exports', '/reports#audit-exports'],
+      // Story 9-3c — the Ledger integrity section.
+      'ledger-chain-break': ['/reports#ledger-integrity', '/reports#ledger-integrity'],
     };
     for (const [sourceType, entry] of Object.entries(ENTRIES)) {
       const [open, done] = expected[sourceType as NotificationEntry['sourceType']];

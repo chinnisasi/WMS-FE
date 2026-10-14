@@ -192,6 +192,11 @@ export const CAPABILITIES = [
   // renders only for a role that holds it; the backend's facade guard is the
   // authority (403 role-denied).
   'audit.view',
+  // Story 9-3c — acknowledge a ledger chain break (the /reports Ledger
+  // integrity section's Acknowledge button). OWNER-ONLY (see
+  // OWNER_ONLY_CAPABILITIES) — the `audit.view` holder set. Acknowledging
+  // repairs nothing; the backend's command is the authority (403 role-denied).
+  'ledger.acknowledge',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -215,6 +220,8 @@ const OWNER_ONLY_CAPABILITIES: readonly Capability[] = [
   'clients.manage',
   // Story 9-3a — the audit trail is the owner's to read.
   'audit.view',
+  // Story 9-3c — and a ledger chain break is the owner's to acknowledge.
+  'ledger.acknowledge',
 ];
 
 /**

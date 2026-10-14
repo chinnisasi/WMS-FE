@@ -35,6 +35,7 @@ const KNOWN_SOURCE_TYPES = {
   'qc-hold': true,
   'channel-sync': true,
   'audit-export': true,
+  'ledger-chain-break': true,
 } as const satisfies Record<SourceType, true>;
 
 /** The entries this build can render — an unknown `sourceType` is dropped. */
@@ -90,6 +91,8 @@ export function notificationCategory(entry: NotificationEntry): string {
       return 'Channel sync failing';
     case 'audit-export':
       return 'Audit export';
+    case 'ledger-chain-break':
+      return 'Ledger integrity';
     default:
       return unknownSource(entry, 'Notification');
   }
@@ -191,6 +194,14 @@ export function notificationDescription(entry: NotificationEntry, lookups: Notif
       }
       return `Audit export failed — ${s.reason === undefined ? 'run it again' : AUDIT_EXPORT_FAILURE_COPY[s.reason]}`;
     }
+    // Story 9-3c — a chain break (or a WORM copy that no longer matches its
+    // anchor), with the warehouse it broke in.
+    case 'ledger-chain-break': {
+      const s = entry.summary;
+      const what = s.kind === 'worm' ? 'WORM copy mismatch' : 'Ledger chain broken';
+      const house = entry.warehouseId === null ? '' : ` — ${lookups.warehouse(entry.warehouseId)}`;
+      return `${what} at #${s.firstSeq}${house}`;
+    }
     default:
       return unknownSource(entry, '');
   }
@@ -248,6 +259,9 @@ export function notificationHref(entry: NotificationEntry): string {
     // downloads (the file needs the bearer, and the list says its state).
     case 'audit-export':
       return '/reports#audit-exports';
+    // Story 9-3c — the Ledger integrity section on /reports (open and acknowledged alike).
+    case 'ledger-chain-break':
+      return '/reports#ledger-integrity';
     default:
       return unknownSource(entry, '/notifications');
   }

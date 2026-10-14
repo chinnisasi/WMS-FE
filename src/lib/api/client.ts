@@ -130,6 +130,10 @@ import {
   billingUsageControllerUsage,
   reportingControllerAudit,
   reportingControllerDownloadAuditExport,
+  inventoryControllerAcknowledgeChainBreak,
+  inventoryControllerLedgerAnchors,
+  inventoryControllerLedgerIntegrity,
+  inventoryControllerLedgerProof,
   reportingControllerListAuditExports,
   reportingControllerRequestAuditExport,
   reportingControllerClientService,
@@ -187,6 +191,9 @@ import type {
   ReportingControllerAuditData,
   AuditExportDto,
   AuditExportListResponse,
+  ChainBreakDto,
+  LedgerAnchorListResponse,
+  LedgerIntegrityResponse,
   AuditExportRequestDto,
   ClientInvoiceDto,
   ClientInvoiceLineRecordsResponse,
@@ -1227,6 +1234,71 @@ export async function fetchApiAuditExportFile(tenantId: string, exportId: string
   const { data, error, response } = await reportingControllerDownloadAuditExport({
     path: { tenantId, exportId },
     parseAs: 'blob',
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data;
+}
+
+/**
+ * Story 9-3c — the tenant's ledger integrity status, one row per warehouse
+ * (owner-only: `audit.view`). Unpaged — the backend bounds it by the
+ * warehouse count.
+ */
+export async function fetchApiLedgerIntegrity(tenantId: string, options?: { signal?: AbortSignal }): Promise<LedgerIntegrityResponse> {
+  const { data, error, response } = await inventoryControllerLedgerIntegrity({
+    path: { tenantId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data;
+}
+
+/** Story 9-3c — one warehouse's anchors, newest range first (keyset cursor). */
+export async function fetchApiLedgerAnchors(
+  tenantId: string,
+  warehouseId: string,
+  query: { cursor?: string; limit?: number },
+): Promise<LedgerAnchorListResponse> {
+  const { data, error, response } = await inventoryControllerLedgerAnchors({
+    path: { tenantId, warehouseId },
+    query,
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data;
+}
+
+/**
+ * Story 9-3c — one anchored range's proof file, as a Blob (`parseAs:
+ * 'blob'`) so it is saved byte for byte as the server wrote it. A refusal is
+ * still problem+json and becomes an `ApiProblem`.
+ */
+export async function fetchApiLedgerProof(tenantId: string, warehouseId: string, anchorId: string): Promise<Blob> {
+  const { data, error, response } = await inventoryControllerLedgerProof({
+    path: { tenantId, warehouseId, anchorId },
+    parseAs: 'blob',
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data as unknown as Blob;
+}
+
+/** Story 9-3c — the owner acknowledges a chain break (a fresh key per click). Acknowledging repairs nothing. */
+export async function fetchApiAcknowledgeChainBreak(
+  tenantId: string,
+  warehouseId: string,
+  breakId: string,
+  idempotencyKey: string,
+): Promise<ChainBreakDto> {
+  const { data, error, response } = await inventoryControllerAcknowledgeChainBreak({
+    path: { tenantId, warehouseId, breakId },
+    headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
     throw unwrapError(error, response?.status ?? 400);
