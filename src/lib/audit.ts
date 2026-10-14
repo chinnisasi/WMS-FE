@@ -22,6 +22,7 @@ export type AuditTargetType = NonNullable<AuditQuery['targetType']>;
  */
 export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   advance_shipment_notice: 'ASN',
+  audit_export: 'Audit export',
   batch_alert: 'Batch alert',
   bin: 'Bin',
   carrier_connection: 'Carrier connection',

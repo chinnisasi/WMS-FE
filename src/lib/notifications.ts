@@ -34,6 +34,7 @@ const KNOWN_SOURCE_TYPES = {
   'batch-alert': true,
   'qc-hold': true,
   'channel-sync': true,
+  'audit-export': true,
 } as const satisfies Record<SourceType, true>;
 
 /** The entries this build can render — an unknown `sourceType` is dropped. */
@@ -87,6 +88,8 @@ export function notificationCategory(entry: NotificationEntry): string {
       return 'QC hold placed';
     case 'channel-sync':
       return 'Channel sync failing';
+    case 'audit-export':
+      return 'Audit export';
     default:
       return unknownSource(entry, 'Notification');
   }
@@ -122,6 +125,19 @@ function istDateLabel(iso: string): string {
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
   return `${part('day')} ${part('month')} ${part('year')}`;
 }
+
+type AuditExportReason = NonNullable<Extract<NotificationEntry, { sourceType: 'audit-export' }>['summary']['reason']>;
+
+/**
+ * Story 9-3b — why an export failed, in words. A `Record` over the GENERATED
+ * reason enum: a reason the backend adds fails this file's compile until it
+ * has copy.
+ */
+export const AUDIT_EXPORT_FAILURE_COPY: Readonly<Record<AuditExportReason, string>> = {
+  'too-many-events': 'too many events; narrow the filters or dates',
+  interrupted: 'interrupted; run it again',
+  'export-error': 'something went wrong; run it again',
+};
 
 /** The one-line description from the entry's summary. */
 export function notificationDescription(entry: NotificationEntry, lookups: NotificationLookups): string {
@@ -167,6 +183,14 @@ export function notificationDescription(entry: NotificationEntry, lookups: Notif
     }
     case 'channel-sync':
       return `Connection ${shortId(entry.summary.connectionId)} — deliveries are failing`;
+    case 'audit-export': {
+      const s = entry.summary;
+      if (s.status === 'ready') {
+        const n = s.rowCount ?? 0;
+        return `Audit export ready — ${n.toLocaleString('en-IN')} ${n === 1 ? 'event' : 'events'}`;
+      }
+      return `Audit export failed — ${s.reason === undefined ? 'run it again' : AUDIT_EXPORT_FAILURE_COPY[s.reason]}`;
+    }
     default:
       return unknownSource(entry, '');
   }
@@ -220,6 +244,10 @@ export function notificationHref(entry: NotificationEntry): string {
       return '/inbound';
     case 'channel-sync':
       return '/channels';
+    // Story 9-3b — the "Your exports" list on /reports; the entry never
+    // downloads (the file needs the bearer, and the list says its state).
+    case 'audit-export':
+      return '/reports#audit-exports';
     default:
       return unknownSource(entry, '/notifications');
   }

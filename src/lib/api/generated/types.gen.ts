@@ -5711,6 +5711,105 @@ export type AuditTrailResponse = {
     systemActorId: '01900000-0000-7000-8000-000000000000';
 };
 
+export type AuditExportRequestDto = {
+    /**
+     * Only actions by this user
+     */
+    actorUserId?: string;
+    /**
+     * Only actions starting with this prefix — a lowercase stem (`transfer.`, `stock_adjustment.`). Matched literally: `_` and `%` are never wildcards
+     */
+    actionPrefix?: string;
+    /**
+     * Only actions on this kind of target
+     */
+    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    /**
+     * Only actions on this target
+     */
+    targetId?: string;
+    /**
+     * Only actions RECORDED at or after this instant (`recordedAt` — the server commit stamp, never `occurredAt`). ISO-8601 with a zone designator
+     */
+    from?: string;
+    /**
+     * Only actions RECORDED strictly before this instant (exclusive). Must be after `from`
+     */
+    to?: string;
+};
+
+export type AuditFilterBaseDto = {
+    /**
+     * Only actions by this user
+     */
+    actorUserId?: string;
+    /**
+     * Only actions starting with this prefix — a lowercase stem (`transfer.`, `stock_adjustment.`). Matched literally: `_` and `%` are never wildcards
+     */
+    actionPrefix?: string;
+    /**
+     * Only actions on this kind of target
+     */
+    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    /**
+     * Only actions on this target
+     */
+    targetId?: string;
+    /**
+     * Only actions RECORDED at or after this instant (`recordedAt` — the server commit stamp, never `occurredAt`). ISO-8601 with a zone designator
+     */
+    from?: string;
+    /**
+     * Only actions RECORDED strictly before this instant (exclusive). Must be after `from`
+     */
+    to?: string;
+};
+
+export type AuditExportDto = {
+    id: string;
+    /**
+     * `queued` → `running` → `ready` or `failed`; a finished export `expired` 7 days after it finished (its file deleted, the row kept as history)
+     */
+    status: 'queued' | 'running' | 'ready' | 'failed' | 'expired';
+    /**
+     * The filters exported — absent keys omitted, `from`/`to` canonical UTC (`to` is exclusive)
+     */
+    filters: AuditFilterBaseDto;
+    /**
+     * When it was requested — the file holds the trail as of this instant
+     */
+    requestedAt: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+    /**
+     * When a finished export expires (7 days after it finished)
+     */
+    expiresAt: string | null;
+    /**
+     * The events in the file (ready, and kept when it expires)
+     */
+    rowCount: number | null;
+    /**
+     * The gzipped file size in bytes
+     */
+    byteSize: number | null;
+    /**
+     * sha256 (hex) of the UNCOMPRESSED CSV bytes, BOM included
+     */
+    sha256: string | null;
+    /**
+     * `too-many-events`: the filters matched more than 1,000,000 events — narrow the filters or dates; `interrupted`: the worker stopped three times — run it again; `export-error`: something went wrong — run it again
+     */
+    failureReason: 'too-many-events' | 'interrupted' | 'export-error' | null;
+};
+
+export type AuditExportListResponse = {
+    /**
+     * The caller's own last 20 exports, newest first (unpaged)
+     */
+    items: Array<AuditExportDto>;
+};
+
 export type ClientTaxDetailsDto = {
     legalName: string | null;
     gstin: string | null;
@@ -7077,11 +7176,46 @@ export type ChannelSyncNotificationDto = {
     resolution: 'recovered' | 'disconnected' | null;
 };
 
+export type AuditExportSummaryDto = {
+    status: 'ready' | 'failed';
+    /**
+     * Why it failed — the failed arm only
+     */
+    reason?: 'too-many-events' | 'interrupted' | 'export-error';
+    /**
+     * The events in the file — the ready arm only
+     */
+    rowCount?: number;
+};
+
+export type AuditExportNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'audit-export';
+    summary: AuditExportSummaryDto;
+    resolution: 'expired' | null;
+};
+
 export type NotificationListResponse = {
     /**
      * Visible entries, newest first. A member sees only the sources it can act on.
      */
-    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto>;
+    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto | AuditExportNotificationDto>;
     nextCursor: string | null;
 };
 
@@ -15343,7 +15477,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target
          */
-        targetType?: 'advance_shipment_notice' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+        targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
         /**
          * Only actions on this target
          */
@@ -15391,6 +15525,136 @@ export type ReportingControllerAuditResponses = {
 };
 
 export type ReportingControllerAuditResponse = ReportingControllerAuditResponses[keyof ReportingControllerAuditResponses];
+
+export type ReportingControllerListAuditExportsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/reporting/audit/exports';
+};
+
+export type ReportingControllerListAuditExportsErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied); a role without `audit.view` (role-denied); or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ReportingControllerListAuditExportsError = ReportingControllerListAuditExportsErrors[keyof ReportingControllerListAuditExportsErrors];
+
+export type ReportingControllerListAuditExportsResponses = {
+    200: AuditExportListResponse;
+};
+
+export type ReportingControllerListAuditExportsResponse = ReportingControllerListAuditExportsResponses[keyof ReportingControllerListAuditExportsResponses];
+
+export type ReportingControllerRequestAuditExportData = {
+    body: AuditExportRequestDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/reporting/audit/exports';
+};
+
+export type ReportingControllerRequestAuditExportErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; a malformed actorUserId/targetId, an actionPrefix outside the stem shape, an unknown targetType, a from/to that is not an ISO-8601 instant, or from not before to (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied); a role without `audit.view` (role-denied); or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * You already have an export queued or running (export-in-progress), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReportingControllerRequestAuditExportError = ReportingControllerRequestAuditExportErrors[keyof ReportingControllerRequestAuditExportErrors];
+
+export type ReportingControllerRequestAuditExportResponses = {
+    /**
+     * The queued export (a matching Idempotency-Key replays the original snapshot)
+     */
+    202: AuditExportDto;
+};
+
+export type ReportingControllerRequestAuditExportResponse = ReportingControllerRequestAuditExportResponses[keyof ReportingControllerRequestAuditExportResponses];
+
+export type ReportingControllerDownloadAuditExportData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        exportId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/reporting/audit/exports/{exportId}/file';
+};
+
+export type ReportingControllerDownloadAuditExportErrors = {
+    /**
+     * Malformed exportId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied); a role without `audit.view` (role-denied); or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No export of yours has this id — another member's export answers the same (export-not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The export is queued, running or failed (export-not-ready), or it expired and its file was deleted (export-expired)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type ReportingControllerDownloadAuditExportError = ReportingControllerDownloadAuditExportErrors[keyof ReportingControllerDownloadAuditExportErrors];
+
+export type ReportingControllerDownloadAuditExportResponses = {
+    /**
+     * The CSV file (Content-Encoding: gzip)
+     */
+    200: Blob | File;
+};
+
+export type ReportingControllerDownloadAuditExportResponse = ReportingControllerDownloadAuditExportResponses[keyof ReportingControllerDownloadAuditExportResponses];
 
 export type ClientsControllerListClientsData = {
     body?: never;

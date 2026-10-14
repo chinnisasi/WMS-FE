@@ -12,6 +12,7 @@ import {
   auditHappenedLabel,
   auditRecordedLabel,
   auditTargetLabel,
+  AUDIT_ROLE_DENIED,
   parseAuditFilters,
   type AuditFilterDraft,
   type AuditFilterQuery,
@@ -19,10 +20,13 @@ import {
 } from '@/lib/audit';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { roleHasCapability } from '@/lib/users';
+import { useAuditExports } from '@/lib/use-audit-exports';
 import { useAuditMembers, useAuditTrail } from '@/lib/use-audit-trail';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { ReadFailure, Section, buttonClass } from '@/components/shared/surface';
+
+import { AuditExportButton, AuditExportsList } from './audit-exports';
 
 const labelClass = 'text-xs text-(--muted-foreground)';
 const inputClass = 'h-8 rounded-sm border border-(--border) bg-transparent px-2 text-sm';
@@ -38,6 +42,11 @@ const inputClass = 'h-8 rounded-sm border border-(--border) bg-transparent px-2 
  * reload); the cursor is scoped to the applied filter tuple and the table is
  * keyed on it, so a filter change starts at page 1 with Prev disabled. The
  * Target column is plain text: no deep links (PENDING).
+ *
+ * Story 9-3b adds the async export: "Export the applied filters" and the
+ * "Your exports" list (`audit-exports.tsx`). Both hide on `role-denied` —
+ * the trail's or the exports list's — and the export stays available when
+ * the trail read failed any other way (a 503 is the case it exists for).
  */
 export function AuditTrail() {
   const role = useSyncExternalStore(
@@ -55,6 +64,8 @@ function AuditTrailSection() {
   const [problem, setProblem] = useState<string | null>(null);
   const trail = useAuditTrail(applied);
   const members = useAuditMembers();
+  const exports = useAuditExports();
+  const exportDenied = exports.denied || (trail.state === 'failed' && trail.reason === AUDIT_ROLE_DENIED);
   const memberList = members.state === 'ready' ? members.data : [];
   const userMap = members.state === 'ready' ? Object.fromEntries(members.data.map((user) => [user.id, user])) : null;
 
@@ -160,6 +171,7 @@ function AuditTrailSection() {
           Apply
         </button>
       </form>
+      {!exportDenied && <AuditExportButton applied={applied} onQueued={exports.reload} />}
       {members.state === 'failed' && (
         <div role="alert" className="text-xs text-(--destructive)">
           Members not loaded — the actor filter lists only System. {members.reason}{' '}
@@ -188,6 +200,7 @@ function AuditTrailSection() {
           emptyMessage={trail.state === 'loading' ? 'Loading the audit trail…' : 'No actions match these filters.'}
         />
       )}
+      {!exportDenied && <AuditExportsList exports={exports} userMap={userMap} />}
     </Section>
   );
 }

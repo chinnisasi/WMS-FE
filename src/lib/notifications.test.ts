@@ -38,6 +38,7 @@ const ENTRIES: Readonly<Record<NotificationEntry['sourceType'], NotificationEntr
   'batch-alert': { ...base, sourceType: 'batch-alert', warehouseId: W, summary: { kind: 'aged', skuId: SKU, batchCode: 'LOT-7', ageDays: 40 } },
   'qc-hold': { ...base, sourceType: 'qc-hold', warehouseId: W, summary: { skuId: SKU, reason: 'Seal broken' } },
   'channel-sync': { ...base, sourceType: 'channel-sync', warehouseId: null, summary: { connectionId: CONNECTION } },
+  'audit-export': { ...base, sourceType: 'audit-export', warehouseId: null, summary: { status: 'ready', rowCount: 102345 } },
 };
 
 function resolved(entry: NotificationEntry, resolution: string): NotificationEntry {
@@ -55,6 +56,7 @@ describe('notification copy', () => {
       'Aged batch',
       'QC hold placed',
       'Channel sync failing',
+      'Audit export',
     ]);
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
     expect(notificationCategory(expiring)).toBe('Batch nearing expiry');
@@ -70,6 +72,7 @@ describe('notification copy', () => {
       'SPICE-01 · batch LOT-7 · 40 days old · MAIN Chennai DC',
       'SPICE-01 · Seal broken · MAIN Chennai DC',
       'Connection 0198f7a2 — deliveries are failing',
+      'Audit export ready — 1,02,345 events',
     ]);
     // The expiry arm names the IST date (18:30Z is the next IST day).
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
@@ -77,6 +80,19 @@ describe('notification copy', () => {
     // Unknown SKU and warehouse degrade to short ids, never a blank.
     const unknown = { ...ENTRIES['qc-hold'], warehouseId: '0198f7a2-ffff-7d4e-8f90-99aabbccdd09', summary: { skuId: UNKNOWN_SKU, reason: 'Wet' } } as NotificationEntry;
     expect(notificationDescription(unknown, LOOKUPS)).toBe('SKU 0198f7a2 · Wet · Warehouse 0198f7a2');
+  });
+
+  test('the audit export (9-3b): ready names its events; failed names its reason — every reason has copy', () => {
+    const exportEntry = (summary: object) => ({ ...ENTRIES['audit-export'], summary }) as NotificationEntry;
+    expect(notificationDescription(exportEntry({ status: 'ready', rowCount: 1 }), LOOKUPS)).toBe('Audit export ready — 1 event');
+    expect(notificationDescription(exportEntry({ status: 'failed', reason: 'too-many-events' }), LOOKUPS)).toBe(
+      'Audit export failed — too many events; narrow the filters or dates',
+    );
+    expect(notificationDescription(exportEntry({ status: 'failed', reason: 'interrupted' }), LOOKUPS)).toBe('Audit export failed — interrupted; run it again');
+    expect(notificationDescription(exportEntry({ status: 'failed', reason: 'export-error' }), LOOKUPS)).toBe(
+      'Audit export failed — something went wrong; run it again',
+    );
+    expect(notificationResolvedLabel(resolved(ENTRIES['audit-export'], 'expired'))).toBe('Resolved · expired');
   });
 
   test('resolved: null while open; "Resolved · {resolution}" once cleared', () => {
@@ -112,6 +128,8 @@ describe('click-through links', () => {
       'reorder-breach': ['/replenishment', '/replenishment'],
       'qc-hold': ['/inbound', '/inbound'],
       'channel-sync': ['/channels', '/channels'],
+      // Story 9-3b — the "Your exports" list, never a download.
+      'audit-export': ['/reports#audit-exports', '/reports#audit-exports'],
     };
     for (const [sourceType, entry] of Object.entries(ENTRIES)) {
       const [open, done] = expected[sourceType as NotificationEntry['sourceType']];

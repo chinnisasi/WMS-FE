@@ -140,7 +140,11 @@ async function apply(container: HTMLElement): Promise<void> {
   await settle();
 }
 
-const auditUrls = () => urls.filter((url) => url.includes('/reporting/audit'));
+// Story 9-3b: the section also reads `…/reporting/audit/exports` — the
+// trail's own requests are the ones whose path ENDS at `/reporting/audit`.
+const auditUrls = () => urls.filter((url) => url.split('?')[0]!.endsWith('/reporting/audit'));
+/** The trail's table — the first in the section (9-3b's "Your exports" table follows it). */
+const trailTable = (container: HTMLElement) => container.querySelector('table')!;
 const lastAudit = () => new URL(`http://x${auditUrls().at(-1)!}`);
 const button = (container: HTMLElement, label: string) =>
   [...container.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement;
@@ -156,7 +160,7 @@ describe('AuditTrail (9-3a)', () => {
     const container = await open();
     expect(lastAudit().pathname).toBe(`/api/v1/tenants/${TENANT_ID}/reporting/audit`);
     expect(lastAudit().search).toBe('');
-    const rows = [...container.querySelectorAll('tbody tr')].map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent));
+    const rows = [...trailTable(container).querySelectorAll('tbody tr')].map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent));
     expect(rows).toEqual([
       ['12 Oct 2026, 15:30:00happened 13:30', 'owner@example.com', 'putaway.placed', 'Putaway 00000003'],
       ['12 Oct 2026, 14:30:00', 'System', 'replenishment.breach_detected', 'Reorder breach 00000002'],
@@ -164,7 +168,7 @@ describe('AuditTrail (9-3a)', () => {
       ['12 Oct 2026, 13:30:00', '000000u9', 'transfer.created', 'Transfer 00000001'],
     ]);
     // The Target column is text, never a link.
-    expect(container.querySelectorAll('tbody a')).toHaveLength(0);
+    expect(trailTable(container).querySelectorAll('tbody a')).toHaveLength(0);
   });
 
   test('an ops manager is never shown the section (the mirror) and nothing is read', async () => {
@@ -230,7 +234,7 @@ describe('AuditTrail (9-3a)', () => {
     usersFail = true;
     const container = await open();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('Members not loaded');
-    expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
+    expect(trailTable(container).querySelectorAll('tbody tr')).toHaveLength(3);
   });
 
   test('"System" works even when no read has succeeded: the first page 503s, then System is applied with the typed id', async () => {
@@ -254,7 +258,7 @@ describe('AuditTrail (9-3a)', () => {
     click(button(container, 'Retry'));
     await settle();
     expect(lastAudit().searchParams.has('cursor')).toBe(false);
-    expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
+    expect(trailTable(container).querySelectorAll('tbody tr')).toHaveLength(3);
     expect(button(container, 'Prev').disabled).toBe(true);
     expect(button(container, 'Next').disabled).toBe(false);
   });

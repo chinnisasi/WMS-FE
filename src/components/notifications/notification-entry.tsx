@@ -12,6 +12,7 @@ import {
   type NotificationEntry,
   type NotificationLookups,
 } from '@/lib/notifications';
+import { requestAuditExportsRefresh } from '@/lib/audit-exports';
 
 /**
  * Story 9-2 — one notification entry, as the panel and the page both draw
@@ -36,7 +37,12 @@ export function NotificationEntryLink({
   return (
     <Link
       href={notificationHref(entry)}
-      onClick={onNavigate}
+      onClick={() => {
+        // Story 9-3b: on `/reports` already, the Link's pushState fires no
+        // hashchange — ask the mounted exports list to reload and scroll.
+        if (entry.sourceType === 'audit-export') requestAuditExportsRefresh();
+        onNavigate?.();
+      }}
       data-notification={entry.sourceType}
       data-state={resolved === null ? 'open' : 'resolved'}
       className={
