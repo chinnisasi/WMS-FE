@@ -1363,6 +1363,139 @@ export type LedgerEventListResponse = {
     nextCursor?: string | null;
 };
 
+export type LedgerAnchorWormDto = {
+    bucket: string;
+    objectKey: string;
+    /**
+     * The S3 object version the copy step wrote
+     */
+    versionId: string;
+    /**
+     * The Object Lock (COMPLIANCE) retain-until date
+     */
+    retainUntil: string;
+    copiedAt: string;
+};
+
+export type LedgerAnchorDto = {
+    id: string;
+    /**
+     * `verified` — verified in the current form; `legacy` — the baseline’s pre-0026 prefix, verified with quantity_delta / 1000
+     */
+    kind: 'verified' | 'legacy';
+    fromSeq: number;
+    toSeq: number;
+    /**
+     * sha256 over the range's 'seq:eventHash' lines, seq ascending, '\n'-joined
+     */
+    digest: string;
+    anchoredAt: string;
+    /**
+     * Null until the anchor is copied to WORM storage (or when none is configured)
+     */
+    worm: LedgerAnchorWormDto | null;
+};
+
+export type ChainBreakDto = {
+    id: string;
+    /**
+     * `chain` — the ledger itself; `worm` — the WORM copy of an anchor is missing or differs
+     */
+    kind: 'chain' | 'worm';
+    /**
+     * The lowest broken seq (a worm break: the anchor’s first seq)
+     */
+    firstSeq: number;
+    /**
+     * The anchor — a worm break only
+     */
+    anchorId: string | null;
+    reason: string;
+    detectedBy: 'anchor' | 'reverify' | 'verify';
+    detectedAt: string;
+    acknowledgedBy: string | null;
+    acknowledgedAt: string | null;
+};
+
+export type WarehouseLedgerIntegrityDto = {
+    warehouseId: string;
+    warehouseCode: string;
+    /**
+     * False until the integrity worker has run once on this warehouse
+     */
+    baselined: boolean;
+    /**
+     * Events 1..N verified in the pre-0026 form (0: none)
+     */
+    legacyThroughSeq: number;
+    /**
+     * The chain is anchored and verified through this seq
+     */
+    verifiedThroughSeq: number | null;
+    verifiedAt: string | null;
+    lastRunAt: string | null;
+    /**
+     * The lowest break seq ever detected — never cleared (detection never auto-heals)
+     */
+    brokenAtSeq: number | null;
+    brokenDetectedAt: string | null;
+    lastAnchor: LedgerAnchorDto | null;
+    /**
+     * Anchors not yet copied to WORM storage
+     */
+    wormPending: number;
+    /**
+     * Open and acknowledged breaks, newest first, at most 10
+     */
+    breaks: Array<ChainBreakDto>;
+    /**
+     * Every unacknowledged break of the warehouse (not only the listed 10) — 0 means every break is acknowledged
+     */
+    openBreakCount: number;
+};
+
+export type LedgerIntegrityResponse = {
+    /**
+     * The configured WORM store (`LEDGER_ANCHOR_WORM`)
+     */
+    wormStore: 'none' | 's3';
+    /**
+     * One row per warehouse of the tenant, by code — unpaged (bounded by the warehouse count)
+     */
+    warehouses: Array<WarehouseLedgerIntegrityDto>;
+};
+
+export type LedgerAnchorListResponse = {
+    /**
+     * Newest range first (to_seq descending)
+     */
+    items: Array<LedgerAnchorDto>;
+    nextCursor: string | null;
+};
+
+export type LedgerProofResponse = {
+    tenantId: string;
+    warehouseId: string;
+    anchor: LedgerAnchorDto;
+    /**
+     * How to recompute the digest from `lines`
+     */
+    algorithm: string;
+    /**
+     * For a legacy anchor: the pre-0026 (÷1000) rule; null otherwise
+     */
+    legacyForm: string | null;
+    /**
+     * 'seq:eventHash', seq ascending — exactly the digest's input
+     */
+    lines: Array<string>;
+    recomputedDigest: string;
+    /**
+     * The recomputed digest equals the anchor’s
+     */
+    matches: boolean;
+};
+
 export type StockEntryDto = {
     /**
      * The projection row id (the cursor tiebreaker)
@@ -5723,7 +5856,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target
      */
-    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
     /**
      * Only actions on this target
      */
@@ -5750,7 +5883,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target
      */
-    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
     /**
      * Only actions on this target
      */
@@ -7211,11 +7344,47 @@ export type AuditExportNotificationDto = {
     resolution: 'expired' | null;
 };
 
+export type LedgerChainBreakSummaryDto = {
+    /**
+     * `chain` — the ledger itself; `worm` — the WORM copy of an anchor is missing or differs
+     */
+    kind: 'chain' | 'worm';
+    /**
+     * The lowest broken seq (a worm break: the anchor’s first seq)
+     */
+    firstSeq: number;
+    reason: string;
+    detectedBy: 'anchor' | 'reverify' | 'verify';
+};
+
+export type LedgerChainBreakNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'ledger-chain-break';
+    summary: LedgerChainBreakSummaryDto;
+    resolution: 'acknowledged' | null;
+};
+
 export type NotificationListResponse = {
     /**
      * Visible entries, newest first. A member sees only the sources it can act on.
      */
-    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto | AuditExportNotificationDto>;
+    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto | AuditExportNotificationDto | LedgerChainBreakNotificationDto>;
     nextCursor: string | null;
 };
 
@@ -9551,6 +9720,182 @@ export type InventoryControllerListEventsResponses = {
 };
 
 export type InventoryControllerListEventsResponse = InventoryControllerListEventsResponses[keyof InventoryControllerListEventsResponses];
+
+export type InventoryControllerLedgerIntegrityData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/ledger/integrity';
+};
+
+export type InventoryControllerLedgerIntegrityErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks audit.view (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type InventoryControllerLedgerIntegrityError = InventoryControllerLedgerIntegrityErrors[keyof InventoryControllerLedgerIntegrityErrors];
+
+export type InventoryControllerLedgerIntegrityResponses = {
+    200: LedgerIntegrityResponse;
+};
+
+export type InventoryControllerLedgerIntegrityResponse = InventoryControllerLedgerIntegrityResponses[keyof InventoryControllerLedgerIntegrityResponses];
+
+export type InventoryControllerLedgerAnchorsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        /**
+         * Page size, default 50
+         */
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/ledger/anchors';
+};
+
+export type InventoryControllerLedgerAnchorsErrors = {
+    /**
+     * A malformed warehouseId (validation-failed), a malformed cursor (invalid-cursor), or an out-of-range limit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks audit.view (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InventoryControllerLedgerAnchorsError = InventoryControllerLedgerAnchorsErrors[keyof InventoryControllerLedgerAnchorsErrors];
+
+export type InventoryControllerLedgerAnchorsResponses = {
+    200: LedgerAnchorListResponse;
+};
+
+export type InventoryControllerLedgerAnchorsResponse = InventoryControllerLedgerAnchorsResponses[keyof InventoryControllerLedgerAnchorsResponses];
+
+export type InventoryControllerLedgerProofData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        anchorId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/ledger/anchors/{anchorId}/proof';
+};
+
+export type InventoryControllerLedgerProofErrors = {
+    /**
+     * A malformed warehouseId or anchorId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks audit.view (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No anchor with this id in this warehouse (anchor-not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type InventoryControllerLedgerProofError = InventoryControllerLedgerProofErrors[keyof InventoryControllerLedgerProofErrors];
+
+export type InventoryControllerLedgerProofResponses = {
+    200: LedgerProofResponse;
+};
+
+export type InventoryControllerLedgerProofResponse = InventoryControllerLedgerProofResponses[keyof InventoryControllerLedgerProofResponses];
+
+export type InventoryControllerAcknowledgeChainBreakData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        breakId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/ledger/breaks/{breakId}/acknowledge';
+};
+
+export type InventoryControllerAcknowledgeChainBreakErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed warehouseId/breakId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks ledger.acknowledge (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No chain break with this id in this warehouse (chain-break-not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Already acknowledged (chain-break-acknowledged), or a concurrent request on the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InventoryControllerAcknowledgeChainBreakError = InventoryControllerAcknowledgeChainBreakErrors[keyof InventoryControllerAcknowledgeChainBreakErrors];
+
+export type InventoryControllerAcknowledgeChainBreakResponses = {
+    200: ChainBreakDto;
+};
+
+export type InventoryControllerAcknowledgeChainBreakResponse = InventoryControllerAcknowledgeChainBreakResponses[keyof InventoryControllerAcknowledgeChainBreakResponses];
 
 export type InventoryControllerListStockData = {
     body?: never;
@@ -15477,7 +15822,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target
          */
-        targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+        targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
         /**
          * Only actions on this target
          */

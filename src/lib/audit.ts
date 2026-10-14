@@ -40,6 +40,7 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   expiry_alert_policy: 'Expiry policy',
   goods_receipt: 'GRN',
   kit: 'Kit',
+  ledger_chain_break: 'Ledger chain break',
   ledger_event: 'Ledger event',
   manifest: 'Manifest',
   order: 'Order',

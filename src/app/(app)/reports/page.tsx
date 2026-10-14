@@ -1,12 +1,15 @@
 import { AuditTrail } from '@/components/reports/audit-trail';
 import { ClientService } from '@/components/reports/client-service';
+import { LedgerIntegrity } from '@/components/reports/ledger-integrity';
 
 export const metadata = { title: 'Reports' };
 
 /**
  * Reports / Audit. Story 21-8's per-client service reporting, then story
  * 9-3a's Audit section — the owner's trail of every state-changing action
- * (it renders only for a role holding `audit.view`).
+ * (it renders only for a role holding `audit.view`) — then story 9-3c's
+ * Ledger integrity section (the hash chain's verified position, anchors,
+ * WORM copies and breaks; owner-only through the same capability).
  */
 export default function ReportsPage() {
   return (
@@ -19,6 +22,7 @@ export default function ReportsPage() {
       </section>
       <ClientService />
       <AuditTrail />
+      <LedgerIntegrity />
     </div>
   );
 }

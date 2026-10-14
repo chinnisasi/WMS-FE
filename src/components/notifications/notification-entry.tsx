@@ -13,6 +13,7 @@ import {
   type NotificationLookups,
 } from '@/lib/notifications';
 import { requestAuditExportsRefresh } from '@/lib/audit-exports';
+import { requestLedgerIntegrityRefresh } from '@/lib/ledger-integrity';
 
 /**
  * Story 9-2 — one notification entry, as the panel and the page both draw
@@ -41,6 +42,8 @@ export function NotificationEntryLink({
         // Story 9-3b: on `/reports` already, the Link's pushState fires no
         // hashchange — ask the mounted exports list to reload and scroll.
         if (entry.sourceType === 'audit-export') requestAuditExportsRefresh();
+        // Story 9-3c: the same for the Ledger integrity section.
+        if (entry.sourceType === 'ledger-chain-break') requestLedgerIntegrityRefresh();
         onNavigate?.();
       }}
       data-notification={entry.sourceType}

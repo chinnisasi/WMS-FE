@@ -54,7 +54,12 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 21-6 adds `asn.manage` (owner + ops_manager, `po.manage`'s set) — 39 became 40.
     // Story 21-7b adds `asn.announce` (owner + client — the portal's one write) — 40 became 41.
     // Story 9-3a adds `audit.view` (owner-only — the audit trail read) — 41 became 42.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(42);
+    // Story 9-3c adds `ledger.acknowledge` (owner-only — a chain break's acknowledgement) — 42 became 43.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(43);
+    expect(roleHasCapability('owner', 'ledger.acknowledge')).toBe(true);
+    for (const role of ['ops_manager', 'operator', 'accountant', 'client'] as const) {
+      expect(roleHasCapability(role, 'ledger.acknowledge')).toBe(false);
+    }
     expect(roleHasCapability('owner', 'audit.view')).toBe(true);
     for (const role of ['ops_manager', 'operator', 'accountant', 'client'] as const) {
       expect(roleHasCapability(role, 'audit.view')).toBe(false);
