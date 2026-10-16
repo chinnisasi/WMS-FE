@@ -455,3 +455,57 @@ describe('RejectedOpsQueue: the card and the read-only render (story 5-6)', () =
     expect(labels).toEqual(['Open', 'Applied', 'Recounted', 'Discarded']);
   });
 });
+
+describe('story 13-2 — a return.receive row is Discard only', () => {
+  const RETURN_OP_ID = '01989f7a-1b3c-7d4e-8f90-888888888888';
+
+  test('the row shows the RMA code and each refused entry with its reason, the guidance, and only Discard — the buttons follow the server rule', async () => {
+    opRows = [
+      rejectedOp(
+        {
+          opType: 'return.receive',
+          classification: 'rejected',
+          problemCode: 'return-entries-refused',
+          problemDetail: null,
+          decisions: ['discard'],
+          payload: {
+            warehouseId: WAREHOUSE_ID,
+            rmaId: '01989f7a-1b3c-7d4e-8f90-999999999999',
+            rmaCode: 'RMA-0007',
+            occurredAt: '2026-10-16T05:00:00Z',
+            entries: [
+              { rmaLineId: 'rl-1', skuId: 'sku-1', qty: 1, condition: 'opened', note: null, batchCode: null, serialNumber: null, weightGrams: null },
+              { rmaLineId: null, skuId: 'sku-2', qty: 2, condition: 'damaged', note: null, batchCode: null, serialNumber: null, weightGrams: null },
+            ],
+            refusals: [
+              { entryIndex: 2, reason: 'exceeds-authorized' },
+              { entryIndex: 3, reason: 'not-on-authorization' },
+            ],
+          },
+        },
+        RETURN_OP_ID,
+      ),
+    ];
+    view = await mount();
+    const card = article(view, 'RMA-0007');
+    const text = card.textContent ?? '';
+    expect(text).toContain('RMA-0007 — 2 entries not booked');
+    expect(text).toContain('× 1 · Opened — more than authorized');
+    expect(text).toContain('× 2 · Damaged · not on any line — not on the return');
+    expect(text).toContain('Create a return authorization for these units, then receive them again.');
+    const labels = [...card.querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels).toContain('Discard');
+    expect(labels).not.toContain('Apply (re-execute)');
+    expect(labels).not.toContain('Open a recount');
+    await click(articleButton(card, 'Discard'));
+    await settle();
+    expect(resolvePosts()).toHaveLength(1);
+    expect(resolvePosts()[0]!.body).toEqual({ decision: 'discard' });
+  });
+
+  test('a row without `decisions` (an old snapshot) keeps the pre-13-2 buttons', async () => {
+    view = await mount();
+    const labels = [...article(view, 'bin-epoch-moved').querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels).toEqual(expect.arrayContaining(['Discard', 'Open a recount', 'Apply (re-execute)']));
+  });
+});

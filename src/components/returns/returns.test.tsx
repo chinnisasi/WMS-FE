@@ -157,6 +157,7 @@ let createAnswers: Response[] = [];
 let listItems: Record<string, unknown>[] = [];
 let returnableAnswer: Record<string, unknown> = RETURNABLE;
 let cancelAnswers: Response[] = [];
+let detailAnswer: Record<string, unknown> | null = null;
 
 function stubRouter(): void {
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
@@ -221,6 +222,9 @@ function stubRouter(): void {
         nextCursor: null,
       });
     }
+    if (method === 'GET' && /\/returns\/rma-[^/]+$/.test(pathname)) {
+      return detailAnswer === null ? json(404, { code: 'not-found', title: 'x', status: 404 }) : json(200, detailAnswer);
+    }
     if (method === 'GET' && pathname.endsWith(`/tenants/${TENANT_ID}/returns`)) {
       return json(200, { items: listItems, nextCursor: null });
     }
@@ -238,6 +242,7 @@ beforeEach(() => {
   listItems = [];
   returnableAnswer = RETURNABLE;
   cancelAnswers = [];
+  detailAnswer = null;
   orderStatus = 'dispatched';
   stubRouter();
 });
@@ -558,3 +563,94 @@ describe('the Returns list (story 13-1)', () => {
     expect(view.container.querySelector('[aria-label="Cancel reason"]')).toBeNull();
   });
 });
+
+describe('the Returns list — receipts (story 13-2)', () => {
+  async function mountList(role: UserRole, canManage: boolean): Promise<Rendered> {
+    writeSession(session(role));
+    const rendered = render(<ReturnsList tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH-1 Peenya" canManage={canManage} />);
+    await settle();
+    return rendered;
+  }
+
+  function received(): Record<string, unknown> {
+    const base = rma({ status: 'partially_received' });
+    const lines = (base.lines as Record<string, unknown>[]).map((line) => (line.id === 'rl-1' ? { ...line, receivedQty: 1 } : line));
+    return { ...base, lines };
+  }
+
+  test('expanding a row fetches the detail: each line\'s received figure, the amber "↩ Awaiting disposition" badge on received lines, and the receipts with the operator and each unit\'s condition', async () => {
+    listItems = [received()];
+    detailAnswer = {
+      ...received(),
+      receipts: [
+        {
+          id: 'rr-1',
+          code: 'RRN-0003',
+          occurredAt: '2026-10-16T05:00:00.000Z',
+          operatorEmail: 'ravi@example.com',
+          lines: [
+            { rmaLineId: 'rl-1', skuId: 'sku-a', qty: 1, condition: 'missing-parts', note: 'no charger', batchCode: null, serialNumber: null, weightGrams: null },
+          ],
+        },
+      ],
+    };
+    view = await mountList('ops_manager', true);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('Partly received');
+    // Cancel is hidden once anything is received (the status is no longer open).
+    expect(button(view.container, 'Cancel')).toBeUndefined();
+    // The list never fetched a detail; expanding does.
+    expect(requests.some((r) => r.pathname.endsWith('/returns/rma-1'))).toBe(false);
+    await press([...view.container.querySelectorAll('button')].find((b) => b.textContent?.includes('RMA-0007')));
+    await settle();
+    expect(requests.some((r) => r.method === 'GET' && r.pathname.endsWith('/returns/rma-1'))).toBe(true);
+    const expanded = view.container.textContent ?? '';
+    expect(expanded).toContain('1 of 2 each received');
+    expect(expanded).toContain('0 of 1 each received');
+    expect([...expanded.matchAll(/↩ Awaiting disposition/g)]).toHaveLength(1);
+    expect(expanded).toContain('RRN-0003 · ravi@example.com');
+    expect(expanded).toContain('1 × Missing parts · “no charger”');
+  });
+
+  test('a failed detail read says so, and the lines still show', async () => {
+    listItems = [received()];
+    view = await mountList('accountant', false);
+    await press([...view.container.querySelectorAll('button')].find((b) => b.textContent?.includes('RMA-0007')));
+    await settle();
+    const expanded = view.container.textContent ?? '';
+    expect(expanded).toContain('Receipts unavailable');
+    expect(expanded).toContain('1 of 2 each received');
+  });
+
+  test('an expanded row refetches its receipts when the row changes (a receipt landed)', async () => {
+    listItems = [rma()];
+    detailAnswer = { ...rma(), receipts: [] };
+    view = await mountList('ops_manager', true);
+    await press([...view.container.querySelectorAll('button')].find((b) => b.textContent?.includes('RMA-0007')));
+    await settle();
+    const detailReads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/returns/rma-1')).length;
+    expect(detailReads()).toBe(1);
+    expect(view.container.textContent).not.toContain('RRN-0004');
+    // A receipt landed: the row's status and received total moved — refetch.
+    listItems = [received()];
+    detailAnswer = {
+      ...received(),
+      receipts: [
+        {
+          id: 'rr-1',
+          code: 'RRN-0004',
+          occurredAt: '2026-10-16T05:00:00.000Z',
+          operatorEmail: 'ravi@example.com',
+          lines: [{ rmaLineId: 'rl-1', skuId: 'sku-a', qty: 1, condition: 'opened', note: null, batchCode: null, serialNumber: null, weightGrams: null }],
+        },
+      ],
+    };
+    await act(async () => {
+      window.dispatchEvent(new Event(RETURNS_CHANGED_EVENT));
+    });
+    await settle();
+    expect(detailReads()).toBeGreaterThanOrEqual(2);
+    expect(view.container.textContent).toContain('RRN-0004');
+  });
+});
+
