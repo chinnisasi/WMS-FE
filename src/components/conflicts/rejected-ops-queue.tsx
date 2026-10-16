@@ -4,7 +4,14 @@ import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiResolveRejectedOp } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { rejectedOpPayloadBinId, rejectedOpsResolveReason } from '@/lib/review-queue';
+import {
+  returnReceiveGuidance,
+  rejectedOpDecisions,
+  rejectedOpPayloadBinId,
+  rejectedOpSummary,
+  rejectedOpsResolveReason,
+} from '@/lib/review-queue';
+import { useOutboundSkus } from '@/lib/use-outbound-orders';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useUserMap } from '@/lib/use-inbound';
@@ -88,6 +95,11 @@ function RejectedOpsQueueSessioned() {
     ...new Set(items.map((entry) => fieldText(entry.payload, 'warehouseId')).filter((w) => w !== null)),
   ];
   const binMaps = useBinCodeMaps(warehouseIds);
+  // Story 13-2 — a return.receive summary names SKUs by code when the
+  // catalog read has landed (the id's short form otherwise).
+  const skus = useOutboundSkus();
+  const skuMap = skus.state === 'ready' ? skus.data : null;
+  const skuCode = (skuId: string): string | null => skuMap?.[skuId]?.code ?? null;
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
   // render) so a /me bootstrap role rewrite re-renders the actions.
   const role = useSyncExternalStore(
@@ -219,6 +231,7 @@ function RejectedOpsQueueSessioned() {
               binCode={binLabelFor(entry, binMaps)}
               resolvedBy={entry.resolvedBy === null ? null : (users?.[entry.resolvedBy]?.email ?? null)}
               canDecide={canDecide}
+              skuCode={skuCode}
               resolving={resolving.has(entry.id)}
               onResolve={resolve}
             />
@@ -266,6 +279,7 @@ function RejectedOpCard({
   binCode,
   resolvedBy,
   canDecide,
+  skuCode,
   resolving,
   onResolve,
 }: {
@@ -273,16 +287,19 @@ function RejectedOpCard({
   binCode: string | null;
   resolvedBy: string | null;
   canDecide: boolean;
+  skuCode: (skuId: string) => string | null;
   resolving: boolean;
   onResolve: (entry: RejectedOpEntry, decision: ResolutionDecision) => void;
 }) {
   // The expanded panel mounts the payload list — and the ledger walk when
   // the payload names a bin; its selection state dies with the card.
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const payloadBinId = rejectedOpPayloadBinId(entry.payload);
   const deviceLabel = fieldText(entry.attribution, 'deviceLabel');
   const operatorEmail = fieldText(entry.attribution, 'operatorEmail');
   const open = entry.status === 'open';
+  // Story 13-2 — the buttons follow the server's per-type rule.
+  const decisions = rejectedOpDecisions(entry);
+  const summary = rejectedOpSummary(entry, skuCode);
 
   return (
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
@@ -299,6 +316,24 @@ function RejectedOpCard({
         <span className="font-mono">{entry.problemCode}</span>
         {entry.problemDetail !== null && <span> — {entry.problemDetail}</span>}
       </div>
+      {summary !== null && (
+        <div className="flex flex-col gap-0.5 text-xs">
+          <div className="font-medium">{summary.heading}</div>
+          <ul className="flex flex-col gap-0.5 pl-3">
+            {summary.lines.map((line, index) => (
+              <li key={index} className="font-mono">
+                {line}
+              </li>
+            ))}
+          </ul>
+          {open &&
+            returnReceiveGuidance(entry).map((guidance) => (
+              <div key={guidance} className="text-(--muted-foreground)">
+                {guidance}
+              </div>
+            ))}
+        </div>
+      )}
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-(--muted-foreground)">
         <span>device {deviceLabel ?? 'unknown device'}</span>
         <span>operator {operatorEmail ?? 'unknown operator'}</span>
@@ -346,6 +381,7 @@ function RejectedOpCard({
           </button>
           {open && (
             <>
+              {decisions.includes('discard') && (
               <button
                 type="button"
                 disabled={resolving}
@@ -354,7 +390,8 @@ function RejectedOpCard({
               >
                 {resolving ? 'Resolving…' : 'Discard'}
               </button>
-              {payloadBinId !== null && (
+              )}
+              {decisions.includes('recount') && (
                 <button
                   type="button"
                   disabled={resolving}
@@ -364,6 +401,7 @@ function RejectedOpCard({
                   {resolving ? 'Resolving…' : 'Open a recount'}
                 </button>
               )}
+              {decisions.includes('apply') && (
               <button
                 type="button"
                 disabled={resolving}
@@ -372,6 +410,7 @@ function RejectedOpCard({
               >
                 {resolving ? 'Resolving…' : 'Apply (re-execute)'}
               </button>
+              )}
             </>
           )}
         </div>

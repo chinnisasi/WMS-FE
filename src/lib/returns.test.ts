@@ -24,6 +24,12 @@ import {
   returnReason,
   returnReasonText,
   selectAllSerials,
+  AWAITING_DISPOSITION_BADGE,
+  RETURN_CONDITION_LABEL,
+  lineAwaitsDisposition,
+  receiptHeading,
+  receiptLineText,
+  receivedOfAuthorized,
 } from './returns';
 import { UNREACHABLE_REASON } from './outbound-orders';
 
@@ -46,7 +52,7 @@ const serial = (n: string) => ({ id: `id-${n}`, serialNumber: n });
 
 describe('words', () => {
   test('statuses and reasons are word-first, over the generated unions', () => {
-    expect(RETURN_STATUS_LABEL).toEqual({ open: 'Open', cancelled: 'Cancelled' });
+    expect(RETURN_STATUS_LABEL).toEqual({ open: 'Open', partially_received: 'Partly received', received: 'Received', cancelled: 'Cancelled' });
     expect(RETURN_REASON_OPTIONS.map((o) => o.value)).toEqual([
       'damaged',
       'defective',
@@ -230,3 +236,37 @@ describe('returnReason', () => {
     expect(cancelRefusalReloads(problem('validation-failed', 400))).toBe(false);
   });
 });
+
+describe('story 13-2 — receipts and the awaiting badge', () => {
+  test('conditions are word-first, over the generated union', () => {
+    expect(RETURN_CONDITION_LABEL).toEqual({ resaleable: 'Resaleable', opened: 'Opened', damaged: 'Damaged', 'missing-parts': 'Missing parts' });
+  });
+
+  test('the badge is word-first and shows on a line once anything is received', () => {
+    expect(AWAITING_DISPOSITION_BADGE).toBe('↩ Awaiting disposition');
+    expect(lineAwaitsDisposition({ receivedQty: 0 })).toBe(false);
+    expect(lineAwaitsDisposition({ receivedQty: 0.5 })).toBe(true);
+    expect(receivedOfAuthorized({ receivedQty: 1, authorizedQty: 2 }, { uom: 'pcs', uomPrecision: 0 })).toBe('1 of 2 pcs received');
+    expect(receivedOfAuthorized({ receivedQty: 0.5, authorizedQty: 1.25 }, { uom: 'kg', uomPrecision: 3 })).toBe('0.500 of 1.250 kg received');
+    expect(receivedOfAuthorized({ receivedQty: 1, authorizedQty: 2 }, null)).toBe('1 of 2 units received');
+  });
+
+  test('Cancel hides once anything is received: only an open authorization can be cancelled', () => {
+    expect(canCancelReturn('open')).toBe(true);
+    expect(canCancelReturn('partially_received')).toBe(false);
+    expect(canCancelReturn('received')).toBe(false);
+    expect(canCancelReturn('cancelled')).toBe(false);
+  });
+
+  test('a receipt and its lines in words', () => {
+    expect(receiptHeading({ code: 'RRN-0003', operatorEmail: 'ravi@example.com' })).toBe('RRN-0003 · ravi@example.com');
+    expect(receiptHeading({ code: 'RRN-0003', operatorEmail: null })).toBe('RRN-0003 · unknown operator');
+    const base = { rmaLineId: 'l', skuId: 's', qty: 1, condition: 'resaleable' as const, note: null, batchCode: null, serialNumber: null, weightGrams: null };
+    expect(receiptLineText(base)).toBe('1 × Resaleable');
+    expect(receiptLineText({ ...base, condition: 'opened', batchCode: 'B1', serialNumber: 'SN-1', note: 'seal cut' })).toBe(
+      '1 × Opened · batch B1 · serial SN-1 · “seal cut”',
+    );
+    expect(receiptLineText({ ...base, condition: 'damaged', weightGrams: 2340 })).toBe('1 × Damaged · 2.340 kg');
+  });
+});
+

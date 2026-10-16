@@ -1031,6 +1031,9 @@ function rejectionReason(error: unknown, attemptedCode?: string): string {
         return attemptedCode !== undefined
           ? `Bin code ${attemptedCode} is already used in this warehouse — pick another.`
           : (error.detail ?? 'A generated bin code is already used in this warehouse — narrow the grid or pick different codes.');
+      case 'reserved-location-code':
+        // Story 13-2 — RETURNS belongs to the system returns zone/bin.
+        return 'RETURNS is reserved for the system returns location — choose another code.';
       case 'grid-too-large':
         return error.detail ?? 'Narrow the aisle range, bays, or levels — 500 bins per run.';
       case 'not-found':

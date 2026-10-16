@@ -878,7 +878,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive';
     /**
      * The replay fate the server refused with
      */
@@ -954,7 +954,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -980,6 +980,10 @@ export type RejectedOpResponse = {
     } | null;
     createdAt: string;
     updatedAt: string;
+    /**
+     * Story 13-2 — the decisions this row's op type admits (the per-type rule; a return.receive row is ['discard'] only). Always present on the list; absent only on a resolve response stored before 13-2
+     */
+    decisions?: Array<'apply' | 'recount' | 'discard'>;
 };
 
 export type RejectedOpListResponse = {
@@ -1323,6 +1327,18 @@ export type LedgerReferenceDocDto = {
      * Story 9-3a — the count variance an approve-adjust resolution corrected (manual-adjustment arm, resolutions only)
      */
     countVarianceId?: string;
+    /**
+     * Story 13-2 — the return receipt the units landed under (return-receipt arm only)
+     */
+    returnReceiptId?: string;
+    /**
+     * Story 13-2 — the return authorization received against (return-receipt arm only)
+     */
+    rmaId?: string;
+    /**
+     * Story 13-2 — the authorization line credited (return-receipt arm only)
+     */
+    rmaLineId?: string;
 };
 
 export type LedgerEventDto = {
@@ -3513,6 +3529,60 @@ export type CatalogCountTaskDto = {
     lines: Array<CatalogCountTaskLineDto>;
 };
 
+export type CatalogOpenReturnSerialDto = {
+    id: string;
+    serialNumber: string;
+    /**
+     * Already received against this authorization
+     */
+    received: boolean;
+    /**
+     * The batch the serial was picked from (batch-and-serial SKUs); null otherwise
+     */
+    batchCode: string | null;
+};
+
+export type CatalogOpenReturnLineDto = {
+    /**
+     * The return authorization line (an entry's rmaLineId)
+     */
+    id: string;
+    skuId: string;
+    /**
+     * Units authorized, base UoM
+     */
+    authorizedQty: number;
+    /**
+     * Units received so far, base UoM
+     */
+    receivedQty: number;
+    /**
+     * authorized − received, base UoM
+     */
+    openQty: number;
+    /**
+     * Batch-tracked SKUs: the batches the order line was picked from (a receipt names one of them); empty otherwise
+     */
+    batchCodes: Array<string>;
+    /**
+     * Serial-tracked lines: every authorized serial, sorted by number; empty otherwise
+     */
+    serials: Array<CatalogOpenReturnSerialDto>;
+};
+
+export type CatalogOpenReturnDto = {
+    id: string;
+    /**
+     * RMA-0001
+     */
+    code: string;
+    /**
+     * The order's channel reference; null for a manual order
+     */
+    orderReference: string | null;
+    lines: Array<CatalogOpenReturnLineDto>;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -3556,6 +3626,10 @@ export type CatalogSnapshotResponse = {
      * Story 5-3 (additive): the STORED pending count tasks of this warehouse — the Count inbox tasks whose submit the operator executes (every task line must be counted; 0 is a valid explicit count). The expectations were FROZEN at task start and are read here, never recomputed
      */
     countTasks: Array<CatalogCountTaskDto>;
+    /**
+     * Story 13-2 (additive): the warehouse's return authorizations that can still receive (open or partially received) — the handheld receives returned units against them offline, grading each unit; units not on an authorization are queued for review, never refused on the device
+     */
+    openReturns: Array<CatalogOpenReturnDto>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -5856,7 +5930,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target
      */
-    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
     /**
      * Only actions on this target
      */
@@ -5883,7 +5957,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target
      */
-    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
     /**
      * Only actions on this target
      */
@@ -7401,7 +7475,7 @@ export type ReturnAuthorizationLineInputDto = {
      */
     orderLineId: string;
     /**
-     * Units authorized for return. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded. At most what is still returnable (dispatched minus what open authorizations already name).
+     * Units authorized for return. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded. At most what is still returnable (dispatched minus what uncancelled authorizations already name).
      */
     qty: number;
     /**
@@ -7413,7 +7487,7 @@ export type ReturnAuthorizationLineInputDto = {
      */
     reasonNote?: string | null;
     /**
-     * Serial-tracked SKUs only, and then required: the serial number of every unit returned (count = qty), each dispatched on this line and not on an open authorization. At most 500 per line and 500 per request
+     * Serial-tracked SKUs only, and then required: the serial number of every unit returned (count = qty), each dispatched on this line and not on an uncancelled authorization. At most 500 per line and 500 per request
      */
     serialNumbers?: Array<string>;
 };
@@ -7467,13 +7541,47 @@ export type ReturnAuthorizationLineDto = {
     serials: Array<ReturnSerialDto>;
 };
 
+export type ReturnReceiptLineViewDto = {
+    rmaLineId: string;
+    skuId: string;
+    /**
+     * Units received, base UoM
+     */
+    qty: number;
+    condition: 'resaleable' | 'opened' | 'damaged' | 'missing-parts';
+    note: string | null;
+    batchCode: string | null;
+    serialNumber: string | null;
+    /**
+     * A returned case's captured weight, grams
+     */
+    weightGrams: number | null;
+};
+
+export type ReturnReceiptViewDto = {
+    id: string;
+    /**
+     * RRN-0001
+     */
+    code: string;
+    /**
+     * Device time of the receipt (ISO-8601 UTC)
+     */
+    occurredAt: string;
+    /**
+     * The receiving operator's email (null when the user no longer exists)
+     */
+    operatorEmail: string | null;
+    lines: Array<ReturnReceiptLineViewDto>;
+};
+
 export type ReturnAuthorizationDto = {
     id: string;
     /**
      * The server-allocated code, `RMA-0001`, unique per tenant
      */
     code: string;
-    status: 'open' | 'cancelled';
+    status: 'open' | 'partially_received' | 'received' | 'cancelled';
     orderId: string;
     /**
      * The order's channel reference at authorization (its external event id); null for a manual order
@@ -7519,6 +7627,108 @@ export type ReturnAuthorizationDto = {
      * The authorized lines, in the order they were named
      */
     lines: Array<ReturnAuthorizationLineDto>;
+    /**
+     * Story 13-2 — the receipts against this authorization, oldest first. Present ONLY on GET /returns/{rmaId}; absent on the list and on the create/cancel responses
+     */
+    receipts?: Array<ReturnReceiptViewDto>;
+};
+
+export type ReturnReceiptEntryDto = {
+    /**
+     * The authorization line it is received against — null for a unit that is on no line (it is refused not-on-authorization and sent to review)
+     */
+    rmaLineId: string | null;
+    skuId: string;
+    /**
+     * Units received, base UoM. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded. A serial entry is exactly 1 unit; a catch-weight entry is exactly 1 case.
+     */
+    qty: number;
+    /**
+     * The inspection grade (human decision 1) — it suggests a disposition; it decides nothing
+     */
+    condition: 'resaleable' | 'opened' | 'damaged' | 'missing-parts';
+    /**
+     * An inspection note — trimmed, blank means absent, at most 200 characters
+     */
+    note?: string | null;
+    /**
+     * Batch-tracked SKUs: the unit's batch — one the order line was picked from
+     */
+    batchCode?: string | null;
+    /**
+     * Serial-tracked SKUs: the unit's serial number — one the line authorizes (qty 1)
+     */
+    serialNumber?: string | null;
+    /**
+     * Catch-weight SKUs: the case's weight in whole grams (qty 1), at most 1000000
+     */
+    weightGrams?: number | null;
+};
+
+export type ReceiveReturnDto = {
+    /**
+     * The warehouse receiving — must be the authorization's (409 document-warehouse-mismatch otherwise)
+     */
+    warehouseId: string;
+    /**
+     * The return authorization received against (open or partially received)
+     */
+    rmaId: string;
+    /**
+     * Device time (ISO-8601 UTC, Z-suffixed) — the ledger events' business time
+     */
+    occurredAt: string;
+    /**
+     * 1–150 entries, one per unit or case (an untracked run may carry several units) — the device splits a larger receipt into several ops
+     */
+    entries: Array<ReturnReceiptEntryDto>;
+};
+
+export type ReturnEntryAppliedDto = {
+    /**
+     * The entry's place in the op (0-based)
+     */
+    entryIndex: number;
+    rmaLineId: string;
+    /**
+     * Units booked into RETURNS, base UoM
+     */
+    qty: number;
+};
+
+export type ReturnEntryRefusedDto = {
+    /**
+     * The entry's place in the op (0-based)
+     */
+    entryIndex: number;
+    /**
+     * Why it was not booked — the entry is in the review queue
+     */
+    reason: 'not-on-authorization' | 'exceeds-authorized' | 'serial-not-authorized' | 'serial-in-stock' | 'batch-not-dispatched' | 'missing-capture' | 'unexpected-capture' | 'weight-out-of-range' | 'qty-precision';
+};
+
+export type ReturnReceiptResultDto = {
+    /**
+     * The receipt; null when every entry was refused
+     */
+    returnReceiptId: string | null;
+    /**
+     * RRN-0001; null when every entry was refused
+     */
+    code: string | null;
+    /**
+     * The authorization's status after this receipt (unchanged when nothing applied)
+     */
+    rmaStatus: 'open' | 'partially_received' | 'received' | 'cancelled';
+    applied: Array<ReturnEntryAppliedDto>;
+    /**
+     * The refused entries — all of them sit in ONE review-queue row (Discard only)
+     */
+    refused: Array<ReturnEntryRefusedDto>;
+    /**
+     * The review row's op id when entries were refused (derived from the key, never equal to it); null otherwise
+     */
+    reviewOpId: string | null;
 };
 
 export type ReturnableLineDto = {
@@ -7537,7 +7747,7 @@ export type ReturnableLineDto = {
      */
     dispatchedQty: number;
     /**
-     * Units already on open authorizations, in base UoM
+     * Units already on uncancelled authorizations (open, partially received or received), in base UoM
      */
     authorizedQty: number;
     /**
@@ -7549,7 +7759,7 @@ export type ReturnableLineDto = {
      */
     serialTracked: boolean;
     /**
-     * Serial-tracked lines: the dispatched serials not on an open authorization, sorted by number
+     * Serial-tracked lines: the dispatched serials not on an uncancelled authorization, sorted by number
      */
     returnableSerials: Array<ReturnSerialDto>;
 };
@@ -7838,7 +8048,7 @@ export type TenancyControllerCreateZoneErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Zone code already exists in this warehouse (duplicate-zone-code names the code)
+     * Zone code already exists in this warehouse (duplicate-zone-code names the code), or the code is RETURNS — reserved for the system returns zone (reserved-location-code, story 13-2)
      */
     409: ProblemDetailsDto;
     /**
@@ -7940,7 +8150,7 @@ export type TenancyControllerCreateBinErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Bin code already exists in this warehouse (duplicate-bin-code names the code)
+     * Bin code already exists in this warehouse (duplicate-bin-code names the code), or the code is RETURNS — reserved for the system returns bin (reserved-location-code, story 13-2)
      */
     409: ProblemDetailsDto;
     /**
@@ -7995,7 +8205,7 @@ export type TenancyControllerGenerateBinGridErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A generated code collides (duplicate-bin-code names the first conflicting code; nothing committed)
+     * A generated code collides (duplicate-bin-code names the first conflicting code; nothing committed), or a generated code is RETURNS (reserved-location-code, story 13-2)
      */
     409: ProblemDetailsDto;
     /**
@@ -9496,7 +9706,7 @@ export type DevicesControllerResolveRejectedOpErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Row already resolved (rejected-op-resolved), a pending count task on the bin (count-task-open), or the re-executed command's own conflict (verbatim)
+     * Row already resolved (rejected-op-resolved), a decision the op type does not admit — story 13-2: a return.receive row is Discard only (decision-not-available, member decisions), a pending count task on the bin (count-task-open), or the re-executed command's own conflict (verbatim)
      */
     409: ProblemDetailsDto;
     /**
@@ -9837,7 +10047,7 @@ export type InventoryControllerListEventsData = {
         /**
          * Story 9-1 — only events of these types (repeatable: `?type=a&type=b`; one value is a one-element list). An unknown type is refused (400 validation-failed naming the known set)
          */
-        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound'>;
+        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received'>;
         /**
          * Story 9-1 — only events RECORDED at or after this instant (`recorded_at` — the server stamp, never the device `occurred_at`). ISO-8601 with a zone designator
          */
@@ -16014,7 +16224,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target
          */
-        targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+        targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
         /**
          * Only actions on this target
          */
@@ -18170,7 +18380,7 @@ export type ReturnsControllerListData = {
         /**
          * Only authorizations of one status
          */
-        status?: 'open' | 'cancelled';
+        status?: 'open' | 'partially_received' | 'received' | 'cancelled';
         /**
          * Only one order's authorizations
          */
@@ -18262,6 +18472,62 @@ export type ReturnsControllerCreateResponses = {
 };
 
 export type ReturnsControllerCreateResponse = ReturnsControllerCreateResponses[keyof ReturnsControllerCreateResponses];
+
+export type ReturnsControllerReceiveData = {
+    body: ReceiveReturnDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/returns/receipts';
+};
+
+export type ReturnsControllerReceiveErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — no entries or over 150, a malformed id, a non-positive qty, an unknown condition, a note over 200 characters, a serial or weight entry whose qty is not 1, both a serial and a weight, a non-UTC occurredAt, or a quantity finer than its unit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked), or the operator is not a floor role (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The return authorization does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The authorization belongs to another warehouse (document-warehouse-mismatch — checked before its status), it is not open or partially received (rma-not-receivable), a user zone or bin named RETURNS blocks the system returns bin (returns-bin-conflict), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReturnsControllerReceiveError = ReturnsControllerReceiveErrors[keyof ReturnsControllerReceiveErrors];
+
+export type ReturnsControllerReceiveResponses = {
+    /**
+     * Recorded: the receipt (null when every entry was refused), the authorization's new status, and per entry applied or refused with its reason (the idempotency snapshot)
+     */
+    201: ReturnReceiptResultDto;
+};
+
+export type ReturnsControllerReceiveResponse = ReturnsControllerReceiveResponses[keyof ReturnsControllerReceiveResponses];
 
 export type ReturnsControllerReturnableData = {
     body?: never;

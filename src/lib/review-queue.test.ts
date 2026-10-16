@@ -5,11 +5,18 @@ import type { CountVarianceEntryResponseDto } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from './outbound-orders';
 import {
   MAX_CONSIDERED_EVENT_SEQS,
+  RETURN_RECEIVE_REVIEW_GUIDANCE,
+  RETURN_RECAPTURE_GUIDANCE,
+  RETURN_MASTER_DATA_GUIDANCE,
+  returnReceiveGuidance,
+  RETURN_REFUSAL_LABEL,
   adjustmentDecisionReason,
   adjustmentListReason,
   isOwnerOnlyVariance,
   ledgerListReason,
+  rejectedOpDecisions,
   rejectedOpPayloadBinId,
+  rejectedOpSummary,
   rejectedOpsListReason,
   rejectedOpsResolveReason,
   resolveDraftProblem,
@@ -297,5 +304,94 @@ describe('rejectedOpsResolveReason (the rejected-op resolve command arms, story 
 
   test('a transport error renders the house unreachable copy', () => {
     expect(rejectedOpsResolveReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
+  });
+});
+
+describe('story 13-2 — per-type decisions and the return.receive summary', () => {
+  test('rejectedOpDecisions follows the server rule, falls back to all three, and gates recount on a payload bin', () => {
+    expect(rejectedOpDecisions({ decisions: ['discard'], payload: { binId: 'b' } })).toEqual(['discard']);
+    expect(rejectedOpDecisions({ payload: { binId: 'b' } })).toEqual(['apply', 'recount', 'discard']);
+    expect(rejectedOpDecisions({ payload: {} })).toEqual(['apply', 'discard']);
+    expect(rejectedOpDecisions({ decisions: ['apply', 'recount', 'discard'], payload: { toBinId: 'b' } })).toEqual(['apply', 'recount', 'discard']);
+  });
+
+  test('the guidance and the refusal words are pinned', () => {
+    expect(RETURN_RECEIVE_REVIEW_GUIDANCE).toBe('Create a return authorization for these units, then receive them again.');
+    expect(RETURN_REFUSAL_LABEL).toEqual({
+      'not-on-authorization': 'not on the return',
+      'exceeds-authorized': 'more than authorized',
+      'serial-not-authorized': 'serial not authorized',
+      'serial-in-stock': 'serial already in stock',
+      'batch-not-dispatched': 'batch not dispatched',
+      'missing-capture': 'capture missing',
+      'unexpected-capture': 'capture not expected',
+      'weight-out-of-range': 'weight out of range',
+      'qty-precision': 'quantity too precise',
+    });
+  });
+
+  test('guidance is per reason / problem code, de-duplicated, and only on return.receive rows', () => {
+    const row = (problemCode: string, reasons?: string[]) => ({
+      opType: 'return.receive' as const,
+      problemCode,
+      payload: reasons === undefined ? {} : { refusals: reasons.map((reason, entryIndex) => ({ entryIndex, reason })) },
+    });
+    expect(returnReceiveGuidance(row('return-entries-refused', ['not-on-authorization', 'exceeds-authorized']))).toEqual([
+      'Create a return authorization for these units, then receive them again.',
+    ]);
+    expect(returnReceiveGuidance(row('return-entries-refused', ['missing-capture', 'serial-not-authorized', 'qty-precision']))).toEqual([
+      RETURN_RECAPTURE_GUIDANCE,
+      RETURN_RECEIVE_REVIEW_GUIDANCE,
+    ]);
+    expect(RETURN_RECAPTURE_GUIDANCE).toBe('Re-scan these units with the correct capture (serial, batch, weight or quantity), then receive them again.');
+    expect(returnReceiveGuidance(row('returns-bin-conflict'))).toEqual(['Fix the location or warehouse master data, then receive these units again.']);
+    expect(returnReceiveGuidance(row('document-warehouse-mismatch'))).toEqual([RETURN_MASTER_DATA_GUIDANCE]);
+    expect(returnReceiveGuidance(row('rma-not-receivable'))).toEqual([
+      'The return authorization is cancelled or already received — create a new one for these units, then receive them again.',
+    ]);
+    expect(returnReceiveGuidance(row('return-entries-refused'))).toEqual([RETURN_RECEIVE_REVIEW_GUIDANCE]);
+    expect(returnReceiveGuidance({ opType: 'grn.submit', problemCode: 'rma-not-receivable', payload: {} })).toEqual([]);
+  });
+
+  test('a server-raised row pairs each entry with its refusal; a device whole-op row reads its problem code; other op types have none', () => {
+    const codes: Record<string, string> = { 'sku-a': 'SKU-A' };
+    const server = rejectedOpSummary(
+      {
+        opType: 'return.receive',
+        problemCode: 'return-entries-refused',
+        payload: {
+          rmaId: '01989f7a-0000-0000-0000-000000000001',
+          rmaCode: 'RMA-0007',
+          entries: [
+            { rmaLineId: 'line-1', skuId: 'sku-a', qty: 1, condition: 'opened', serialNumber: 'SN-1', batchCode: 'B1', weightGrams: null, note: 'seal cut' },
+            { rmaLineId: null, skuId: '01989f7a-0000-7000-8000-00000000c0de', qty: 1, condition: 'missing-parts', weightGrams: 2340 },
+          ],
+          refusals: [
+            { entryIndex: 0, reason: 'serial-not-authorized' },
+            { entryIndex: 3, reason: 'not-on-authorization' },
+          ],
+        },
+      },
+      (id) => codes[id] ?? null,
+    );
+    expect(server).toEqual({
+      heading: 'RMA-0007 — 2 entries not booked',
+      lines: [
+        'SKU-A × 1 · Opened · batch B1 · serial SN-1 · “seal cut” — serial not authorized',
+        'SKU …0000c0de × 1 · Missing parts · 2.340 kg · not on any line — not on the return',
+      ],
+    });
+    const device = rejectedOpSummary({
+      opType: 'return.receive',
+      problemCode: 'rma-not-receivable',
+      payload: { rmaId: '01989f7a-0000-0000-0000-000000000001', entries: [{ rmaLineId: 'line-1', skuId: 'sku-a', qty: 1, condition: 'damaged' }] },
+    });
+    expect(device).toEqual({ heading: 'return …00000001 — 1 entry not booked', lines: ['SKU …sku-a × 1 · Damaged — rma-not-receivable'] });
+    expect(rejectedOpSummary({ opType: 'grn.submit', problemCode: 'x', payload: {} })).toBeNull();
+  });
+
+  test('decision-not-available reads generically (the per-row guidance lives on return.receive cards)', () => {
+    const error = problem('decision-not-available', 409);
+    expect(rejectedOpsResolveReason(error)).toBe('That decision is not available for this op — refresh the queue.');
   });
 });

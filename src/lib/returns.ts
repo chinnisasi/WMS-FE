@@ -13,9 +13,11 @@ import type {
   ReturnableLineDto,
   ReturnAuthorizationDto,
   ReturnAuthorizationLineInputDto,
+  ReturnReceiptLineViewDto,
+  ReturnReceiptViewDto,
   ReturnSerialDto,
 } from '@/lib/api/generated';
-import { parseQuantityInput } from '@/lib/format-quantity';
+import { formatQuantity, parseQuantityInput, quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
 /**
@@ -44,8 +46,64 @@ export const MAX_RETURN_EXTERNAL_REFERENCE_LENGTH = 64;
 /** Word-first status — a `Record` over the generated union, so a new status fails the compile until named. */
 export const RETURN_STATUS_LABEL: Readonly<Record<ReturnStatus, string>> = {
   open: 'Open',
+  // Story 13-2 — some units received, some still expected / every line received.
+  partially_received: 'Partly received',
+  received: 'Received',
   cancelled: 'Cancelled',
 };
+
+/** Story 13-2 — the inspection grade (human decision 1), in words; a `Record` over the generated union. */
+export type ReturnCondition = ReturnReceiptLineViewDto['condition'];
+export const RETURN_CONDITION_LABEL: Readonly<Record<ReturnCondition, string>> = {
+  resaleable: 'Resaleable',
+  opened: 'Opened',
+  damaged: 'Damaged',
+  'missing-parts': 'Missing parts',
+};
+
+/**
+ * Story 13-2 — the badge on a line with received units: amber, word-first,
+ * never glyph-only (UX: lowest in badge ordering). 13-2 never clears it —
+ * 13-3's disposition does.
+ */
+export const AWAITING_DISPOSITION_BADGE = '↩ Awaiting disposition';
+
+/** A line shows the awaiting badge once any of its units were received. */
+export function lineAwaitsDisposition(line: Pick<ReturnAuthorizationDto['lines'][number], 'receivedQty'>): boolean {
+  return line.receivedQty > 0;
+}
+
+/**
+ * A line's received figure in its unit at its precision: "1 of 2 pcs
+ * received" (the `quantityLabel` the authorized figure uses; "units" when the
+ * SKU is unknown).
+ */
+export function receivedOfAuthorized(
+  line: Pick<ReturnAuthorizationDto['lines'][number], 'receivedQty' | 'authorizedQty'>,
+  uom: QuantityUom | null,
+): string {
+  const authorized = quantityLabel(line.authorizedQty, uom);
+  const received = uom === null ? String(line.receivedQty) : formatQuantity(line.receivedQty, uom.uomPrecision);
+  return `${received} of ${authorized} received`;
+}
+
+/** A receipt's heading: code · operator (or "unknown operator"). The time is formatted by the view. */
+export function receiptHeading(receipt: Pick<ReturnReceiptViewDto, 'code' | 'operatorEmail'>): string {
+  return `${receipt.code} · ${receipt.operatorEmail ?? 'unknown operator'}`;
+}
+
+/**
+ * One received line in words: `<qty> × <condition>`, then the captures it
+ * carried (batch, serial, case weight in kg) and the inspector's note.
+ */
+export function receiptLineText(line: ReturnReceiptLineViewDto): string {
+  const parts = [`${line.qty} × ${RETURN_CONDITION_LABEL[line.condition]}`];
+  if (line.batchCode !== null) parts.push(`batch ${line.batchCode}`);
+  if (line.serialNumber !== null) parts.push(`serial ${line.serialNumber}`);
+  if (line.weightGrams !== null) parts.push(`${(line.weightGrams / 1000).toFixed(3)} kg`);
+  if (line.note !== null) parts.push(`“${line.note}”`);
+  return parts.join(' · ');
+}
 
 /** The reason list (decision 3), in words — `Record` over the generated union. */
 export const RETURN_REASON_LABEL: Readonly<Record<ReturnReasonCode, string>> = {
@@ -61,7 +119,11 @@ export const RETURN_REASON_OPTIONS: readonly { value: ReturnReasonCode; label: s
   Object.keys(RETURN_REASON_LABEL) as ReturnReasonCode[]
 ).map((value) => ({ value, label: RETURN_REASON_LABEL[value] }));
 
-/** Only an open authorization can be cancelled (else 409 `rma-transition-invalid`). */
+/**
+ * Only an open authorization can be cancelled (else 409 `rma-transition-invalid`).
+ * Story 13-2: an RMA with anything received is `partially_received` or
+ * `received`, never `open` — so Cancel hides once anything is received.
+ */
 export function canCancelReturn(status: ReturnStatus): boolean {
   return status === 'open';
 }

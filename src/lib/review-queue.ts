@@ -1,6 +1,8 @@
 import { ApiProblem } from '@/lib/api/client';
-import type { CountVarianceEntryResponseDto } from '@/lib/api/generated';
+import type { CountVarianceEntryResponseDto, RejectedOpResponse, ReturnEntryRefusedDto } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
+import { shortIdTail } from '@/lib/audit';
+import { RETURN_CONDITION_LABEL } from '@/lib/returns';
 
 /**
  * The Conflicts & Reviews queue's pure decisions (story 5-5, the
@@ -271,6 +273,10 @@ export function rejectedOpsResolveReason(error: unknown): string {
         return error.detail ?? 'This rejected op no longer exists — refresh the queue.';
       case 'role-denied':
         return 'Your role cannot resolve rejected ops.';
+      case 'decision-not-available':
+        // Story 13-2 — the per-type rule (a return.receive row is Discard
+        // only); the buttons follow it, so reaching this is a stale page.
+        return 'That decision is not available for this op — refresh the queue.';
       case 'unauthenticated':
         return 'Your session expired — sign in again.';
       case 'validation-failed':
@@ -288,4 +294,134 @@ export function rejectedOpsResolveReason(error: unknown): string {
     return error.detail ?? `Resolve failed (${error.code}).`;
   }
   return UNREACHABLE_REASON;
+}
+
+// ── story 13-2: per-type decisions and the return.receive summary ──────────
+
+export type RejectedOpDecision = 'apply' | 'recount' | 'discard';
+
+/** The decisions every pre-13-2 row admitted (recount still needs a payload bin). */
+const LEGACY_DECISIONS: readonly RejectedOpDecision[] = ['apply', 'recount', 'discard'];
+
+/**
+ * The decision buttons a row offers: the server's per-type rule
+ * (`decisions`, story 13-2 — a `return.receive` row is `['discard']`), else
+ * the pre-13-2 behaviour when the field is absent (an old resolve snapshot).
+ * Recount additionally needs a payload bin — the server's own recount read.
+ */
+export function rejectedOpDecisions(
+  entry: Pick<RejectedOpResponse, 'decisions' | 'payload'>,
+): readonly RejectedOpDecision[] {
+  const admitted = entry.decisions ?? LEGACY_DECISIONS;
+  return admitted.filter((decision) => decision !== 'recount' || rejectedOpPayloadBinId(entry.payload) !== null);
+}
+
+/** The authorization remedy (human decision 4 — Discard only): the units were not on the return. */
+export const RETURN_RECEIVE_REVIEW_GUIDANCE = 'Create a return authorization for these units, then receive them again.';
+
+/** The re-scan remedy: the authorization covers them, the capture was wrong. */
+export const RETURN_RECAPTURE_GUIDANCE = 'Re-scan these units with the correct capture (serial, batch, weight or quantity), then receive them again.';
+
+/** The master-data remedy: a location or warehouse problem, not the units. */
+export const RETURN_MASTER_DATA_GUIDANCE = 'Fix the location or warehouse master data, then receive these units again.';
+
+/** The closed-authorization remedy. */
+export const RETURN_RMA_CLOSED_GUIDANCE =
+  'The return authorization is cancelled or already received — create a new one for these units, then receive them again.';
+
+/** Why a returned unit was not booked, in words — a `Record` over the generated union. */
+export const RETURN_REFUSAL_LABEL: Readonly<Record<ReturnEntryRefusedDto['reason'], string>> = {
+  'not-on-authorization': 'not on the return',
+  'exceeds-authorized': 'more than authorized',
+  'serial-not-authorized': 'serial not authorized',
+  'serial-in-stock': 'serial already in stock',
+  'batch-not-dispatched': 'batch not dispatched',
+  'missing-capture': 'capture missing',
+  'unexpected-capture': 'capture not expected',
+  'weight-out-of-range': 'weight out of range',
+  'qty-precision': 'quantity too precise',
+};
+
+/** Per refusal reason / whole-op problem code, the remedy a reviewer reads. */
+const GUIDANCE_BY_CODE: Readonly<Record<string, string>> = {
+  'not-on-authorization': RETURN_RECEIVE_REVIEW_GUIDANCE,
+  'exceeds-authorized': RETURN_RECEIVE_REVIEW_GUIDANCE,
+  'serial-not-authorized': RETURN_RECEIVE_REVIEW_GUIDANCE,
+  'return-entries-refused': RETURN_RECEIVE_REVIEW_GUIDANCE,
+  'missing-capture': RETURN_RECAPTURE_GUIDANCE,
+  'unexpected-capture': RETURN_RECAPTURE_GUIDANCE,
+  'weight-out-of-range': RETURN_RECAPTURE_GUIDANCE,
+  'qty-precision': RETURN_RECAPTURE_GUIDANCE,
+  'batch-not-dispatched': RETURN_RECAPTURE_GUIDANCE,
+  'serial-in-stock': RETURN_RECAPTURE_GUIDANCE,
+  'returns-bin-conflict': RETURN_MASTER_DATA_GUIDANCE,
+  'document-warehouse-mismatch': RETURN_MASTER_DATA_GUIDANCE,
+  'rma-not-receivable': RETURN_RMA_CLOSED_GUIDANCE,
+};
+
+/**
+ * The remedies a `return.receive` row's reviewer reads (story 13-2), one per
+ * distinct remedy, in the order the row's reasons first name them: a
+ * server-raised row reads its `refusals`, a device-uploaded whole-op row its
+ * `problemCode`. Empty for any other op type (the guidance is a returns
+ * thing); an unknown code falls back to the authorization remedy.
+ */
+export function returnReceiveGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
+  if (entry.opType !== 'return.receive') return [];
+  const refusals = Array.isArray(entry.payload['refusals']) ? (entry.payload['refusals'] as Record<string, unknown>[]) : null;
+  const codes = refusals === null ? [entry.problemCode] : refusals.map((item) => String(item['reason'] ?? entry.problemCode));
+  const out: string[] = [];
+  for (const code of codes) {
+    const guidance = GUIDANCE_BY_CODE[code] ?? RETURN_RECEIVE_REVIEW_GUIDANCE;
+    if (!out.includes(guidance)) out.push(guidance);
+  }
+  return out;
+}
+
+function refusalWords(reason: string): string {
+  return (RETURN_REFUSAL_LABEL as Readonly<Record<string, string>>)[reason] ?? reason;
+}
+
+function conditionWords(condition: unknown): string | null {
+  if (typeof condition !== 'string') return null;
+  return (RETURN_CONDITION_LABEL as Readonly<Record<string, string>>)[condition] ?? condition;
+}
+
+/**
+ * A `return.receive` row's summary (story 13-2): the RMA (its code, else a
+ * short form of its id) and each refused entry with its reason. A
+ * server-raised row (`return-entries-refused`) pairs `entries[i]` with
+ * `refusals[i]`; a device-uploaded whole-op refusal carries the whole op, so
+ * every entry reads with the row's problem code. Null for any other op type.
+ * `skuCode` resolves a SKU id to its code when the caller has the catalog.
+ */
+export function rejectedOpSummary(
+  entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>,
+  skuCode: (skuId: string) => string | null = () => null,
+): { heading: string; lines: readonly string[] } | null {
+  if (entry.opType !== 'return.receive') return null;
+  const payload = entry.payload;
+  const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;
+  const rmaId = typeof payload['rmaId'] === 'string' ? payload['rmaId'] : null;
+  // The random tail (`shortIdTail`) — a UUIDv7's head is its timestamp (guide §1.10).
+  const rma = rmaCode ?? (rmaId === null ? 'unknown return' : `return …${shortIdTail(rmaId)}`);
+  const entries = Array.isArray(payload['entries']) ? (payload['entries'] as Record<string, unknown>[]) : [];
+  const refusals = Array.isArray(payload['refusals']) ? (payload['refusals'] as Record<string, unknown>[]) : null;
+  const lines = entries.map((item, index) => {
+    const skuId = typeof item['skuId'] === 'string' ? item['skuId'] : '';
+    const sku = skuCode(skuId) ?? (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
+    const qty = typeof item['qty'] === 'number' ? item['qty'] : '?';
+    const condition = conditionWords(item['condition']);
+    const parts = [`${sku} × ${qty}`];
+    if (condition !== null) parts.push(condition);
+    if (typeof item['batchCode'] === 'string') parts.push(`batch ${item['batchCode']}`);
+    if (typeof item['serialNumber'] === 'string') parts.push(`serial ${item['serialNumber']}`);
+    if (typeof item['weightGrams'] === 'number') parts.push(`${(item['weightGrams'] / 1000).toFixed(3)} kg`);
+    if (typeof item['note'] === 'string') parts.push(`“${item['note']}”`);
+    if (typeof item['rmaLineId'] !== 'string') parts.push('not on any line');
+    const reasonCode = refusals === null ? entry.problemCode : String(refusals[index]?.['reason'] ?? entry.problemCode);
+    return `${parts.join(' · ')} — ${refusalWords(reasonCode)}`;
+  });
+  const units = entries.length;
+  return { heading: `${rma} — ${units} entr${units === 1 ? 'y' : 'ies'} not booked`, lines };
 }

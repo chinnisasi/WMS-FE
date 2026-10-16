@@ -3,12 +3,13 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiCancelReturn } from '@/lib/api/client';
-import type { ReturnAuthorizationDto, SkuResponse } from '@/lib/api/generated';
+import { fetchApiCancelReturn, fetchApiGetReturn } from '@/lib/api/client';
+import type { ReturnAuthorizationDto, ReturnReceiptViewDto, SkuResponse } from '@/lib/api/generated';
 import { istDateTimeLabel } from '@/lib/audit-exports';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { quantityLabel } from '@/lib/format-quantity';
 import {
+  AWAITING_DISPOSITION_BADGE,
   MAX_RETURN_NOTE_LENGTH,
   RETURN_STATUS_LABEL,
   RETURNS_CHANGED_EVENT,
@@ -21,6 +22,10 @@ import {
   returnOrderLabel,
   returnReason,
   returnReasonText,
+  lineAwaitsDisposition,
+  receiptHeading,
+  receiptLineText,
+  receivedOfAuthorized,
   type ReturnStatus,
 } from '@/lib/returns';
 import { useOutboundSkus } from '@/lib/use-outbound-orders';
@@ -43,7 +48,7 @@ import {
 } from '@/components/outbound/shell';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
-const STATUS_OPTIONS: readonly ReturnStatus[] = ['open', 'cancelled'];
+const STATUS_OPTIONS: readonly ReturnStatus[] = ['open', 'partially_received', 'received', 'cancelled'];
 
 /**
  * Story 13-1 — the Returns page (FR-46): the active warehouse's return
@@ -353,7 +358,7 @@ export function ReturnsList({
           rows={rows}
           nextCursor={returns.state === 'ready' ? returns.data.nextCursor : null}
           onCursor={returns.onCursor}
-          renderExpanded={(rma) => (expandedId === rma.id ? <ReturnDetail rma={rma} skus={skuMap} /> : null)}
+          renderExpanded={(rma) => (expandedId === rma.id ? <ReturnDetail tenantId={tenantId} rma={rma} skus={skuMap} /> : null)}
           emptyMessage={returns.state === 'loading' ? 'Loading returns…' : 'No returns yet'}
         />
       )}
@@ -362,13 +367,40 @@ export function ReturnsList({
   );
 }
 
+type ReceiptsRead =
+  | { state: 'loading' }
+  | { state: 'ready'; receipts: readonly ReturnReceiptViewDto[] }
+  | { state: 'failed'; reason: string };
+
+/**
+ * Story 13-2 — the expanded row: each line's received figure and the amber
+ * "↩ Awaiting disposition" badge on a line with received units, then the
+ * receipts. Receipts ride ONLY on the detail read (never the list), so they
+ * are fetched here, when the row expands.
+ */
 function ReturnDetail({
+  tenantId,
   rma,
   skus,
 }: {
+  tenantId: string;
   rma: ReturnAuthorizationDto;
   skus: Readonly<Record<string, SkuResponse>> | null;
 }) {
+  const [receipts, setReceipts] = useState<ReceiptsRead>({ state: 'loading' });
+  // Refetch when the row moves on (a receipt landed: the status or the summed
+  // received quantity changed) — not only when the row is first expanded.
+  const receivedTotal = rma.lines.reduce((sum, line) => sum + line.receivedQty, 0);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchApiGetReturn(tenantId, rma.id, { signal: controller.signal })
+      .then((detail) => setReceipts({ state: 'ready', receipts: detail.receipts ?? [] }))
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setReceipts({ state: 'failed', reason: returnReason(error) });
+      });
+    return () => controller.abort();
+  }, [tenantId, rma.id, rma.status, receivedTotal]);
   return (
     <div className="flex flex-col gap-1 text-xs">
       {rma.status === 'cancelled' && rma.cancelReason !== null && (
@@ -385,6 +417,14 @@ function ReturnDetail({
                   {quantityLabel(line.authorizedQty, sku === undefined ? null : { uom: sku.uom, uomPrecision: sku.uomPrecision })}
                 </span>
                 <span className="text-(--muted-foreground)">{returnReasonText(line)}</span>
+                <span className="data text-(--muted-foreground)">
+                  {receivedOfAuthorized(line, sku === undefined ? null : { uom: sku.uom, uomPrecision: sku.uomPrecision })}
+                </span>
+                {lineAwaitsDisposition(line) && (
+                  <span className="rounded-full border border-(--warning) bg-(--warning)/10 px-2 py-0.5 text-(--foreground)">
+                    {AWAITING_DISPOSITION_BADGE}
+                  </span>
+                )}
               </div>
               {line.serials.length > 0 && (
                 <div className="font-mono text-(--muted-foreground)">{line.serials.map((serial) => serial.serialNumber).join(', ')}</div>
@@ -393,6 +433,31 @@ function ReturnDetail({
           );
         })}
       </ul>
+      {receipts.state === 'loading' && <div className="text-(--muted-foreground)">Loading receipts…</div>}
+      {receipts.state === 'failed' && <div className="text-(--muted-foreground)">Receipts unavailable — {receipts.reason}</div>}
+      {receipts.state === 'ready' && receipts.receipts.length > 0 && (
+        <div className="flex flex-col gap-1 pt-1">
+          <div className="font-medium">Receipts</div>
+          {receipts.receipts.map((receipt) => (
+            <div key={receipt.id} className="flex flex-col gap-0.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono">{receiptHeading(receipt)}</span>
+                <time className="text-(--muted-foreground)" dateTime={receipt.occurredAt}>
+                  {istDateTimeLabel(receipt.occurredAt)}
+                </time>
+              </div>
+              <ul className="flex flex-col gap-0.5 pl-3">
+                {receipt.lines.map((line, index) => (
+                  <li key={`${receipt.id}-${index}`}>
+                    <span className="font-mono">{skus?.[line.skuId]?.code ?? line.skuId}</span>{' '}
+                    <span className="text-(--muted-foreground)">{receiptLineText(line)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
