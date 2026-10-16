@@ -197,6 +197,12 @@ export const CAPABILITIES = [
   // OWNER_ONLY_CAPABILITIES) — the `audit.view` holder set. Acknowledging
   // repairs nothing; the backend's command is the authority (403 role-denied).
   'ledger.acknowledge',
+  // Story 13-1 — return authorizations: authorize part of a dispatched order
+  // for return (an RMA) and cancel one. Owner + Ops Manager (decision 1 —
+  // operators only, never a client-held capability). Gates the order
+  // detail's "Create return" form and the /returns Cancel action; every
+  // member reads returns. The ops grant is derived below — never hand-copied.
+  'returns.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];

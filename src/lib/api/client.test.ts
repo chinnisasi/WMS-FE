@@ -21,6 +21,11 @@ import {
   fetchApiTransitionClientInvoice,
   fetchApiAmendAsn,
   fetchApiCreateAsn,
+  fetchApiCancelReturn,
+  fetchApiCreateReturn,
+  fetchApiGetReturn,
+  fetchApiListReturns,
+  fetchApiReturnable,
   fetchApiGetAsn,
   fetchApiListAsns,
   fetchApiTransitionAsn,
@@ -2137,5 +2142,93 @@ describe('notification wrappers (story 9-2)', () => {
     writeSession(SESSION);
     stubFetch(400, { type: 'x', title: 'Malformed pagination cursor', status: 400, code: 'invalid-cursor', detail: 'bad' });
     await expect(fetchApiListNotifications(SESSION.tenant.id, { cursor: 'bad' })).rejects.toMatchObject({ code: 'invalid-cursor', status: 400 });
+  });
+});
+
+describe('return authorization wrappers (story 13-1)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const WAREHOUSE_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const ORDER_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000b1';
+  const RMA_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000c1';
+  const LINE_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000c2';
+  const RMA = {
+    id: RMA_ID,
+    code: 'RMA-0001',
+    status: 'open',
+    orderId: ORDER_ID,
+    orderReference: null,
+    warehouseId: WAREHOUSE_ID,
+    clientId: WAREHOUSE_ID,
+    externalReference: null,
+    orderDispatchedAt: '2026-10-15T00:00:00.000Z',
+    createdAt: '2026-10-16T00:00:00.000Z',
+    createdBy: 'u-1',
+    cancelledAt: null,
+    cancelledBy: null,
+    cancelReason: null,
+    lines: [],
+  };
+  const base = `/api/v1/tenants/${SESSION.tenant.id}`;
+
+  test('the returnable read GETs the literal path with the orderId query', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { orderId: ORDER_ID, status: 'dispatched', warehouseId: WAREHOUSE_ID, orderReference: null, dispatchedAt: null, lines: [] });
+    await fetchApiReturnable(SESSION.tenant.id, ORDER_ID);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/returns/returnable`);
+    expect(new URL(lastRequest!.url).searchParams.get('orderId')).toBe(ORDER_ID);
+    clearSession();
+  });
+
+  test('the list GETs the tenant path; the first page sends no query, filters ride as query params', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [RMA], nextCursor: null });
+    await fetchApiListReturns(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/returns`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListReturns(SESSION.tenant.id, { warehouseId: WAREHOUSE_ID, status: 'open', cursor: 'c-2' });
+    const params = new URL(lastRequest!.url).searchParams;
+    expect(params.get('warehouseId')).toBe(WAREHOUSE_ID);
+    expect(params.get('status')).toBe('open');
+    expect(params.get('cursor')).toBe('c-2');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    clearSession();
+  });
+
+  test('the detail GETs the RMA path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, RMA);
+    const res = await fetchApiGetReturn(SESSION.tenant.id, RMA_ID);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/returns/${RMA_ID}`);
+    expect(res.code).toBe('RMA-0001');
+    clearSession();
+  });
+
+  test('create POSTs the body with the Idempotency-Key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, RMA);
+    const body = { orderId: ORDER_ID, lines: [{ orderLineId: LINE_ID, qty: 2, reasonCode: 'damaged' as const }] };
+    await fetchApiCreateReturn(SESSION.tenant.id, body, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/returns`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    clearSession();
+  });
+
+  test('cancel POSTs the reason to the cancel verb with the key; a 409 carries its extension members', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { ...RMA, status: 'cancelled' });
+    await fetchApiCancelReturn(SESSION.tenant.id, RMA_ID, 'kept it', KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/returns/${RMA_ID}/cancel`);
+    expect(await lastRequest!.json()).toEqual({ reason: 'kept it' });
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    stubFetch(409, { type: 'x', title: 'More than can be returned', status: 409, code: 'exceeds-returnable', detail: 'd', orderLineId: LINE_ID, returnableQty: 1 });
+    await expect(fetchApiCreateReturn(SESSION.tenant.id, { orderId: ORDER_ID, lines: [] }, KEY)).rejects.toMatchObject({
+      code: 'exceeds-returnable',
+      extensions: { orderLineId: LINE_ID, returnableQty: 1 },
+    });
+    clearSession();
   });
 });

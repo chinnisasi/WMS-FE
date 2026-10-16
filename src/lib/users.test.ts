@@ -55,7 +55,13 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 21-7b adds `asn.announce` (owner + client — the portal's one write) — 40 became 41.
     // Story 9-3a adds `audit.view` (owner-only — the audit trail read) — 41 became 42.
     // Story 9-3c adds `ledger.acknowledge` (owner-only — a chain break's acknowledgement) — 42 became 43.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(43);
+    // Story 13-1 adds `returns.manage` (owner + ops_manager — return authorizations) — 43 became 44.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(44);
+    expect(roleHasCapability('owner', 'returns.manage')).toBe(true);
+    expect(roleHasCapability('ops_manager', 'returns.manage')).toBe(true);
+    for (const role of ['operator', 'accountant', 'client'] as const) {
+      expect(roleHasCapability(role, 'returns.manage')).toBe(false);
+    }
     expect(roleHasCapability('owner', 'ledger.acknowledge')).toBe(true);
     for (const role of ['ops_manager', 'operator', 'accountant', 'client'] as const) {
       expect(roleHasCapability(role, 'ledger.acknowledge')).toBe(false);
@@ -204,6 +210,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'channel.manage',
         // Story 8-2b — the e-way paperwork (NOT its owner-only configuration).
         'eway.manage',
+        // Story 13-1 — return authorizations (decision 1: owner + ops manager).
+        'returns.manage',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),

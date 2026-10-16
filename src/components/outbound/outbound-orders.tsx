@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
-import type { OrderEntryDto, SkuResponse } from '@/lib/api/generated';
+import type { OrderEntryDto, ReturnAuthorizationDto, SkuResponse } from '@/lib/api/generated';
 import { quantityInputLabel, sharedQuantityUom } from '@/lib/format-quantity';
 import { buyerGstinStateMismatch } from '@/lib/gst-states';
 import { GSTIN_HELP, parseGstinField } from '@/lib/gstin';
@@ -47,10 +47,12 @@ import { readyClients, useClients } from '@/lib/use-clients';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
+import { canCreateReturn, RETURN_CREATED_REASON, returnCreatedWord } from '@/lib/returns';
 
 import { StateSelect } from '@/components/address/state-select';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { DrillBanner } from '@/components/shared/drill-banner';
+import { ReturnCreateForm } from '@/components/returns/return-create-form';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
 import {
@@ -92,6 +94,8 @@ export function OutboundOrders({
   drill = null,
 }: OutboundSurfaceProps & { readonly drill?: OrdersDrill | null }) {
   const canManageOrders = roleHasCapability(role, 'orders.manage');
+  // Story 13-1 — "Create return" on a dispatched order's detail.
+  const canManageReturns = roleHasCapability(role, 'returns.manage');
   return (
     <Section title="Orders">
       {drill !== null && <DrillBanner drill={drill} />}
@@ -105,6 +109,7 @@ export function OutboundOrders({
         tenantId={tenantId}
         warehouseId={warehouseId}
         canManageOrders={canManageOrders}
+        canManageReturns={canManageReturns}
         drill={drill}
       />
     </Section>
@@ -519,11 +524,14 @@ function OrdersTable({
   tenantId,
   warehouseId,
   canManageOrders,
+  canManageReturns = false,
   drill,
 }: {
   tenantId: string;
   warehouseId: string;
   canManageOrders: boolean;
+  /** Story 13-1 — threaded down to the expanded detail's "Create return". */
+  canManageReturns?: boolean;
   drill: OrdersDrill | null;
 }) {
   const orders = useOutboundOrders(warehouseId, drill);
@@ -734,7 +742,9 @@ function OrdersTable({
           nextCursor={orders.state === 'ready' ? orders.data.nextCursor : null}
           onCursor={orders.onCursor}
           renderExpanded={(order) =>
-            expandedId === order.id ? <OrderDetailPanel orderId={order.id} warehouseId={warehouseId} /> : null
+            expandedId === order.id ? (
+              <OrderDetailPanel orderId={order.id} warehouseId={warehouseId} canManageReturns={canManageReturns} />
+            ) : null
           }
           emptyMessage={
             orders.state === 'loading'
@@ -764,13 +774,22 @@ function OrdersTable({
 export function OrderDetailPanel({
   orderId,
   warehouseId,
+  canManageReturns = false,
 }: {
   orderId: string;
   /** Story 9-3a — the order's warehouse (threaded from `OrdersTable`): its "View ledger" link. */
   warehouseId?: string;
+  /**
+   * Story 13-1 — `returns.manage` (threaded from `OutboundOrders`): a
+   * dispatched order offers "Create return", an inline form that reads the
+   * returnable quantities only when opened — never on expand.
+   */
+  canManageReturns?: boolean;
 }) {
   const detail = useOrderDetail(orderId);
   const skus = useOutboundSkus();
+  const [creatingReturn, setCreatingReturn] = useState(false);
+  const [createdReturn, setCreatedReturn] = useState<ReturnAuthorizationDto | null>(null);
   // The SKU map only decorates: a line falls back to its raw `skuId` rather
   // than blocking the quantities, which are what this panel exists for.
   const skuMap = skus.state === 'ready' ? skus.data : null;
@@ -809,6 +828,43 @@ export function OrderDetailPanel({
             View ledger
           </Link>
         </div>
+      )}
+      {canManageReturns && canCreateReturn(detail.data.status) && !creatingReturn && (
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setCreatedReturn(null);
+              setCreatingReturn(true);
+            }}
+            className={`${buttonClass} py-1 text-xs`}
+          >
+            Create return
+          </button>
+        </div>
+      )}
+      {createdReturn !== null && (
+        <FeedbackBanner
+          tone="accepted"
+          word={returnCreatedWord(createdReturn)}
+          reason={RETURN_CREATED_REASON}
+          action={
+            <Link href="/returns" className="text-xs text-(--primary) underline underline-offset-2">
+              View returns
+            </Link>
+          }
+        />
+      )}
+      {creatingReturn && (
+        <ReturnCreateForm
+          orderId={orderId}
+          skus={skuMap}
+          onCreated={(rma) => {
+            setCreatingReturn(false);
+            setCreatedReturn(rma);
+          }}
+          onClose={() => setCreatingReturn(false)}
+        />
       )}
       <div className="text-xs text-(--muted-foreground)">
         {orderTotalsLabel(

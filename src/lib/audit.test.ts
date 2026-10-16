@@ -122,6 +122,7 @@ describe('the cells', () => {
 
   test('Target: the type in words and a short id, plain text; an unknown type prints as itself', () => {
     expect(auditTargetLabel({ targetType: 'transfer_order', targetId: '0198f7a2-aaaa-7d4e-8f90-000000000001' })).toBe('Transfer 00000001');
+    expect(auditTargetLabel({ targetType: 'return_authorization', targetId: '0198f7a2-aaaa-7d4e-8f90-000000000001' })).toBe('Return 00000001');
     expect(auditTargetLabel({ targetType: 'spaceship', targetId: '0198f7a2-aaaa-7d4e-8f90-000000000001' })).toBe('spaceship 00000001');
   });
 
