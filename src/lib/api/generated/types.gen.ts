@@ -5856,7 +5856,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target
      */
-    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
     /**
      * Only actions on this target
      */
@@ -5883,7 +5883,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target
      */
-    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
     /**
      * Only actions on this target
      */
@@ -7393,6 +7393,198 @@ export type NotificationStatusResponse = {
      * Show the bell’s dot: an open entry you can act on surfaced since you last opened the panel (or you never have). Never a count
      */
     hasNew: boolean;
+};
+
+export type ReturnAuthorizationLineInputDto = {
+    /**
+     * The order line being returned — a line of the order, never a kit parent
+     */
+    orderLineId: string;
+    /**
+     * Units authorized for return. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded. At most what is still returnable (dispatched minus what open authorizations already name).
+     */
+    qty: number;
+    /**
+     * Why the units come back; `other` requires a reasonNote
+     */
+    reasonCode: 'damaged' | 'defective' | 'wrong-item' | 'not-as-described' | 'changed-mind' | 'other';
+    /**
+     * A note on the reason — required for "other"; trimmed, blank means absent, at most 500 characters
+     */
+    reasonNote?: string | null;
+    /**
+     * Serial-tracked SKUs only, and then required: the serial number of every unit returned (count = qty), each dispatched on this line and not on an open authorization. At most 500 per line and 500 per request
+     */
+    serialNumbers?: Array<string>;
+};
+
+export type CreateReturnAuthorizationDto = {
+    /**
+     * The dispatched order being returned
+     */
+    orderId: string;
+    /**
+     * A channel's or customer's RMA number — trimmed, blank means absent, 1–64 characters; deliberately not unique
+     */
+    externalReference?: string | null;
+    /**
+     * One entry per order line returned (distinct orderLineIds)
+     */
+    lines: Array<ReturnAuthorizationLineInputDto>;
+};
+
+export type ReturnSerialDto = {
+    /**
+     * The catalog serial id (the ledger's serialRef)
+     */
+    id: string;
+    /**
+     * The serial number people and scanners speak
+     */
+    serialNumber: string;
+};
+
+export type ReturnAuthorizationLineDto = {
+    id: string;
+    orderLineId: string;
+    skuId: string;
+    /**
+     * Units authorized for return, in base UoM
+     */
+    authorizedQty: number;
+    /**
+     * Units received against this line so far, in base UoM (story 13-2 records receipts; 0 until then)
+     */
+    receivedQty: number;
+    reasonCode: 'damaged' | 'defective' | 'wrong-item' | 'not-as-described' | 'changed-mind' | 'other';
+    /**
+     * The reason note; null when none was given
+     */
+    reasonNote: string | null;
+    /**
+     * Serial-tracked lines: the authorized serials, sorted by number; empty otherwise
+     */
+    serials: Array<ReturnSerialDto>;
+};
+
+export type ReturnAuthorizationDto = {
+    id: string;
+    /**
+     * The server-allocated code, `RMA-0001`, unique per tenant
+     */
+    code: string;
+    status: 'open' | 'cancelled';
+    orderId: string;
+    /**
+     * The order's channel reference at authorization (its external event id); null for a manual order
+     */
+    orderReference: string | null;
+    /**
+     * The order's warehouse — where the return will be received
+     */
+    warehouseId: string;
+    /**
+     * The order's client
+     */
+    clientId: string;
+    /**
+     * A channel's or customer's RMA number; null when none was given
+     */
+    externalReference: string | null;
+    /**
+     * When the order was dispatched (ISO-8601 UTC) — recorded at authorization
+     */
+    orderDispatchedAt: string;
+    /**
+     * ISO-8601 UTC creation time (the keyset field)
+     */
+    createdAt: string;
+    /**
+     * Who authorized it
+     */
+    createdBy: string;
+    /**
+     * When it was cancelled (ISO-8601 UTC); null unless cancelled
+     */
+    cancelledAt: string | null;
+    /**
+     * Who cancelled it; null unless cancelled
+     */
+    cancelledBy: string | null;
+    /**
+     * Why it was cancelled; null unless cancelled
+     */
+    cancelReason: string | null;
+    /**
+     * The authorized lines, in the order they were named
+     */
+    lines: Array<ReturnAuthorizationLineDto>;
+};
+
+export type ReturnableLineDto = {
+    orderLineId: string;
+    /**
+     * A kit component's parent line; null for a top-level line
+     */
+    parentLineId: string | null;
+    skuId: string;
+    /**
+     * A kit parent (a line with component lines) — never returnable itself; return its components
+     */
+    kitParent: boolean;
+    /**
+     * Units dispatched on this line, in base UoM (0 for an order not dispatched)
+     */
+    dispatchedQty: number;
+    /**
+     * Units already on open authorizations, in base UoM
+     */
+    authorizedQty: number;
+    /**
+     * max(0, dispatched − authorized), in base UoM
+     */
+    returnableQty: number;
+    /**
+     * Whether the SKU is serial-tracked (then a return names its serial numbers)
+     */
+    serialTracked: boolean;
+    /**
+     * Serial-tracked lines: the dispatched serials not on an open authorization, sorted by number
+     */
+    returnableSerials: Array<ReturnSerialDto>;
+};
+
+export type ReturnableOrderDto = {
+    orderId: string;
+    /**
+     * The order's status — only `dispatched` is returnable; any other answers zero everywhere
+     */
+    status: string;
+    warehouseId: string;
+    /**
+     * The order's channel reference; null for a manual order
+     */
+    orderReference: string | null;
+    /**
+     * When the order was dispatched (ISO-8601 UTC); null when it is not
+     */
+    dispatchedAt: string | null;
+    /**
+     * The order's lines, in order-line order
+     */
+    lines: Array<ReturnableLineDto>;
+};
+
+export type ReturnAuthorizationListResponse = {
+    items: Array<ReturnAuthorizationDto>;
+    nextCursor?: string | null;
+};
+
+export type CancelReturnAuthorizationDto = {
+    /**
+     * Why — required, 1–500 characters after trimming
+     */
+    reason: string;
 };
 
 export type ChannelWebhookOrderResponse = {
@@ -15822,7 +16014,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target
          */
-        targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+        targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
         /**
          * Only actions on this target
          */
@@ -17961,6 +18153,256 @@ export type NotificationsControllerOpenedResponses = {
 };
 
 export type NotificationsControllerOpenedResponse = NotificationsControllerOpenedResponses[keyof NotificationsControllerOpenedResponses];
+
+export type ReturnsControllerListData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Only one warehouse's authorizations (tenant-wide when absent)
+         */
+        warehouseId?: string;
+        /**
+         * Only authorizations of one status
+         */
+        status?: 'open' | 'cancelled';
+        /**
+         * Only one order's authorizations
+         */
+        orderId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/returns';
+};
+
+export type ReturnsControllerListErrors = {
+    /**
+     * A malformed warehouseId, status or orderId, a limit outside 1–100 (validation-failed), or a malformed cursor (invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ReturnsControllerListError = ReturnsControllerListErrors[keyof ReturnsControllerListErrors];
+
+export type ReturnsControllerListResponses = {
+    200: ReturnAuthorizationListResponse;
+};
+
+export type ReturnsControllerListResponse = ReturnsControllerListResponses[keyof ReturnsControllerListResponses];
+
+export type ReturnsControllerCreateData = {
+    body: CreateReturnAuthorizationDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/returns';
+};
+
+export type ReturnsControllerCreateErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — no lines or over 200, a repeated orderLineId, qty not above 0, an unknown reasonCode, "other" without a note, blank/repeated serial numbers, a serial count unequal to qty, over 500 serials, serials on a SKU that is not serial-tracked or none on one that is, or a quantity finer than its unit (validation-failed); a line not on the order (line-not-of-order); a kit parent line (kit-parent-not-returnable)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks returns.manage (role-denied), or a client-portal session (role-denied — operators only)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The order does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not dispatched (order-not-dispatched), a quantity above what is still returnable — members orderLineId and returnableQty (exceeds-returnable), a serial not dispatched on the line (serial-not-dispatched) or already on an open authorization (serial-already-authorized) — members orderLineId and serialNumber — or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReturnsControllerCreateError = ReturnsControllerCreateErrors[keyof ReturnsControllerCreateErrors];
+
+export type ReturnsControllerCreateResponses = {
+    /**
+     * The authorization, open (the idempotency snapshot)
+     */
+    201: ReturnAuthorizationDto;
+};
+
+export type ReturnsControllerCreateResponse = ReturnsControllerCreateResponses[keyof ReturnsControllerCreateResponses];
+
+export type ReturnsControllerReturnableData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query: {
+        /**
+         * The order whose returnable quantities to read
+         */
+        orderId: string;
+    };
+    url: '/tenants/{tenantId}/returns/returnable';
+};
+
+export type ReturnsControllerReturnableErrors = {
+    /**
+     * A missing or malformed orderId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The order does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReturnsControllerReturnableError = ReturnsControllerReturnableErrors[keyof ReturnsControllerReturnableErrors];
+
+export type ReturnsControllerReturnableResponses = {
+    200: ReturnableOrderDto;
+};
+
+export type ReturnsControllerReturnableResponse = ReturnsControllerReturnableResponses[keyof ReturnsControllerReturnableResponses];
+
+export type ReturnsControllerGetData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rmaId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/returns/{rmaId}';
+};
+
+export type ReturnsControllerGetErrors = {
+    /**
+     * A malformed rmaId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No return authorization with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReturnsControllerGetError = ReturnsControllerGetErrors[keyof ReturnsControllerGetErrors];
+
+export type ReturnsControllerGetResponses = {
+    200: ReturnAuthorizationDto;
+};
+
+export type ReturnsControllerGetResponse = ReturnsControllerGetResponses[keyof ReturnsControllerGetResponses];
+
+export type ReturnsControllerCancelData = {
+    body: CancelReturnAuthorizationDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rmaId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/returns/{rmaId}/cancel';
+};
+
+export type ReturnsControllerCancelErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed rmaId, or a reason that is blank or over 500 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks returns.manage (role-denied), or a client-portal session (role-denied — operators only)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No return authorization with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The authorization is not open, or units were received against it (rma-transition-invalid), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReturnsControllerCancelError = ReturnsControllerCancelErrors[keyof ReturnsControllerCancelErrors];
+
+export type ReturnsControllerCancelResponses = {
+    /**
+     * The cancelled authorization (the idempotency snapshot)
+     */
+    200: ReturnAuthorizationDto;
+};
+
+export type ReturnsControllerCancelResponse = ReturnsControllerCancelResponses[keyof ReturnsControllerCancelResponses];
 
 export type WebhooksControllerIngestOrderData = {
     body?: never;

@@ -11,7 +11,7 @@ import { visibleNavItems } from '@/lib/navigation';
 import { writeStoredTheme } from '@/lib/theme';
 
 /**
- * Sidebar IA skeleton — all 12 surfaces, non-functional routes. The list is
+ * Sidebar IA skeleton — all 13 surfaces, non-functional routes. The list is
  * filtered by the session role (story 1.5): a surface that declares
  * capabilities the role lacks is hidden — hide surfaces, never "blocked"
  * screens (no epic-1 nav surface declares any yet).

@@ -55,6 +55,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   rejected_op: 'Rejected op',
   reorder_breach: 'Reorder breach',
   reorder_policy: 'Reorder policy',
+  // Story 13-1 — a return authorization (RMA).
+  return_authorization: 'Return',
   sku: 'SKU',
   stock_adjustment_pending: 'Pending adjustment',
   stock_adjustment_policy: 'Adjustment policy',

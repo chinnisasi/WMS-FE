@@ -167,6 +167,11 @@ import {
   portalControllerStock,
   portalControllerWarehouses,
   putawayControllerListPutawayTasks,
+  returnsControllerCancel,
+  returnsControllerCreate,
+  returnsControllerGet,
+  returnsControllerList,
+  returnsControllerReturnable,
 } from './generated/sdk.gen';
 import { ensureSessionHint, readSession, clearSession, writeSession, PORTAL_SUSPENDED_EVENT } from '../auth';
 import type {
@@ -308,6 +313,10 @@ import type {
   PurchaseOrderListResponse,
   PurchaseOrderResponse,
   AmendAsnDto,
+  CreateReturnAuthorizationDto,
+  ReturnableOrderDto,
+  ReturnAuthorizationDto,
+  ReturnAuthorizationListResponse,
   AsnListResponse,
   AsnResponse,
   CreateAsnDto,
@@ -3844,6 +3853,90 @@ export async function fetchApiNotificationStatus(
  */
 export async function fetchApiMarkNotificationsOpened(tenantId: string): Promise<NotificationStatusResponse> {
   const { data, error } = await notificationsControllerOpened({ path: { tenantId } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+// ── Story 13-1 — return authorizations ─────────────────────────────────────
+
+/** One order's returnable quantities per line (member-open). */
+export async function fetchApiReturnable(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ReturnableOrderDto> {
+  const { data, error } = await returnsControllerReturnable({ path: { tenantId }, query: { orderId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * The return authorizations, newest first (keyset), optionally one
+ * warehouse's, one status's or one order's. Member-open. A first page with no
+ * option sends no query.
+ */
+export async function fetchApiListReturns(
+  tenantId: string,
+  options?: {
+    warehouseId?: string;
+    status?: ReturnAuthorizationDto['status'];
+    orderId?: string;
+    cursor?: string;
+    signal?: AbortSignal;
+  },
+): Promise<ReturnAuthorizationListResponse> {
+  const { data, error } = await returnsControllerList({
+    path: { tenantId },
+    query: definedQuery({
+      warehouseId: options?.warehouseId,
+      status: options?.status,
+      orderId: options?.orderId,
+      cursor: options?.cursor,
+    }),
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** One return authorization with its lines. */
+export async function fetchApiGetReturn(
+  tenantId: string,
+  rmaId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ReturnAuthorizationDto> {
+  const { data, error } = await returnsControllerGet({ path: { tenantId, rmaId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Authorizes part of a dispatched order for return (`returns.manage`); the key is per draft. */
+export async function fetchApiCreateReturn(
+  tenantId: string,
+  body: CreateReturnAuthorizationDto,
+  idempotencyKey: string,
+): Promise<ReturnAuthorizationDto> {
+  const { data, error } = await returnsControllerCreate({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Cancels an open return authorization with a reason (`returns.manage`); the key is per click. */
+export async function fetchApiCancelReturn(
+  tenantId: string,
+  rmaId: string,
+  reason: string,
+  idempotencyKey: string,
+): Promise<ReturnAuthorizationDto> {
+  const { data, error } = await returnsControllerCancel({
+    path: { tenantId, rmaId },
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
   if (error || !data) throw unwrapError(error, 400);
   return data;
 }

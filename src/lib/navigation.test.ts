@@ -4,7 +4,7 @@ import { NAV_ITEMS, NAV_ITEM_COUNT, visibleNavItems } from './navigation';
 import type { UserRole } from './users';
 
 describe('sidebar IA skeleton', () => {
-  test('carries all 12 surfaces', () => {
+  test('carries all 13 surfaces', () => {
     expect(NAV_ITEMS).toHaveLength(NAV_ITEM_COUNT);
     expect(NAV_ITEMS.map((i) => i.label)).toEqual([
       'Overview',
@@ -18,6 +18,7 @@ describe('sidebar IA skeleton', () => {
       'Channels',
       'Compliance',
       'Reports / Audit',
+      'Returns',
       'Settings',
     ]);
   });
@@ -64,6 +65,21 @@ describe('sidebar IA skeleton', () => {
       expect(visibleNavItems(role).some((i) => i.id === 'outbound')).toBe(true);
     }
     expect(visibleNavItems(undefined).some((i) => i.id === 'outbound')).toBe(true);
+  });
+
+  // Story 13-1: Returns is ungated (every role reads the list) and sits after
+  // Reports, before Settings, with its own monogram. Pinned for all four
+  // roles, the Outbound precedent.
+  test('Returns is ungated, sits after Reports and before Settings, and has a unique monogram', () => {
+    const ids = NAV_ITEMS.map((i) => i.id);
+    expect(ids.indexOf('returns')).toBe(ids.indexOf('reports') + 1);
+    expect(ids.indexOf('settings')).toBe(ids.indexOf('returns') + 1);
+    const returns = NAV_ITEMS.find((i) => i.id === 'returns')!;
+    expect(returns).toMatchObject({ label: 'Returns', href: '/returns', monogram: 'RT' });
+    expect(returns.capabilities).toBeUndefined();
+    for (const role of ['owner', 'ops_manager', 'operator', 'accountant'] as const satisfies readonly UserRole[]) {
+      expect(visibleNavItems(role).some((i) => i.id === 'returns')).toBe(true);
+    }
   });
 
   // Gating must never change the IA itself — NAV_ITEM_COUNT is the contract.

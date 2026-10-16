@@ -1,5 +1,5 @@
 /**
- * Sidebar IA skeleton — all 12 surfaces (epic context / DESIGN.md shell).
+ * Sidebar IA skeleton — all 13 surfaces (12 until story 13-1 added Returns) (epic context / DESIGN.md shell).
  * Settings includes device enrollment and the setup checklist. Routes are
  * non-functional placeholders in Story 1.1.
  */
@@ -65,10 +65,16 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   { id: 'compliance', label: 'Compliance', href: '/compliance', monogram: 'CO' },
   { id: 'reports', label: 'Reports / Audit', href: '/reports', monogram: 'RA' },
+  // Story 13-1 — Returns (EXPERIENCE.md: after Reports, before Settings).
+  // UNGATED: the list and each authorization's lines are readable by every
+  // role (reads are member-open server-side); only Cancel — and, on the
+  // order detail, "Create return" — consult `returns.manage`, inside the
+  // components (the Outbound precedent).
+  { id: 'returns', label: 'Returns', href: '/returns', monogram: 'RT' },
   { id: 'settings', label: 'Settings', href: '/settings', monogram: 'ST' },
 ] as const;
 
-export const NAV_ITEM_COUNT = 12;
+export const NAV_ITEM_COUNT = 13;
 
 /**
  * The IA list filtered by the session role (story 1.5). An unknown role
