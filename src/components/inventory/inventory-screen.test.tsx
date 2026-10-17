@@ -320,8 +320,39 @@ describe('the Inventory screen — Stock', () => {
     view = render(<InventoryScreen />);
     await settle();
     await search('GLOW-SERUM-30');
-    expect(panel().querySelector('[data-testid="stock-total"]')?.textContent).toBe('Loading every bin…');
+    expect(panel().querySelector('[data-testid="stock-total"]')?.textContent).toBe('Total unavailable — a page failed to load');
     expect(panelText()).toContain('More stock unavailable');
+  });
+
+  test('the SKU total sits under On hand when the Client column is shown', async () => {
+    clients = [...clients, { id: 'client-b', code: 'BRAND', name: 'Brand', systemOwned: false, status: 'active' }];
+    view = render(<InventoryScreen />);
+    await settle();
+    await search('GLOW-SERUM-30');
+    const headers = [...panel().querySelectorAll('thead th')].map((th) => th.textContent);
+    expect(headers).toEqual(['Bin', 'Client', 'On hand']);
+    const footCells = [...panel().querySelectorAll('tfoot td')] as HTMLTableCellElement[];
+    expect(footCells.map((td) => td.textContent)).toEqual(['Total across bins', '300 each']);
+    expect(footCells[0]!.colSpan).toBe(headers.length - 1);
+  });
+
+  test('a SKU walk stops at 50 pages and says the total is unavailable', async () => {
+    let n = 0;
+    overrides.push({
+      match: (p, q) => p.endsWith('/inventory/stock') && q.skuId === SKU_SERUM,
+      respond: () => {
+        n += 1;
+        return json(200, { items: [{ ...STOCK[0], id: `w-${n}` }], nextCursor: `c-${n}` });
+      },
+    });
+    view = render(<InventoryScreen />);
+    await settle();
+    await search('GLOW-SERUM-30');
+    for (let i = 0; i < 10; i++) await settle();
+    expect(stockReads().filter((r) => r.params.skuId === SKU_SERUM)).toHaveLength(50);
+    expect(panel().querySelector('[data-testid="stock-total"]')?.textContent).toBe(
+      'Total unavailable — too many bins to total here',
+    );
   });
 
   test('an unknown code reads "No bin or SKU with code X found" and sends no read', async () => {
@@ -361,6 +392,18 @@ describe('the Inventory screen — Stock', () => {
     expect(panel().querySelector('[data-testid="search-miss"]')?.textContent).toContain(
       'No bin with code GLOW-SERUM-30 found (SKU codes are not loaded).',
     );
+  });
+
+  test('a failed bin map is named; Retry bin codes is offered; a SKU search still sends skuId', async () => {
+    overrides.push({ match: (p) => /\/zones\/[^/]+\/bins$/.test(p), respond: () => problem(500, 'boom') });
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(panel().querySelector('[data-testid="search-note"]')?.textContent).toContain(
+      'Bin codes not loaded — search by SKU code only.',
+    );
+    expect(button('Retry bin codes')).toBeDefined();
+    await search('GLOW-SERUM-30');
+    expect(stockReads().at(-1)!.params.skuId).toBe(SKU_SERUM);
   });
 
   test('Load more fetches the next page in bin order; a failure keeps the rows; Retry resets to page one', async () => {
@@ -480,12 +523,34 @@ describe('the Inventory screen — Batches', () => {
     expect(history[1]).toContain('RECEIVING → D-01-01');
   });
 
-  test('a batch the server no longer has → "Batch not found"', async () => {
+  test('a batch the server no longer has → "Batch not found" with its own sentence', async () => {
     view = render(<InventoryScreen initialTab="batches" />);
     await settle();
     await search('GLOW-SERUM-30', 'sku');
     await click(tableRows()[1]!.querySelector('button')!);
     expect(panelText()).toContain('Batch not found');
+    expect(panelText()).toContain('Batch not found — it may have been removed.');
+    expect(panelText()).not.toContain('refresh the queue');
+  });
+
+  test('any other batch failure is headed "Batch unavailable"', async () => {
+    overrides.push({ match: (p) => p.endsWith(`/inventory/batches/${BATCH_A}`), respond: () => problem(500, 'boom') });
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    await click(tableRows()[0]!.querySelector('button')!);
+    expect(panelText()).toContain('Batch unavailable');
+    expect(panelText()).not.toContain('Batch not found');
+  });
+
+  test('a failed bin map on Batches says "Bin codes not loaded" with Retry bin codes', async () => {
+    overrides.push({ match: (p) => /\/zones\/[^/]+\/bins$/.test(p), respond: () => problem(500, 'boom') });
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    expect(panel().querySelector('[data-testid="bin-codes-note"]')?.textContent).toContain('Bin codes not loaded');
+    expect(button('Retry bin codes')).toBeDefined();
+    expect(cellTexts(tableRows()[0]!)[3]).toBe('Active');
   });
 });
 

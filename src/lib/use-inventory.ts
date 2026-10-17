@@ -135,6 +135,13 @@ export function useWarehouseBins(warehouseId: string | null): ResourceState<read
 /** The stock list's page size — the route's ceiling. */
 export const STOCK_PAGE_LIMIT = 200;
 
+/**
+ * A SKU walk stops after this many pages (50 × 200 = 10,000 rows) and says
+ * so — a SKU is never in that many bins in practice, and an uncapped walk
+ * would follow a misbehaving cursor forever.
+ */
+export const MAX_SKU_WALK_PAGES = 50;
+
 export interface StockFilter {
   readonly skuId: string | null;
   readonly binId: string | null;
@@ -147,6 +154,8 @@ export interface StockRows {
   readonly loadingMore: boolean;
   /** A later page failed: the loaded rows stay, with this reason and Retry. */
   readonly moreFailed: string | null;
+  /** A walk (`walkAll`) stopped at `MAX_SKU_WALK_PAGES` with pages left. */
+  readonly capped: boolean;
 }
 
 /**
@@ -170,14 +179,17 @@ export function useStockList(
     tenantId === null || warehouseId === null
       ? null
       : `${tenantId}|${warehouseId}|${skuId ?? ''}|${binId ?? ''}|${walkAll ? 'all' : 'paged'}|${epoch}`;
-  const [wanted, setWanted] = useState<{ scope: string; cursor: string } | null>(null);
+  const [wanted, setWanted] = useState<{ scope: string; cursor: string; page: number } | null>(null);
   const wantedCursor = wanted !== null && wanted.scope === scope ? wanted.cursor : null;
+  const wantedPage = wanted !== null && wanted.scope === scope ? wanted.page : 1;
   const [acc, setAcc] = useState<{
     scope: string;
     rows: readonly StockEntryDto[];
     nextCursor: string | null;
     /** The cursor of the last page appended (null = the first page). */
     loaded: string | null;
+    /** How many pages are appended. */
+    pages: number;
     failure: { cursor: string | null; reason: string } | null;
   } | null>(null);
 
@@ -200,23 +212,25 @@ export function useStockList(
           const same = prev !== null && prev.scope === scope;
           if (same && wantedCursor !== null && prev.loaded === wantedCursor) return prev;
           const base = wantedCursor !== null && same ? prev.rows : [];
-          return { scope, rows: [...base, ...page.items], nextCursor, loaded: wantedCursor, failure: null };
+          return { scope, rows: [...base, ...page.items], nextCursor, loaded: wantedCursor, pages: wantedPage, failure: null };
         });
-        if (walkAll && nextCursor !== null) setWanted({ scope, cursor: nextCursor });
+        if (walkAll && nextCursor !== null && wantedPage < MAX_SKU_WALK_PAGES) {
+          setWanted({ scope, cursor: nextCursor, page: wantedPage + 1 });
+        }
       } catch (error) {
         if (cancelled) return;
         const failure = { cursor: wantedCursor, reason: readReason(error, 'the stock list') };
         setAcc((prev) =>
           prev !== null && prev.scope === scope && wantedCursor !== null
             ? { ...prev, failure }
-            : { scope, rows: [], nextCursor: null, loaded: null, failure },
+            : { scope, rows: [], nextCursor: null, loaded: null, pages: 0, failure },
         );
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [scope, tenantId, warehouseId, skuId, binId, walkAll, wantedCursor]);
+  }, [scope, tenantId, warehouseId, skuId, binId, walkAll, wantedCursor, wantedPage]);
 
   const reload = useCallback(() => setEpoch((e) => e + 1), []);
 
@@ -224,7 +238,7 @@ export function useStockList(
   const loadMore = () => {
     if (scope === null || current === null || current.nextCursor === null) return;
     if (current.failure !== null) return;
-    setWanted({ scope, cursor: current.nextCursor });
+    setWanted({ scope, cursor: current.nextCursor, page: current.pages + 1 });
   };
 
   if (current === null) return { state: 'loading', reload, loadMore };
@@ -238,6 +252,7 @@ export function useStockList(
       nextCursor: current.nextCursor,
       loadingMore: wantedCursor !== null && current.loaded !== wantedCursor && current.failure === null,
       moreFailed: current.failure?.reason ?? null,
+      capped: walkAll && current.nextCursor !== null && current.pages >= MAX_SKU_WALK_PAGES,
     },
     reload,
     loadMore,
