@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import type { ReactNode } from 'react';
 import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
@@ -41,6 +43,14 @@ import {
   type PutawayDrill,
 } from '@/lib/drill';
 import { usePutawayTasks } from '@/lib/use-putaway';
+import {
+  DEFAULT_INBOUND_TAB,
+  INBOUND_TABS,
+  inboundTabHref,
+  initialInboundTab,
+  parseInboundTab,
+  type InboundTab,
+} from '@/lib/inbound-tabs';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { DrillBanner } from '@/components/shared/drill-banner';
@@ -68,7 +78,10 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
  * card renders normally for the active warehouse, which a drill never writes.
  */
 
-export function InboundCards({ drill = null }: { drill?: ParsedDrill } = {}) {
+export function InboundCards({
+  drill = null,
+  initialTab = null,
+}: { drill?: ParsedDrill; initialTab?: InboundTab | null } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -84,12 +97,34 @@ export function InboundCards({ drill = null }: { drill?: ParsedDrill } = {}) {
       </div>
     );
   }
-  return <InboundCardsSessioned drill={drill} />;
+  return <InboundCardsSessioned drill={drill} initialTab={initialTab} />;
 }
 
-function InboundCardsSessioned({ drill }: { drill: ParsedDrill }) {
+function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; initialTab: InboundTab | null }) {
   const grnsDrill = drillFor(drill, 'grns');
   const putawayDrill = drillFor(drill, 'putaway');
+  // inbound-tabs: one card at a time. A drill opens on its own list's tab;
+  // another tab leaves the drill (`?tab=` replaces the drill's URL), so the
+  // other lists stay one click away, as on the stacked page.
+  const drilled = grnsDrill !== null || putawayDrill !== null;
+  // Outside a drill the tab IS the URL's `?tab=` (useSearchParams follows
+  // in-place history updates and every navigation, so the sidebar's bare
+  // /inbound or a bell link always lands on the tab it names — the mounted
+  // card is never left on a stale pick). A click rewrites the URL in place:
+  // no remount, no re-fetch flash. `searchParams` is null only outside the
+  // App Router (screen tests), where the local pick stands in.
+  const searchParams = useSearchParams();
+  const [localTab, setLocalTab] = useState<InboundTab>(() => initialInboundTab(drill, initialTab));
+  const tab: InboundTab =
+    drilled || searchParams === null
+      ? localTab
+      : (parseInboundTab(Object.fromEntries(searchParams.entries())) ?? DEFAULT_INBOUND_TAB);
+  const selectTab = (next: InboundTab) => {
+    if (next === tab) return;
+    setLocalTab(next);
+    // The default tab is the bare route, so /inbound and its first tab are one URL.
+    window.history.replaceState(null, '', next === DEFAULT_INBOUND_TAB ? '/inbound' : inboundTabHref(next));
+  };
   const warehouseRead = useTenantWarehouses();
   // Loading reads as before; a failed read renders below (21-11b).
   const { tenantId, items: warehouses } =
@@ -125,29 +160,81 @@ function InboundCardsSessioned({ drill }: { drill: ParsedDrill }) {
       {warehouseRead.state === 'ready' && warehouseRead.data.refreshFailed !== null && (
         <WarehousesRefreshNote reason={warehouseRead.data.refreshFailed} onRetry={warehouseRead.reload} />
       )}
-      <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
-      <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
-      {grnsDrill === null ? (
-        <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+      {drilled ? (
+        <DrillInboundTabBar active={tab} />
       ) : (
-        // The drill's warehouse (or every warehouse, when the drill names none).
-        <GoodsReceiptsCard
-          warehouseId={grnsDrill.warehouseId ?? null}
-          warehouseLabel={grnsDrill.warehouseId === undefined ? 'All warehouses' : drillLabel(grnsDrill.warehouseId)}
-          drill={grnsDrill}
-        />
+        <InboundTabBar active={tab} onSelect={selectTab} />
       )}
-      {putawayDrill === null ? (
-        <PutawayCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
-      ) : (
-        <PutawayCard
-          warehouseId={putawayDrill.warehouseId}
-          warehouseLabel={drillLabel(putawayDrill.warehouseId)}
-          drill={putawayDrill}
-        />
-      )}
-      <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+      <div role="tabpanel" id="inbound-panel" aria-labelledby={`inbound-tab-${tab}`}>
+        {tab === 'pos' && <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
+        {tab === 'asns' && <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
+        {tab === 'grns' &&
+          (grnsDrill === null ? (
+            <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+          ) : (
+            // The drill's warehouse (or every warehouse, when the drill names none).
+            <GoodsReceiptsCard
+              warehouseId={grnsDrill.warehouseId ?? null}
+              warehouseLabel={grnsDrill.warehouseId === undefined ? 'All warehouses' : drillLabel(grnsDrill.warehouseId)}
+              drill={grnsDrill}
+              clearHref={inboundTabHref('grns')}
+            />
+          ))}
+        {tab === 'putaway' &&
+          (putawayDrill === null ? (
+            <PutawayCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+          ) : (
+            <PutawayCard
+              warehouseId={putawayDrill.warehouseId}
+              warehouseLabel={drillLabel(putawayDrill.warehouseId)}
+              drill={putawayDrill}
+              clearHref={inboundTabHref('putaway')}
+            />
+          ))}
+        {tab === 'qc-holds' && <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
+      </div>
     </div>
+  );
+}
+
+/** The Inbound tab bar (inbound-tabs) — the Conflicts tab pattern. */
+function InboundTabBar({ active, onSelect }: { active: InboundTab; onSelect: (tab: InboundTab) => void }): ReactNode {
+  return (
+    <div className="flex flex-wrap gap-1 text-xs" role="tablist" aria-label="Inbound lists">
+      {INBOUND_TABS.map((t) => (
+        <button
+          key={t.id}
+          id={`inbound-tab-${t.id}`}
+          type="button"
+          role="tab"
+          aria-selected={active === t.id}
+          aria-controls="inbound-panel"
+          onClick={() => onSelect(t.id)}
+          className={`rounded-sm border border-(--border) px-3 py-1 ${
+            active === t.id ? 'bg-(--muted) font-medium' : 'hover:bg-(--muted)'
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * In a drill, another tab LEAVES the drill: a soft navigation to `?tab=<id>`
+ * remounts the page with no drill (the page key joins drill and tab). Only
+ * drilled mode touches the router, as `DrillBanner` does.
+ */
+function DrillInboundTabBar({ active }: { active: InboundTab }): ReactNode {
+  const router = useRouter();
+  return (
+    <InboundTabBar
+      active={active}
+      onSelect={(next) => {
+        if (next !== active) router.replace(inboundTabHref(next), { scroll: false });
+      }}
+    />
   );
 }
 
@@ -285,11 +372,14 @@ function GoodsReceiptsCard({
   warehouseId,
   warehouseLabel,
   drill = null,
+  clearHref,
 }: {
   warehouseId: string | null;
   warehouseLabel: string | null;
   /** Story 9-1b — the drill's rows, server-filtered, under the banner. */
   drill?: GrnsDrill | null;
+  /** inbound-tabs — where the banner's Clear lands (this list's tab). */
+  clearHref?: string;
 }) {
   const grns = useGoodsReceipts(warehouseId, drill);
 
@@ -352,7 +442,7 @@ function GoodsReceiptsCard({
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Goods receipt notes</h2>
-        {drill !== null && <DrillBanner drill={drill} />}
+        {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its receipts.'
@@ -398,10 +488,13 @@ function PutawayCard({
   warehouseId,
   warehouseLabel,
   drill = null,
+  clearHref,
 }: {
   warehouseId: string | null;
   warehouseLabel: string | null;
   drill?: PutawayDrill | null;
+  /** inbound-tabs — where the banner's Clear lands (this list's tab). */
+  clearHref?: string;
 }) {
   const tasks = usePutawayTasks(warehouseId);
   const skus = useSkuMap();
@@ -434,7 +527,7 @@ function PutawayCard({
     >
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Awaiting putaway</h2>
-        {drill !== null && <DrillBanner drill={drill} />}
+        {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Received stock still in the Receiving bin, oldest receipt first.'

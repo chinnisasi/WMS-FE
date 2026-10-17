@@ -4,6 +4,7 @@ import type { ComponentType, ReactElement } from 'react';
 
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { drillKey, parseDrill, type DrillScreen, type ParsedDrill } from '../../lib/drill';
+import { parseInboundTab, type InboundTab } from '../../lib/inbound-tabs';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { readActiveWarehouseId, writeActiveWarehouseId } from '../../lib/warehouses';
@@ -25,6 +26,8 @@ import { readActiveWarehouseId, writeActiveWarehouseId } from '../../lib/warehou
  */
 
 const pushes: string[] = [];
+const replaces: string[] = [];
+let searchParamsNow: URLSearchParams | null = null;
 let pathname = '/';
 
 type Screen = ComponentType<{ drill?: ParsedDrill }>;
@@ -45,10 +48,13 @@ beforeAll(async () => {
     ...real,
     useRouter: () => ({
       push: (href: string) => void pushes.push(href),
-      replace: (href: string) => void pushes.push(href),
+      replace: (href: string) => void replaces.push(href),
       prefetch: () => undefined,
     }),
     usePathname: () => pathname,
+    // null = outside the App Router (the screens' local-state path); a test
+    // sets it to drive Inbound's URL-derived tab.
+    useSearchParams: () => searchParamsNow,
   }));
   ({ Outbound } = await import('../outbound/outbound'));
   ({ ConflictsQueues } = await import('../conflicts/queues'));
@@ -289,6 +295,8 @@ let view: Rendered | undefined;
 beforeEach(() => {
   requests = [];
   pushes.length = 0;
+  replaces.length = 0;
+  searchParamsNow = null;
   putawayItems = [PUTAWAY_TASK];
   warehouseRows = WAREHOUSES;
   warehousesFail = false;
@@ -317,7 +325,10 @@ const sorted = (query: Record<string, string>) => Object.entries(query).sort(([a
 /** What a page does: parse the URL's params, mount the screen keyed on the drill. */
 function page(Component: Screen, screen: DrillScreen, params: Record<string, string>): { drill: ParsedDrill; element: ReactElement } {
   const drill = parseDrill(screen, params);
-  return { drill, element: <Component key={drillKey(drill)} drill={drill} /> };
+  // inbound-tabs — Inbound also reads `?tab=` (not a drill key).
+  const tab = screen === 'inbound' ? parseInboundTab(params) : null;
+  const Tabbed = Component as unknown as (props: { drill: ParsedDrill; initialTab?: InboundTab | null }) => ReactElement;
+  return { drill, element: <Tabbed key={`${drillKey(drill)}|${tab ?? 'default'}`} drill={drill} initialTab={tab} /> };
 }
 
 async function mount(role: StoredSession['user']['role'], element: ReactElement): Promise<Rendered> {
@@ -365,6 +376,8 @@ interface Case {
   readonly controls: (r: Rendered) => boolean;
   /** The normal view's first request after Clear (beyond "no cursor, no drill keys"). */
   readonly normal: (r: Recorded) => void;
+  /** inbound-tabs — the params Clear lands on (Inbound reopens the drilled list's tab). */
+  readonly clearTo?: Record<string, string>;
 }
 
 const DRILL_ONLY_KEYS = [
@@ -441,6 +454,7 @@ const CASES: readonly Case[] = [
     controls: () => false, // the GRN card has no filter control of its own
     // The house GRN hook reads tenant-wide while the warehouses load, then the active one.
     normal: (r) => expect([[], [['warehouseId', W1]]]).toContainEqual(entries(r.params)),
+    clearTo: { tab: 'grns' },
   },
   {
     name: 'Replenishment — batch alerts (no forced kind or status)',
@@ -560,12 +574,12 @@ describe.each([...CASES])('$name', (c) => {
     expect(entries(afterNext.params).filter(([k]) => k !== 'cursor')).toEqual(sorted(c.sent));
 
     await click(buttonIn(bannerOf(view), 'Clear'));
-    expect(pushes).toEqual([c.route]);
+    expect(pushes).toEqual([c.clearTo === undefined ? c.route : `${c.route}?${new URLSearchParams(c.clearTo)}`]);
 
     // What the page does on the soft navigation: the bare URL parses to no
     // drill, and the new key remounts the screen.
     const before = requests.length;
-    const bare = page(c.component(), c.screen, {});
+    const bare = page(c.component(), c.screen, c.clearTo ?? {});
     expect(bare.drill).toBeNull();
     view.rerender(bare.element);
     await settle();
@@ -617,8 +631,12 @@ describe('story 9-3a — "View ledger" on the inbound cards uses the DOCUMENT\'s
       },
     ];
     pathname = '/inbound';
-    view = await mount('owner', page(InboundCards, 'inbound', {}).element);
-    const links = [...view.container.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')]);
+    // inbound-tabs — one card at a time: the GRN tab, then the PO tab.
+    view = await mount('owner', page(InboundCards, 'inbound', { tab: 'grns' }).element);
+    const linksNow = () => [...view!.container.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')]);
+    const grnLinks = linksNow();
+    await click(buttonIn(view.container, 'Purchase orders'));
+    const links = [...grnLinks, ...linksNow()];
     const grnLink = links.find(([text]) => text === 'View ledger');
     expect(grnLink).toBeDefined();
     const grnParams = new URL(`http://x${grnLink![1]}`).searchParams;
@@ -644,7 +662,7 @@ describe('story 9-3a — a document drill words the page for its document; the d
     view = await mount('owner', page(Ledger, 'ledger', { list: 'ledger', warehouseId: W2, doc: 'grn', grnId: GRN_ID, label: 'GRN-0042' }).element);
     expect(view.container.textContent).toContain('NORTH Delhi DC — the ledger events of GRN GRN-0042, newest first.');
     expect(view.container.textContent).not.toContain("the dashboard figure's");
-    view.unmount();
+    view!.unmount();
     view = await mount('owner', page(Ledger, 'ledger', { list: 'ledger', warehouseId: W2, type: 'putaway.placed', to: TO }).element);
     expect(view.container.textContent).toContain("the dashboard figure's ledger events");
     expect(bannerOf(view).textContent).toContain("Showing the dashboard figure's rows");
@@ -826,7 +844,7 @@ describe('Inbound — the goods receipts read states', () => {
 
   test.each([
     ['drilled', GRN_DRILL, 'No receipts match this figure.'],
-    ['normal', {}, 'No receipts recorded yet.'],
+    ['normal', { tab: 'grns' }, 'No receipts recorded yet.'],
   ] as const)('%s: a failed read shows ReadFailure with Retry, which re-reads', async (_name, params, empty) => {
     grnMode = 'fail';
     pathname = '/inbound';
@@ -854,10 +872,79 @@ describe('Conflicts — a role without the over-receipts tab', () => {
   });
 });
 
-describe('Inbound — Awaiting putaway', () => {
-  test('always shown, for the active warehouse, with its columns', async () => {
+describe('Inbound — tabs (inbound-tabs)', () => {
+  // These tests rewrite the shared happy-dom URL; restore it EXACTLY as they
+  // found it — a later suite's hash handling depends on the starting URL.
+  let originalHref = '';
+  beforeEach(() => {
+    originalHref = window.location.href;
+  });
+  afterEach(() => window.history.replaceState(null, '', originalHref));
+
+  test('opens on Purchase orders and mounts only that card', async () => {
     pathname = '/inbound';
     view = await mount('owner', page(InboundCards, 'inbound', {}).element);
+    const tablist = view.container.querySelector('[role="tablist"]')!;
+    expect(tablist.querySelector('[aria-selected="true"]')?.textContent).toBe('Purchase orders');
+    expect(reads('/receiving/goods-receipts')).toHaveLength(0);
+    expect(reads('/putaway/tasks')).toHaveLength(0);
+  });
+
+  test('?tab= opens that tab; an unknown tab falls back to Purchase orders', async () => {
+    pathname = '/inbound';
+    view = await mount('owner', page(InboundCards, 'inbound', { tab: 'putaway' }).element);
+    expect(view.container.querySelector('[role="tablist"] [aria-selected="true"]')?.textContent).toBe('Awaiting putaway');
+    expect(view.container.querySelector('[data-testid="awaiting-putaway"]')).not.toBeNull();
+    view!.unmount();
+    view = await mount('owner', page(InboundCards, 'inbound', { tab: 'nope' }).element);
+    expect(view.container.querySelector('[role="tablist"] [aria-selected="true"]')?.textContent).toBe('Purchase orders');
+  });
+
+  test('a click switches the card and rewrites the URL in place — no router navigation', async () => {
+    pathname = '/inbound';
+    view = await mount('owner', page(InboundCards, 'inbound', {}).element);
+    await click(buttonIn(view.container.querySelector('[role="tablist"]')!, 'QC holds'));
+    expect(view.container.querySelector('[role="tablist"] [aria-selected="true"]')?.textContent).toBe('QC holds');
+    expect(window.location.search).toBe('?tab=qc-holds');
+    expect(pushes).toEqual([]);
+    expect(replaces).toEqual([]);
+  });
+
+  test('in the App Router the tab follows the live URL — a later bare /inbound or ?tab= link is never left on a stale pick', async () => {
+    pathname = '/inbound';
+    searchParamsNow = new URLSearchParams('tab=qc-holds');
+    view = await mount('owner', page(InboundCards, 'inbound', { tab: 'qc-holds' }).element);
+    const selected = () => view!.container.querySelector('[role="tablist"] [aria-selected="true"]')?.textContent;
+    expect(selected()).toBe('QC holds');
+    // The sidebar's bare /inbound (same page key as a default load): the URL wins.
+    searchParamsNow = new URLSearchParams('');
+    view.rerender(page(InboundCards, 'inbound', { tab: 'qc-holds' }).element);
+    await settle();
+    expect(selected()).toBe('Purchase orders');
+    // A bell link back to ?tab=qc-holds.
+    searchParamsNow = new URLSearchParams('tab=qc-holds');
+    view.rerender(page(InboundCards, 'inbound', { tab: 'qc-holds' }).element);
+    await settle();
+    expect(selected()).toBe('QC holds');
+  });
+
+  test('clicking the default tab writes the bare route; clicking the open tab writes nothing', async () => {
+    pathname = '/inbound';
+    window.history.replaceState(null, '', '/inbound?tab=asns');
+    view = await mount('owner', page(InboundCards, 'inbound', { tab: 'asns' }).element);
+    const tablist = view.container.querySelector('[role="tablist"]')!;
+    await click(buttonIn(tablist, 'Purchase orders'));
+    expect(window.location.pathname + window.location.search).toBe('/inbound');
+    window.history.replaceState(null, '', '/inbound?tab=marker');
+    await click(buttonIn(tablist, 'Purchase orders'));
+    expect(window.location.search).toBe('?tab=marker');
+  });
+});
+
+describe('Inbound — Awaiting putaway', () => {
+  test('its tab shows it for the active warehouse, with its columns', async () => {
+    pathname = '/inbound';
+    view = await mount('owner', page(InboundCards, 'inbound', { tab: 'putaway' }).element);
     const section = view.container.querySelector('[data-testid="awaiting-putaway"]')!;
     expect(section).not.toBeNull();
     expect(reads('/putaway/tasks').map((r) => entries(r.params))).toEqual([[['warehouseId', W1]]]);
@@ -866,14 +953,27 @@ describe('Inbound — Awaiting putaway', () => {
     expect(section.querySelector('[data-testid="drill-banner"]')).toBeNull();
   });
 
-  test('a putaway drill scopes it to the drill warehouse, under the banner; the GRN card stays normal', async () => {
+  test('a putaway drill scopes it to the drill warehouse, under the banner, on its own tab; another tab leaves the drill', async () => {
     pathname = '/inbound';
     view = await mount('owner', page(InboundCards, 'inbound', { list: 'putaway', warehouseId: W2 }).element);
     expect(reads('/putaway/tasks').map((r) => entries(r.params))).toEqual([[['warehouseId', W2]]]);
     const section = view.container.querySelector('[data-testid="awaiting-putaway"]')!;
     expect(section.querySelector('[data-testid="drill-banner"]')?.textContent).toContain('Awaiting putaway · NORTH Delhi DC');
-    // Only the named section drills: the goods receipts read the active warehouse, unfiltered.
+    // inbound-tabs — the drill opens on its own tab and mounts only that card;
+    // another tab leaves the drill through the router (`?tab=`).
+    const tablist = view.container.querySelector('[role="tablist"]')!;
+    expect(tablist.querySelector('[aria-selected="true"]')?.textContent).toBe('Awaiting putaway');
+    expect(reads('/receiving/goods-receipts')).toHaveLength(0);
+    await click(buttonIn(tablist, 'Goods receipts'));
+    expect(replaces).toEqual(['/inbound?tab=grns']);
+    expect(pushes).toEqual([]);
+    // What the page does on that soft navigation: no drill, the GRN tab, the
+    // active warehouse, no drill-only keys.
+    view.rerender(page(InboundCards, 'inbound', { tab: 'grns' }).element);
+    await settle();
+    expect(view.container.querySelector('[data-testid="drill-banner"]')).toBeNull();
     const grns = reads('/receiving/goods-receipts');
+    expect(grns.length).toBeGreaterThan(0);
     expect(entries(grns.at(-1)!.params)).toEqual([['warehouseId', W1]]);
     for (const r of grns) for (const key of DRILL_ONLY_KEYS) expect(r.params.has(key)).toBe(false);
     expect(readActiveWarehouseId(T)).toBe(W1);
@@ -882,14 +982,14 @@ describe('Inbound — Awaiting putaway', () => {
   test('empty reads "Nothing awaiting putaway"', async () => {
     putawayItems = [];
     pathname = '/inbound';
-    view = await mount('owner', page(InboundCards, 'inbound', {}).element);
+    view = await mount('owner', page(InboundCards, 'inbound', { tab: 'putaway' }).element);
     expect(view.container.querySelector('[data-testid="awaiting-putaway"]')?.textContent).toContain('Nothing awaiting putaway');
   });
 
   test('a failed read renders the shared failure with Retry — never "nothing awaiting"', async () => {
     putawayItems = 'fail';
     pathname = '/inbound';
-    view = await mount('owner', page(InboundCards, 'inbound', {}).element);
+    view = await mount('owner', page(InboundCards, 'inbound', { tab: 'putaway' }).element);
     const section = view.container.querySelector('[data-testid="awaiting-putaway"]')!;
     expect(section.textContent).toContain('Putaway tasks unavailable');
     expect(section.textContent).not.toContain('Nothing awaiting putaway');
@@ -951,7 +1051,7 @@ describe('the pages', () => {
   const PAGE_CASES = [
     { route: '/outbound', params: CASES[0]!.params, list: '/outbound/orders' },
     { route: '/conflicts', params: CASES[1]!.params, list: '/receiving/over-receipts' },
-    { route: '/inbound', params: CASES[2]!.params, list: '/receiving/goods-receipts' },
+    { route: '/inbound', params: CASES[2]!.params, list: '/receiving/goods-receipts', clearTo: { tab: 'grns' } },
     { route: '/replenishment', params: CASES[3]!.params, list: '/replenishment/batch-alerts' },
     { route: '/compliance', params: CASES[4]!.params, list: '/eway/bills' },
     { route: '/inventory/ledger', params: CASES[6]!.params, list: '/inventory/events' },
@@ -961,7 +1061,8 @@ describe('the pages', () => {
     return PAGES[route]!({ searchParams: Promise.resolve(params) });
   }
 
-  test.each(PAGE_CASES)('$route: a drill reaches its section; re-rendering with {} remounts to the normal view', async ({ route, params, list }) => {
+  test.each(PAGE_CASES)('$route: a drill reaches its section; re-rendering with {} remounts to the normal view', async ({ route, params, list, ...rest }) => {
+    const clearTo = 'clearTo' in rest ? rest.clearTo : undefined;
     pathname = route;
     writeSession(session('owner'));
     writeActiveWarehouseId(T, W1);
@@ -975,7 +1076,7 @@ describe('the pages', () => {
     expect(reads(list).at(-1)!.params.get('cursor')).toBe(CURSOR);
 
     const before = requests.length;
-    view.rerender(await renderPage(route, {}));
+    view.rerender(await renderPage(route, clearTo ?? {}));
     await settle();
     const first = requests.slice(before).find((r) => r.method === 'GET' && r.pathname.endsWith(list));
     expect(first).toBeDefined();

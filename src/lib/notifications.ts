@@ -1,5 +1,6 @@
 import type { NotificationListResponse } from '@/lib/api/generated';
 import { conflictsQueueHref } from '@/lib/conflicts-queues';
+import { inboundTabHref } from '@/lib/inbound-tabs';
 import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 
 /**
@@ -252,7 +253,7 @@ export function notificationHref(entry: NotificationEntry): string {
     case 'reorder-breach':
       return '/replenishment';
     case 'qc-hold':
-      return '/inbound';
+      return inboundTabHref('qc-holds');
     case 'channel-sync':
       return '/channels';
     // Story 9-3b — the "Your exports" list on /reports; the entry never

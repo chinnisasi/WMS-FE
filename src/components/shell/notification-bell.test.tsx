@@ -284,7 +284,7 @@ describe('the bell', () => {
     expect(qc.getAttribute('data-state')).toBe('resolved');
     expect(qc.className).not.toContain('border-(--warning)');
     expect(qc.textContent).toContain('Resolved · released');
-    expect(qc.getAttribute('href')).toBe('/inbound');
+    expect(qc.getAttribute('href')).toBe('/inbound?tab=qc-holds');
 
     expect(entry('batch-alert').getAttribute('href')).toBe(`/replenishment?list=batch-alerts&warehouseId=${W}&kind=aged`);
     expect(entry('channel-sync').getAttribute('href')).toBe('/channels');

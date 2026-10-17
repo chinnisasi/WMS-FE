@@ -20,17 +20,18 @@ import { buttonClass } from '@/components/shared/surface';
  *   - `UnsupportedDrillNotice` — beside the NORMAL view when the link's
  *     drill could not be honoured whole.
  *
- * Clear navigates to the bare route. The page mounts its screen keyed on the
+ * Clear navigates to the bare route (or `clearHref`, e.g. the Inbound tab the
+ * drilled list lives on). The page mounts its screen keyed on the
  * drill, so that soft navigation REMOUNTS the screen: no drilled cursor,
  * cached page or DataTable Prev/Next stack survives into the normal view.
  *
- * `DrillBanner` is the ONLY component that touches the router, and it
- * renders only in drilled mode — so a screen rendered without a drill (every
+ * `DrillBanner` (and Inbound's drilled tab bar) are the only components that
+ * touch the router, and they render only in drilled mode — so a screen rendered without a drill (every
  * existing screen test) never needs an App Router context. Not reachable
  * from the portal (it reads an operator hook); `portal-boundary.test.ts`
  * would say so if it were.
  */
-export function DrillBanner({ drill }: { drill: Drill }) {
+export function DrillBanner({ drill, clearHref }: { drill: Drill; clearHref?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const warehouses = useTenantWarehouses();
@@ -42,7 +43,7 @@ export function DrillBanner({ drill }: { drill: Drill }) {
         word={drillBannerWord(drill)}
         reason={describeDrill(drill, items)}
         action={
-          <button type="button" className={buttonClass} onClick={() => router.push(pathname)}>
+          <button type="button" className={buttonClass} onClick={() => router.push(clearHref ?? pathname)}>
             Clear
           </button>
         }
