@@ -88,15 +88,23 @@ export type SearchResolution =
   | { readonly kind: 'blank' }
   | { readonly kind: 'bin'; readonly id: string; readonly code: string; readonly alsoSku: boolean }
   | { readonly kind: 'sku'; readonly id: string; readonly code: string }
-  | { readonly kind: 'miss'; readonly message: string };
+  | { readonly kind: 'miss'; readonly message: string }
+  | { readonly kind: 'ambiguous'; readonly message: string };
 
-/** Exact code first, then a case-insensitive match. */
-function findCode(map: CodeMap, query: string): CodeEntry | undefined {
+/**
+ * Exact code first, then a case-insensitive match — but codes are unique
+ * case-SENSITIVELY (`skus_tenant_id_code_unique`), so `abc` and `ABC` can
+ * both exist: more than one case-insensitive match is `'ambiguous'`, never
+ * a silent pick of the first.
+ */
+function findCode(map: CodeMap, query: string): CodeEntry | 'ambiguous' | undefined {
   if (map.state !== 'ready') return undefined;
   const exact = map.data.find((entry) => entry.code === query);
   if (exact !== undefined) return exact;
   const upper = query.toUpperCase();
-  return map.data.find((entry) => entry.code.toUpperCase() === upper);
+  const matches = map.data.filter((entry) => entry.code.toUpperCase() === upper);
+  if (matches.length > 1) return 'ambiguous';
+  return matches[0];
 }
 
 /**
@@ -111,7 +119,9 @@ export function resolveSearch(query: string, bins: CodeMap, skus: CodeMap): Sear
   if (code === '') return { kind: 'blank' };
   const bin = findCode(bins, code);
   const sku = findCode(skus, code);
+  if (bin === 'ambiguous') return { kind: 'ambiguous', message: `More than one bin matches ${code} — type the exact code.` };
   if (bin !== undefined) return { kind: 'bin', id: bin.id, code: bin.code, alsoSku: sku !== undefined };
+  if (sku === 'ambiguous') return { kind: 'ambiguous', message: `More than one SKU matches ${code} — type the exact code.` };
   if (sku !== undefined) return { kind: 'sku', id: sku.id, code: sku.code };
   if (bins.state === 'failed') return { kind: 'miss', message: `No SKU with code ${code} found (bin codes are not loaded).` };
   if (skus.state === 'failed') return { kind: 'miss', message: `No bin with code ${code} found (SKU codes are not loaded).` };
@@ -137,6 +147,19 @@ export function totalAcrossBins(rows: readonly { readonly quantity: number }[], 
 /* ------------------------------------------------------------------ */
 /* Batches                                                             */
 /* ------------------------------------------------------------------ */
+
+/**
+ * The batch lifecycle statuses in words — the backend's `batches_status_check`
+ * (`active`, `blocked`, migration 0010). An unknown value falls back to its raw text.
+ */
+const BATCH_STATUS_LABEL: Readonly<Record<string, string>> = {
+  active: 'Active',
+  blocked: 'Blocked',
+};
+
+export function batchStatusLabel(status: string): string {
+  return Object.prototype.hasOwnProperty.call(BATCH_STATUS_LABEL, status) ? BATCH_STATUS_LABEL[status]! : status;
+}
 
 /** A batch's quantity here — a zero reads "0 in this warehouse" (the row is greyed). */
 export function batchQuantityLabel(quantity: number, sku: QuantityUom | null): string {
@@ -174,12 +197,19 @@ export function otherWarehousesLabel(
   return `${total} more ${total === 1 ? 'bin' : 'bins'} in other warehouses: ${named.join(', ')}`;
 }
 
+export const BATCH_NOT_FOUND_REASON = 'Batch not found — it may have been removed.';
+
+/** The heading over a failed batch detail: "Batch not found" only for a 404, else "Batch unavailable". */
+export function batchFailureWord(reason: string): string {
+  return reason === BATCH_NOT_FOUND_REASON ? 'Batch not found' : 'Batch unavailable';
+}
+
 /** The batch picker and the detail read's refusals, branched on `code`. */
 export function batchDetailReason(error: unknown): string {
   if (error instanceof ApiProblem) {
     switch (error.code) {
       case 'not-found':
-        return 'Batch not found — it may have been removed.';
+        return BATCH_NOT_FOUND_REASON;
       case 'permission-denied':
         return 'That data belongs to another tenant — sign in again.';
       case 'unauthenticated':
@@ -190,5 +220,10 @@ export function batchDetailReason(error: unknown): string {
   }
   return UNREACHABLE_REASON;
 }
+
+/** A SKU walk that hit `MAX_SKU_WALK_PAGES` before the last page. */
+export const TOTAL_CAPPED = 'Total unavailable — too many bins to total here';
+/** A SKU walk whose later page failed. */
+export const TOTAL_PAGE_FAILED = 'Total unavailable — a page failed to load';
 
 export const NOT_BATCH_TRACKED = "This SKU isn't batch-tracked.";

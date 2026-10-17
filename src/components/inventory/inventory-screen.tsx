@@ -10,6 +10,10 @@ import { ledgerTypeLabel, warehouseDisplayLabel, type DrillWarehouse } from '@/l
 import { quantityLabel } from '@/lib/format-quantity';
 import {
   batchDetailReason,
+  batchFailureWord,
+  batchStatusLabel,
+  TOTAL_CAPPED,
+  TOTAL_PAGE_FAILED,
   batchQuantityLabel,
   NOT_BATCH_TRACKED,
   otherWarehousesLabel,
@@ -252,7 +256,7 @@ function ListTable<T extends { id: string }>({
 /* Stock                                                               */
 /* ------------------------------------------------------------------ */
 
-type AppliedSearch = Extract<SearchResolution, { kind: 'bin' | 'sku' | 'miss' }>;
+type AppliedSearch = Extract<SearchResolution, { kind: 'bin' | 'sku' | 'miss' | 'ambiguous' }>;
 
 function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
   const skus = useSkuCatalog();
@@ -278,7 +282,8 @@ function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
         ? { skuId: applied.id, binId: null }
         : { skuId: null, binId: null };
   // A miss reads nothing: the message stands in for the list.
-  const stock = useStockList(applied?.kind === 'miss' ? null : warehouseId, filter, applied?.kind === 'sku');
+  const unresolved = applied?.kind === 'miss' || applied?.kind === 'ambiguous';
+  const stock = useStockList(unresolved ? null : warehouseId, filter, applied?.kind === 'sku');
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -363,7 +368,7 @@ function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
           )}
         </div>
       )}
-      {applied?.kind === 'miss' ? (
+      {applied?.kind === 'miss' || applied?.kind === 'ambiguous' ? (
         <div data-testid="search-miss">
           <FeedbackBanner tone="warning" word="No match" reason={applied.message} />
         </div>
@@ -409,14 +414,25 @@ function StockRowsView({
   }
   const { rows, nextCursor, loadingMore, moreFailed } = stock.data;
   // A SKU search walks every page before it totals (never a partial sum).
-  const complete = nextCursor === null && moreFailed === null;
+  const { capped } = stock.data;
+  const total =
+    moreFailed !== null
+      ? TOTAL_PAGE_FAILED
+      : capped
+        ? TOTAL_CAPPED
+        : nextCursor === null
+          ? totalAcrossBins(rows, skuOfId(skuSearch?.id ?? ''))
+          : 'Loading every bin…';
   const footer =
     skuSearch !== null && rows.length > 0 ? (
       <tfoot>
         <tr className="h-10 border-t border-(--border) font-medium">
-          <td className="px-3">Total across bins</td>
+          {/* The label spans every column but the last, so the total sits under On hand. */}
+          <td className="px-3" colSpan={columns.length - 1}>
+            Total across bins
+          </td>
           <td className="data px-3 text-right" data-testid="stock-total">
-            {complete ? totalAcrossBins(rows, skuOfId(skuSearch.id)) : 'Loading every bin…'}
+            {total}
           </td>
         </tr>
       </tfoot>
@@ -466,6 +482,10 @@ function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) 
       setPick(null);
       return;
     }
+    if (resolution.kind === 'ambiguous') {
+      setPick({ kind: 'problem', message: resolution.message });
+      return;
+    }
     if (resolution.kind !== 'sku') {
       setPick({ kind: 'problem', message: `No SKU with code ${draft.trim()} found.` });
       return;
@@ -505,6 +525,19 @@ function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) 
         </button>
       </form>
       {skus.state === 'failed' && <ReadFailure word="SKU codes not loaded" reason={skus.reason} onRetry={skus.reload} />}
+      {bins.state === 'failed' && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-(--muted-foreground)" data-testid="bin-codes-note">
+          <span>Bin codes not loaded — bins show as —.</span>
+          <button type="button" className={rowButtonClass} onClick={bins.reload}>
+            Retry bin codes
+          </button>
+        </div>
+      )}
+      {bins.state === 'loading' && pick?.kind === 'sku' && (
+        <div className="text-xs text-(--muted-foreground)" data-testid="bin-codes-note">
+          Loading bin codes…
+        </div>
+      )}
       {ready && tracked.length === 0 && (
         <div className="text-xs text-(--muted-foreground)">No SKU in the catalog is batch-tracked.</div>
       )}
@@ -548,7 +581,7 @@ function BatchList({
     { key: 'code', header: 'Batch', render: (b) => <span className="font-mono text-xs">{b.code}</span> },
     { key: 'mfg', header: 'Manufactured', render: (b) => (b.mfgDate === null ? '—' : istDateLabel(b.mfgDate)) },
     { key: 'expiry', header: 'Expires', render: (b) => (b.expiryDate === null ? '—' : istDateLabel(b.expiryDate)) },
-    { key: 'status', header: 'Status', render: (b) => b.status },
+    { key: 'status', header: 'Status', render: (b) => batchStatusLabel(b.status) },
     { key: 'quantity', header: 'Here', numeric: true, render: (b) => batchQuantityLabel(b.quantity, sku) },
     {
       key: 'open',
@@ -605,7 +638,7 @@ function BatchDetail({
   const detail = useBatchDetail(batchId, batchDetailReason);
   if (detail.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading the batch…</div>;
   if (detail.state === 'failed') {
-    return <ReadFailure word="Batch not found" reason={detail.reason} onRetry={detail.reload} />;
+    return <ReadFailure word={batchFailureWord(detail.reason)} reason={detail.reason} onRetry={detail.reload} />;
   }
   const binCode = bins === null ? null : Object.fromEntries(bins.map((bin) => [bin.id, bin.code]));
   const binById = bins === null ? null : Object.fromEntries(bins.map((bin) => [bin.id, bin]));

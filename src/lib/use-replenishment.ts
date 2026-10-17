@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   ApiProblem,
@@ -634,6 +634,13 @@ export function useBatchDetail(
     state: ResourceState<BatchDetailResponse>;
   } | null>(null);
 
+  // The mapper is held in a ref (refreshed after every render, before the
+  // fetch effect below runs) so a caller's inline function never refetches.
+  const reasonRef = useRef(reasonOf);
+  useEffect(() => {
+    reasonRef.current = reasonOf;
+  });
+
   useEffect(() => {
     if (tenantId === null || batchId === null) return;
     let cancelled = false;
@@ -654,7 +661,7 @@ export function useBatchDetail(
             batchId,
             state: {
               state: 'failed',
-              reason: reasonOf(error),
+              reason: reasonRef.current(error),
             },
           });
         }
@@ -663,8 +670,6 @@ export function useBatchDetail(
     return () => {
       cancelled = true;
     };
-    // `reasonOf` is a module-level mapper at every call site — not a dependency.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, batchId, revision]);
 
   const reload = useCallback(() => {

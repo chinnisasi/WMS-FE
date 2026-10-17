@@ -3,7 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import { ApiProblem } from './api/client';
 import {
   batchDetailReason,
+  batchFailureWord,
   batchQuantityLabel,
+  batchStatusLabel,
   LOADING_CODES,
   NOT_BATCH_TRACKED,
   otherWarehousesLabel,
@@ -167,5 +169,36 @@ describe('the stock and batch words', () => {
     expect(batchDetailReason(new ApiProblem('not-found', 404, 'gone'))).toBe('Batch not found — it may have been removed.');
     expect(batchDetailReason(new Error('Failed to fetch'))).toBe('The API is unreachable — is wms-be running?');
     expect(NOT_BATCH_TRACKED).toBe("This SKU isn't batch-tracked.");
+  });
+});
+
+describe('review follow-ups', () => {
+  test('a case-insensitive code matching two SKUs is ambiguous, never a silent pick', () => {
+    const twins: CodeMap = { state: 'ready', data: [{ id: 's-a', code: 'abc' }, { id: 's-b', code: 'ABC' }] };
+    expect(resolveSearch('Abc', BINS, twins)).toEqual({
+      kind: 'ambiguous',
+      message: 'More than one SKU matches Abc — type the exact code.',
+    });
+    // The exact code still resolves.
+    expect(resolveSearch('ABC', BINS, twins)).toEqual({ kind: 'sku', id: 's-b', code: 'ABC' });
+    const binTwins: CodeMap = { state: 'ready', data: [{ id: 'b-a', code: 'x-a' }, { id: 'b-b', code: 'X-A' }] };
+    expect(resolveSearch('x-a ', binTwins, SKUS)).toMatchObject({ kind: 'bin', id: 'b-a' });
+    expect(resolveSearch('x-A', binTwins, SKUS)).toEqual({
+      kind: 'ambiguous',
+      message: 'More than one bin matches x-A — type the exact code.',
+    });
+  });
+
+  test('batch statuses in words; an unknown status keeps its raw text', () => {
+    expect(batchStatusLabel('active')).toBe('Active');
+    expect(batchStatusLabel('blocked')).toBe('Blocked');
+    expect(batchStatusLabel('recalled')).toBe('recalled');
+    expect(batchStatusLabel('constructor')).toBe('constructor');
+  });
+
+  test('the batch failure heading: not-found only for the 404 sentence', () => {
+    expect(batchFailureWord(batchDetailReason(new ApiProblem('not-found', 404, 'gone')))).toBe('Batch not found');
+    expect(batchFailureWord(batchDetailReason(new ApiProblem('boom', 500, 'x')))).toBe('Batch unavailable');
+    expect(batchFailureWord(batchDetailReason(new Error('Failed to fetch')))).toBe('Batch unavailable');
   });
 });
