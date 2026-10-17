@@ -52,6 +52,7 @@ import {
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { drillFor, warehouseDisplayLabel, type BatchAlertsDrill, type ParsedDrill } from '@/lib/drill';
+import { REPLENISHMENT_PAGE_TABS, type ReplenishmentTab } from '@/lib/page-tabs';
 import { useSkuMap, useUserMap, useVendorMap } from '@/lib/use-inbound';
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import {
@@ -69,6 +70,7 @@ import {
 } from '@/lib/warehouses';
 
 import { DrillBanner } from '@/components/shared/drill-banner';
+import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 import {
@@ -121,8 +123,15 @@ type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } |
  * aging alert queue only: the drill's warehouse, kind, status and window,
  * sent exactly, under a banner, with the kind and status tabs hidden. Every
  * other section renders normally for the active warehouse.
+ *
+ * page-tabs (2026-10-17) — the four sections sit behind a tab bar under the
+ * picker (`?tab=`), one mounted at a time. A drill opens on the alerts tab;
+ * another tab leaves the drill, and Clear lands on the alerts tab.
  */
-export function ReplenishmentView({ drill = null }: { drill?: ParsedDrill } = {}) {
+export function ReplenishmentView({
+  drill = null,
+  initialTab = null,
+}: { drill?: ParsedDrill; initialTab?: ReplenishmentTab | null } = {}) {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
   const sessioned = useSyncExternalStore(
     subscribeSession,
@@ -144,11 +153,16 @@ export function ReplenishmentView({ drill = null }: { drill?: ParsedDrill } = {}
       </Section>
     );
   }
-  return <ReplenishmentSessioned drill={drill} />;
+  return <ReplenishmentSessioned drill={drill} initialTab={initialTab} />;
 }
 
-function ReplenishmentSessioned({ drill }: { drill: ParsedDrill }) {
+function ReplenishmentSessioned({ drill, initialTab }: { drill: ParsedDrill; initialTab: ReplenishmentTab | null }) {
   const alertsDrill = drillFor(drill, 'batch-alerts');
+  const [tab, selectTab] = usePageTab(
+    REPLENISHMENT_PAGE_TABS,
+    REPLENISHMENT_PAGE_TABS.initial(drill, initialTab),
+    alertsDrill !== null,
+  );
   const warehouses = useOutboundWarehouses();
   const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
   const items = warehouses.state === 'ready' ? warehouses.data.items : [];
@@ -226,46 +240,57 @@ function ReplenishmentSessioned({ drill }: { drill: ParsedDrill }) {
           </label>
         </div>
       )}
-      <BreachQueue
-        key={`breaches-${warehouseId}`}
-        tenantId={tenantId}
-        warehouseId={warehouseId}
-        warehouseLabel={warehouseLabel}
-        canManage={canManage}
-      />
-      {alertsDrill === null ? (
-        <BatchAlertQueue
-          key={`batch-alerts-${warehouseId}`}
-          tenantId={tenantId}
-          warehouseId={warehouseId}
-          warehouseLabel={warehouseLabel}
-          canManage={canManage}
-        />
-      ) : (
-        <BatchAlertQueue
-          key="batch-alerts-drilled"
-          tenantId={tenantId}
-          warehouseId={alertsDrill.warehouseId ?? null}
-          warehouseLabel={
-            alertsDrill.warehouseId === undefined ? null : warehouseDisplayLabel(items, alertsDrill.warehouseId)
-          }
-          canManage={canManage}
-          drill={alertsDrill}
-        />
-      )}
-      <SuggestedPoQueue
-        key={`drafts-${warehouseId}`}
-        tenantId={tenantId}
-        warehouseId={warehouseId}
-        warehouseLabel={warehouseLabel}
-        canManage={canManage}
-      />
-      <PolicyTable
-        key={`policies-${warehouseId}`}
-        tenantId={tenantId}
-        warehouseId={warehouseId}
-        canManage={canManage}
-      />
+      <PageTabStrip def={REPLENISHMENT_PAGE_TABS} active={tab} drilled={alertsDrill !== null} onSelect={selectTab} />
+      <PageTabPanel def={REPLENISHMENT_PAGE_TABS} active={tab}>
+        {tab === 'breaches' && (
+          <BreachQueue
+            key={`breaches-${warehouseId}`}
+            tenantId={tenantId}
+            warehouseId={warehouseId}
+            warehouseLabel={warehouseLabel}
+            canManage={canManage}
+          />
+        )}
+        {tab === 'batch-alerts' &&
+          (alertsDrill === null ? (
+            <BatchAlertQueue
+              key={`batch-alerts-${warehouseId}`}
+              tenantId={tenantId}
+              warehouseId={warehouseId}
+              warehouseLabel={warehouseLabel}
+              canManage={canManage}
+            />
+          ) : (
+            <BatchAlertQueue
+              key="batch-alerts-drilled"
+              tenantId={tenantId}
+              warehouseId={alertsDrill.warehouseId ?? null}
+              warehouseLabel={
+                alertsDrill.warehouseId === undefined ? null : warehouseDisplayLabel(items, alertsDrill.warehouseId)
+              }
+              canManage={canManage}
+              drill={alertsDrill}
+              clearHref={REPLENISHMENT_PAGE_TABS.href('batch-alerts')}
+            />
+          ))}
+        {tab === 'suggested-pos' && (
+          <SuggestedPoQueue
+            key={`drafts-${warehouseId}`}
+            tenantId={tenantId}
+            warehouseId={warehouseId}
+            warehouseLabel={warehouseLabel}
+            canManage={canManage}
+          />
+        )}
+        {tab === 'policies' && (
+          <PolicyTable
+            key={`policies-${warehouseId}`}
+            tenantId={tenantId}
+            warehouseId={warehouseId}
+            canManage={canManage}
+          />
+        )}
+      </PageTabPanel>
     </div>
   );
 }
@@ -519,6 +544,7 @@ function BatchAlertQueue({
   warehouseLabel,
   canManage,
   drill = null,
+  clearHref,
 }: {
   tenantId: string;
   /** Null only for a drill that names no warehouse (tenant-wide). */
@@ -527,6 +553,8 @@ function BatchAlertQueue({
   canManage: boolean;
   /** Story 9-1b — the drill's rows, server-filtered; the tabs are hidden and never sent. */
   drill?: BatchAlertsDrill | null;
+  /** page-tabs — where the banner's Clear lands (the alerts tab). */
+  clearHref?: string;
 }) {
   const [kind, setKind] = useState<BatchAlertKindFilter>('all');
   const [tab, setTab] = useState<BatchAlertStatus>('open');
@@ -603,7 +631,7 @@ function BatchAlertQueue({
             ? policy.reason
             : 'Reading the tenant’s alert config…'}
       </div>
-      {drill !== null && <DrillBanner drill={drill} />}
+      {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
       {drill === null && <div className="text-xs text-(--muted-foreground)">{batchAlertQueueIntro(tab)}</div>}
       {drill === null && (
         <div className="flex flex-wrap items-center gap-4">

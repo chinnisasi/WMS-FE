@@ -1,8 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
-import type { ReactNode } from 'react';
 import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
@@ -43,19 +41,12 @@ import {
   type PutawayDrill,
 } from '@/lib/drill';
 import { usePutawayTasks } from '@/lib/use-putaway';
-import {
-  DEFAULT_INBOUND_TAB,
-  INBOUND_TABS,
-  inboundTabHref,
-  initialInboundTab,
-  parseInboundTab,
-  tabCountLabel,
-  type InboundTab,
-} from '@/lib/inbound-tabs';
+import { INBOUND_PAGE_TABS, inboundTabHref, initialInboundTab, tabCountLabel, type InboundTab } from '@/lib/inbound-tabs';
 import { useInboundTabCounts, type InboundTabCounts } from '@/lib/use-inbound-tab-counts';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { DrillBanner } from '@/components/shared/drill-banner';
+import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
 import { ReadFailure, Section } from '@/components/shared/surface';
@@ -109,24 +100,10 @@ function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; init
   // another tab leaves the drill (`?tab=` replaces the drill's URL), so the
   // other lists stay one click away, as on the stacked page.
   const drilled = grnsDrill !== null || putawayDrill !== null;
-  // Outside a drill the tab IS the URL's `?tab=` (useSearchParams follows
-  // in-place history updates and every navigation, so the sidebar's bare
-  // /inbound or a bell link always lands on the tab it names — the mounted
-  // card is never left on a stale pick). A click rewrites the URL in place:
-  // no remount, no re-fetch flash. `searchParams` is null only outside the
-  // App Router (screen tests), where the local pick stands in.
-  const searchParams = useSearchParams();
-  const [localTab, setLocalTab] = useState<InboundTab>(() => initialInboundTab(drill, initialTab));
-  const tab: InboundTab =
-    drilled || searchParams === null
-      ? localTab
-      : (parseInboundTab(Object.fromEntries(searchParams.entries())) ?? DEFAULT_INBOUND_TAB);
-  const selectTab = (next: InboundTab) => {
-    if (next === tab) return;
-    setLocalTab(next);
-    // The default tab is the bare route, so /inbound and its first tab are one URL.
-    window.history.replaceState(null, '', next === DEFAULT_INBOUND_TAB ? '/inbound' : inboundTabHref(next));
-  };
+  // The tab state and its URL rules are the shared page-tabs ones
+  // (`components/shared/page-tabs.tsx`): outside a drill the tab IS the live
+  // URL's `?tab=`, and a click rewrites the URL in place.
+  const [tab, selectTab] = usePageTab(INBOUND_PAGE_TABS, initialInboundTab(drill, initialTab), drilled);
   const warehouseRead = useTenantWarehouses();
   // Loading reads as before; a failed read renders below (21-11b).
   const { tenantId, items: warehouses } =
@@ -165,12 +142,14 @@ function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; init
       {warehouseRead.state === 'ready' && warehouseRead.data.refreshFailed !== null && (
         <WarehousesRefreshNote reason={warehouseRead.data.refreshFailed} onRetry={warehouseRead.reload} />
       )}
-      {drilled ? (
-        <DrillInboundTabBar active={tab} counts={tabCounts} />
-      ) : (
-        <InboundTabBar active={tab} onSelect={selectTab} counts={tabCounts} />
-      )}
-      <div role="tabpanel" id="inbound-panel" aria-labelledby={`inbound-tab-${tab}`}>
+      <PageTabStrip
+        def={INBOUND_PAGE_TABS}
+        active={tab}
+        drilled={drilled}
+        onSelect={selectTab}
+        badge={(id) => <InboundTabCount tab={id} counts={tabCounts} />}
+      />
+      <PageTabPanel def={INBOUND_PAGE_TABS} active={tab}>
         {tab === 'pos' && <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
         {tab === 'asns' && <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
         {tab === 'grns' &&
@@ -197,67 +176,23 @@ function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; init
             />
           ))}
         {tab === 'qc-holds' && <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
-      </div>
+      </PageTabPanel>
     </div>
   );
 }
 
-/** The Inbound tab bar (inbound-tabs) — the Conflicts tab pattern. */
-function InboundTabBar({
-  active,
-  onSelect,
-  counts,
-}: {
-  active: InboundTab;
-  onSelect: (tab: InboundTab) => void;
-  counts: InboundTabCounts;
-}): ReactNode {
+/** inbound-tabs — a tab's count pill; none on Goods receipts (history) or a failed read. */
+function InboundTabCount({ tab, counts }: { tab: InboundTab; counts: InboundTabCounts }) {
+  if (tab === 'grns') return null;
+  const count = counts[tab];
+  if (count === undefined) return null;
   return (
-    <div className="flex flex-wrap gap-1 text-xs" role="tablist" aria-label="Inbound lists">
-      {INBOUND_TABS.map((t) => (
-        <button
-          key={t.id}
-          id={`inbound-tab-${t.id}`}
-          data-tab={t.id}
-          type="button"
-          role="tab"
-          aria-selected={active === t.id}
-          aria-controls="inbound-panel"
-          onClick={() => onSelect(t.id)}
-          className={`rounded-sm border border-(--border) px-3 py-1 ${
-            active === t.id ? 'bg-(--muted) font-medium' : 'hover:bg-(--muted)'
-          }`}
-        >
-          {t.label}
-          {t.id !== 'grns' && counts[t.id] !== undefined && (
-            <span
-              data-testid={`inbound-tab-count-${t.id}`}
-              className="ml-1.5 rounded-full bg-(--muted) px-1.5 text-[11px] tabular-nums text-(--muted-foreground)"
-            >
-              {tabCountLabel(counts[t.id]!)}
-            </span>
-          )}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/**
- * In a drill, another tab LEAVES the drill: a soft navigation to `?tab=<id>`
- * remounts the page with no drill (the page key joins drill and tab). Only
- * drilled mode touches the router, as `DrillBanner` does.
- */
-function DrillInboundTabBar({ active, counts }: { active: InboundTab; counts: InboundTabCounts }): ReactNode {
-  const router = useRouter();
-  return (
-    <InboundTabBar
-      active={active}
-      counts={counts}
-      onSelect={(next) => {
-        if (next !== active) router.replace(inboundTabHref(next), { scroll: false });
-      }}
-    />
+    <span
+      data-testid={`inbound-tab-count-${tab}`}
+      className="ml-1.5 rounded-full bg-(--muted) px-1.5 text-[11px] tabular-nums text-(--muted-foreground)"
+    >
+      {tabCountLabel(count)}
+    </span>
   );
 }
 

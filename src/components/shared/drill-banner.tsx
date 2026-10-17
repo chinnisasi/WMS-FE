@@ -20,12 +20,13 @@ import { buttonClass } from '@/components/shared/surface';
  *   - `UnsupportedDrillNotice` — beside the NORMAL view when the link's
  *     drill could not be honoured whole.
  *
- * Clear navigates to the bare route (or `clearHref`, e.g. the Inbound tab the
+ * Clear navigates to the bare route (or `clearHref`, the page tab the
  * drilled list lives on). The page mounts its screen keyed on the
  * drill, so that soft navigation REMOUNTS the screen: no drilled cursor,
  * cached page or DataTable Prev/Next stack survives into the normal view.
  *
- * `DrillBanner` (and Inbound's drilled tab bar) are the only components that
+ * `DrillBanner` and the shared drilled tab bar (`DrillPageTabBar`,
+ * `components/shared/page-tabs.tsx`) are the only components that
  * touch the router, and they render only in drilled mode — so a screen rendered without a drill (every
  * existing screen test) never needs an App Router context. Not reachable
  * from the portal (it reads an operator hook); `portal-boundary.test.ts`

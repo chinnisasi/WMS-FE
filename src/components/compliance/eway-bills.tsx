@@ -91,7 +91,14 @@ import {
  * PENDING row keeps its own row actions (Act → Part B / record / dismiss /
  * Generate, on `eway.manage`); no other row offers any.
  */
-export function EwayBills({ drill = null }: { drill?: ParsedDrill } = {}) {
+export function EwayBills({
+  drill = null,
+  clearHref,
+}: {
+  drill?: ParsedDrill;
+  /** page-tabs — where the drill banner's Clear lands (this list's Compliance tab). */
+  clearHref?: string;
+} = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -105,10 +112,10 @@ export function EwayBills({ drill = null }: { drill?: ParsedDrill } = {}) {
       </Section>
     );
   }
-  return <EwayBillsSessioned drill={drillFor(drill, 'eway')} />;
+  return <EwayBillsSessioned drill={drillFor(drill, 'eway')} clearHref={clearHref} />;
 }
 
-function EwayBillsSessioned({ drill }: { drill: EwayDrill | null }) {
+function EwayBillsSessioned({ drill, clearHref }: { drill: EwayDrill | null; clearHref?: string }) {
   const role = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.user.role,
@@ -305,7 +312,7 @@ function EwayBillsSessioned({ drill }: { drill: EwayDrill | null }) {
     >
       <div className="text-(--muted-foreground)">{QUEUE_COPY}</div>
 
-      {drill !== null && <DrillBanner drill={drill} />}
+      {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
 
       {drill === null && (
         <div className="flex flex-wrap items-end gap-3">

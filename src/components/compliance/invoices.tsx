@@ -65,7 +65,14 @@ import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass
  * invoices (warehouse + issue window, filtered server-side) under a banner.
  * Decision 7: the page-level generate-for-order form is hidden while drilled.
  */
-export function Invoices({ drill = null }: { drill?: ParsedDrill } = {}) {
+export function Invoices({
+  drill = null,
+  clearHref,
+}: {
+  drill?: ParsedDrill;
+  /** page-tabs — where the drill banner's Clear lands (this list's Compliance tab). */
+  clearHref?: string;
+} = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -79,10 +86,10 @@ export function Invoices({ drill = null }: { drill?: ParsedDrill } = {}) {
       </Section>
     );
   }
-  return <InvoicesSessioned drill={drillFor(drill, 'invoices')} />;
+  return <InvoicesSessioned drill={drillFor(drill, 'invoices')} clearHref={clearHref} />;
 }
 
-function InvoicesSessioned({ drill }: { drill: InvoicesDrill | null }) {
+function InvoicesSessioned({ drill, clearHref }: { drill: InvoicesDrill | null; clearHref?: string }) {
   const role = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.user.role,
@@ -163,7 +170,7 @@ function InvoicesSessioned({ drill }: { drill: InvoicesDrill | null }) {
         and a supplier GSTIN exists; it takes its number when it issues.
       </div>
 
-      {drill !== null && <DrillBanner drill={drill} />}
+      {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
 
       {canGenerate && drill === null && <GenerateForOrder onGenerated={() => onGenerated()} />}
 

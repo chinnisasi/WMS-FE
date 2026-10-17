@@ -4,7 +4,8 @@ import type { ComponentType, ReactElement } from 'react';
 
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { drillKey, parseDrill, type DrillScreen, type ParsedDrill } from '../../lib/drill';
-import { parseInboundTab, type InboundTab } from '../../lib/inbound-tabs';
+import { INBOUND_PAGE_TABS } from '../../lib/inbound-tabs';
+import { COMPLIANCE_PAGE_TABS, OUTBOUND_PAGE_TABS, REPLENISHMENT_PAGE_TABS, type PageTabs } from '../../lib/page-tabs';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { readActiveWarehouseId, writeActiveWarehouseId } from '../../lib/warehouses';
@@ -39,6 +40,7 @@ let InboundCards: Screen;
 let ReplenishmentView: Screen;
 let EwayBills: Screen;
 let Invoices: Screen;
+let ComplianceTabs: Screen;
 let Ledger: Screen;
 let ledgerDrillEmptyMessage: (drill: never) => string;
 
@@ -62,6 +64,7 @@ beforeAll(async () => {
   ({ ReplenishmentView } = await import('../replenishment/replenishment-view'));
   ({ EwayBills } = await import('../compliance/eway-bills'));
   ({ Invoices } = await import('../compliance/invoices'));
+  ({ ComplianceTabs } = await import('../compliance/compliance-tabs'));
   ({ Ledger, ledgerDrillEmptyMessage } = await import('../inventory/ledger'));
   PAGES['/outbound'] = (await import('../../app/(app)/outbound/page')).default;
   PAGES['/conflicts'] = (await import('../../app/(app)/conflicts/page')).default;
@@ -322,12 +325,19 @@ const reads = (suffix: string) => requests.filter((r) => r.method === 'GET' && r
 const entries = (params: URLSearchParams) => [...params.entries()].sort(([a], [b]) => a.localeCompare(b));
 const sorted = (query: Record<string, string>) => Object.entries(query).sort(([a], [b]) => a.localeCompare(b));
 
-/** What a page does: parse the URL's params, mount the screen keyed on the drill. */
+/** page-tabs — each tabbed screen's tab definition (its page reads `?tab=`, not a drill key). */
+const SCREEN_TABS: Partial<Record<DrillScreen, PageTabs<string>>> = {
+  inbound: INBOUND_PAGE_TABS,
+  outbound: OUTBOUND_PAGE_TABS,
+  replenishment: REPLENISHMENT_PAGE_TABS,
+  compliance: COMPLIANCE_PAGE_TABS,
+};
+
+/** What a page does: parse the URL's params, mount the screen keyed on the drill and the tab. */
 function page(Component: Screen, screen: DrillScreen, params: Record<string, string>): { drill: ParsedDrill; element: ReactElement } {
   const drill = parseDrill(screen, params);
-  // inbound-tabs — Inbound also reads `?tab=` (not a drill key).
-  const tab = screen === 'inbound' ? parseInboundTab(params) : null;
-  const Tabbed = Component as unknown as (props: { drill: ParsedDrill; initialTab?: InboundTab | null }) => ReactElement;
+  const tab = SCREEN_TABS[screen]?.parse(params) ?? null;
+  const Tabbed = Component as unknown as (props: { drill: ParsedDrill; initialTab?: string | null }) => ReactElement;
   return { drill, element: <Tabbed key={`${drillKey(drill)}|${tab ?? 'default'}`} drill={drill} initialTab={tab} /> };
 }
 
@@ -383,8 +393,10 @@ interface Case {
   readonly controls: (r: Rendered) => boolean;
   /** The normal view's first request after Clear (beyond "no cursor, no drill keys"). */
   readonly normal: (r: Recorded) => void;
-  /** inbound-tabs — the params Clear lands on (Inbound reopens the drilled list's tab). */
+  /** page-tabs — the params Clear lands on (the drilled list's tab; none when it is the default tab). */
   readonly clearTo?: Record<string, string>;
+  /** page-tabs — the params that open the normal view on this list's tab. */
+  readonly normalParams?: Record<string, string>;
 }
 
 const DRILL_ONLY_KEYS = [
@@ -436,6 +448,8 @@ const CASES: readonly Case[] = [
       expect(r.pathname).toContain(`/warehouses/${W1}/outbound/orders`);
       expect([...r.params.keys()]).toEqual([]);
     },
+    // Orders is Outbound's default tab: Clear lands on the bare route.
+    normalParams: { tab: 'orders' },
   },
   {
     name: 'Conflicts — over-receipts (no forced status)',
@@ -462,6 +476,7 @@ const CASES: readonly Case[] = [
     // The house GRN hook reads tenant-wide while the warehouses load, then the active one.
     normal: (r) => expect([[], [['warehouseId', W1]]]).toContainEqual(entries(r.params)),
     clearTo: { tab: 'grns' },
+    normalParams: { tab: 'grns' },
   },
   {
     name: 'Replenishment — batch alerts (no forced kind or status)',
@@ -477,10 +492,13 @@ const CASES: readonly Case[] = [
       tablist('Batch alert status')(r) ||
       [...r.container.querySelectorAll('label')].some((l) => l.textContent?.startsWith('Warehouse')),
     normal: (r) => expect(entries(r.params)).toEqual([['status', 'open'], ['warehouseId', W1]]),
+    clearTo: { tab: 'batch-alerts' },
+    normalParams: { tab: 'batch-alerts' },
   },
   {
     name: 'Compliance — e-way bills (no forced status)',
-    component: () => EwayBills,
+    // page-tabs — the real tabbed screen, so Clear's `clearHref` is the one that ships.
+    component: () => ComplianceTabs,
     screen: 'compliance',
     route: '/compliance',
     params: { list: 'eway', warehouseId: W2, source: 'gateway', from: FROM, to: TO },
@@ -493,10 +511,13 @@ const CASES: readonly Case[] = [
       r.container.querySelector('table input[type="checkbox"]') !== null ||
       (r.container.textContent ?? '').includes('Download'),
     normal: (r) => expect(entries(r.params)).toEqual([['status', 'pending']]),
+    clearTo: { tab: 'eway' },
+    normalParams: { tab: 'eway' },
   },
   {
     name: 'Compliance — invoices',
-    component: () => Invoices,
+    // Invoices is Compliance's default tab: Clear lands on the bare route.
+    component: () => ComplianceTabs,
     screen: 'compliance',
     route: '/compliance',
     params: { list: 'invoices', warehouseId: W2, from: FROM, to: TO },
@@ -505,6 +526,7 @@ const CASES: readonly Case[] = [
     banner: ['Invoices', 'NORTH Delhi DC'],
     controls: () => false, // the invoice list has no filter control
     normal: (r) => expect([...r.params.keys()]).toEqual([]),
+    normalParams: { tab: 'invoices' },
   },
   {
     name: 'Ledger (path-scoped)',
@@ -549,20 +571,15 @@ describe.each([...CASES])('$name', (c) => {
     const { element } = page(c.component(), c.screen, c.params);
     view = await mount('owner', element);
 
-    // A path-scoped drill's section reads the drill warehouse's path; a
-    // sibling section on the same page (the waves surface reads orders too)
-    // reads the active warehouse, unfiltered.
+    // A path-scoped drill's section reads the drill warehouse's path. (The
+    // sibling check that once followed — "the waves surface reads orders too,
+    // for the active warehouse" — went vacuous with page-tabs: only the
+    // drilled tab is mounted, so no sibling section reads anything. Deleted.)
     const list = reads(c.list).filter(
       (r) => c.pathWarehouse === undefined || r.pathname.includes(`/warehouses/${c.pathWarehouse}/`),
     );
     expect(list.length).toBeGreaterThan(0);
     for (const r of list) expect(entries(r.params)).toEqual(sorted(c.sent));
-    if (c.pathWarehouse !== undefined) {
-      for (const r of reads(c.list).filter((r) => !list.includes(r))) {
-        expect(r.pathname).toContain(`/warehouses/${W1}/`);
-        expect([...r.params.keys()]).toEqual([]);
-      }
-    }
     expect(c.controls(view)).toBe(false);
     const text = bannerOf(view).textContent ?? '';
     for (const word of c.banner) expect(text).toContain(word);
@@ -707,7 +724,8 @@ describe('the normal view still has its controls (so the "hidden" assertions bit
     '$name',
     async (c) => {
       pathname = c.route;
-      view = await mount('owner', page(c.component(), c.screen, {}).element);
+      // page-tabs — on its own list's tab (only that section is mounted).
+      view = await mount('owner', page(c.component(), c.screen, c.normalParams ?? {}).element);
       expect(c.controls(view)).toBe(true);
     },
   );
@@ -978,6 +996,158 @@ describe('Inbound — tabs (inbound-tabs)', () => {
   });
 });
 
+/**
+ * page-tabs — Outbound, Replenishment and Compliance behave exactly as
+ * Inbound does (the block above): the same shared module, pinned per page.
+ */
+interface TabPage {
+  readonly name: string;
+  readonly component: () => Screen;
+  readonly screen: DrillScreen;
+  readonly route: string;
+  readonly def: PageTabs<string>;
+  /** A non-default tab, and a read only its section sends. */
+  readonly other: string;
+  readonly otherRead: string;
+  /** A drill on this page, and the tab it opens on. */
+  readonly drill: Record<string, string>;
+  readonly drillTab: string;
+  /** Whether the page has the warehouse picker above the tab bar. */
+  readonly picker: boolean;
+}
+
+const TAB_PAGES: readonly TabPage[] = [
+  {
+    name: 'Outbound',
+    component: () => Outbound,
+    screen: 'outbound',
+    route: '/outbound',
+    def: OUTBOUND_PAGE_TABS,
+    other: 'waves',
+    otherRead: '/outbound/waves',
+    drill: CASES[0]!.params,
+    drillTab: 'orders',
+    picker: true,
+  },
+  {
+    name: 'Replenishment',
+    component: () => ReplenishmentView,
+    screen: 'replenishment',
+    route: '/replenishment',
+    def: REPLENISHMENT_PAGE_TABS,
+    other: 'policies',
+    otherRead: '/replenishment/policies',
+    drill: CASES[3]!.params,
+    drillTab: 'batch-alerts',
+    picker: true,
+  },
+  {
+    name: 'Compliance',
+    component: () => ComplianceTabs,
+    screen: 'compliance',
+    route: '/compliance',
+    def: COMPLIANCE_PAGE_TABS,
+    other: 'eway',
+    otherRead: '/eway/bills',
+    drill: CASES[4]!.params,
+    drillTab: 'eway',
+    picker: false,
+  },
+];
+
+describe.each([...TAB_PAGES])('$name — tabs (page-tabs)', (tp) => {
+  let originalHref = '';
+  beforeEach(() => {
+    originalHref = window.location.href;
+  });
+  afterEach(() => window.history.replaceState(null, '', originalHref));
+
+  const bar = (r: Rendered) => r.container.querySelector(`[role="tablist"][aria-label="${tp.def.label}"]`)!;
+  const selected = (r: Rendered) => bar(r).querySelector('[aria-selected="true"]')?.getAttribute('data-tab');
+  const panelHeading = (r: Rendered) => r.container.querySelector(`#${tp.def.id}-panel h2`)?.textContent;
+
+  test('opens on the default tab, mounting only its section; the picker sits above the bar', async () => {
+    pathname = tp.route;
+    view = await mount('owner', page(tp.component(), tp.screen, {}).element);
+    expect(selected(view)).toBe(tp.def.defaultTab);
+    expect(panelHeading(view)).toBe(tp.def.tabs[0]!.label);
+    expect(reads(tp.otherRead)).toHaveLength(0);
+    const panel = view.container.querySelector('[role="tabpanel"]')!;
+    expect(panel.getAttribute('aria-labelledby')).toBe(`${tp.def.id}-tab-${tp.def.defaultTab}`);
+    expect(bar(view).querySelector(`#${tp.def.id}-tab-${tp.def.defaultTab}`)?.getAttribute('aria-controls')).toBe(`${tp.def.id}-panel`);
+    if (tp.picker) {
+      const picker = [...view.container.querySelectorAll('label')].find((l) => l.textContent?.startsWith('Warehouse'))!;
+      expect(picker.compareDocumentPosition(bar(view)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  test('every tab label equals its section heading; ?tab= opens it; an unknown tab falls back', async () => {
+    pathname = tp.route;
+    for (const t of tp.def.tabs) {
+      view = await mount('owner', page(tp.component(), tp.screen, { tab: t.id }).element);
+      expect(selected(view)).toBe(t.id);
+      expect(panelHeading(view)).toBe(t.label);
+      view.unmount();
+    }
+    view = await mount('owner', page(tp.component(), tp.screen, { tab: 'nope' }).element);
+    expect(selected(view)).toBe(tp.def.defaultTab);
+  });
+
+  test('a click swaps the section and rewrites the URL in place — no router; the default tab writes the bare route; the open tab writes nothing', async () => {
+    pathname = tp.route;
+    view = await mount('owner', page(tp.component(), tp.screen, {}).element);
+    await click(tabIn(bar(view), tp.other));
+    expect(selected(view)).toBe(tp.other);
+    expect(window.location.search).toBe(`?tab=${tp.other}`);
+    expect(reads(tp.otherRead).length).toBeGreaterThan(0);
+    expect(pushes).toEqual([]);
+    expect(replaces).toEqual([]);
+    await click(tabIn(bar(view), tp.def.defaultTab));
+    expect(window.location.pathname + window.location.search).toBe(tp.route);
+    window.history.replaceState(null, '', `${tp.route}?tab=marker`);
+    await click(tabIn(bar(view), tp.def.defaultTab));
+    expect(window.location.search).toBe('?tab=marker');
+  });
+
+  test('in the App Router the tab follows the live URL', async () => {
+    pathname = tp.route;
+    searchParamsNow = new URLSearchParams(`tab=${tp.other}`);
+    view = await mount('owner', page(tp.component(), tp.screen, { tab: tp.other }).element);
+    expect(selected(view)).toBe(tp.other);
+    searchParamsNow = new URLSearchParams('');
+    view.rerender(page(tp.component(), tp.screen, { tab: tp.other }).element);
+    await settle();
+    expect(selected(view)).toBe(tp.def.defaultTab);
+    // A repeated `tab` is null on the client too (the server parse refuses the array).
+    searchParamsNow = new URLSearchParams(`tab=${tp.other}&tab=${tp.def.defaultTab}`);
+    view.rerender(page(tp.component(), tp.screen, { tab: tp.other }).element);
+    await settle();
+    expect(selected(view)).toBe(tp.def.defaultTab);
+  });
+
+  test('a drill opens on its list\'s tab with its banner; another tab leaves the drill through the router', async () => {
+    pathname = tp.route;
+    // In the App Router the live URL is the drill's (no `tab`): the drilled
+    // tab must win over the URL-derived default.
+    searchParamsNow = new URLSearchParams(tp.drill);
+    view = await mount('owner', page(tp.component(), tp.screen, tp.drill).element);
+    expect(selected(view)).toBe(tp.drillTab);
+    expect(bannerOf(view)).toBeDefined();
+    if (tp.picker) {
+      expect([...view.container.querySelectorAll('label')].some((l) => l.textContent?.startsWith('Warehouse'))).toBe(false);
+    }
+    // Every other tab replaces to its own href — the bare route for the default.
+    const others = tp.def.tabs.map((t) => t.id).filter((id) => id !== tp.drillTab);
+    for (const id of others) await click(tabIn(bar(view), id));
+    expect(replaces).toEqual(others.map((id) => tp.def.href(id)));
+    if (tp.drillTab !== tp.def.defaultTab) expect(replaces).toContain(tp.route);
+    expect(pushes).toEqual([]);
+    // Clicking the drilled tab itself writes nothing.
+    await click(tabIn(bar(view), tp.drillTab));
+    expect(replaces).toHaveLength(others.length);
+  });
+});
+
 describe('Inbound — Awaiting putaway', () => {
   test('its tab shows it for the active warehouse, with its columns', async () => {
     pathname = '/inbound';
@@ -995,6 +1165,8 @@ describe('Inbound — Awaiting putaway', () => {
 
   test('a putaway drill scopes it to the drill warehouse, under the banner, on its own tab; another tab leaves the drill', async () => {
     pathname = '/inbound';
+    // The live URL is the drill's (no `tab`): the drilled tab must win over it.
+    searchParamsNow = new URLSearchParams({ list: 'putaway', warehouseId: W2 });
     view = await mount('owner', page(InboundCards, 'inbound', { list: 'putaway', warehouseId: W2 }).element);
     // The drilled card reads the drill's warehouse; the tab counts follow the active one.
     const putawayReads = reads('/putaway/tasks').map((r) => entries(r.params));
@@ -1012,6 +1184,7 @@ describe('Inbound — Awaiting putaway', () => {
     expect(pushes).toEqual([]);
     // What the page does on that soft navigation: no drill, the GRN tab, the
     // active warehouse, no drill-only keys.
+    searchParamsNow = new URLSearchParams({ tab: 'grns' });
     view.rerender(page(InboundCards, 'inbound', { tab: 'grns' }).element);
     await settle();
     expect(view.container.querySelector('[data-testid="drill-banner"]')).toBeNull();
@@ -1096,10 +1269,19 @@ describe('the pages', () => {
     { route: '/outbound', params: CASES[0]!.params, list: '/outbound/orders' },
     { route: '/conflicts', params: CASES[1]!.params, list: '/receiving/over-receipts' },
     { route: '/inbound', params: CASES[2]!.params, list: '/receiving/goods-receipts', clearTo: { tab: 'grns' } },
-    { route: '/replenishment', params: CASES[3]!.params, list: '/replenishment/batch-alerts' },
-    { route: '/compliance', params: CASES[4]!.params, list: '/eway/bills' },
+    { route: '/replenishment', params: CASES[3]!.params, list: '/replenishment/batch-alerts', clearTo: { tab: 'batch-alerts' } },
+    { route: '/compliance', params: CASES[4]!.params, list: '/eway/bills', clearTo: { tab: 'eway' } },
     { route: '/inventory/ledger', params: CASES[6]!.params, list: '/inventory/events' },
   ];
+  /** page-tabs — the read each page's DEFAULT tab sends (the unsupported link lands there). */
+  const DEFAULT_READ: Record<string, string> = {
+    '/outbound': '/outbound/orders',
+    '/conflicts': '/receiving/over-receipts',
+    '/inbound': '/inbound/purchase-orders',
+    '/replenishment': '/replenishment/breaches',
+    '/compliance': '/invoices',
+    '/inventory/ledger': '/inventory/events',
+  };
 
   async function renderPage(route: string, params: Record<string, string>): Promise<ReactElement> {
     return PAGES[route]!({ searchParams: Promise.resolve(params) });
@@ -1129,7 +1311,7 @@ describe('the pages', () => {
     expect(view.container.querySelector('[data-testid="drill-unsupported"]')).toBeNull();
   });
 
-  test.each(PAGE_CASES)('$route: an unsupported link renders the notice over the normal view', async ({ route, list }) => {
+  test.each(PAGE_CASES)('$route: an unsupported link renders the notice over the normal view', async ({ route }) => {
     pathname = route;
     writeSession(session('owner'));
     writeActiveWarehouseId(T, W1);
@@ -1137,7 +1319,12 @@ describe('the pages', () => {
     await settle();
     expect(view.container.querySelector('[data-testid="drill-unsupported"]')?.textContent).toContain('Link not applied');
     expect(view.container.querySelector('[data-testid="drill-banner"]')).toBeNull();
-    for (const r of reads(list)) expect(r.params.has('from')).toBe(false);
+    // page-tabs — the notice sits over the DEFAULT tab, whose own read is
+    // sent with nothing of the refused link (the drilled list's own tab may
+    // not be mounted, so asserting its reads would be vacuous).
+    const defaults = reads(DEFAULT_READ[route]!);
+    expect(defaults.length).toBeGreaterThan(0);
+    for (const r of defaults) expect(r.params.has('from')).toBe(false);
   });
 
   test('an unrelated param with no `list` is a plain visit — no notice', async () => {
@@ -1149,24 +1336,46 @@ describe('the pages', () => {
     expect(view.container.querySelector('[data-testid="drill-banner"]')).toBeNull();
   });
 
-  test('compliance: `list` picks the keyed section — the other renders normally', async () => {
+  test('compliance: `list` picks the keyed section on its tab — the other is unmounted, and selecting it reads normally', async () => {
     pathname = '/compliance';
     writeSession(session('owner'));
     view = render(await renderPage('/compliance', { list: 'invoices', warehouseId: W2, from: FROM, to: TO }));
     await settle();
+    const tablist = () => view!.container.querySelector('[role="tablist"][aria-label="Compliance lists"]')!;
+    expect(tablist().querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('invoices');
     expect(sectionText(view, 'Invoices')).toContain("Showing the dashboard figure's rows");
-    expect(sectionText(view, 'E-way bills')).not.toContain("Showing the dashboard figure's rows");
     expect(reads('/invoices').every((r) => r.params.get('warehouseId') === W2)).toBe(true);
-    expect(reads('/eway/bills').every((r) => entries(r.params).length === 1 && r.params.get('status') === 'pending')).toBe(true);
+    // The E-way tab is not mounted: no section, no read.
+    expect(() => sectionText(view!, 'E-way bills')).toThrow();
+    expect(reads('/eway/bills')).toHaveLength(0);
 
+    // Selecting it leaves the drill (the router), then reads normally.
+    await click(tabIn(tablist(), 'eway'));
+    expect(replaces).toEqual(['/compliance?tab=eway']);
     requests = [];
+    view.rerender(await renderPage('/compliance', { tab: 'eway' }));
+    await settle();
+    expect(sectionText(view, 'E-way bills')).not.toContain("Showing the dashboard figure's rows");
+    expect(reads('/eway/bills').length).toBeGreaterThan(0);
+    expect(reads('/eway/bills').every((r) => entries(r.params).length === 1 && r.params.get('status') === 'pending')).toBe(true);
+    expect(reads('/invoices')).toHaveLength(0);
+
+    // An e-way drill: its own tab, drilled; Invoices unmounted until selected
+    // — the default tab, so the drilled bar replaces to the bare route.
+    requests = [];
+    replaces.length = 0;
     view.rerender(await renderPage('/compliance', { list: 'eway', warehouseId: W2, from: FROM, to: TO }));
     await settle();
-    // Both keys changed (`invoices-…`, `eway-…`): both sections remounted and re-read.
+    expect(tablist().querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('eway');
     expect(sectionText(view, 'E-way bills')).toContain("Showing the dashboard figure's rows");
-    expect(sectionText(view, 'Invoices')).not.toContain("Showing the dashboard figure's rows");
+    expect(reads('/eway/bills').every((r) => r.params.get('warehouseId') === W2 && !r.params.has('status'))).toBe(true);
+    expect(reads('/invoices')).toHaveLength(0);
+    await click(tabIn(tablist(), 'invoices'));
+    expect(replaces).toEqual(['/compliance']);
+    view.rerender(await renderPage('/compliance', {}));
+    await settle();
     expect(reads('/invoices').length).toBeGreaterThan(0);
     expect(reads('/invoices').every((r) => !r.params.has('from'))).toBe(true);
-    expect(reads('/eway/bills').every((r) => r.params.get('warehouseId') === W2 && !r.params.has('status'))).toBe(true);
+    expect(sectionText(view, 'Invoices')).not.toContain("Showing the dashboard figure's rows");
   });
 });
