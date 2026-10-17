@@ -122,6 +122,22 @@ export const COMPLIANCE_PAGE_TABS = definePageTabs({
 export type ComplianceTab = (typeof COMPLIANCE_PAGE_TABS)['defaultTab'];
 
 /**
+ * `/inventory` (inventory-screen, 2026-10-17) — Stock (on-hand per bin and
+ * SKU), Batches (a SKU's batches by expiry) and the Ledger timeline. The page
+ * takes no drill: ledger drills stay on `/inventory/ledger`.
+ */
+export const INVENTORY_PAGE_TABS = definePageTabs({
+  route: '/inventory',
+  label: 'Inventory lists',
+  tabs: [
+    { id: 'stock', label: 'Stock' },
+    { id: 'batches', label: 'Batches' },
+    { id: 'ledger', label: 'Ledger' },
+  ],
+});
+export type InventoryTab = (typeof INVENTORY_PAGE_TABS)['defaultTab'];
+
+/**
  * `/settings` — five grouped tabs (user decision, 2026-10-17): Warehouses
  * (create form, warehouse list, zones & bins), Catalog (import, products,
  * SKUs, segregation matrix), Clients (clients, rate cards), Team (users &
