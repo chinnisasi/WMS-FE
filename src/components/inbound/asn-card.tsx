@@ -24,6 +24,7 @@ import {
   parseAsnAmend,
   parseAsnCreate,
   parseAsnNote,
+  withoutKits,
   type AsnDraftLine,
 } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -34,6 +35,7 @@ import { openQtyLabel } from '@/lib/over-receipt';
 import { useAsns } from '@/lib/use-asns';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { useSkuMap } from '@/lib/use-inbound';
+import { useKits } from '@/lib/use-catalog';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
@@ -58,6 +60,8 @@ import { lineButtonClass as buttonClass, lineInputClass as inputClass, LineRows 
  * notice is gone.
  */
 
+const NO_KITS: ReadonlySet<string> = new Set();
+
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string };
 
 const primaryClass =
@@ -75,6 +79,12 @@ export function AsnsCard({
 }) {
   const asns = useAsns(warehouseId);
   const skus = useSkuMap();
+  // A kit can never hold stock, so receiving refuses a kit line (409
+  // kit-cannot-hold-stock): the pickers never offer one, as the portal's
+  // `portal/skus` never lists one. Until the kit list is read nothing is
+  // hidden — the server's refusal (worded by `asnReason`) still stands.
+  const kits = useKits();
+  const kitIds: ReadonlySet<string> = kits.state === 'ready' ? new Set(Object.keys(kits.data)) : NO_KITS;
   const clients = readyClients(useClients());
   const tenantName = useSyncExternalStore(
     subscribeSession,
@@ -196,6 +206,7 @@ export function AsnsCard({
           warehouseId={warehouseId}
           clients={clients}
           skus={skus}
+          kitIds={kitIds}
           tenantName={tenantName}
           onCancel={() => setCreating(false)}
           onCreated={(asn) => {
@@ -227,7 +238,7 @@ export function AsnsCard({
           }
           renderExpanded={(asn) =>
             asn.id === openId ? (
-              <AsnDetail key={asn.id} asnId={asn.id} skus={skus} canManage={canManage} onOutcome={report} />
+              <AsnDetail key={asn.id} asnId={asn.id} skus={skus} kitIds={kitIds} canManage={canManage} onOutcome={report} />
             ) : null
           }
         />
@@ -242,6 +253,7 @@ function AsnCreateForm({
   warehouseId,
   clients,
   skus,
+  kitIds,
   tenantName,
   onCancel,
   onCreated,
@@ -249,6 +261,7 @@ function AsnCreateForm({
   warehouseId: string;
   clients: readonly ClientDto[] | null;
   skus: Readonly<Record<string, SkuResponse>> | null;
+  kitIds: ReadonlySet<string>;
   tenantName: string | null;
   onCancel: () => void;
   onCreated: (asn: AsnDto) => void;
@@ -268,7 +281,7 @@ function AsnCreateForm({
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const inFlight = useRef(false);
 
-  const options = skusOfClient(Object.values(skus ?? {}), clientId);
+  const options = withoutKits(skusOfClient(Object.values(skus ?? {}), clientId), kitIds);
 
   function edit<T>(setter: (value: T) => void): (value: T) => void {
     return (value) => {
@@ -376,11 +389,13 @@ function AsnCreateForm({
 function AsnDetail({
   asnId,
   skus,
+  kitIds,
   canManage,
   onOutcome,
 }: {
   asnId: string;
   skus: Readonly<Record<string, SkuResponse>> | null;
+  kitIds: ReadonlySet<string>;
   canManage: boolean;
   onOutcome: (outcome: Outcome) => void;
 }) {
@@ -460,6 +475,7 @@ function AsnDetail({
         <AsnAmendForm
           asn={asn}
           skus={skus}
+          kitIds={kitIds}
           onCancel={() => setMode('view')}
           onAmended={(next) => changed(next, `ASN ${next.code} amended`, `Now ${ASN_STATUS_LABEL[next.status].toLowerCase()}.`)}
         />
@@ -485,11 +501,13 @@ function AsnDetail({
 function AsnAmendForm({
   asn,
   skus,
+  kitIds,
   onCancel,
   onAmended,
 }: {
   asn: AsnDto;
   skus: Readonly<Record<string, SkuResponse>> | null;
+  kitIds: ReadonlySet<string>;
   onCancel: () => void;
   onAmended: (asn: AsnDto) => void;
 }) {
@@ -500,7 +518,8 @@ function AsnAmendForm({
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const inFlight = useRef(false);
   const received = new Set(asn.lines.filter((line) => line.receivedQty > 0).map((line) => line.id));
-  const options = skusOfClient(Object.values(skus ?? {}), asn.clientId);
+  // A kit already on a line (keyed before kits were refused) stays shown.
+  const options = withoutKits(skusOfClient(Object.values(skus ?? {}), asn.clientId), kitIds, new Set(asn.lines.map((line) => line.skuId)));
 
   async function submit() {
     const session = readSession();

@@ -2026,6 +2026,14 @@ export type AsnImportRowErrorDto = {
      */
     code: 'unknown-client' | 'unknown-warehouse' | 'wrong-warehouse' | 'unknown-sku' | 'sku-client-mismatch' | 'mixed-client' | 'kit-cannot-hold-stock' | 'duplicate-asn-code' | 'invalid-asn-code' | 'too-many-lines' | 'asn-rows-disagree' | 'duplicate-sku-in-asn' | 'invalid-quantity' | 'quantity-precision' | 'invalid-expected-at' | 'missing-value';
     detail: string;
+    /**
+     * The row’s sku cell as written; null when blank
+     */
+    sku: string | null;
+    /**
+     * The row’s quantity cell as written; null when blank
+     */
+    quantity: string | null;
 };
 
 export type AsnImportResponseDto = {

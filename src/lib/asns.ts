@@ -205,6 +205,21 @@ export function parseAsnNote(note: string): { note: string | null; problem: stri
   return { note: trimmed, problem: null };
 }
 
+/**
+ * The ASN pickers' SKU options without kits (FR-38: a kit never holds stock,
+ * so receiving refuses a kit line and create / amend answer 409
+ * `kit-cannot-hold-stock`) — the operator twin of `portal/skus`, which never
+ * lists one. `keep` holds SKUs already on the document, so an existing line
+ * still shows its SKU.
+ */
+export function withoutKits<T extends { id: string }>(
+  options: readonly T[],
+  kitIds: ReadonlySet<string>,
+  keep: ReadonlySet<string> = new Set(),
+): readonly T[] {
+  return options.filter((option) => !kitIds.has(option.id) || keep.has(option.id));
+}
+
 /** The ASN mutations' refusals, branching on the problem `code` — never on prose. */
 export function asnReason(error: unknown): string {
   if (error instanceof ApiProblem) {
@@ -214,6 +229,8 @@ export function asnReason(error: unknown): string {
       case 'sku-client-mismatch':
       case 'mixed-client':
         return error.detail ?? "An ASN carries only its own client's SKUs.";
+      case 'kit-cannot-hold-stock':
+        return error.detail ?? 'A kit SKU cannot be announced — a kit holds no stock of its own; announce its component SKUs instead.';
       case 'asn-not-open':
         return 'This ASN is no longer open (received, closed or cancelled) — refresh the list.';
       case 'asn-line-received':

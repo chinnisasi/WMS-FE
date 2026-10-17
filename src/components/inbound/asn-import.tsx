@@ -15,6 +15,7 @@ import {
   asnImportReasonLabel,
   asnImportReportName,
   asnImportTemplate,
+  fileReadProblem,
 } from '@/lib/asn-import';
 import { readSession } from '@/lib/auth';
 import { downloadText } from '@/lib/csv';
@@ -80,6 +81,14 @@ export function AsnImport({
     setBusy(step);
     setProblem(null);
     try {
+      // Read it first: a file moved or changed since it was picked fails
+      // here with its own words, not as "the API is unreachable".
+      try {
+        await file.arrayBuffer();
+      } catch {
+        setProblem(fileReadProblem(file.name));
+        return;
+      }
       if (step === 'check') {
         const response = await fetchApiImportAsns(session.tenant.id, file, warehouseId, { dryRun: true });
         setChecked({ file, result: response });
@@ -112,7 +121,9 @@ export function AsnImport({
           <div className="text-xs text-(--muted-foreground)">
             CSV or Excel (.xlsx), one row per ASN line — columns asn_code, sku and quantity, and optionally client
             (blank = the client the SKUs belong to), warehouse (blank or this warehouse) and expected_at
-            (YYYY-MM-DD or YYYY-MM-DD HH:mm, read as IST). Other columns are ignored. At most{' '}
+            (YYYY-MM-DD or YYYY-MM-DD HH:mm, read as IST; or ISO-8601 with an offset, like 2026-10-20T14:30+05:30 — a
+            time without an offset, like 2026-10-20T14:30, is refused). asn_code and sku are case-sensitive; client and
+            warehouse are not. Other columns are ignored. At most{' '}
             {MAX_ASN_IMPORT_ROWS.toLocaleString('en-IN')} rows, {MAX_ASN_IMPORT_ASNS} ASNs and 5 MB. An ASN with any bad
             row is refused whole; the others are created.
           </div>
@@ -139,8 +150,13 @@ export function AsnImport({
             type="file"
             aria-label="ASN file"
             accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            onChange={(event) => pick(event.target.files?.[0] ?? null)}
+            onChange={(event) => {
+              pick(event.target.files?.[0] ?? null);
+              // Cleared, so picking the same (fixed) file again fires a change.
+              event.target.value = '';
+            }}
           />
+          {file !== null && <span className="text-(--muted-foreground)">Selected: {file.name}</span>}
         </label>
         <button
           type="button"

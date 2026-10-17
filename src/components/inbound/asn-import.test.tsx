@@ -43,8 +43,8 @@ const SELF = {
 };
 
 const ERRORS = [
-  { rowNumber: 7, asnCode: 'GLOW-ASN-9', code: 'unknown-sku', detail: 'No SKU with code "GLOW-X" exists in this tenant.' },
-  { rowNumber: 9, asnCode: 'GLOW-ASN-9', code: 'quantity-precision', detail: 'quantity must be a whole number.' },
+  { rowNumber: 7, asnCode: 'GLOW-ASN-9', code: 'unknown-sku', detail: 'No SKU with code "GLOW-X" exists in this tenant.', sku: 'GLOW-X', quantity: '3' },
+  { rowNumber: 9, asnCode: 'GLOW-ASN-9', code: 'quantity-precision', detail: 'quantity must be a whole number.', sku: 'GLOW-1', quantity: '1.5' },
 ];
 
 function importResult(dryRun: boolean) {
@@ -258,15 +258,15 @@ describe('ASN import', () => {
       '7GLOW-ASN-9Unknown SKUNo SKU with code "GLOW-X" exists in this tenant.',
       '9GLOW-ASN-9Too many decimalsquantity must be a whole number.',
     ]);
-    expect(panel.textContent).toContain('1 ASN refused (2 rows below)');
+    expect(panel.textContent).toContain('1 ASN refused — 2 rows with problems, listed below');
 
     await press(buttons(panel, 'Download error report (.csv)')[0]);
     expect(downloads.map((d) => d.name)).toEqual([`asn-import-${'ab'.repeat(6)}-errors.csv`]);
     const report = await downloads[0]!.text;
     expect(report.replace(/^\uFEFF/, '').trimEnd().split('\n')).toEqual([
-      'row_number,asn_code,code,reason,detail',
-      '7,"GLOW-ASN-9","unknown-sku","Unknown SKU","No SKU with code ""GLOW-X"" exists in this tenant."',
-      '9,"GLOW-ASN-9","quantity-precision","Too many decimals","quantity must be a whole number."',
+      'row_number,asn_code,sku,quantity,code,reason,detail',
+      '7,"GLOW-ASN-9","GLOW-X","3","unknown-sku","Unknown SKU","No SKU with code ""GLOW-X"" exists in this tenant."',
+      '9,"GLOW-ASN-9","GLOW-1","1.5","quantity-precision","Too many decimals","quantity must be a whole number."',
     ]);
 
     await press(buttons(panel, 'Download template')[0]);
@@ -287,5 +287,31 @@ describe('ASN import', () => {
     expect(panel.textContent).toContain('Not imported');
     expect(panel.textContent).toContain('The file announces 501 ASNs — the cap is 500 per import.');
     expect(buttons(panel, 'Import')[0]!.disabled).toBe(true);
+  });
+
+  test('the input is cleared after a pick, so picking the fixed file again starts over (result gone, new key)', async () => {
+    view = await mount('ops_manager');
+    const panel = await openImport(view.container);
+    pickFile(panel, csv('asns.csv'));
+    expect(panel.querySelector<HTMLInputElement>('input[aria-label="ASN file"]')!.value).toBe('');
+    expect(panel.textContent).toContain('Selected: asns.csv');
+    await press(buttons(panel, 'Check file')[0]);
+    expect(panel.querySelector('[data-testid="asn-import-result"]')).not.toBeNull();
+    // The same name, fixed on disk: the browser hands over a new File.
+    pickFile(panel, csv('asns.csv'));
+    expect(panel.querySelector('[data-testid="asn-import-result"]')).toBeNull();
+    expect(buttons(panel, 'Import')[0]!.disabled).toBe(true);
+  });
+
+  test('a file the browser cannot read is named as such — nothing is sent', async () => {
+    view = await mount('ops_manager');
+    const panel = await openImport(view.container);
+    const broken = csv('gone.csv');
+    Object.defineProperty(broken, 'arrayBuffer', { value: () => Promise.reject(new DOMException('gone', 'NotReadableError')) });
+    pickFile(panel, broken);
+    await press(buttons(panel, 'Check file')[0]);
+    expect(panel.textContent).toContain('gone.csv could not be read — it may have been moved or changed since you picked it. Pick it again.');
+    expect(panel.textContent).not.toContain('unreachable');
+    expect(imports()).toHaveLength(0);
   });
 });

@@ -76,10 +76,17 @@ export function acceptedLineCount(result: Pick<AsnImportResponseDto, 'asns'>): n
   return result.asns.reduce((total, asn) => total + asn.lineCount, 0);
 }
 
+/** The distinct spreadsheet rows refused (a row can carry more than one problem). */
+export function refusedRowCount(result: Pick<AsnImportResponseDto, 'errors'>): number {
+  return new Set(result.errors.map((error) => error.rowNumber)).size;
+}
+
 /**
  * The result's banner: Check file says what WOULD happen ("3 ASNs, 10 lines
- * ready"), Import what did ("3 ASNs announced"); refusals are named beside
- * either, never hidden behind a success word.
+ * ready"), Import what did ("3 ASNs announced"). Refused rows are named
+ * whenever there are any — also a row with no `asn_code`, which belongs to
+ * no ASN and so leaves `refusedCount` at 0 — never hidden behind a success
+ * word.
  */
 export function asnImportOutcome(result: AsnImportResponseDto): {
   tone: 'accepted' | 'rejected';
@@ -88,10 +95,12 @@ export function asnImportOutcome(result: AsnImportResponseDto): {
 } {
   const lines = acceptedLineCount(result);
   const ready = `${plural(result.acceptedCount, 'ASN', 'ASNs')}, ${plural(lines, 'line', 'lines')}`;
+  const rows = refusedRowCount(result);
   const refused =
-    result.refusedCount === 0
+    result.errors.length === 0
       ? null
-      : `${plural(result.refusedCount, 'ASN', 'ASNs')} refused (${plural(result.errors.length, 'row', 'rows')} below)`;
+      : (result.refusedCount > 0 ? `${plural(result.refusedCount, 'ASN', 'ASNs')} refused — ` : '') +
+        `${plural(rows, 'row', 'rows')} with problems, listed below`;
   if (result.dryRun) {
     return {
       tone: result.acceptedCount === 0 ? 'rejected' : 'accepted',
@@ -115,15 +124,18 @@ export function asnImportOutcome(result: AsnImportResponseDto): {
 /**
  * The CSV error report, built from the response (the catalog import's
  * convention): every refused row with its spreadsheet row number, ASN code,
- * reason code and words, and the server's detail. UTF-8 BOM so Excel opens it
+ * its own sku and quantity cells (so the line is identifiable), reason code and words, and the server's detail. UTF-8 BOM so Excel opens it
  * as UTF-8.
  */
 export function asnImportErrorReport(result: Pick<AsnImportResponseDto, 'errors'>): string {
-  const header = 'row_number,asn_code,code,reason,detail';
+  const header = 'row_number,asn_code,sku,quantity,code,reason,detail';
   const lines = result.errors.map((error) =>
     [
       String(error.rowNumber),
       csvField(error.asnCode ?? ''),
+      csvField(error.sku ?? ''),
+      // The cell as written — text, so a guard keeps a formula inert.
+      csvField(error.quantity ?? ''),
       csvField(error.code),
       csvField(asnImportReasonLabel(error.code)),
       csvField(error.detail),
@@ -135,6 +147,11 @@ export function asnImportErrorReport(result: Pick<AsnImportResponseDto, 'errors'
 /** The report's file name — the import's id when there is one, else the file's. */
 export function asnImportReportName(result: Pick<AsnImportResponseDto, 'importId' | 'fileSha256'>): string {
   return `asn-import-${result.importId ?? result.fileSha256.slice(0, 12)}-errors.csv`;
+}
+
+/** The file could not be read in the browser (moved, deleted, or permission lost since it was picked). */
+export function fileReadProblem(name: string): string {
+  return `${name} could not be read — it may have been moved or changed since you picked it. Pick it again.`;
 }
 
 /** The file-level refusals of the import, branching on `code` — never on prose. */
