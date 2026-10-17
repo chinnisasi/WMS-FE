@@ -13,7 +13,8 @@ import { Outbound } from './outbound';
  * page-level wiring — the three mounts, each keyed `...-${warehouseId}` —
  * never executes under them: deleting a surface or its key would ship green.
  * This file drives the real shell through a stubbed `fetch` and pins that
- *   1. all three surfaces render on one page,
+ *   1. the three surfaces sit behind tabs (page-tabs): the default mount shows
+ *      Orders only, and the Pack & Dispatch tab mounts that surface,
  *   2. a row expanded on the pack surface collapses when the warehouse
  *      switches — the key remount resets the expanded panel (and with it the
  *      filter and any pending confirmation, which live in the same subtree).
@@ -170,22 +171,16 @@ async function settle(): Promise<void> {
   }
 }
 
-function text(rendered: Rendered): string {
-  return rendered.container.textContent ?? '';
-}
-
 function buttons(rendered: Rendered): HTMLButtonElement[] {
   return [...rendered.container.querySelectorAll('button')] as HTMLButtonElement[];
 }
 
 /**
- * The PACK surface's expand toggle for the order — the LAST toggle naming the
- * id, since the orders surface's own row toggle comes first in the DOM and
- * the pack surface mounts beneath it.
+ * The PACK surface's expand toggle for the order — the toggle naming the id
+ * (page-tabs: only the selected surface is mounted).
  */
 async function pressExpand(orderId: string): Promise<void> {
-  const matches = buttons(view!).filter((b) => b.textContent?.includes(orderId));
-  const button = matches[matches.length - 1];
+  const button = buttons(view!).find((b) => b.textContent?.includes(orderId));
   if (button === undefined) throw new Error(`No expand toggle for "${orderId}"`);
   await act(async () => {
     button.click();
@@ -211,34 +206,52 @@ const listReads = (warehouseId: string) =>
   );
 
 describe('the Outbound page', () => {
-  test('all three surfaces render, and a warehouse switch remounts the pack surface', async () => {
+  /** The tab panel's section headings — only the selected surface is mounted. */
+  const panelHeadings = (r: Rendered) =>
+    [...r.container.querySelectorAll('[role="tabpanel"] h2')]
+      .map((h) => h.textContent)
+      .filter((t, i, all) => all.indexOf(t) === i);
+  const panelText = (r: Rendered) => r.container.querySelector('[role="tabpanel"]')?.textContent ?? '';
+
+  test('the default mount shows Orders only, behind the tab bar', async () => {
     writeSession(session('operator'));
     view = render(<Outbound />);
     await settle();
 
-    const body = text(view);
-    expect(body).toContain('Orders');
-    expect(body).toContain('Waves');
-    expect(body).toContain('Pack & Dispatch');
-    // The page reads the ACTIVE warehouse's orders (the orders and waves
-    // surfaces each hold their own instance of the read, so more than one
-    // request is fine — the point is which warehouse they name).
+    const tablist = view.container.querySelector('[role="tablist"][aria-label="Outbound lists"]')!;
+    expect([...tablist.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['Orders', 'Waves', 'Pack & Dispatch']);
+    expect(tablist.querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('orders');
+    expect(panelHeadings(view)).toContain('Orders');
+    expect(panelHeadings(view)).not.toContain('Waves');
+    expect(panelHeadings(view)).not.toContain('Pack & Dispatch');
+    // The page reads the ACTIVE warehouse's orders.
     expect(listReads(WH_MAIN).length).toBeGreaterThan(0);
     expect(listReads(WH_SOUTH)).toHaveLength(0);
+    // The picker sits above the tab bar.
+    const picker = view.container.querySelector('select')!;
+    expect(picker.compareDocumentPosition(tablist) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('the Pack & Dispatch tab remounts on a warehouse switch', async () => {
+    writeSession(session('operator'));
+    view = render(<Outbound initialTab="pack" />);
+    await settle();
+    expect(panelHeadings(view)).toContain('Pack & Dispatch');
+    expect(panelHeadings(view)).not.toContain('Orders');
 
     // Expand a row on the pack surface — its bench panel fetches the detail.
     await pressExpand('order-1');
-    expect(text(view)).toContain('Pack this order');
+    expect(panelText(view)).toContain('Pack this order');
 
-    // Switching the warehouse remounts every surface (each is keyed on the
+    // Switching the warehouse remounts the surface (it is keyed on the
     // warehouse): the expanded panel — and with it the filter and any
     // pending confirmation — is reset, and the pack surface refetches
     // against the new warehouse.
     await pickWarehouse(WH_SOUTH);
     const picker = view!.container.querySelector('select') as HTMLSelectElement;
     expect(picker.value).toBe(WH_SOUTH);
-    expect(text(view)).not.toContain('Pack this order');
-    expect(text(view)).toContain('Pack & Dispatch');
+    expect(panelText(view)).not.toContain('Pack this order');
+    expect(panelHeadings(view)).toContain('Pack & Dispatch');
     expect(listReads(WH_SOUTH).length).toBeGreaterThan(0);
   });
 });

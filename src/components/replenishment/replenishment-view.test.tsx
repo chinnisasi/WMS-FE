@@ -4,6 +4,7 @@ import { act } from 'react';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
+import type { ReplenishmentTab } from '../../lib/page-tabs';
 import { ReplenishmentView } from './replenishment-view';
 
 /**
@@ -377,9 +378,14 @@ async function settle(): Promise<void> {
   }
 }
 
-async function mount(session: StoredSession = OWNER_SESSION): Promise<Rendered> {
+/**
+ * page-tabs — one section is mounted at a time, so each test mounts the tab
+ * it drives through `initialTab` and never clicks a tab: a click would first
+ * mount Breaches and pollute the "mounting sends reads only" claims.
+ */
+async function mount(session: StoredSession = OWNER_SESSION, tab: ReplenishmentTab = 'breaches'): Promise<Rendered> {
   writeSession(session);
-  const rendered = render(<ReplenishmentView />);
+  const rendered = render(<ReplenishmentView initialTab={tab} />);
   await settle();
   return rendered;
 }
@@ -421,7 +427,7 @@ function setInput(input: HTMLInputElement, value: string): void {
 
 describe('ReplenishmentView: the suggested-PO submit flow (story 6-1)', () => {
   test('submit-never-auto: mounting sends reads only; a click sends the one POST', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'suggested-pos');
     const mutatingBefore = requests.filter((r) => r.method !== 'GET');
     expect(mutatingBefore).toEqual([]);
 
@@ -432,7 +438,7 @@ describe('ReplenishmentView: the suggested-PO submit flow (story 6-1)', () => {
   });
 
   test('the submit body carries the picked vendor, the parsed MILLI quantity and a fresh key; the outcome reads the FLAT PO', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'suggested-pos');
     // The card's quantity input: 5 kg suggested → the operator types 7.5 kg.
     const qtyInput = view.container.querySelector('input[aria-label="Quantity"]') as HTMLInputElement;
     setInput(qtyInput, '7.5');
@@ -455,7 +461,7 @@ describe('ReplenishmentView: the suggested-PO submit flow (story 6-1)', () => {
   });
 
   test('a 409 suggested-po-submitted renders the server\'s words verbatim AND re-reads the queue', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'suggested-pos');
     const readsBefore = readsEndingWith('/replenishment/suggested-pos').length;
     nextSubmitStatus = 409;
 
@@ -469,7 +475,7 @@ describe('ReplenishmentView: the suggested-PO submit flow (story 6-1)', () => {
   });
 
   test('two synchronous clicks on the submit button send exactly one POST', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'suggested-pos');
     const submit = button(view.container, 'Submit as purchase order');
 
     await act(async () => {
@@ -484,7 +490,7 @@ describe('ReplenishmentView: the suggested-PO submit flow (story 6-1)', () => {
 
 describe('ReplenishmentView: the breach queue (story 6-1)', () => {
   test('a 409 breach-not-open renders the server\'s words verbatim AND re-reads the queue', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'breaches');
     const readsBefore = readsEndingWith('/replenishment/breaches').length;
     nextDismissStatus = 409;
 
@@ -498,7 +504,7 @@ describe('ReplenishmentView: the breach queue (story 6-1)', () => {
   });
 
   test('a dismissal re-reads the queue and the rows render quantities at the SKU precision', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'breaches');
     // 10000 milli point → '10.000 kg' at uomPrecision 3; 4000 milli ATP →
     // '4.000 kg' — declared precision, never raw milli.
     const text = view.container.textContent ?? '';
@@ -517,7 +523,7 @@ describe('ReplenishmentView: the breach queue (story 6-1)', () => {
 
 describe('ReplenishmentView: the reorder-override table (story 6-1)', () => {
   test('the upsert sends a PUT whose body carries the milli-converted values of the base-unit inputs', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'policies');
     await click(button(view.container, 'Edit'));
 
     const point = view.container.querySelector(
@@ -547,7 +553,7 @@ describe('ReplenishmentView: the reorder-override table (story 6-1)', () => {
   });
 
   test('an override row shows the override values and the sku table keeps every pin on this surface', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'policies');
     // The override (20 kg · 100 kg) renders instead of the dashes.
     expect(view.container.textContent).toContain('20 kg · 100 kg');
     // The read pins the SKU-column defaults too (base units on the SKU wire).
@@ -559,36 +565,68 @@ describe('ReplenishmentView: the reorder-override table (story 6-1)', () => {
 
 describe('ReplenishmentView: the read-only render (story 6-1)', () => {
   test('an operator session sees the rows with no mutating affordance', async () => {
-    view = await mount(OPERATOR_SESSION);
-    const text = view.container.textContent ?? '';
-    // The queues and the table still render — hiding is losing the alert.
-    expect(text).toContain('SPICE-01');
-    expect(text).toContain('10 kg');
-    expect(text).toContain('Default point');
-    // The only buttons are the status/kind tabs and the read-only batch
-    // click-throughs — no Dismiss, no submit, no Edit.
-    const labels = [...view.container.querySelectorAll('button')].map((b) => b.textContent);
-    expect(labels).toEqual([
-      'Open',
-      'Recovered',
-      'Actioned',
-      'Dismissed',
-      'All kinds',
-      'Expiring soon',
-      'Aged',
-      'Open',
-      'Resolved',
-      'Dismissed',
-      'View batch',
-      'View batch',
-      // The batch-alert read's first-page fixture carries a live nextCursor —
-      // the keyset Next renders (read-only sessions still page).
-      'Next',
-      'Drafts',
-      'Submitted',
-      'Dismissed',
-    ]);
-    expect([...view.container.querySelectorAll('input, select')]).toEqual([]);
+    // page-tabs — one section per tab: walk each, reading only its panel.
+    const panelOf = (r: Rendered) => r.container.querySelector('[role="tabpanel"]')!;
+    const panelButtons = (r: Rendered) => [...panelOf(r).querySelectorAll('button')].map((b) => b.textContent);
+    const expected: Record<ReplenishmentTab, readonly string[]> = {
+      // The only buttons are the status/kind tabs and the read-only batch
+      // click-throughs — no Dismiss, no submit, no Edit.
+      breaches: ['Open', 'Recovered', 'Actioned', 'Dismissed'],
+      'batch-alerts': [
+        'All kinds',
+        'Expiring soon',
+        'Aged',
+        'Open',
+        'Resolved',
+        'Dismissed',
+        'View batch',
+        'View batch',
+        // The batch-alert read's first-page fixture carries a live nextCursor —
+        // the keyset Next renders (read-only sessions still page).
+        'Next',
+      ],
+      'suggested-pos': ['Drafts', 'Submitted', 'Dismissed'],
+      policies: [],
+    };
+    for (const tab of Object.keys(expected) as ReplenishmentTab[]) {
+      view = await mount(OPERATOR_SESSION, tab);
+      expect(panelButtons(view)).toEqual([...expected[tab]]);
+      expect([...view.container.querySelectorAll('input, select')]).toEqual([]);
+      const text = panelOf(view).textContent ?? '';
+      // The queues and the table still render — hiding is losing the alert.
+      if (tab === 'breaches') expect(text).toContain('SPICE-01');
+      if (tab === 'policies') {
+        expect(text).toContain('10 kg');
+        expect(text).toContain('Default point');
+      }
+      view.unmount();
+      view = undefined;
+    }
+  });
+});
+
+describe('ReplenishmentView: tabs (page-tabs)', () => {
+  test('opens on Reorder breaches, mounts only that section, and a click swaps the section in place', async () => {
+    const originalHref = window.location.href;
+    try {
+      view = await mount();
+      const tablist = view.container.querySelector('[role="tablist"][aria-label="Replenishment lists"]')!;
+      expect(tablist.querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('breaches');
+      expect(readsEndingWith('/replenishment/policies')).toHaveLength(0);
+      expect(readsEndingWith('/replenishment/suggested-pos')).toHaveLength(0);
+      expect(readsEndingWith('/replenishment/batch-alerts')).toHaveLength(0);
+
+      await click(tablist.querySelector<HTMLElement>('[data-tab="policies"]')!);
+      await settle();
+      expect(tablist.querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('policies');
+      expect(window.location.search).toBe('?tab=policies');
+      expect(readsEndingWith('/replenishment/policies').length).toBeGreaterThan(0);
+      const panel = view.container.querySelector('[role="tabpanel"]')!;
+      expect(panel.getAttribute('aria-labelledby')).toBe('replenishment-tab-policies');
+      expect(panel.querySelector('h2')?.textContent).toBe('Reorder points');
+    } finally {
+      window.history.replaceState(null, '', originalHref);
+    }
   });
 });
 
@@ -601,7 +639,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
   });
 
   test('mounting sends reads alone; the queue read carries the warehouse and status (kind off on `all`)', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
     const mutatingBefore = requests.filter((r) => r.method !== 'GET');
     expect(mutatingBefore).toEqual([]);
 
@@ -617,7 +655,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
   });
 
   test('the kind filter narrows the read; the status tab swaps the filter', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
     const readsBefore = readsEndingWith('/replenishment/batch-alerts').length;
 
     await click(button(view.container, 'Expiring soon'));
@@ -653,7 +691,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
         resolvedAt: '2026-09-29T08:00:00.000Z',
       }),
     ];
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
 
     const articles = [...view.container.querySelectorAll('article')];
     const openCard = articles.find((a) => a.textContent?.includes('Expiring soon'));
@@ -674,7 +712,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
   });
 
   test('a dismissal POSTs with a ULID key, reads the snapshot, and re-reads the queue', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
     const readsBefore = readsEndingWith('/replenishment/batch-alerts').length;
 
     await click(button(view.container, 'Dismiss'));
@@ -691,7 +729,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
   });
 
   test('the keyset Next: the walked read carries the cursor AND the scope filters; the walked page ends the affordance', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
     const readsBefore = readsEndingWith('/replenishment/batch-alerts').length;
     const next = [...view.container.querySelectorAll('button')].find(
       (b) => b.textContent === 'Next',
@@ -716,7 +754,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
   });
 
   test('a 409 batch-alert-not-open renders the server\'s words verbatim AND re-reads the queue', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
     const readsBefore = readsEndingWith('/replenishment/batch-alerts').length;
     nextAlertDismissStatus = 409;
 
@@ -730,7 +768,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
   });
 
   test('the success sentence says the re-raise clause — dismissal is not suppression', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
 
     await click(button(view.container, 'Dismiss'));
     await settle();
@@ -743,7 +781,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
   test('an absent config row is the OFF read-back, not a failed read', async () => {
     expiryPolicyRow = null;
     batchAlertRows = [];
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
 
     const text = view.container.textContent ?? '';
     expect(text).toContain('Expiry and aging alerts are OFF');
@@ -753,7 +791,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
   });
 
   test('the batch click-through reads the DETAIL route, renders its identity, and collapses without a second fetch', async () => {
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
 
     await click(button(view.container, 'View batch'));
     await settle();
@@ -782,7 +820,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
 
   test('an expanded card whose batch read 404s shows the failed arm with a way back', async () => {
     batchDetailRow = null;
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'batch-alerts');
 
     await click(button(view.container, 'View batch'));
     await settle();
@@ -798,7 +836,7 @@ describe('ReplenishmentView: the expiry & aging batch alert queue (story 6-2)', 
   });
 
   test('an operator session sees the alert rows with no Dismiss affordance', async () => {
-    view = await mount(OPERATOR_SESSION);
+    view = await mount(OPERATOR_SESSION, 'batch-alerts');
     const buttons = [...view.container.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons).not.toContain('Dismiss');
     expect(buttons).not.toContain('Submit as purchase order');
@@ -813,7 +851,7 @@ describe('ReplenishmentView: the policy walker\'s truncated-is-SAID contract (st
     // the truncation flag must be SAID (an override beyond the cap missing
     // from the map would render as the SKU default governing).
     policyPageQueue = Array.from({ length: 20 }, () => ({ items: [policy()], nextCursor: 'cursor-does-not-end' }));
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'policies');
 
     const policyGets = readsEndingWith('/replenishment/policies');
     expect(policyGets.length).toBe(20); // MAX_PAGE_HOPS — accumulated, not one page
@@ -832,7 +870,7 @@ describe('ReplenishmentView: the policy walker\'s truncated-is-SAID contract (st
       { items: [policy()], nextCursor: 'cursor-2' },
       { items: [policy()], nextCursor: null },
     ];
-    view = await mount();
+    view = await mount(OWNER_SESSION, 'policies');
 
     const policyGets = readsEndingWith('/replenishment/policies');
     expect(policyGets.length).toBe(2); // the chain ended where the server said

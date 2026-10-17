@@ -6,6 +6,7 @@ import { useSyncExternalStore } from 'react';
 import type { UserResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { drillFor, warehouseDisplayLabel, type ParsedDrill } from '@/lib/drill';
+import { OUTBOUND_PAGE_TABS, type OutboundTab } from '@/lib/page-tabs';
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import {
   readActiveWarehouseId,
@@ -17,6 +18,7 @@ import { OutboundOrders } from '@/components/outbound/outbound-orders';
 import { OutboundWaves } from '@/components/outbound/outbound-waves';
 import { OutboundPackDispatch } from '@/components/outbound/pack-dispatch';
 import { Section, selectClass } from '@/components/outbound/shell';
+import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 /**
@@ -36,8 +38,15 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
  * the active warehouse) under a banner, and the warehouse picker is hidden —
  * it writes the active warehouse. Waves and pack & dispatch render normally
  * for the active warehouse.
+ *
+ * page-tabs (2026-10-17) — the three sections sit behind a tab bar under the
+ * picker (Orders · Waves · Pack & Dispatch, `?tab=`), one mounted at a time.
+ * A drill opens on the Orders tab; another tab leaves the drill.
  */
-export function Outbound({ drill = null }: { drill?: ParsedDrill } = {}) {
+export function Outbound({
+  drill = null,
+  initialTab = null,
+}: { drill?: ParsedDrill; initialTab?: OutboundTab | null } = {}) {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
   const sessioned = useSyncExternalStore(
     subscribeSession,
@@ -59,11 +68,12 @@ export function Outbound({ drill = null }: { drill?: ParsedDrill } = {}) {
       </Section>
     );
   }
-  return <OutboundSessioned drill={drill} />;
+  return <OutboundSessioned drill={drill} initialTab={initialTab} />;
 }
 
-function OutboundSessioned({ drill }: { drill: ParsedDrill }) {
+function OutboundSessioned({ drill, initialTab }: { drill: ParsedDrill; initialTab: OutboundTab | null }) {
   const ordersDrill = drillFor(drill, 'orders');
+  const [tab, selectTab] = usePageTab(OUTBOUND_PAGE_TABS, OUTBOUND_PAGE_TABS.initial(drill, initialTab), ordersDrill !== null);
   const warehouses = useOutboundWarehouses();
   const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
   const items = warehouses.state === 'ready' ? warehouses.data.items : [];
@@ -142,28 +152,37 @@ function OutboundSessioned({ drill }: { drill: ParsedDrill }) {
           </label>
         </div>
       )}
-      <OutboundOrders
-        key={`orders-${ordersWarehouseId}`}
-        tenantId={tenantId}
-        warehouseId={ordersWarehouseId}
-        warehouseLabel={ordersWarehouseLabel}
-        role={role}
-        drill={ordersDrill}
-      />
-      <OutboundWaves
-        key={`waves-${warehouseId}`}
-        tenantId={tenantId}
-        warehouseId={warehouseId}
-        warehouseLabel={warehouseLabel}
-        role={role}
-      />
-      <OutboundPackDispatch
-        key={`pack-${warehouseId}`}
-        tenantId={tenantId}
-        warehouseId={warehouseId}
-        warehouseLabel={warehouseLabel}
-        role={role}
-      />
+      <PageTabStrip def={OUTBOUND_PAGE_TABS} active={tab} drilled={ordersDrill !== null} onSelect={selectTab} />
+      <PageTabPanel def={OUTBOUND_PAGE_TABS} active={tab}>
+        {tab === 'orders' && (
+          <OutboundOrders
+            key={`orders-${ordersWarehouseId}`}
+            tenantId={tenantId}
+            warehouseId={ordersWarehouseId}
+            warehouseLabel={ordersWarehouseLabel}
+            role={role}
+            drill={ordersDrill}
+          />
+        )}
+        {tab === 'waves' && (
+          <OutboundWaves
+            key={`waves-${warehouseId}`}
+            tenantId={tenantId}
+            warehouseId={warehouseId}
+            warehouseLabel={warehouseLabel}
+            role={role}
+          />
+        )}
+        {tab === 'pack' && (
+          <OutboundPackDispatch
+            key={`pack-${warehouseId}`}
+            tenantId={tenantId}
+            warehouseId={warehouseId}
+            warehouseLabel={warehouseLabel}
+            role={role}
+          />
+        )}
+      </PageTabPanel>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { CONFLICTS_QUEUES, parseQueueParam } from './conflicts-queues';
 import { parseDrill, type DrillScreen } from './drill';
+import { parseInboundTab } from './inbound-tabs';
 import {
   bellLabel,
   knownNotifications,
@@ -142,7 +143,7 @@ describe('click-through links', () => {
       'count-variance': ['/conflicts?queue=variances', '/conflicts?queue=variances'],
       'rejected-op': ['/conflicts?queue=rejected-ops', '/conflicts?queue=rejected-ops'],
       'reorder-breach': ['/replenishment', '/replenishment'],
-      'qc-hold': ['/inbound', '/inbound'],
+      'qc-hold': ['/inbound?tab=qc-holds', '/inbound?tab=qc-holds'],
       'channel-sync': ['/channels', '/channels'],
       // Story 9-3b — the "Your exports" list, never a download.
       'audit-export': ['/reports#audit-exports', '/reports#audit-exports'],
@@ -174,6 +175,13 @@ describe('click-through links', () => {
       const [path, query] = href.split('?') as [string, string | undefined];
       if (query === undefined) continue;
       const params = Object.fromEntries(new URLSearchParams(query).entries());
+      if (params.list === undefined && path === '/inbound') {
+        // inbound-tabs — a tab link: not a drill, and a tab Inbound knows.
+        expect(parseDrill('inbound', params)).toBeNull();
+        expect(parseInboundTab(params)).not.toBeNull();
+        if (entry.sourceType === 'qc-hold') expect(parseInboundTab(params)).toBe('qc-holds');
+        continue;
+      }
       if (params.list === undefined) {
         queues += 1;
         // A queue link: not a drill (parseDrill reads a plain visit), and

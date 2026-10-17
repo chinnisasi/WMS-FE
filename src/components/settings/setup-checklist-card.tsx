@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 
+import { setupStepHref } from '@/lib/page-tabs';
 import { useSetupChecklist } from '@/lib/use-setup-checklist';
 
 /**
@@ -10,6 +11,10 @@ import { useSetupChecklist } from '@/lib/use-setup-checklist';
  * lines, and a Continue link per pending step (deep links point at /settings
  * until stories 1.4/1.5 build their surfaces). The flags come from the
  * backend, computed on read — no stored step rows to go stale.
+ *
+ * page-tabs (2026-10-17) — the card sits above the Settings tab bar, and a
+ * Continue link opens the tab holding its step's card (`setupStepHref`; an
+ * unknown step keeps the server's `href`).
  */
 export function SetupChecklistCard() {
   const checklist = useSetupChecklist();
@@ -67,7 +72,7 @@ export function SetupChecklistCard() {
                 {!step.done && (
                   <>
                     {' · '}
-                    <Link href={step.href} className="text-(--primary) underline underline-offset-2">
+                    <Link href={setupStepHref(step)} className="text-(--primary) underline underline-offset-2">
                       Continue →
                     </Link>
                   </>

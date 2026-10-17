@@ -1707,11 +1707,16 @@ export async function fetchApiListVendors(
 export async function fetchApiListPurchaseOrders(
   tenantId: string,
   warehouseId: string,
-  options?: { cursor?: string; signal?: AbortSignal },
+  options?: { cursor?: string; status?: 'open' | 'closed'; limit?: number; signal?: AbortSignal },
 ): Promise<PurchaseOrderListResponse> {
+  const query = {
+    ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options?.status === undefined ? {} : { status: options.status }),
+    ...(options?.limit === undefined ? {} : { limit: options.limit }),
+  };
   const { data, error } = await inboundControllerListPurchaseOrders({
     path: { tenantId, warehouseId },
-    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    query: Object.keys(query).length === 0 ? undefined : query,
     signal: options?.signal,
   });
   if (error || !data) {
@@ -1732,6 +1737,7 @@ export async function fetchApiListAsns(
     status?: 'announced' | 'partially_received' | 'received' | 'closed' | 'cancelled';
     clientId?: string;
     cursor?: string;
+    limit?: number;
     signal?: AbortSignal;
   },
 ): Promise<AsnListResponse> {
@@ -1739,6 +1745,7 @@ export async function fetchApiListAsns(
     ...(options?.status === undefined ? {} : { status: options.status }),
     ...(options?.clientId === undefined ? {} : { clientId: options.clientId }),
     ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options?.limit === undefined ? {} : { limit: options.limit }),
   };
   const { data, error } = await inboundControllerListAsns({
     path: { tenantId, warehouseId },
@@ -1957,21 +1964,19 @@ export async function fetchApiListQcHolds(
     warehouseId?: string;
     status?: 'open' | 'released';
     cursor?: string;
+    limit?: number;
     signal?: AbortSignal;
   },
 ): Promise<QcHoldListResponse> {
+  const query = {
+    ...(options?.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
+    ...(options?.status === undefined ? {} : { status: options.status }),
+    ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options?.limit === undefined ? {} : { limit: options.limit }),
+  };
   const { data, error } = await receivingControllerListQcHolds({
     path: { tenantId },
-    query:
-      options?.warehouseId === undefined &&
-      options?.status === undefined &&
-      options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
-            ...(options.status === undefined ? {} : { status: options.status }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query: Object.keys(query).length === 0 ? undefined : query,
     signal: options?.signal,
   });
   if (error || !data) {

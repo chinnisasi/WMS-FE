@@ -31,7 +31,7 @@ import { roleHasCapability } from '@/lib/users';
 import { clientCell, showClients } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { ulid } from '@/lib/ulid';
-import { grnDocument } from '@/lib/asns';
+import { grnDocument, notifyInboundChanged } from '@/lib/asns';
 import {
   drillFor,
   ledgerDocHref,
@@ -41,9 +41,12 @@ import {
   type PutawayDrill,
 } from '@/lib/drill';
 import { usePutawayTasks } from '@/lib/use-putaway';
+import { INBOUND_PAGE_TABS, inboundTabHref, initialInboundTab, tabCountLabel, type InboundTab } from '@/lib/inbound-tabs';
+import { useInboundTabCounts, type InboundTabCounts } from '@/lib/use-inbound-tab-counts';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { DrillBanner } from '@/components/shared/drill-banner';
+import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
 import { ReadFailure, Section } from '@/components/shared/surface';
@@ -68,7 +71,10 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
  * card renders normally for the active warehouse, which a drill never writes.
  */
 
-export function InboundCards({ drill = null }: { drill?: ParsedDrill } = {}) {
+export function InboundCards({
+  drill = null,
+  initialTab = null,
+}: { drill?: ParsedDrill; initialTab?: InboundTab | null } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -84,12 +90,20 @@ export function InboundCards({ drill = null }: { drill?: ParsedDrill } = {}) {
       </div>
     );
   }
-  return <InboundCardsSessioned drill={drill} />;
+  return <InboundCardsSessioned drill={drill} initialTab={initialTab} />;
 }
 
-function InboundCardsSessioned({ drill }: { drill: ParsedDrill }) {
+function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; initialTab: InboundTab | null }) {
   const grnsDrill = drillFor(drill, 'grns');
   const putawayDrill = drillFor(drill, 'putaway');
+  // inbound-tabs: one card at a time. A drill opens on its own list's tab;
+  // another tab leaves the drill (`?tab=` replaces the drill's URL), so the
+  // other lists stay one click away, as on the stacked page.
+  const drilled = grnsDrill !== null || putawayDrill !== null;
+  // The tab state and its URL rules are the shared page-tabs ones
+  // (`components/shared/page-tabs.tsx`): outside a drill the tab IS the live
+  // URL's `?tab=`, and a click rewrites the URL in place.
+  const [tab, selectTab] = usePageTab(INBOUND_PAGE_TABS, initialInboundTab(drill, initialTab), drilled);
   const warehouseRead = useTenantWarehouses();
   // Loading reads as before; a failed read renders below (21-11b).
   const { tenantId, items: warehouses } =
@@ -106,6 +120,9 @@ function InboundCardsSessioned({ drill }: { drill: ParsedDrill }) {
       ? activeId
       : (warehouses[0]?.id ?? null);
   const warehouse = warehouses.find((w) => w.id === warehouseId);
+  // inbound-tabs — counts follow the active warehouse (a drill's own
+  // warehouse scopes only its card).
+  const tabCounts = useInboundTabCounts(warehouseId);
   // A drilled card names the drill's warehouse with the one shared label
   // (its short id while the list is not in hand — never "Pick a warehouse").
   const drillLabel = (id: string) => warehouseDisplayLabel(warehouses, id);
@@ -125,29 +142,57 @@ function InboundCardsSessioned({ drill }: { drill: ParsedDrill }) {
       {warehouseRead.state === 'ready' && warehouseRead.data.refreshFailed !== null && (
         <WarehousesRefreshNote reason={warehouseRead.data.refreshFailed} onRetry={warehouseRead.reload} />
       )}
-      <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
-      <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
-      {grnsDrill === null ? (
-        <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
-      ) : (
-        // The drill's warehouse (or every warehouse, when the drill names none).
-        <GoodsReceiptsCard
-          warehouseId={grnsDrill.warehouseId ?? null}
-          warehouseLabel={grnsDrill.warehouseId === undefined ? 'All warehouses' : drillLabel(grnsDrill.warehouseId)}
-          drill={grnsDrill}
-        />
-      )}
-      {putawayDrill === null ? (
-        <PutawayCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
-      ) : (
-        <PutawayCard
-          warehouseId={putawayDrill.warehouseId}
-          warehouseLabel={drillLabel(putawayDrill.warehouseId)}
-          drill={putawayDrill}
-        />
-      )}
-      <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+      <PageTabStrip
+        def={INBOUND_PAGE_TABS}
+        active={tab}
+        drilled={drilled}
+        onSelect={selectTab}
+        badge={(id) => <InboundTabCount tab={id} counts={tabCounts} />}
+      />
+      <PageTabPanel def={INBOUND_PAGE_TABS} active={tab}>
+        {tab === 'pos' && <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
+        {tab === 'asns' && <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
+        {tab === 'grns' &&
+          (grnsDrill === null ? (
+            <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+          ) : (
+            // The drill's warehouse (or every warehouse, when the drill names none).
+            <GoodsReceiptsCard
+              warehouseId={grnsDrill.warehouseId ?? null}
+              warehouseLabel={grnsDrill.warehouseId === undefined ? 'All warehouses' : drillLabel(grnsDrill.warehouseId)}
+              drill={grnsDrill}
+              clearHref={inboundTabHref('grns')}
+            />
+          ))}
+        {tab === 'putaway' &&
+          (putawayDrill === null ? (
+            <PutawayCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+          ) : (
+            <PutawayCard
+              warehouseId={putawayDrill.warehouseId}
+              warehouseLabel={drillLabel(putawayDrill.warehouseId)}
+              drill={putawayDrill}
+              clearHref={inboundTabHref('putaway')}
+            />
+          ))}
+        {tab === 'qc-holds' && <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
+      </PageTabPanel>
     </div>
+  );
+}
+
+/** inbound-tabs — a tab's count pill; none on Goods receipts (history) or a failed read. */
+function InboundTabCount({ tab, counts }: { tab: InboundTab; counts: InboundTabCounts }) {
+  if (tab === 'grns') return null;
+  const count = counts[tab];
+  if (count === undefined) return null;
+  return (
+    <span
+      data-testid={`inbound-tab-count-${tab}`}
+      className="ml-1.5 rounded-full bg-(--muted) px-1.5 text-[11px] tabular-nums text-(--muted-foreground)"
+    >
+      {tabCountLabel(count)}
+    </span>
   );
 }
 
@@ -285,11 +330,14 @@ function GoodsReceiptsCard({
   warehouseId,
   warehouseLabel,
   drill = null,
+  clearHref,
 }: {
   warehouseId: string | null;
   warehouseLabel: string | null;
   /** Story 9-1b — the drill's rows, server-filtered, under the banner. */
   drill?: GrnsDrill | null;
+  /** inbound-tabs — where the banner's Clear lands (this list's tab). */
+  clearHref?: string;
 }) {
   const grns = useGoodsReceipts(warehouseId, drill);
 
@@ -352,7 +400,7 @@ function GoodsReceiptsCard({
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Goods receipt notes</h2>
-        {drill !== null && <DrillBanner drill={drill} />}
+        {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its receipts.'
@@ -398,10 +446,13 @@ function PutawayCard({
   warehouseId,
   warehouseLabel,
   drill = null,
+  clearHref,
 }: {
   warehouseId: string | null;
   warehouseLabel: string | null;
   drill?: PutawayDrill | null;
+  /** inbound-tabs — where the banner's Clear lands (this list's tab). */
+  clearHref?: string;
 }) {
   const tasks = usePutawayTasks(warehouseId);
   const skus = useSkuMap();
@@ -434,7 +485,7 @@ function PutawayCard({
     >
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Awaiting putaway</h2>
-        {drill !== null && <DrillBanner drill={drill} />}
+        {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Received stock still in the Receiving bin, oldest receipt first.'
@@ -515,6 +566,8 @@ function QcHoldsCard({
           'The held units returned to the recorded origin bin; the ledger carries the qc.released movements and the decision is audit-trailed.',
       });
       holds?.reload();
+      // inbound-tabs — the tab counts re-read on any inbound change.
+      notifyInboundChanged();
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not released', reason: qcReason(error) });
     } finally {
@@ -693,6 +746,7 @@ function PlaceQcHoldForm({
       // bin) and joins the open-holds list.
       scopesData?.reload();
       openHolds?.reload();
+      notifyInboundChanged();
       onPlaced();
     } catch (caught) {
       setError(qcReason(caught));
