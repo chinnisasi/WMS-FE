@@ -50,6 +50,8 @@ import {
   fetchApiApproveAdjustmentPending,
   fetchApiListAdjustmentPendings,
   fetchApiListLedgerEvents,
+  fetchApiListBatches,
+  fetchApiListStock,
   fetchApiListPutawayTasks,
   fetchApiListVariances,
   fetchApiRejectAdjustmentPending,
@@ -2230,5 +2232,56 @@ describe('return authorization wrappers (story 13-1)', () => {
       extensions: { orderLineId: LINE_ID, returnableQty: 1 },
     });
     clearSession();
+  });
+});
+
+describe('inventory-screen — the stock and batch list wrappers', () => {
+  const T = '0198f7a2-1b3c-7d4e-8f90-112233445566';
+  const W = '0198f7a2-1b3c-7d4e-8f90-99aabbccddee';
+  const SKU = '0198f7a2-1b3c-7d4e-8f90-aabbccddeeff';
+
+  afterEach(() => {
+    restoreGlobals();
+  });
+
+  test('the stock list: a first page with no options sends no query (the QC-hold caller is unchanged)', async () => {
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListStock(T, W);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${T}/warehouses/${W}/inventory/stock`);
+    expect(url.search).toBe('');
+  });
+
+  test('the stock list sends limit, order=location and nonZero=true, plus the SKU and cursor given', async () => {
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListStock(T, W, { limit: 200, order: 'location', nonZero: true });
+    expect(Object.fromEntries(new URL(lastRequest!.url).searchParams)).toEqual({
+      limit: '200',
+      order: 'location',
+      nonZero: 'true',
+    });
+    await fetchApiListStock(T, W, { skuId: SKU, cursor: 'c-2', limit: 200, order: 'location', nonZero: true });
+    expect(Object.fromEntries(new URL(lastRequest!.url).searchParams)).toEqual({
+      skuId: SKU,
+      cursor: 'c-2',
+      limit: '200',
+      order: 'location',
+      nonZero: 'true',
+    });
+    expect(lastRequest!.method).toBe('GET');
+  });
+
+  test('the batch list is warehouse-scoped and sends exactly the SKU', async () => {
+    stubFetch(200, { items: [] });
+    await fetchApiListBatches(T, W, SKU);
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${T}/warehouses/${W}/inventory/batches`);
+    expect([...url.searchParams.entries()]).toEqual([['skuId', SKU]]);
+    expect(lastRequest!.method).toBe('GET');
+  });
+
+  test('a refusal keeps its machine-readable code', async () => {
+    stubFetch(400, { code: 'invalid-cursor', title: 'Malformed pagination cursor', status: 400, detail: 'd' });
+    await expect(fetchApiListStock(T, W, { cursor: 'x', order: 'location' })).rejects.toMatchObject({ code: 'invalid-cursor' });
   });
 });

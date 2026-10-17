@@ -282,7 +282,7 @@ describe('the tiles', () => {
     const params = new URLSearchParams(href.split('?')[1]);
     expect(params.get('warehouseId')).toBe(W1);
     expect(params.get('type')).toBe('putaway.placed');
-    // No tile still links the bare /inventory placeholder.
+    // Tiles drill into /inventory/ledger — none links the /inventory page (its tabs take no drill).
     const hrefs = [...view.container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
     expect(hrefs.some((h) => h === '/inventory' || h.startsWith('/inventory?'))).toBe(false);
   });

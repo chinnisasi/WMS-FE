@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   ApiProblem,
@@ -618,6 +618,9 @@ function expiryPolicyReason(error: unknown): string {
  */
 export function useBatchDetail(
   batchId: string | null,
+  // Inventory-screen: the Inventory batch detail words its own refusals
+  // ("Batch not found"); the replenishment queue keeps its wording.
+  reasonOf: (error: unknown) => string = replenishmentBatchDetailReason,
 ): ResourceState<BatchDetailResponse> & Reloadable {
   const tenantId = useSyncExternalStore(
     subscribeSession,
@@ -630,6 +633,13 @@ export function useBatchDetail(
     batchId: string;
     state: ResourceState<BatchDetailResponse>;
   } | null>(null);
+
+  // The mapper is held in a ref (refreshed after every render, before the
+  // fetch effect below runs) so a caller's inline function never refetches.
+  const reasonRef = useRef(reasonOf);
+  useEffect(() => {
+    reasonRef.current = reasonOf;
+  });
 
   useEffect(() => {
     if (tenantId === null || batchId === null) return;
@@ -651,7 +661,7 @@ export function useBatchDetail(
             batchId,
             state: {
               state: 'failed',
-              reason: replenishmentBatchDetailReason(error),
+              reason: reasonRef.current(error),
             },
           });
         }
