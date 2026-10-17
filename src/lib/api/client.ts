@@ -60,6 +60,7 @@ import {
   inventoryControllerApproveAdjustment,
   inventoryControllerGetBatch,
   inventoryControllerListAdjustmentPendings,
+  inventoryControllerListBatches,
   inventoryControllerListEvents,
   inventoryControllerListStock,
   inventoryControllerRejectAdjustment,
@@ -291,6 +292,7 @@ import type {
   BatchAlertListResponse,
   BatchAlertResponse,
   BatchDetailResponse,
+  BatchListResponse,
   ExpiryPolicyResponse,
   SuggestedPoListResponse,
   SubmitSuggestedPoResponse,
@@ -2023,25 +2025,57 @@ export async function fetchApiReleaseQcHold(
 
 /**
  * The on-hand stock rows (story 2.2 read) for the QC hold form's scope
- * choices — the (sku, bin) scopes with on-hand to hold.
+ * choices — the (sku, bin) scopes with on-hand to hold. Inventory-screen adds
+ * `limit`, `order: 'location'` (bin by bin; the items then carry `binCode`
+ * and `binSystemOwned`) and `nonZero`. A first page with no option sends no
+ * query at all, as before.
  */
 export async function fetchApiListStock(
   tenantId: string,
   warehouseId: string,
-  options?: { skuId?: string; binId?: string; cursor?: string; signal?: AbortSignal },
+  options?: {
+    skuId?: string;
+    binId?: string;
+    cursor?: string;
+    limit?: number;
+    order?: 'location';
+    nonZero?: boolean;
+    signal?: AbortSignal;
+  },
 ): Promise<StockListResponse> {
+  const query = {
+    ...(options?.skuId === undefined ? {} : { skuId: options.skuId }),
+    ...(options?.binId === undefined ? {} : { binId: options.binId }),
+    ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options?.limit === undefined ? {} : { limit: options.limit }),
+    ...(options?.order === undefined ? {} : { order: options.order }),
+    ...(options?.nonZero === undefined ? {} : { nonZero: options.nonZero }),
+  };
   const { data, error } = await inventoryControllerListStock({
     path: { tenantId, warehouseId },
-    query:
-      options?.skuId === undefined &&
-      options?.binId === undefined &&
-      options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.skuId === undefined ? {} : { skuId: options.skuId }),
-            ...(options.binId === undefined ? {} : { binId: options.binId }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query: Object.keys(query).length === 0 ? undefined : query,
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Inventory-screen — one SKU's batches in a warehouse, FEFO (expiry ASC,
+ * nulls last), each with its on-hand here (0 when none). Unpaged; `skuId` is
+ * required by the backend.
+ */
+export async function fetchApiListBatches(
+  tenantId: string,
+  warehouseId: string,
+  skuId: string,
+  options?: { signal?: AbortSignal },
+): Promise<BatchListResponse> {
+  const { data, error } = await inventoryControllerListBatches({
+    path: { tenantId, warehouseId },
+    query: { skuId },
     signal: options?.signal,
   });
   if (error || !data) {

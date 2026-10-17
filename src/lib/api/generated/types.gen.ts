@@ -1528,6 +1528,14 @@ export type StockEntryDto = {
      * ISO-8601 UTC projection-row commit time (the cursor sort key)
      */
     createdAt: string;
+    /**
+     * The bin's code — present only under `order=location`
+     */
+    binCode?: string;
+    /**
+     * Whether the bin is a system bin (RECEIVING, QC-HOLD, RETURNS, IN-TRANSIT) — present only under `order=location`
+     */
+    binSystemOwned?: boolean;
 };
 
 export type StockListResponse = {
@@ -10322,13 +10330,21 @@ export type InventoryControllerListStockData = {
          */
         cursor?: string;
         limit?: number;
+        /**
+         * Inventory-screen — `location`: storage bins first, then system bins, each by bin code (lexical, `COLLATE "C"`), then SKU id, then row id; the items then carry `binCode` and `binSystemOwned`. Absent: newest projection row first (the original order). A cursor minted under one order is refused (400 invalid-cursor) under the other
+         */
+        order?: 'location';
+        /**
+         * Inventory-screen — `true`: only rows with a quantity above zero. Exactly 'true' or 'false'
+         */
+        nonZero?: boolean;
     };
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/stock';
 };
 
 export type InventoryControllerListStockErrors = {
     /**
-     * Malformed skuId/binId query, cursor, or out-of-range limit (validation-failed / invalid-cursor)
+     * Malformed skuId/binId query, unknown order, non-boolean nonZero or out-of-range limit (validation-failed); a malformed cursor, or one minted under the other order (invalid-cursor)
      */
     400: ProblemDetailsDto;
     /**
