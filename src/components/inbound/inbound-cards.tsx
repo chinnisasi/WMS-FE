@@ -33,7 +33,7 @@ import { roleHasCapability } from '@/lib/users';
 import { clientCell, showClients } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { ulid } from '@/lib/ulid';
-import { grnDocument } from '@/lib/asns';
+import { grnDocument, notifyInboundChanged } from '@/lib/asns';
 import {
   drillFor,
   ledgerDocHref,
@@ -49,8 +49,10 @@ import {
   inboundTabHref,
   initialInboundTab,
   parseInboundTab,
+  tabCountLabel,
   type InboundTab,
 } from '@/lib/inbound-tabs';
+import { useInboundTabCounts, type InboundTabCounts } from '@/lib/use-inbound-tab-counts';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { DrillBanner } from '@/components/shared/drill-banner';
@@ -141,6 +143,9 @@ function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; init
       ? activeId
       : (warehouses[0]?.id ?? null);
   const warehouse = warehouses.find((w) => w.id === warehouseId);
+  // inbound-tabs — counts follow the active warehouse (a drill's own
+  // warehouse scopes only its card).
+  const tabCounts = useInboundTabCounts(warehouseId);
   // A drilled card names the drill's warehouse with the one shared label
   // (its short id while the list is not in hand — never "Pick a warehouse").
   const drillLabel = (id: string) => warehouseDisplayLabel(warehouses, id);
@@ -161,9 +166,9 @@ function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; init
         <WarehousesRefreshNote reason={warehouseRead.data.refreshFailed} onRetry={warehouseRead.reload} />
       )}
       {drilled ? (
-        <DrillInboundTabBar active={tab} />
+        <DrillInboundTabBar active={tab} counts={tabCounts} />
       ) : (
-        <InboundTabBar active={tab} onSelect={selectTab} />
+        <InboundTabBar active={tab} onSelect={selectTab} counts={tabCounts} />
       )}
       <div role="tabpanel" id="inbound-panel" aria-labelledby={`inbound-tab-${tab}`}>
         {tab === 'pos' && <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
@@ -198,13 +203,22 @@ function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; init
 }
 
 /** The Inbound tab bar (inbound-tabs) — the Conflicts tab pattern. */
-function InboundTabBar({ active, onSelect }: { active: InboundTab; onSelect: (tab: InboundTab) => void }): ReactNode {
+function InboundTabBar({
+  active,
+  onSelect,
+  counts,
+}: {
+  active: InboundTab;
+  onSelect: (tab: InboundTab) => void;
+  counts: InboundTabCounts;
+}): ReactNode {
   return (
     <div className="flex flex-wrap gap-1 text-xs" role="tablist" aria-label="Inbound lists">
       {INBOUND_TABS.map((t) => (
         <button
           key={t.id}
           id={`inbound-tab-${t.id}`}
+          data-tab={t.id}
           type="button"
           role="tab"
           aria-selected={active === t.id}
@@ -215,6 +229,14 @@ function InboundTabBar({ active, onSelect }: { active: InboundTab; onSelect: (ta
           }`}
         >
           {t.label}
+          {t.id !== 'grns' && counts[t.id] !== undefined && (
+            <span
+              data-testid={`inbound-tab-count-${t.id}`}
+              className="ml-1.5 rounded-full bg-(--muted) px-1.5 text-[11px] tabular-nums text-(--muted-foreground)"
+            >
+              {tabCountLabel(counts[t.id]!)}
+            </span>
+          )}
         </button>
       ))}
     </div>
@@ -226,11 +248,12 @@ function InboundTabBar({ active, onSelect }: { active: InboundTab; onSelect: (ta
  * remounts the page with no drill (the page key joins drill and tab). Only
  * drilled mode touches the router, as `DrillBanner` does.
  */
-function DrillInboundTabBar({ active }: { active: InboundTab }): ReactNode {
+function DrillInboundTabBar({ active, counts }: { active: InboundTab; counts: InboundTabCounts }): ReactNode {
   const router = useRouter();
   return (
     <InboundTabBar
       active={active}
+      counts={counts}
       onSelect={(next) => {
         if (next !== active) router.replace(inboundTabHref(next), { scroll: false });
       }}
@@ -608,6 +631,8 @@ function QcHoldsCard({
           'The held units returned to the recorded origin bin; the ledger carries the qc.released movements and the decision is audit-trailed.',
       });
       holds?.reload();
+      // inbound-tabs — the tab counts re-read on any inbound change.
+      notifyInboundChanged();
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not released', reason: qcReason(error) });
     } finally {
@@ -786,6 +811,7 @@ function PlaceQcHoldForm({
       // bin) and joins the open-holds list.
       scopesData?.reload();
       openHolds?.reload();
+      notifyInboundChanged();
       onPlaced();
     } catch (caught) {
       setError(qcReason(caught));

@@ -43,3 +43,31 @@ export function initialInboundTab(drill: ParsedDrill, tab: InboundTab | null): I
   }
   return tab ?? DEFAULT_INBOUND_TAB;
 }
+
+/**
+ * Tab counts (inbound-tabs): the open / actionable items behind each tab —
+ * open POs, ASNs still to receive (announced + partially received), tasks
+ * awaiting putaway, open QC holds. Goods receipts are history and carry no
+ * count. The lists are keyset-paged with no total, so a count is read from
+ * one page at the route's maximum size; a full page with more behind it
+ * reads "N+" — never a misleadingly small number.
+ */
+export type CountedInboundTab = Exclude<InboundTab, 'grns'>;
+
+export interface TabCount {
+  readonly count: number;
+  /** The page was full and more lie beyond it. */
+  readonly more: boolean;
+}
+
+export function tabCountLabel(count: TabCount): string {
+  return count.more ? `${count.count}+` : String(count.count);
+}
+
+/** Sums partial counts (ASNs read per status); `more` if any part had more. */
+export function sumTabCounts(parts: readonly TabCount[]): TabCount {
+  return {
+    count: parts.reduce((sum, part) => sum + part.count, 0),
+    more: parts.some((part) => part.more),
+  };
+}

@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
 import { parseDrill } from './drill';
-import { DEFAULT_INBOUND_TAB, INBOUND_TABS, inboundTabHref, initialInboundTab, parseInboundTab } from './inbound-tabs';
+import {
+  DEFAULT_INBOUND_TAB,
+  INBOUND_TABS,
+  inboundTabHref,
+  initialInboundTab,
+  parseInboundTab,
+  sumTabCounts,
+  tabCountLabel,
+} from './inbound-tabs';
 
 describe('inbound-tabs', () => {
   test('the five tabs, in page order, with the Purchase orders tab first', () => {
@@ -34,5 +42,17 @@ describe('inbound-tabs', () => {
     expect(initialInboundTab(null, 'qc-holds')).toBe('qc-holds');
     expect(initialInboundTab(null, null)).toBe('pos');
     expect(initialInboundTab('unsupported', null)).toBe('pos');
+  });
+
+  test('a count reads N, or N+ when the page had more behind it', () => {
+    expect(tabCountLabel({ count: 0, more: false })).toBe('0');
+    expect(tabCountLabel({ count: 7, more: false })).toBe('7');
+    expect(tabCountLabel({ count: 200, more: true })).toBe('200+');
+  });
+
+  test('partial counts sum, and any part with more makes the sum N+', () => {
+    expect(sumTabCounts([])).toEqual({ count: 0, more: false });
+    expect(sumTabCounts([{ count: 3, more: false }, { count: 4, more: false }])).toEqual({ count: 7, more: false });
+    expect(sumTabCounts([{ count: 100, more: true }, { count: 2, more: false }])).toEqual({ count: 102, more: true });
   });
 });

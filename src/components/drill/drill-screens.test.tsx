@@ -345,6 +345,13 @@ function bannerOf(r: Rendered): HTMLElement {
   return banner;
 }
 
+/** inbound-tabs — a tab button by id (its text also carries the count). */
+function tabIn(root: Element, id: string): HTMLButtonElement {
+  const tab = root.querySelector<HTMLButtonElement>(`[role="tab"][data-tab="${id}"]`);
+  if (tab === null) throw new Error(`no "${id}" tab`);
+  return tab;
+}
+
 function buttonIn(root: Element, label: string): HTMLButtonElement {
   const button = [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
   if (button === undefined) throw new Error(`no "${label}" button`);
@@ -635,7 +642,7 @@ describe('story 9-3a — "View ledger" on the inbound cards uses the DOCUMENT\'s
     view = await mount('owner', page(InboundCards, 'inbound', { tab: 'grns' }).element);
     const linksNow = () => [...view!.container.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')]);
     const grnLinks = linksNow();
-    await click(buttonIn(view.container, 'Purchase orders'));
+    await click(tabIn(view.container, 'pos'));
     const links = [...grnLinks, ...linksNow()];
     const grnLink = links.find(([text]) => text === 'View ledger');
     expect(grnLink).toBeDefined();
@@ -885,26 +892,28 @@ describe('Inbound — tabs (inbound-tabs)', () => {
     pathname = '/inbound';
     view = await mount('owner', page(InboundCards, 'inbound', {}).element);
     const tablist = view.container.querySelector('[role="tablist"]')!;
-    expect(tablist.querySelector('[aria-selected="true"]')?.textContent).toBe('Purchase orders');
+    expect(tablist.querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('pos');
     expect(reads('/receiving/goods-receipts')).toHaveLength(0);
-    expect(reads('/putaway/tasks')).toHaveLength(0);
+    // Only the selected card mounts (the putaway list is read once, for its tab count).
+    expect(view.container.querySelector('[data-testid="awaiting-putaway"]')).toBeNull();
+    expect(reads('/putaway/tasks').length).toBeLessThanOrEqual(1);
   });
 
   test('?tab= opens that tab; an unknown tab falls back to Purchase orders', async () => {
     pathname = '/inbound';
     view = await mount('owner', page(InboundCards, 'inbound', { tab: 'putaway' }).element);
-    expect(view.container.querySelector('[role="tablist"] [aria-selected="true"]')?.textContent).toBe('Awaiting putaway');
+    expect(view.container.querySelector('[role="tablist"] [aria-selected="true"]')?.getAttribute('data-tab')).toBe('putaway');
     expect(view.container.querySelector('[data-testid="awaiting-putaway"]')).not.toBeNull();
     view!.unmount();
     view = await mount('owner', page(InboundCards, 'inbound', { tab: 'nope' }).element);
-    expect(view.container.querySelector('[role="tablist"] [aria-selected="true"]')?.textContent).toBe('Purchase orders');
+    expect(view.container.querySelector('[role="tablist"] [aria-selected="true"]')?.getAttribute('data-tab')).toBe('pos');
   });
 
   test('a click switches the card and rewrites the URL in place — no router navigation', async () => {
     pathname = '/inbound';
     view = await mount('owner', page(InboundCards, 'inbound', {}).element);
-    await click(buttonIn(view.container.querySelector('[role="tablist"]')!, 'QC holds'));
-    expect(view.container.querySelector('[role="tablist"] [aria-selected="true"]')?.textContent).toBe('QC holds');
+    await click(tabIn(view.container.querySelector('[role="tablist"]')!, 'qc-holds'));
+    expect(view.container.querySelector('[role="tablist"] [aria-selected="true"]')?.getAttribute('data-tab')).toBe('qc-holds');
     expect(window.location.search).toBe('?tab=qc-holds');
     expect(pushes).toEqual([]);
     expect(replaces).toEqual([]);
@@ -914,18 +923,18 @@ describe('Inbound — tabs (inbound-tabs)', () => {
     pathname = '/inbound';
     searchParamsNow = new URLSearchParams('tab=qc-holds');
     view = await mount('owner', page(InboundCards, 'inbound', { tab: 'qc-holds' }).element);
-    const selected = () => view!.container.querySelector('[role="tablist"] [aria-selected="true"]')?.textContent;
-    expect(selected()).toBe('QC holds');
+    const selected = () => view!.container.querySelector('[role="tablist"] [aria-selected="true"]')?.getAttribute('data-tab');
+    expect(selected()).toBe('qc-holds');
     // The sidebar's bare /inbound (same page key as a default load): the URL wins.
     searchParamsNow = new URLSearchParams('');
     view.rerender(page(InboundCards, 'inbound', { tab: 'qc-holds' }).element);
     await settle();
-    expect(selected()).toBe('Purchase orders');
+    expect(selected()).toBe('pos');
     // A bell link back to ?tab=qc-holds.
     searchParamsNow = new URLSearchParams('tab=qc-holds');
     view.rerender(page(InboundCards, 'inbound', { tab: 'qc-holds' }).element);
     await settle();
-    expect(selected()).toBe('QC holds');
+    expect(selected()).toBe('qc-holds');
   });
 
   test('clicking the default tab writes the bare route; clicking the open tab writes nothing', async () => {
@@ -933,11 +942,39 @@ describe('Inbound — tabs (inbound-tabs)', () => {
     window.history.replaceState(null, '', '/inbound?tab=asns');
     view = await mount('owner', page(InboundCards, 'inbound', { tab: 'asns' }).element);
     const tablist = view.container.querySelector('[role="tablist"]')!;
-    await click(buttonIn(tablist, 'Purchase orders'));
+    await click(tabIn(tablist, 'pos'));
     expect(window.location.pathname + window.location.search).toBe('/inbound');
     window.history.replaceState(null, '', '/inbound?tab=marker');
-    await click(buttonIn(tablist, 'Purchase orders'));
+    await click(tabIn(tablist, 'pos'));
     expect(window.location.search).toBe('?tab=marker');
+  });
+
+  test('tabs carry counts: N+ for a full page with more, none on Goods receipts or a failed read, re-read on an inbound change', async () => {
+    pathname = '/inbound';
+    poRows = [{ id: 'po-a' }, { id: 'po-b' }];
+    putawayItems = [PUTAWAY_TASK, { ...PUTAWAY_TASK, id: 'task-2' }];
+    view = await mount('owner', page(InboundCards, 'inbound', { tab: 'putaway' }).element);
+    const pill = (id: string) =>
+      view!.container.querySelector(`[data-testid="inbound-tab-count-${id}"]`)?.textContent ?? null;
+    // The PO page carries a cursor (more behind it); putaway is unpaged and exact.
+    expect(pill('pos')).toBe('2+');
+    expect(pill('putaway')).toBe('2');
+    expect(pill('grns')).toBeNull();
+    // ASNs and QC holds are unrouted here (404): no count, never a wrong "0".
+    expect(pill('asns')).toBeNull();
+    expect(pill('qc-holds')).toBeNull();
+    // Counts read the open/actionable rows only.
+    expect(reads('/inbound/purchase-orders').some((r) => r.params.get('status') === 'open')).toBe(true);
+    expect(reads('/receiving/goods-receipts')).toHaveLength(0);
+
+    const before = reads('/inbound/purchase-orders').length;
+    putawayItems = [];
+    await act(async () => {
+      window.dispatchEvent(new Event('wms-inbound-changed'));
+    });
+    await settle();
+    expect(reads('/inbound/purchase-orders').length).toBeGreaterThan(before);
+    expect(pill('putaway')).toBe('0');
   });
 });
 
@@ -947,7 +984,10 @@ describe('Inbound — Awaiting putaway', () => {
     view = await mount('owner', page(InboundCards, 'inbound', { tab: 'putaway' }).element);
     const section = view.container.querySelector('[data-testid="awaiting-putaway"]')!;
     expect(section).not.toBeNull();
-    expect(reads('/putaway/tasks').map((r) => entries(r.params))).toEqual([[['warehouseId', W1]]]);
+    // The card and its tab count both read the active warehouse.
+    const putawayReads = reads('/putaway/tasks').map((r) => entries(r.params));
+    expect(putawayReads.length).toBeGreaterThan(0);
+    for (const read of putawayReads) expect(read).toEqual([['warehouseId', W1]]);
     const text = section.textContent ?? '';
     for (const cell of ['GRN-0007', 'SPICE-01', 'B-42', '2.500 kg', 'A-01']) expect(text).toContain(cell);
     expect(section.querySelector('[data-testid="drill-banner"]')).toBeNull();
@@ -956,15 +996,18 @@ describe('Inbound — Awaiting putaway', () => {
   test('a putaway drill scopes it to the drill warehouse, under the banner, on its own tab; another tab leaves the drill', async () => {
     pathname = '/inbound';
     view = await mount('owner', page(InboundCards, 'inbound', { list: 'putaway', warehouseId: W2 }).element);
-    expect(reads('/putaway/tasks').map((r) => entries(r.params))).toEqual([[['warehouseId', W2]]]);
+    // The drilled card reads the drill's warehouse; the tab counts follow the active one.
+    const putawayReads = reads('/putaway/tasks').map((r) => entries(r.params));
+    expect(putawayReads).toContainEqual([['warehouseId', W2]]);
+    for (const read of putawayReads) expect([[['warehouseId', W2]], [['warehouseId', W1]]]).toContainEqual(read);
     const section = view.container.querySelector('[data-testid="awaiting-putaway"]')!;
     expect(section.querySelector('[data-testid="drill-banner"]')?.textContent).toContain('Awaiting putaway · NORTH Delhi DC');
     // inbound-tabs — the drill opens on its own tab and mounts only that card;
     // another tab leaves the drill through the router (`?tab=`).
     const tablist = view.container.querySelector('[role="tablist"]')!;
-    expect(tablist.querySelector('[aria-selected="true"]')?.textContent).toBe('Awaiting putaway');
+    expect(tablist.querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('putaway');
     expect(reads('/receiving/goods-receipts')).toHaveLength(0);
-    await click(buttonIn(tablist, 'Goods receipts'));
+    await click(tabIn(tablist, 'grns'));
     expect(replaces).toEqual(['/inbound?tab=grns']);
     expect(pushes).toEqual([]);
     // What the page does on that soft navigation: no drill, the GRN tab, the
@@ -994,8 +1037,9 @@ describe('Inbound — Awaiting putaway', () => {
     expect(section.textContent).toContain('Putaway tasks unavailable');
     expect(section.textContent).not.toContain('Nothing awaiting putaway');
     putawayItems = [];
+    const before = reads('/putaway/tasks').length;
     await click(buttonIn(section, 'Retry'));
-    expect(reads('/putaway/tasks')).toHaveLength(2);
+    expect(reads('/putaway/tasks').length).toBeGreaterThan(before);
     expect(section.textContent).toContain('Nothing awaiting putaway');
   });
 });
