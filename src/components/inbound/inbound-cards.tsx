@@ -151,7 +151,9 @@ function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; init
       />
       <PageTabPanel def={INBOUND_PAGE_TABS} active={tab}>
         {tab === 'pos' && <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
-        {tab === 'asns' && <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
+        {tab === 'asns' && (
+          <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} warehouseCode={warehouse?.code ?? null} />
+        )}
         {tab === 'grns' &&
           (grnsDrill === null ? (
             <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />

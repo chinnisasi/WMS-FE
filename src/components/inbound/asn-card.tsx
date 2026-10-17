@@ -39,6 +39,7 @@ import { ulid } from '@/lib/ulid';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { AsnImport } from '@/components/inbound/asn-import';
 import { ReadFailure } from '@/components/outbound/shell';
 import { lineButtonClass as buttonClass, lineInputClass as inputClass, LineRows } from '@/components/shared/line-rows';
 
@@ -65,9 +66,12 @@ const primaryClass =
 export function AsnsCard({
   warehouseId,
   warehouseLabel,
+  warehouseCode = null,
 }: {
   warehouseId: string | null;
   warehouseLabel: string | null;
+  /** The ASN import's template pre-fills it (the `warehouse` column must equal it or stay blank). */
+  warehouseCode?: string | null;
 }) {
   const asns = useAsns(warehouseId);
   const skus = useSkuMap();
@@ -93,6 +97,9 @@ export function AsnsCard({
   const [banner, setBanner] = useState<{ warehouseId: string; outcome: Outcome } | null>(null);
   const outcome = banner !== null && banner.warehouseId === warehouseId ? banner.outcome : null;
   const [creating, setCreating] = useState(false);
+  // The ASN import (2026-10-17): open for ONE warehouse (keyed derivation).
+  const [importingFor, setImportingFor] = useState<string | null>(null);
+  const importing = importingFor !== null && importingFor === warehouseId;
   const [pageEpoch, setPageEpoch] = useState(0);
 
   function report(next: Outcome) {
@@ -154,11 +161,35 @@ export function AsnsCard({
           </div>
         </div>
         {canManage && warehouseId !== null && !creating && (
-          <button type="button" onClick={() => setCreating(true)} className={primaryClass}>
-            Announce a shipment
-          </button>
+          <div className="flex gap-2">
+            {!importing && (
+              <button type="button" onClick={() => setImportingFor(warehouseId)} className={buttonClass}>
+                Import from file
+              </button>
+            )}
+            <button type="button" onClick={() => setCreating(true)} className={primaryClass}>
+              Announce a shipment
+            </button>
+          </div>
         )}
       </div>
+
+      {canManage && warehouseId !== null && importing && (
+        <AsnImport
+          key={warehouseId}
+          warehouseId={warehouseId}
+          warehouseCode={warehouseCode}
+          onClose={() => setImportingFor(null)}
+          onImported={(result) => {
+            if (result.acceptedCount === 0) return;
+            // Back to page one, remounting the table's Prev/Next state, and
+            // every inbound reader (the tab counts) refetches.
+            asns.onCursor(null);
+            setPageEpoch((epoch) => epoch + 1);
+            notifyInboundChanged();
+          }}
+        />
+      )}
 
       {canManage && warehouseId !== null && creating && (
         <AsnCreateForm
