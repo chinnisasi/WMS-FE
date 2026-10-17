@@ -618,6 +618,9 @@ function expiryPolicyReason(error: unknown): string {
  */
 export function useBatchDetail(
   batchId: string | null,
+  // Inventory-screen: the Inventory batch detail words its own refusals
+  // ("Batch not found"); the replenishment queue keeps its wording.
+  reasonOf: (error: unknown) => string = replenishmentBatchDetailReason,
 ): ResourceState<BatchDetailResponse> & Reloadable {
   const tenantId = useSyncExternalStore(
     subscribeSession,
@@ -651,7 +654,7 @@ export function useBatchDetail(
             batchId,
             state: {
               state: 'failed',
-              reason: replenishmentBatchDetailReason(error),
+              reason: reasonOf(error),
             },
           });
         }
@@ -660,6 +663,8 @@ export function useBatchDetail(
     return () => {
       cancelled = true;
     };
+    // `reasonOf` is a module-level mapper at every call site — not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, batchId, revision]);
 
   const reload = useCallback(() => {
