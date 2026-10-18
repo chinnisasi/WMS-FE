@@ -19,7 +19,7 @@ import { render, type Rendered } from '../../lib/test/render';
 
 const pushes: string[] = [];
 let RegisterForm: ComponentType;
-let LoginForm: ComponentType<{ initialEmail?: string }>;
+let LoginForm: ComponentType<{ initialEmail?: string; notice?: string | null }>;
 
 beforeAll(async () => {
   const real = await import('next/navigation');
@@ -31,6 +31,23 @@ beforeAll(async () => {
 });
 
 let posts: Record<string, unknown>[] = [];
+/** Story 6-1b — every sign-in request's header, and the second step's bodies. */
+let signInHeaders: (string | null)[] = [];
+let secondFactorPosts: Record<string, unknown>[] = [];
+/** What the password step answers: the session (null) or a challenge. */
+let challenge: Record<string, unknown> | null = null;
+/** What the second step answers next (shifted per call); empty = the session. */
+let secondFactorAnswers: { status: number; body: Record<string, unknown> }[] = [];
+
+const SESSION_BODY = {
+  accessToken: 'header.payload.signature',
+  tokenType: 'Bearer',
+  expiresInSeconds: 900,
+  refreshExpiresInSeconds: 43200,
+  tenant: { id: 't-1', name: 'Priya Spices', gstin: null },
+  user: { id: 'u-1', email: 'x@example.com', role: 'owner', status: 'active', clientId: null, createdAt: '2026-10-09T00:00:00.000Z' },
+  client: null,
+};
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -40,12 +57,21 @@ function stubRouter(): void {
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
     const { pathname } = new URL(request.url);
+    if (request.method.toUpperCase() === 'POST' && pathname.endsWith('/tenants/sign-in/second-factor')) {
+      secondFactorPosts.push((await request.json()) as Record<string, unknown>);
+      const next = secondFactorAnswers.shift();
+      if (next !== undefined) return json(next.status, next.body);
+      return json(200, SESSION_BODY);
+    }
     if (request.method.toUpperCase() === 'POST' && pathname.endsWith('/tenants/sign-in')) {
+      signInHeaders.push(request.headers.get('X-WMS-Second-Factor'));
       if (signInRefusal !== null) return json(signInRefusal.status, signInRefusal);
+      if (challenge !== null) return json(200, challenge);
       return json(200, {
         accessToken: 'header.payload.signature',
         tokenType: 'Bearer',
         expiresInSeconds: 900,
+        refreshExpiresInSeconds: 43200,
         tenant: { id: 't-1', name: 'Priya Spices', gstin: null },
         user: { id: 'u-1', email: 'x@example.com', role: signInClient === null ? 'owner' : 'client', status: 'active', clientId: signInClient?.id ?? null, createdAt: '2026-10-09T00:00:00.000Z' },
         client: signInClient,
@@ -71,6 +97,10 @@ beforeEach(() => {
   signInClient = null;
   signInRefusal = null;
   posts = [];
+  signInHeaders = [];
+  secondFactorPosts = [];
+  challenge = null;
+  secondFactorAnswers = [];
   pushes.length = 0;
   stubRouter();
 });
@@ -181,5 +211,186 @@ describe('LoginForm: where a sign-in lands (story 21-7)', () => {
     expect(pushes).toEqual([]);
     expect(localStorage.getItem('wms-session')).toBeNull();
     expect(container.querySelector('[role="alert"]')!.textContent).toContain("Your company's portal access is suspended.");
+  });
+});
+
+describe('LoginForm: the second step (story 6-1b)', () => {
+  const TOTP = { challenge: 'totp', challengeToken: 'chal.secret', expiresInSeconds: 300 };
+  const ENROLL = {
+    challenge: 'enroll',
+    challengeToken: 'chal.secret',
+    expiresInSeconds: 600,
+    secret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
+    otpauthUri: 'otpauth://totp/WMS%20(Priya)%3Ax%40example.com?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=WMS%20(Priya)',
+    enrolmentCodeRequired: false,
+  };
+
+  async function passwordStep(notice: string | null = null): Promise<HTMLElement> {
+    view = render(<LoginForm initialEmail="x@example.com" notice={notice} />);
+    const { container } = view;
+    setInput(field(container, 'Password'), 'hunter2hunter2');
+    act(() => void container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    return container;
+  }
+
+  function submit(container: HTMLElement): Promise<void> {
+    act(() => void container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    return settle();
+  }
+
+  afterEach(() => {
+    localStorage.removeItem('wms-session');
+  });
+
+  test('the sign-in tells the server this build can do the second step', async () => {
+    await passwordStep();
+    expect(signInHeaders).toEqual(['1']);
+  });
+
+  test('a totp challenge switches in place: email kept, password cleared, step announced, the ended notice hidden, nothing stored', async () => {
+    challenge = TOTP;
+    const container = await passwordStep('An owner reset your two-factor sign-in — sign in and set it up again.');
+    expect(container.textContent).toContain('x@example.com');
+    expect(container.querySelector('input[type="password"]')).toBeNull();
+    expect(container.querySelector('[aria-live="polite"]')!.textContent).toBe('Step 2 of 2: enter the code from your authenticator app.');
+    expect(container.textContent).not.toContain('An owner reset');
+    expect(localStorage.getItem('wms-session')).toBeNull();
+    const code = field(container, 'Authenticator code');
+    expect(code.getAttribute('autocomplete')).toBe('one-time-code');
+    expect(code.getAttribute('inputmode')).toBe('numeric');
+    expect(document.activeElement).toBe(code);
+  });
+
+  test('the right code: the session is written and the page left', async () => {
+    challenge = TOTP;
+    const container = await passwordStep();
+    setInput(field(container, 'Authenticator code'), '123 456');
+    await submit(container);
+    expect(secondFactorPosts).toEqual([{ challengeToken: 'chal.secret', code: '123456' }]);
+    expect(pushes).toEqual(['/settings']);
+    expect(localStorage.getItem('wms-session')).not.toBeNull();
+  });
+
+  test('a wrong code shows the attempts left and stays on the step; "Use a backup code" sends one', async () => {
+    challenge = TOTP;
+    secondFactorAnswers = [{ status: 401, body: { code: 'second-factor-invalid', status: 401, title: 'Wrong code', attemptsLeft: 3 } }];
+    const container = await passwordStep();
+    setInput(field(container, 'Authenticator code'), '000000');
+    await submit(container);
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain('3 attempts left');
+    expect(localStorage.getItem('wms-session')).toBeNull();
+    const toggle = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Use a backup code')!;
+    act(() => toggle.click());
+    const backup = field(container, 'Backup code');
+    expect(backup.getAttribute('autocapitalize')).toBe('characters');
+    setInput(backup, 'abcde-fgh23');
+    await submit(container);
+    expect(secondFactorPosts[1]).toEqual({ challengeToken: 'chal.secret', code: 'ABCDE-FGH23' });
+    expect(pushes).toEqual(['/settings']);
+  });
+
+  test('challenge-ended from the server: back to the password with "Sign in again"', async () => {
+    challenge = TOTP;
+    secondFactorAnswers = [{ status: 401, body: { code: 'challenge-ended', status: 401, title: 'Sign-in step ended' } }];
+    const container = await passwordStep();
+    setInput(field(container, 'Authenticator code'), '123456');
+    await submit(container);
+    expect(container.querySelector('input[type="password"]')).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain('Sign in again.');
+  });
+
+  test('enrolment: the QR code and grouped key, then the backup codes — the session is written only on Continue, after "I\'ve saved these codes"', async () => {
+    challenge = ENROLL;
+    const codes = ['AAAAA-BBBBB', 'CCCCC-DDDDD', 'EEEEE-FFFFF', 'GGGGG-HHHHH', 'IIIII-JJJJJ', 'KKKKK-LLLLL', 'MMMMM-NNNNN', 'OOOOO-PPPPP', 'QQQQQ-RRRRR', 'SSSSS-TTTTT'];
+    secondFactorAnswers = [{ status: 200, body: { ...SESSION_BODY, backupCodes: codes } }];
+    const container = await passwordStep();
+    expect(container.querySelector('[role="img"]')!.getAttribute('aria-label')).toContain('QR code');
+    expect(container.textContent).toContain('JBSW Y3DP EHPK 3PXP');
+    expect(container.textContent).toMatch(/Expires in \d+:\d\d/);
+    expect(container.textContent).not.toContain('Enrolment code');
+    setInput(field(container, 'Code from the app'), '654321');
+    await submit(container);
+    expect(secondFactorPosts).toEqual([{ challengeToken: 'chal.secret', code: '654321' }]);
+    expect(container.querySelector('[data-testid="backup-codes"]')!.textContent).toContain('SSSSS-TTTTT');
+    expect(localStorage.getItem('wms-session')).toBeNull();
+    expect(pushes).toEqual([]);
+    const proceed = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Continue') as HTMLButtonElement;
+    expect(proceed.disabled).toBe(true);
+    const saved = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(container.querySelector(`label[for="${saved.id}"]`)!.textContent).toBe("I've saved these codes");
+    act(() => saved.click());
+    expect(proceed.disabled).toBe(false);
+    act(() => proceed.click());
+    await settle();
+    expect(localStorage.getItem('wms-session')).not.toBeNull();
+    expect(pushes).toEqual(['/settings']);
+  });
+
+  test('the stored expiries count from the arrival of the second step, not from Continue', async () => {
+    challenge = ENROLL;
+    secondFactorAnswers = [{ status: 200, body: { ...SESSION_BODY, backupCodes: ['AAAAA-BBBBB'] } }];
+    const container = await passwordStep();
+    setInput(field(container, 'Code from the app'), '654321');
+    const realNow = Date.now;
+    const arrival = realNow();
+    try {
+      await submit(container);
+      // Ten minutes reading the codes before Continue.
+      Date.now = () => arrival + 10 * 60_000;
+      act(() => (container.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+      const proceed = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Continue')!;
+      act(() => proceed.click());
+      await settle();
+    } finally {
+      Date.now = realNow;
+    }
+    const stored = JSON.parse(localStorage.getItem('wms-session') ?? 'null') as { expiresAt: number; refreshUntil: number } | null;
+    // The clock moved past the access token's life while reading, so the row reads as stored-but-expiring:
+    expect(stored).not.toBeNull();
+    expect(stored!.expiresAt).toBeLessThan(arrival + 900_000 + 5_000);
+    expect(stored!.refreshUntil).toBeLessThan(arrival + 43_200_000 + 5_000);
+  });
+
+  test('an expired enrolment code is answered at the password step with the reset words', async () => {
+    signInRefusal = { code: 'enrolment-code-expired', status: 403, title: 'Enrolment code expired' };
+    const container = await passwordStep();
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain('Ask an owner to reset your two-factor sign-in again.');
+  });
+
+  test('after an owner\'s reset the enrolment code field appears and is sent', async () => {
+    challenge = { ...ENROLL, enrolmentCodeRequired: true };
+    secondFactorAnswers = [{ status: 200, body: { ...SESSION_BODY, backupCodes: ['AAAAA-BBBBB'] } }];
+    const container = await passwordStep();
+    setInput(field(container, 'Enrolment code'), 'K7PQ2MXA');
+    setInput(field(container, 'Code from the app'), '654321');
+    await submit(container);
+    expect(secondFactorPosts).toEqual([{ challengeToken: 'chal.secret', code: '654321', enrolmentCode: 'K7PQ2MXA' }]);
+  });
+
+  test('failed attempts since the last sign-in are shown before going in', async () => {
+    challenge = TOTP;
+    secondFactorAnswers = [{ status: 200, body: { ...SESSION_BODY, secondFactorFailedAttempts: 7 } }];
+    const container = await passwordStep();
+    setInput(field(container, 'Authenticator code'), '123456');
+    await submit(container);
+    expect(container.textContent).toContain('7 failed two-factor attempts since your last sign-in');
+    expect(pushes).toEqual([]);
+    const proceed = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Continue')!;
+    act(() => proceed.click());
+    await settle();
+    expect(pushes).toEqual(['/settings']);
+  });
+
+  test('client-outdated and an unknown challenge both say "Reload this page"; nothing is stored', async () => {
+    signInRefusal = { code: 'client-outdated', status: 409, title: 'Reload required' };
+    let container = await passwordStep();
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain('Reload this page to sign in.');
+    view?.unmount();
+    signInRefusal = null;
+    challenge = { challenge: 'webauthn', challengeToken: 'x', expiresInSeconds: 300 };
+    container = await passwordStep();
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain('Reload this page to sign in.');
+    expect(localStorage.getItem('wms-session')).toBeNull();
   });
 });

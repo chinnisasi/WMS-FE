@@ -117,6 +117,7 @@ import {
   tenancyControllerRetireBin,
   tenancyControllerSetupChecklist,
   tenancyControllerSignIn,
+  tenancyControllerSignInSecondFactor,
   usersControllerAcceptInvite,
   usersControllerInviteUser,
   usersControllerListUsers,
@@ -125,6 +126,12 @@ import {
   usersControllerDeactivateUser,
   usersControllerReactivateUser,
   usersControllerUnlockUser,
+  usersControllerResetSecondFactor,
+  usersControllerSecondFactorBackupCodes,
+  usersControllerSecondFactorConfirm,
+  usersControllerSecondFactorDisable,
+  usersControllerSecondFactorSetup,
+  usersControllerSecondFactorStatus,
   reportingControllerOverview,
   notificationsControllerList,
   notificationsControllerStatus,
@@ -350,6 +357,15 @@ import type {
   SetupChecklistResponse,
   SignInDto,
   SignInResponse,
+  TotpChallengeResponse,
+  EnrollChallengeResponse,
+  SecondFactorSignInDto,
+  SecondFactorSignInResponse,
+  SecondFactorStatusResponse,
+  SecondFactorSetupDto,
+  SecondFactorSetupResponse,
+  BackupCodesResponse,
+  SecondFactorResetResponse,
   SkuListResponse,
   SkuClientCorrectionResponse,
   SkuResponse,
@@ -403,9 +419,13 @@ client.setConfig({
  */
 const retryCopies = new WeakMap<Request, Request>();
 
-/** Story 6-1a — the session routes manage tokens themselves; nothing refreshes around them. */
-function isSessionRoute(url: string): boolean {
-  return /\/tenants\/(sign-in|session\/refresh|session\/sign-out)$/.test(new URL(url).pathname);
+/**
+ * Story 6-1a — the session routes manage tokens themselves; nothing refreshes
+ * around them. Story 6-1b — the second sign-in step is one too: its 401 (a
+ * wrong code) must never sign anyone out or trigger a refresh.
+ */
+export function isSessionRoute(url: string): boolean {
+  return /\/tenants\/(sign-in|sign-in\/second-factor|session\/refresh|session\/sign-out)$/.test(new URL(url).pathname);
 }
 
 client.interceptors.request.use(async (request) => {
@@ -599,9 +619,92 @@ export async function fetchApiRegisterTenant(
   return data;
 }
 
-export async function fetchApiSignIn(body: SignInDto): Promise<SignInResponse> {
+/**
+ * The password step. Story 6-1b — the answer is the session, or a challenge
+ * (narrow with `signInStep`, `lib/second-factor.ts`); `X-WMS-Second-Factor: 1`
+ * tells the server this build can complete the second step (without it the
+ * server answers 409 `client-outdated` rather than a challenge an old bundle
+ * would mistake for a session).
+ */
+export async function fetchApiSignIn(
+  body: SignInDto,
+): Promise<SignInResponse | TotpChallengeResponse | EnrollChallengeResponse> {
   // Story 6-1a — `include`, so the browser keeps the cross-origin refresh cookie.
-  const { data, error } = await tenancyControllerSignIn({ body, credentials: 'include' });
+  const { data, error } = await tenancyControllerSignIn({
+    body,
+    credentials: 'include',
+    headers: { 'X-WMS-Second-Factor': '1' },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 6-1b — the second sign-in step: the code (and, after a reset, the enrolment code) → the session. */
+export async function fetchApiSecondFactor(body: SecondFactorSignInDto): Promise<SecondFactorSignInResponse> {
+  const { data, error } = await tenancyControllerSignInSecondFactor({ body, credentials: 'include' });
+  if (error || !data) {
+    throw unwrapError(error, 401);
+  }
+  return data;
+}
+
+/** Story 6-1b — My account → Security: the caller's two-factor state. */
+export async function fetchApiSecondFactorStatus(tenantId: string): Promise<SecondFactorStatusResponse> {
+  const { data, error } = await usersControllerSecondFactorStatus({ path: { tenantId } });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 6-1b — starts (or replaces) the authenticator: the password when off, a code when on. Not keyed. */
+export async function fetchApiSecondFactorSetup(tenantId: string, body: SecondFactorSetupDto): Promise<SecondFactorSetupResponse> {
+  const { data, error } = await usersControllerSecondFactorSetup({ path: { tenantId }, body });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 6-1b — confirms the new authenticator; answers the ten backup codes once. Not keyed. */
+export async function fetchApiSecondFactorConfirm(tenantId: string, code: string): Promise<BackupCodesResponse> {
+  const { data, error } = await usersControllerSecondFactorConfirm({ path: { tenantId }, body: { code } });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 6-1b — a new set of backup codes (the old set stops working). Not keyed. */
+export async function fetchApiSecondFactorBackupCodes(tenantId: string, code: string): Promise<BackupCodesResponse> {
+  const { data, error } = await usersControllerSecondFactorBackupCodes({ path: { tenantId }, body: { code } });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 6-1b — turns two-factor sign-in off (not for owners). Not keyed. */
+export async function fetchApiSecondFactorDisable(tenantId: string, code: string): Promise<SecondFactorStatusResponse> {
+  const { data, error } = await usersControllerSecondFactorDisable({ path: { tenantId }, body: { code } });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 6-1b — an owner resets a colleague's two-factor sign-in; answers the one-time enrolment code. Keyed. */
+export async function fetchApiResetSecondFactor(
+  tenantId: string,
+  userId: string,
+  idempotencyKey: string,
+): Promise<SecondFactorResetResponse> {
+  const { data, error } = await usersControllerResetSecondFactor({
+    path: { tenantId, userId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
   if (error || !data) {
     throw unwrapError(error, 400);
   }

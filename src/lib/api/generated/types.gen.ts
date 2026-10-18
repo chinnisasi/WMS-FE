@@ -43,11 +43,6 @@ export type TenantRegistrationResponse = {
     owner: OwnerUserResponse;
 };
 
-export type SignInDto = {
-    email: string;
-    password: string;
-};
-
 export type UserResponse = {
     id: string;
     email: string;
@@ -62,6 +57,14 @@ export type UserResponse = {
      * Story 6-1a — sign-in is locked for this email (5 failed attempts from one address) until this instant; on the user list only, null or absent when not locked
      */
     lockedUntil?: string | null;
+    /**
+     * Story 6-1b — the user has two-factor sign-in set up; on the user list only (absent on stored invite / role-change snapshots)
+     */
+    secondFactorEnabled?: boolean;
+    /**
+     * Story 6-1b — an owner reset this user’s two-factor sign-in and they have not set it up again (an enrolment code is outstanding); on the user list only
+     */
+    secondFactorResetPending?: boolean;
 };
 
 export type SessionClientResponse = {
@@ -87,6 +90,80 @@ export type SignInResponse = {
      * Story 21-7 — the client brand of a client-portal user (the portal shell prints its name); null for the tenant’s own staff
      */
     client: SessionClientResponse | null;
+};
+
+export type TotpChallengeResponse = {
+    challenge: 'totp';
+    /**
+     * The one-time token for `POST /tenants/sign-in/second-factor` (no session exists yet)
+     */
+    challengeToken: string;
+    expiresInSeconds: number;
+};
+
+export type EnrollChallengeResponse = {
+    challenge: 'enroll';
+    /**
+     * The one-time token for `POST /tenants/sign-in/second-factor` (no session exists yet)
+     */
+    challengeToken: string;
+    expiresInSeconds: number;
+    /**
+     * The authenticator secret (base32) — the QR code’s fallback. The same one for 24 h, so an app that scanned it keeps working
+     */
+    secret: string;
+    otpauthUri: string;
+    /**
+     * An owner reset this user’s two-factor sign-in: the one-time enrolment code they handed over is needed too
+     */
+    enrolmentCodeRequired: boolean;
+};
+
+export type SignInDto = {
+    email: string;
+    password: string;
+};
+
+export type SecondFactorSignInDto = {
+    /**
+     * The `challengeToken` from the sign-in response
+     */
+    challengeToken: string;
+    /**
+     * A 6-digit code from the authenticator app, or (code step only) a backup code `XXXXX-XXXXX`
+     */
+    code: string;
+    /**
+     * Enrolment after an owner’s reset — the one-time code they handed over
+     */
+    enrolmentCode?: string;
+};
+
+export type SecondFactorSignInResponse = {
+    /**
+     * HS256 session token (15 min), claims: sub + tenant_id (+ client_id for a client-portal user, story 21-7)
+     */
+    accessToken: string;
+    tokenType: string;
+    expiresInSeconds: number;
+    /**
+     * Story 6-1a — seconds until the session can no longer be refreshed (its absolute end). The refresh token itself rides an httpOnly cookie; the client stores this to tell a refreshable session from an ended one.
+     */
+    refreshExpiresInSeconds: number;
+    tenant: TenantResponse;
+    user: UserResponse;
+    /**
+     * Story 21-7 — the client brand of a client-portal user (the portal shell prints its name); null for the tenant’s own staff
+     */
+    client: SessionClientResponse | null;
+    /**
+     * Enrolment only — the ten single-use backup codes, shown this once and never again
+     */
+    backupCodes?: Array<string>;
+    /**
+     * Wrong codes since the last successful sign-in (present only when there were any)
+     */
+    secondFactorFailedAttempts?: number;
 };
 
 export type RefreshResponse = {
@@ -424,6 +501,14 @@ export type UserStatusResponse = {
     inviteExpiresAt?: string;
 };
 
+export type SecondFactorResetResponse = {
+    /**
+     * Hand this to the user in person — they need it to set up again (72 h)
+     */
+    enrolmentCode: string | null;
+    enrolmentCodeExpiresAt: string | null;
+};
+
 export type AcceptInviteDto = {
     /**
      * The one-time invite token from the invite response
@@ -438,6 +523,49 @@ export type AcceptInviteResponse = {
 
 export type MeResponse = {
     user: UserResponse;
+};
+
+export type SecondFactorStatusResponse = {
+    enabled: boolean;
+    enabledAt: string | null;
+    /**
+     * The role must use two-factor sign-in (owners) — it cannot be turned off
+     */
+    required: boolean;
+    backupCodesRemaining: number;
+};
+
+export type SecondFactorSetupDto = {
+    /**
+     * With two-factor sign-in off: the current password
+     */
+    password?: string;
+    /**
+     * With two-factor sign-in on: a current code or a backup code
+     */
+    code?: string;
+};
+
+export type SecondFactorSetupResponse = {
+    /**
+     * The new authenticator secret (base32) — confirm it with a code from the app
+     */
+    secret: string;
+    otpauthUri: string;
+};
+
+export type SecondFactorCodeDto = {
+    /**
+     * A code from the authenticator app (or, where accepted, a backup code)
+     */
+    code: string;
+};
+
+export type BackupCodesResponse = {
+    /**
+     * Ten single-use backup codes `XXXXX-XXXXX` — shown this once
+     */
+    backupCodes: Array<string>;
 };
 
 export type CatalogImportErrorResponse = {
@@ -7970,6 +8098,12 @@ export type TenancyControllerRegisterResponse = TenancyControllerRegisterRespons
 
 export type TenancyControllerSignInData = {
     body: SignInDto;
+    headers?: {
+        /**
+         * Story 6-1b — `1` from a client that can complete the second step
+         */
+        'X-WMS-Second-Factor'?: '1';
+    };
     path?: never;
     query?: never;
     url: '/tenants/sign-in';
@@ -7985,9 +8119,13 @@ export type TenancyControllerSignInErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Invitation not yet accepted (invite-pending), or a client-portal user whose client is not active (client-suspended, story 21-7)
+     * Invitation not yet accepted (invite-pending), a client-portal user whose client is not active (client-suspended, story 21-7), or — story 6-1b — an owner reset this user’s two-factor sign-in and the enrolment code has expired (enrolment-code-expired: ask for another reset; nothing counted)
      */
     403: ProblemDetailsDto;
+    /**
+     * Story 6-1b — the second step is needed and the client did not send `X-WMS-Second-Factor: 1` (client-outdated: "Reload this page to sign in"); nothing was written
+     */
+    409: ProblemDetailsDto;
     /**
      * Too many failed attempts for this email from this address (sign-in-locked; `retryAfterSeconds`)
      */
@@ -8001,10 +8139,48 @@ export type TenancyControllerSignInErrors = {
 export type TenancyControllerSignInError = TenancyControllerSignInErrors[keyof TenancyControllerSignInErrors];
 
 export type TenancyControllerSignInResponses = {
-    200: SignInResponse;
+    200: SignInResponse | TotpChallengeResponse | EnrollChallengeResponse;
 };
 
 export type TenancyControllerSignInResponse = TenancyControllerSignInResponses[keyof TenancyControllerSignInResponses];
+
+export type TenancyControllerSignInSecondFactorData = {
+    body: SecondFactorSignInDto;
+    path?: never;
+    query?: never;
+    url: '/tenants/sign-in/second-factor';
+};
+
+export type TenancyControllerSignInSecondFactorErrors = {
+    /**
+     * Invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Wrong code (second-factor-invalid; `attemptsLeft`), or the challenge is unknown, expired, used, out of attempts, or the account changed (challenge-ended — sign in again)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Too many wrong codes (second-factor-locked; `retryAfterSeconds`, null until an owner unlocks)
+     */
+    423: ProblemDetailsDto;
+    /**
+     * Too many attempts from this address (rate-limited; `retryAfterSeconds`)
+     */
+    429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
+};
+
+export type TenancyControllerSignInSecondFactorError = TenancyControllerSignInSecondFactorErrors[keyof TenancyControllerSignInSecondFactorErrors];
+
+export type TenancyControllerSignInSecondFactorResponses = {
+    200: SecondFactorSignInResponse;
+};
+
+export type TenancyControllerSignInSecondFactorResponse = TenancyControllerSignInSecondFactorResponses[keyof TenancyControllerSignInSecondFactorResponses];
 
 export type TenancyControllerRefreshSessionData = {
     body?: never;
@@ -8905,6 +9081,60 @@ export type UsersControllerUnlockUserResponses = {
 
 export type UsersControllerUnlockUserResponse = UsersControllerUnlockUserResponses[keyof UsersControllerUnlockUserResponses];
 
+export type UsersControllerResetSecondFactorData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/users/{userId}/second-factor/reset';
+};
+
+export type UsersControllerResetSecondFactorErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed userId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks users.role_change (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * User does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Your own account (self-reset), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type UsersControllerResetSecondFactorError = UsersControllerResetSecondFactorErrors[keyof UsersControllerResetSecondFactorErrors];
+
+export type UsersControllerResetSecondFactorResponses = {
+    200: SecondFactorResetResponse;
+};
+
+export type UsersControllerResetSecondFactorResponse = UsersControllerResetSecondFactorResponses[keyof UsersControllerResetSecondFactorResponses];
+
 export type UsersControllerAcceptInviteData = {
     body: AcceptInviteDto;
     headers: {
@@ -8972,6 +9202,257 @@ export type UsersControllerMeResponses = {
 };
 
 export type UsersControllerMeResponse = UsersControllerMeResponses[keyof UsersControllerMeResponses];
+
+export type UsersControllerSecondFactorStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/me/second-factor';
+};
+
+export type UsersControllerSecondFactorStatusErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type UsersControllerSecondFactorStatusError = UsersControllerSecondFactorStatusErrors[keyof UsersControllerSecondFactorStatusErrors];
+
+export type UsersControllerSecondFactorStatusResponses = {
+    200: SecondFactorStatusResponse;
+};
+
+export type UsersControllerSecondFactorStatusResponse = UsersControllerSecondFactorStatusResponses[keyof UsersControllerSecondFactorStatusResponses];
+
+export type UsersControllerSecondFactorSetupData = {
+    body: SecondFactorSetupDto;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/me/second-factor/setup';
+};
+
+export type UsersControllerSecondFactorSetupErrors = {
+    /**
+     * Invalid body, or the proof this state needs is missing (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The factor changed while this ran (second-factor-changed)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Wrong password (password-invalid) or wrong code (second-factor-invalid; `attemptsLeft`) — the session stays
+     */
+    422: ProblemDetailsDto;
+    /**
+     * Too many wrong passwords (sign-in-locked) or codes (second-factor-locked)
+     */
+    423: ProblemDetailsDto;
+    /**
+     * Too many attempts from this address (rate-limited)
+     */
+    429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
+};
+
+export type UsersControllerSecondFactorSetupError = UsersControllerSecondFactorSetupErrors[keyof UsersControllerSecondFactorSetupErrors];
+
+export type UsersControllerSecondFactorSetupResponses = {
+    200: SecondFactorSetupResponse;
+};
+
+export type UsersControllerSecondFactorSetupResponse = UsersControllerSecondFactorSetupResponses[keyof UsersControllerSecondFactorSetupResponses];
+
+export type UsersControllerSecondFactorConfirmData = {
+    body: SecondFactorCodeDto;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/me/second-factor/confirm';
+};
+
+export type UsersControllerSecondFactorConfirmErrors = {
+    /**
+     * Invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No setup in progress, or it expired after 24 h (second-factor-setup-expired), or it changed meanwhile (second-factor-changed)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Wrong code (second-factor-invalid; `attemptsLeft`) — the session stays
+     */
+    422: ProblemDetailsDto;
+    /**
+     * Too many wrong codes (second-factor-locked)
+     */
+    423: ProblemDetailsDto;
+    /**
+     * Too many attempts from this address (rate-limited)
+     */
+    429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
+};
+
+export type UsersControllerSecondFactorConfirmError = UsersControllerSecondFactorConfirmErrors[keyof UsersControllerSecondFactorConfirmErrors];
+
+export type UsersControllerSecondFactorConfirmResponses = {
+    200: BackupCodesResponse;
+};
+
+export type UsersControllerSecondFactorConfirmResponse = UsersControllerSecondFactorConfirmResponses[keyof UsersControllerSecondFactorConfirmResponses];
+
+export type UsersControllerSecondFactorBackupCodesData = {
+    body: SecondFactorCodeDto;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/me/second-factor/backup-codes';
+};
+
+export type UsersControllerSecondFactorBackupCodesErrors = {
+    /**
+     * Invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Two-factor sign-in is off (second-factor-not-enabled), or it changed meanwhile (second-factor-changed)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Wrong code (second-factor-invalid; `attemptsLeft`) — the session stays
+     */
+    422: ProblemDetailsDto;
+    /**
+     * Too many wrong codes (second-factor-locked)
+     */
+    423: ProblemDetailsDto;
+    /**
+     * Too many attempts from this address (rate-limited)
+     */
+    429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
+};
+
+export type UsersControllerSecondFactorBackupCodesError = UsersControllerSecondFactorBackupCodesErrors[keyof UsersControllerSecondFactorBackupCodesErrors];
+
+export type UsersControllerSecondFactorBackupCodesResponses = {
+    200: BackupCodesResponse;
+};
+
+export type UsersControllerSecondFactorBackupCodesResponse = UsersControllerSecondFactorBackupCodesResponses[keyof UsersControllerSecondFactorBackupCodesResponses];
+
+export type UsersControllerSecondFactorDisableData = {
+    body: SecondFactorCodeDto;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/me/second-factor/disable';
+};
+
+export type UsersControllerSecondFactorDisableErrors = {
+    /**
+     * Invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The role requires two-factor sign-in (second-factor-required), it is already off (second-factor-not-enabled), or it changed meanwhile (second-factor-changed)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Wrong code (second-factor-invalid; `attemptsLeft`) — the session stays
+     */
+    422: ProblemDetailsDto;
+    /**
+     * Too many wrong codes (second-factor-locked)
+     */
+    423: ProblemDetailsDto;
+    /**
+     * Too many attempts from this address (rate-limited)
+     */
+    429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
+};
+
+export type UsersControllerSecondFactorDisableError = UsersControllerSecondFactorDisableErrors[keyof UsersControllerSecondFactorDisableErrors];
+
+export type UsersControllerSecondFactorDisableResponses = {
+    200: SecondFactorStatusResponse;
+};
+
+export type UsersControllerSecondFactorDisableResponse = UsersControllerSecondFactorDisableResponses[keyof UsersControllerSecondFactorDisableResponses];
 
 export type CatalogControllerImportCatalogData = {
     body: {

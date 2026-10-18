@@ -18,6 +18,7 @@ import type {
 } from '@/lib/api/generated';
 import type { Session } from '@/lib/auth';
 import { CLIENT_INVOICE_STATUS_LABEL } from '@/lib/client-invoices';
+import { SECOND_FACTOR_ENDED_NOTICE } from '@/lib/second-factor';
 import {
   ASN_STATUS_LABEL,
   MAX_ASN_CODE_LENGTH,
@@ -89,6 +90,8 @@ export const SESSION_ENDED_NOTICE: Readonly<Record<string, string>> = {
   'client-suspended': PORTAL_SUSPENDED_MESSAGE,
   'refresh-reuse': 'Your session was used from somewhere else and was ended for safety — sign in again.',
   legacy: 'Sign-in was upgraded — please sign in again.',
+  // Story 6-1b.
+  ...SECOND_FACTOR_ENDED_NOTICE,
 };
 
 export interface PortalNavItem {
