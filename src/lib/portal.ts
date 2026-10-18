@@ -72,7 +72,8 @@ export function portalShellRoute(
 /** The login page's notice for its query (`portal=suspended`), or null. */
 export function loginNotice(portal: string | undefined, ended?: string): string | null {
   if (portal === 'suspended') return PORTAL_SUSPENDED_MESSAGE;
-  return ended === undefined ? null : (SESSION_ENDED_NOTICE[ended] ?? null);
+  // Own keys only: `?ended=constructor` must not read an Object.prototype member.
+  return ended !== undefined && Object.hasOwn(SESSION_ENDED_NOTICE, ended) ? SESSION_ENDED_NOTICE[ended]! : null;
 }
 
 /**
@@ -81,7 +82,7 @@ export function loginNotice(portal: string | undefined, ended?: string): string 
  */
 export const SESSION_ENDED_NOTICE: Readonly<Record<string, string>> = {
   idle: 'You were signed out after 2 hours of inactivity.',
-  absolute: 'Your session reached its 12-hour limit — sign in again.',
+  absolute: 'Your session reached its time limit — sign in again.',
   'signed-out': 'You were signed out.',
   deactivated: 'Your account has been deactivated. Ask your administrator if you think this is a mistake.',
   'role-changed': 'Your role changed — sign in again to continue.',

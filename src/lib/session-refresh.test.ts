@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import { restoreGlobals, stubGlobal } from './test/globals';
-import { fetchApiListWarehouses } from './api/client';
+import { fetchApiListWarehouses, fetchApiSignIn } from './api/client';
 import {
   accessTokenExpired,
   clearSession,
@@ -24,7 +24,7 @@ import { refreshAccessToken, signOutEverywhere } from './session-refresh';
 
 let store: Map<string, string>;
 let sessionStore: Map<string, string>;
-let calls: { url: string; method: string; auth: string | null; key: string | null; credentials: string | undefined }[];
+let calls: { url: string; method: string; auth: string | null; key: string | null; session: string | null; credentials: string | undefined }[];
 
 const TENANT = '0198f7a2-1b3c-7d4e-8f90-112233445566';
 
@@ -52,7 +52,8 @@ function scriptFetch(responses: Array<(request: Request) => Response>): void {
       method: request.method,
       auth: request.headers.get('Authorization'),
       key: request.headers.get('Idempotency-Key'),
-      credentials: init?.credentials ?? (input instanceof Request ? undefined : undefined),
+      session: request.headers.get('X-WMS-Session'),
+      credentials: init?.credentials ?? (input instanceof Request ? input.credentials : undefined),
     });
     const next = responses[index] ?? responses[responses.length - 1]!;
     index += 1;
@@ -203,5 +204,58 @@ describe('the API client around the session', () => {
     }) as unknown as typeof fetch);
     await signOutEverywhere();
     expect(readSession()).toBeNull();
+  });
+});
+
+describe('code review additions', () => {
+  test('refresh and sign-out send credentials: include and X-WMS-Session: 1; sign-in sends credentials: include', async () => {
+    writeSession(session({ expiresAt: Date.now() - 1_000 }));
+    scriptFetch([() => json(200, REFRESHED)]);
+    await refreshAccessToken();
+    expect(calls[0]).toMatchObject({ credentials: 'include', session: '1', method: 'POST' });
+
+    scriptFetch([() => new Response(null, { status: 204 })]);
+    calls = [];
+    await signOutEverywhere();
+    expect(calls[0]).toMatchObject({ credentials: 'include', session: '1' });
+
+    calls = [];
+    scriptFetch([
+      () =>
+        json(200, {
+          accessToken: 't',
+          tokenType: 'Bearer',
+          expiresInSeconds: 900,
+          refreshExpiresInSeconds: 43200,
+          tenant: { id: TENANT, name: 'x', gstin: null },
+          user: { id: 'u', email: 'e@example.com', role: 'owner', status: 'active', clientId: null, createdAt: 'x' },
+          client: null,
+        }),
+    ]);
+    await fetchApiSignIn({ email: 'e@example.com', password: 'p' });
+    expect(calls[0]!.credentials).toBe('include');
+  });
+
+  test('a retried request that answers 401 session-ended still signs out with the reason', async () => {
+    writeSession(session());
+    scriptFetch([
+      () => json(401, { code: 'token-expired', status: 401, title: 'x' }),
+      () => json(200, REFRESHED),
+      () => json(401, { code: 'session-ended', reason: 'deactivated', status: 401, title: 'x' }),
+    ]);
+    await expect(fetchApiListWarehouses(TENANT)).rejects.toBeDefined();
+    expect(readSession()).toBeNull();
+    expect(signedOutLoginHref()).toBe('/login?ended=deactivated');
+  });
+
+  test('a garbled 200 refresh keeps the session and reports failure (never throws)', async () => {
+    writeSession(session({ expiresAt: Date.now() - 1_000 }));
+    scriptFetch([() => new Response('<html>proxy</html>', { status: 200 })]);
+    expect(await refreshAccessToken()).toBe(false);
+    expect(readSession()).not.toBeNull();
+  });
+
+  test('an ?ended= value naming an Object.prototype member reads as no notice', () => {
+    for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) expect(loginNotice(undefined, name)).toBeNull();
   });
 });

@@ -445,14 +445,25 @@ client.interceptors.response.use(async (response, request) => {
       const session = readSession();
       if (session !== null) {
         copy.headers.set('Authorization', `Bearer ${session.token}`);
-        return fetch(copy);
+        const retried = await fetch(copy);
+        // Code review — the retry's own 401 (the session ended between the
+        // refresh and the retry) is handled like any other.
+        if (retried.status === 401) await signOutFrom(retried);
+        return retried;
       }
     }
     return response;
   }
-  clearSession(body.code === 'session-ended' && typeof body.reason === 'string' ? body.reason : undefined);
+  await signOutFrom(response, body);
   return response;
 });
+
+/** A 401 that is not `token-expired`: clear the session, carrying the server's `reason` when it ended one. */
+async function signOutFrom(response: Response, parsed?: { code?: unknown; reason?: unknown }): Promise<void> {
+  const body = parsed ?? ((await response.clone().json().catch(() => ({}))) as { code?: unknown; reason?: unknown });
+  if (body.code === 'token-expired') return;
+  clearSession(body.code === 'session-ended' && typeof body.reason === 'string' ? body.reason : undefined);
+}
 
 export { client };
 

@@ -21,7 +21,7 @@ export default async function LoginPage({
       <header className="flex flex-col gap-1">
         <h1 className="text-lg font-semibold">Sign in</h1>
         <p className="text-sm text-(--muted-foreground)">
-          You stay signed in while you work. After 2 hours without activity, or 12 hours in all, you’ll be asked to sign in again.
+          You stay signed in while you work. After 2 hours without activity, or when your session reaches its time limit, you’ll be asked to sign in again.
         </p>
       </header>
       {notice !== null && <FeedbackBanner tone="rejected" word="Signed out" reason={notice} />}

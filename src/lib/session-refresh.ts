@@ -63,7 +63,14 @@ async function runRefresh(tokenBefore: string | null): Promise<boolean> {
     return false;
   }
   if (response.ok) {
-    const body = (await response.json()) as RefreshBody;
+    let body: RefreshBody;
+    try {
+      body = (await response.json()) as RefreshBody;
+    } catch {
+      // A garbled 200 (a proxy page): keep the session; the request fails on its own.
+      return false;
+    }
+    if (typeof body.accessToken !== 'string' || typeof body.expiresInSeconds !== 'number') return false;
     const latest = readSession() ?? current;
     const now = Date.now();
     writeSession({
