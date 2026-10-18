@@ -61,6 +61,10 @@ let clientsFail = false;
 let statusFailures = 0;
 /** Story 21-10 — when set, a status PATCH waits for this promise before answering. */
 let statusGate: Promise<void> | null = null;
+/** Story 1-2a — the contacts the GET answers (and the writes change). */
+let contactRows: { id: string; isPrimary: boolean; [key: string]: unknown }[] = [];
+/** Story 1-2a — when set, the next departure answers 409 with these blockers. */
+let departBlockers: unknown[] | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -91,6 +95,11 @@ function stubRouter(): void {
     }
     if (method === 'PATCH' && pathname.endsWith('/status')) {
       if (statusGate !== null) await statusGate;
+      if (departBlockers !== null && (body as { status: string }).status === 'departed') {
+        const blockers = departBlockers;
+        departBlockers = null;
+        return json(409, { code: 'client-not-wound-down', title: 'x', status: 409, detail: 'Client cannot depart while work remains', blockers });
+      }
       if (statusFailures > 0) {
         statusFailures -= 1;
         return json(503, { code: 'unavailable', title: 'Down', status: 503, detail: 'Try again.' });
@@ -99,6 +108,33 @@ function stubRouter(): void {
       const status = (body as { status: string }).status;
       clientRows = clientRows.map((row) => ((row as { id: string }).id === id ? { ...(row as object), status } : row));
       return json(200, { client: clientRows.find((row) => (row as { id: string }).id === id) });
+    }
+    // Story 1-2a — contacts and addresses.
+    if (method === 'GET' && pathname.endsWith('/contacts')) {
+      return json(200, { items: contactRows });
+    }
+    if (method === 'POST' && pathname.endsWith('/contacts')) {
+      const sent = body as { name: string; email: string; phone: string | null; roles: string[] };
+      const contact = { id: `k-${contactRows.length + 1}`, clientId: 'c-acme', ...sent, isPrimary: contactRows.length === 0, createdAt: '', updatedAt: '' };
+      contactRows = [...contactRows, contact];
+      return json(201, { contact });
+    }
+    if (method === 'PATCH' && pathname.includes('/contacts/')) {
+      const id = pathname.split('/').at(-1);
+      const patch = body as { isPrimary?: boolean };
+      contactRows = contactRows.map((row) =>
+        patch.isPrimary === true ? { ...row, isPrimary: row.id === id } : row.id === id ? { ...row, ...(body as object) } : row,
+      );
+      return json(200, { contact: contactRows.find((row) => row.id === id) });
+    }
+    if (method === 'DELETE' && pathname.includes('/contacts/')) {
+      const id = pathname.split('/').at(-1);
+      const removed = contactRows.find((row) => row.id === id);
+      contactRows = contactRows.filter((row) => row.id !== id);
+      return json(200, { contact: removed });
+    }
+    if (method === 'PATCH' && pathname.endsWith('/addresses')) {
+      return json(200, { client: { ...ACME, status: 'active', registeredAddress: null, returnAddress: null } });
     }
     if (method === 'PATCH' && pathname.endsWith('/tax-details')) {
       return json(200, { client: { ...ACME, status: 'active' } });
@@ -119,6 +155,8 @@ beforeEach(() => {
   clientsFail = false;
   statusFailures = 0;
   statusGate = null;
+  contactRows = [];
+  departBlockers = null;
   stubRouter();
 });
 
@@ -261,17 +299,19 @@ describe('ClientsCard', () => {
       await settle();
     }
 
-    test('the labels render; an owner sees Suspend on an active brand, Reactivate on a suspended one, nothing on self or a departed one', async () => {
+    // Story 1-2a changed this pin: a departed brand now offers Reactivate,
+    // and Depart joins Suspend (active) and Reactivate (suspended).
+    test('the labels render; an owner sees Suspend + Depart on an active brand, Reactivate + Depart on a suspended one, Reactivate on a departed one, nothing on self', async () => {
       clientRows = [SELF, ACME, GLOBEX, GONE];
       writeSession(session('owner'));
       view = render(<ClientsCard />);
       await settle();
       const statusCells = [...view.container.querySelectorAll('tbody tr')].map((row) => row.querySelectorAll('td')[2]?.textContent);
       expect(statusCells).toEqual(['Active', 'Suspended', 'Active', 'Departed']);
-      expect(buttons(view.container, 'Suspend')).toHaveLength(1);
-      expect(buttons(view.container, 'Suspend')[0]!.getAttribute('aria-label')).toBe('Suspend GLOBEX');
-      expect(buttons(view.container, 'Reactivate')).toHaveLength(1);
-      expect(buttons(view.container, 'Reactivate')[0]!.getAttribute('aria-label')).toBe('Reactivate ACME');
+      const labels = (word: string) => buttons(view!.container, word).map((b) => b.getAttribute('aria-label'));
+      expect(labels('Suspend')).toEqual(['Suspend GLOBEX']);
+      expect(labels('Reactivate')).toEqual(['Reactivate ACME', 'Reactivate GONE']);
+      expect(labels('Depart')).toEqual(['Depart ACME', 'Depart GLOBEX']);
     });
 
     test('Suspend confirms, PATCHes {status} with an Idempotency-Key, reloads the list; Reactivate right after uses a fresh key', async () => {
@@ -372,6 +412,183 @@ describe('ClientsCard', () => {
     });
   });
 
+  describe('story 1-2a: departure, contacts, addresses', () => {
+    const GLOBEX = { ...ACME, id: 'c-globex', code: 'GLOBEX', name: 'Globex Ltd', status: 'active' };
+    const GONE = { ...ACME, id: 'c-gone', code: 'GONE', name: 'Gone Brand', status: 'departed' };
+
+    async function press(label: string, index = 0): Promise<void> {
+      await act(async () => {
+        buttons(view!.container, label)[index]!.click();
+      });
+      await settle();
+    }
+    async function pressLabelled(ariaLabel: string): Promise<void> {
+      await act(async () => {
+        (view!.container.querySelector(`button[aria-label="${ariaLabel}"]`) as HTMLButtonElement).click();
+      });
+      await settle();
+    }
+    const rowButtons = (code: string) => {
+      const row = [...view!.container.querySelectorAll('tbody tr')].find((tr) => tr.querySelector('td')?.textContent === code)!;
+      return [...row.querySelectorAll('button')].map((b) => b.textContent);
+    };
+
+    test('the self row offers only Contacts and Addresses; a departed row Reactivate, Rename, Tax details, Contacts, Addresses', async () => {
+      clientRows = [SELF, GLOBEX, GONE];
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      expect(rowButtons('self')).toEqual(['Contacts', 'Addresses']);
+      expect(rowButtons('GONE')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses']);
+      expect(rowButtons('GLOBEX')).toEqual(['Rename', 'Tax details', 'Contacts', 'Addresses', 'Suspend', 'Depart']);
+    });
+
+    test('a refused departure lists every blocker in an alert under the confirm, which stays open; the retry reuses the key and departs', async () => {
+      clientRows = [SELF, GLOBEX];
+      departBlockers = [
+        { kind: 'stock', count: 4, codes: ['A', 'B', 'C', 'D'] },
+        { kind: 'open-orders', count: 3, codes: ['SO-104', 'SO-109'] },
+        { kind: 'future-kind', count: 1 },
+      ];
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await press('Depart');
+      const confirm = view.container.querySelector('[role="group"][aria-label="Confirm depart"]')!;
+      expect(confirm.textContent).toContain('Depart Globex Ltd? It takes no new work from now on');
+      await press('Depart GLOBEX');
+      const alert = confirm.querySelector('[role="alert"]')!;
+      expect([...alert.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+        'Stock on hand in 4 SKUs: A, B, C, D',
+        '3 open orders: SO-104, SO-109 and 1 more',
+        '1 other open item (future-kind)',
+      ]);
+      expect(view.container.querySelector('[aria-label="Confirm depart"]')).not.toBeNull();
+      await press('Depart GLOBEX');
+      const departs = requests.filter((r) => r.method === 'PATCH' && r.pathname.endsWith('/status'));
+      expect(departs.map((r) => r.body)).toEqual([{ status: 'departed' }, { status: 'departed' }]);
+      expect(departs[1]!.key).toBe(departs[0]!.key);
+      expect(view.container.textContent).toContain('Globex Ltd has departed — it takes no new work, and its history stays.');
+      expect(rowButtons('GLOBEX')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses']);
+    });
+
+    test('Contacts: any staff session reads the list, the owner adds (roles as checkboxes), makes one primary and removes one', async () => {
+      contactRows = [
+        { id: 'k-1', clientId: 'c-acme', name: 'Asha', email: 'asha@acme.example', phone: null, roles: ['operations'], isPrimary: true, createdAt: '', updatedAt: '' },
+      ];
+      writeSession(session('operator'));
+      view = render(<ClientsCard />);
+      await settle();
+      await pressLabelled('Contacts of ACME');
+      const panel = () => view!.container.querySelector('section[aria-labelledby]')!;
+      expect(panel().textContent).toContain('Contacts — ACME');
+      expect(panel().textContent).toContain('asha@acme.example · Operations');
+      expect(buttons(view.container, 'Add contact')).toHaveLength(0);
+      expect(buttons(view.container, 'Edit')).toHaveLength(0);
+      view.unmount();
+
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await pressLabelled('Contacts of ACME');
+      // Focus moved to the panel's heading, which names the client code.
+      expect(document.activeElement?.textContent).toBe('Contacts — ACME');
+      await press('Add contact');
+      const form = view.container.querySelector('form[aria-label="Add contact for ACME"]')!;
+      const [name, email, phone] = [...form.querySelectorAll('input:not([type="checkbox"])')] as HTMLInputElement[];
+      setInput(name!, ' Ravi ');
+      setInput(email!, ' Ravi@Acme.Example ');
+      setInput(phone!, '');
+      const fieldset = form.querySelector('fieldset')!;
+      expect(fieldset.querySelector('legend')?.textContent).toContain('Roles');
+      const boxes = [...fieldset.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+      await act(async () => {
+        boxes[2]!.click(); // returns
+        boxes[1]!.click(); // billing
+      });
+      await act(async () => {
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+      await settle();
+      const post = requests.find((r) => r.method === 'POST' && r.pathname.endsWith('/contacts'))!;
+      expect(post.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-acme/contacts`);
+      expect(post.body).toEqual({ name: 'Ravi', email: 'ravi@acme.example', phone: null, roles: ['billing', 'returns'] });
+      expect(post.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(view.container.textContent).toContain('Ravi added');
+
+      await pressLabelled('Make Ravi primary');
+      // The confirmation's own button (the row's carries the same words).
+      await act(async () => {
+        (view!.container.querySelector('[aria-label="Confirm make primary"] button') as HTMLButtonElement).click();
+      });
+      await settle();
+      const primary = requests.find((r) => r.method === 'PATCH' && r.pathname.includes('/contacts/'))!;
+      expect(primary.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-acme/contacts/k-2`);
+      expect(primary.body).toEqual({ isPrimary: true });
+
+      await pressLabelled('Remove Asha');
+      await press('Remove contact');
+      const removed = requests.find((r) => r.method === 'DELETE')!;
+      expect(removed.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-acme/contacts/k-1`);
+      expect(removed.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(view.container.textContent).toContain('Asha removed');
+    });
+
+    test('opening another panel over a dirty contact draft asks first; Keep editing stays, Discard switches', async () => {
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await pressLabelled('Contacts of ACME');
+      await press('Add contact');
+      const form = view.container.querySelector('form[aria-label="Add contact for ACME"]')!;
+      setInput(form.querySelector('input') as HTMLInputElement, 'Half typed');
+      await pressLabelled('Addresses of ACME');
+      expect(view.container.querySelector('[aria-label="Discard unsaved changes"]')).not.toBeNull();
+      await press('Keep editing');
+      expect(view.container.querySelector('form[aria-label="Add contact for ACME"]')).not.toBeNull();
+      await pressLabelled('Addresses of ACME');
+      await press('Discard');
+      expect(view.container.querySelector('form[aria-label="Add contact for ACME"]')).toBeNull();
+      expect(view.container.textContent).toContain('Addresses — ACME');
+    });
+
+    test('Addresses: saving a group sends only that group; Clear asks, then sends null', async () => {
+      clientRows = [SELF, { ...ACME, returnAddress: { contactName: 'Desk', phone: '1', line1: 'L1', city: 'Pune', state: 'Maharashtra', pincode: '411001' }, registeredAddress: null }];
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await pressLabelled('Addresses of ACME');
+      const form = view.container.querySelector('form[aria-label="Registered address of ACME"]')!;
+      const [line1, , city, pincode] = [...form.querySelectorAll('input')] as HTMLInputElement[];
+      setInput(line1!, '4th Floor');
+      setInput(city!, 'Mumbai');
+      setInput(pincode!, '400001');
+      const state = form.querySelector('select') as HTMLSelectElement;
+      await act(async () => {
+        state.value = '27';
+        state.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await act(async () => {
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+      await settle();
+      const saved = requests.find((r) => r.method === 'PATCH' && r.pathname.endsWith('/addresses'))!;
+      expect(saved.body).toEqual({ registered: { line1: '4th Floor', city: 'Mumbai', stateCode: '27', pincode: '400001' } });
+      expect(saved.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+      view.unmount();
+
+      requests = [];
+      view = render(<ClientsCard />);
+      await settle();
+      await pressLabelled('Addresses of ACME');
+      await press('Clear');
+      expect(requests.some((r) => r.method === 'PATCH')).toBe(false);
+      await press('Clear return address');
+      const cleared = requests.find((r) => r.method === 'PATCH' && r.pathname.endsWith('/addresses'))!;
+      expect(cleared.body).toEqual({ return: null });
+    });
+  });
+
   test('a reserved code is refused client-side and nothing is sent', async () => {
     writeSession(session('owner'));
     view = render(<ClientsCard />);
@@ -415,6 +632,21 @@ describe('ImportCatalogCard — the client field', () => {
       'Choose the client these SKUs belong to',
       'Priya Spices (your company)',
       'ACME — Acme Foods',
+    ]);
+  });
+
+  // Story 1-2a — the gate counts every client; only the options drop a
+  // departed one: self + one departed brand still asks (never a forced 400).
+  test('a departed client is not offered, yet still makes the picker required', async () => {
+    clientRows = [SELF, { ...ACME, status: 'departed' }];
+    writeSession(session('owner'));
+    view = render(<ImportCatalogCard />);
+    await settle();
+    const select = view.container.querySelector('select[aria-label="Client"]') as HTMLSelectElement;
+    expect(select.required).toBe(true);
+    expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual([
+      'Choose the client these SKUs belong to',
+      'Priya Spices (your company)',
     ]);
   });
 });

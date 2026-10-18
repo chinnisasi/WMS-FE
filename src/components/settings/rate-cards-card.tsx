@@ -46,6 +46,7 @@ import { DataTable, type DataTableColumn } from '@/components/data-table/data-ta
 import { ReadFailure } from '@/components/outbound/shell';
 import { ClientUsage } from '@/components/settings/client-usage';
 import { ConfirmRow } from '@/components/settings/confirm-row';
+import { clientTakesWork } from '@/lib/clients';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -104,7 +105,10 @@ function RateCardsCardSessioned() {
     () => undefined,
   );
   const canManage = roleHasCapability(role, 'rates.manage');
-  const priced = clients.state === 'ready' ? pricedClients(clients.data) : [];
+  // Story 1-2a — the draft picker offers only clients that take work: a
+  // departed client gets no new card (the server refuses its drafts). Its
+  // invoices still list it (`pricedClients` alone, client-invoices.tsx).
+  const priced = clients.state === 'ready' ? pricedClients(clients.data).filter(clientTakesWork) : [];
   const [picked, setPicked] = useState<string | null>(null);
   // Keyed derivation (IMPLEMENTATION-GUIDE §1.5): a pick that no longer
   // names a priced client falls back to the first, in the same render.

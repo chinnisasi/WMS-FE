@@ -156,6 +156,11 @@ import {
   rateCardsControllerReplaceLines,
   clientsControllerUpdateClientStatus,
   clientsControllerUpdateTaxDetails,
+  clientsControllerUpdateAddresses,
+  clientsControllerListContacts,
+  clientsControllerAddContact,
+  clientsControllerEditContact,
+  clientsControllerRemoveContact,
   clientInvoicesControllerDiscard,
   clientInvoicesControllerDispute,
   clientInvoicesControllerGet,
@@ -231,6 +236,10 @@ import type {
   IssueClientInvoiceResponse,
   PrepareClientInvoicesResponse,
   UpdateClientStatusDto,
+  UpdateClientAddressesDto,
+  ClientContactDto,
+  CreateClientContactDto,
+  UpdateClientContactDto,
   UpdateClientTaxDetailsDto,
   AcceptInviteDto,
   AcceptInviteResponse,
@@ -1074,6 +1083,97 @@ export async function fetchApiUpdateClientStatus(
     throw unwrapError(error, 400);
   }
   return data.client;
+}
+
+/**
+ * Story 1-2a — set a client's registered and return addresses (owner-only).
+ * Each group: omitted is unchanged, `null` clears it, a value replaces it.
+ */
+export async function fetchApiUpdateClientAddresses(
+  tenantId: string,
+  clientId: string,
+  body: UpdateClientAddressesDto,
+  idempotencyKey: string,
+): Promise<ClientDto> {
+  const { data, error } = await clientsControllerUpdateAddresses({
+    path: { tenantId, clientId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.client;
+}
+
+/** Story 1-2a — a client's contacts, the primary first (any staff session). */
+export async function fetchApiListClientContacts(
+  tenantId: string,
+  clientId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ClientContactDto[]> {
+  const { data, error } = await clientsControllerListContacts({
+    path: { tenantId, clientId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.items;
+}
+
+/** Story 1-2a — add a contact (owner-only); the first becomes primary. */
+export async function fetchApiAddClientContact(
+  tenantId: string,
+  clientId: string,
+  body: CreateClientContactDto,
+  idempotencyKey: string,
+): Promise<ClientContactDto> {
+  const { data, error } = await clientsControllerAddContact({
+    path: { tenantId, clientId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.contact;
+}
+
+/** Story 1-2a — edit a contact (owner-only); `isPrimary: true` makes it the primary. */
+export async function fetchApiEditClientContact(
+  tenantId: string,
+  clientId: string,
+  contactId: string,
+  body: UpdateClientContactDto,
+  idempotencyKey: string,
+): Promise<ClientContactDto> {
+  const { data, error } = await clientsControllerEditContact({
+    path: { tenantId, clientId, contactId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.contact;
+}
+
+/** Story 1-2a — remove a contact (owner-only); answers the removed contact. */
+export async function fetchApiRemoveClientContact(
+  tenantId: string,
+  clientId: string,
+  contactId: string,
+  idempotencyKey: string,
+): Promise<ClientContactDto> {
+  const { data, error } = await clientsControllerRemoveContact({
+    path: { tenantId, clientId, contactId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.contact;
 }
 
 /* ------------------------------------------------------------------ */

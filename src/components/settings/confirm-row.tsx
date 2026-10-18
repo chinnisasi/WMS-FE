@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 
 import { readSession } from '@/lib/auth';
 import { ulid } from '@/lib/ulid';
@@ -26,6 +26,12 @@ const primaryButtonClass =
  * `run(key, tenantId)` performs the request and resolves with whatever `onDone`
  * needs; a thrown error is worded by `reason(error)` and handed to
  * `onRejected`.
+ *
+ * Story 1-2a — an optional `detail(error)`: a refusal that carries structured
+ * content a string cannot (the departure's blocker list) renders it here,
+ * under the confirmation, in a `role="alert"` region, and the row stays open
+ * for a retry (`onRejected` is not called for it). `null` falls back to
+ * `onRejected`.
  */
 export function ConfirmRow<T>({
   question,
@@ -37,6 +43,7 @@ export function ConfirmRow<T>({
   onRejected,
   onClose,
   keepLabel = 'Keep',
+  detail,
 }: {
   question: string;
   confirmLabel: string;
@@ -48,8 +55,10 @@ export function ConfirmRow<T>({
   onRejected: (reason: string) => void;
   onClose: () => void;
   keepLabel?: string;
+  detail?: (error: unknown) => ReactNode | null;
 }) {
   const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState<ReactNode | null>(null);
   const keyRef = useRef<string | null>(null);
   const inFlight = useRef(false);
 
@@ -60,11 +69,17 @@ export function ConfirmRow<T>({
     inFlight.current = true;
     setBusy(true);
     keyRef.current ??= ulid();
+    setShown(null);
     try {
       const result = await run(keyRef.current, session.tenant.id);
       onDone(result);
     } catch (error) {
-      onRejected(reason(error));
+      const structured = detail === undefined ? null : detail(error);
+      if (structured !== null) {
+        setShown(structured);
+      } else {
+        onRejected(reason(error));
+      }
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -81,6 +96,11 @@ export function ConfirmRow<T>({
       <button type="button" disabled={busy} onClick={onClose} className={rowButtonClass}>
         {keepLabel}
       </button>
+      {shown !== null ? (
+        <div role="alert" className="w-full text-sm">
+          {shown}
+        </div>
+      ) : null}
     </div>
   );
 }

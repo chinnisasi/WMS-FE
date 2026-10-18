@@ -2,6 +2,7 @@ import { ApiProblem } from '@/lib/api/client';
 import type { AddressDto, OrderDto, OrderEntryDto, OrderLineDto } from '@/lib/api/generated';
 import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 import { parseRupees } from '@/lib/rupees';
+import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 
 /**
  * Pure copy and derivation for the Outbound orders surface (story 4.2b) —
@@ -349,6 +350,9 @@ export function createReason(error: unknown): string {
       // server names the client codes the lines (or kit components) span.
       case 'mixed-client':
         return error.detail ?? 'These SKUs belong to more than one client — an order is for one client; split it.';
+      // Story 1-2a — the order's client has departed (no new orders).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       case 'conflict':
         return 'The same submission is still in flight — retry to read the settled result.';
       case 'reservation-store-unavailable':
@@ -618,7 +622,7 @@ const PINCODE_RE = /^\d{6}$/;
  */
 export function parseDestinationFields(
   fields: DestinationFields,
-  label: 'destination' | 'origin' = 'destination',
+  label: 'destination' | 'origin' | 'return address' = 'destination',
 ): ParsedDestination {
   const trimmed = {
     contactName: fields.contactName.trim(),

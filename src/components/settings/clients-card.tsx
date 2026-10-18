@@ -12,14 +12,22 @@ import type { ClientDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
   BILLING_STATE_OPTIONS,
+  DEPARTURE_BLOCKED_LEAD,
   clientLabel,
   clientNameProblem,
   clientReason,
   clientStatusAction,
+  clientStatusActionLabel,
+  clientStatusConfirmLabel,
   clientStatusLabel,
   clientStatusQuestion,
+  clientStatusReasonAction,
+  clientStatusRefusedWord,
   clientStatusSuccess,
   clientStatusTarget,
+  clientStatusWord,
+  departureBlockerLine,
+  departureBlockers,
   notifyClientsChanged,
   parseClientDraft,
   parseTaxDetailsDraft,
@@ -39,6 +47,8 @@ import { FeedbackBanner } from '@/components/feedback/banner';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { ReadFailure } from '@/components/outbound/shell';
 import { ConfirmRow } from '@/components/settings/confirm-row';
+import { ClientContactsPanel } from '@/components/settings/client-contacts';
+import { ClientAddressesPanel } from '@/components/settings/client-addresses';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -50,20 +60,37 @@ type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } |
 
 /**
  * The one open panel below the table (story 21-10 folded the rename and
- * tax-details states into it): opening one closes any other.
+ * tax-details states into it; story 1-2a adds contacts and addresses, and
+ * depart beside suspend/reactivate): opening one closes any other — after
+ * asking, when the open one holds an unsaved draft.
  */
 type Panel =
   | { kind: 'rename'; client: ClientDto }
   | { kind: 'tax'; client: ClientDto }
+  | { kind: 'contacts'; client: ClientDto }
+  | { kind: 'addresses'; client: ClientDto }
   | { kind: ClientStatusAction; client: ClientDto };
+
+/** The panel's name in the discard question. */
+function panelName(panel: Panel): string {
+  switch (panel.kind) {
+    case 'contacts':
+      return `the contact for ${panel.client.code}`;
+    case 'addresses':
+      return `${panel.client.code}'s addresses`;
+    default:
+      return panel.client.code;
+  }
+}
 
 /**
  * The clients card (story 21-2b) — the client brands this tenant holds goods
- * for. Every member reads the list (status included); an owner
- * (`clients.manage`) registers a client, renames one, and (story 21-10)
- * suspends or reactivates one. The tenant's own
- * `self` client is shown as the company itself and is never renamed here —
- * its name mirrors the tenant's.
+ * for. Every member reads the list (status included) and (story 1-2a) a
+ * client's contacts and addresses; an owner (`clients.manage`) registers a
+ * client, renames one, edits its contacts and addresses, and (story 21-10,
+ * 1-2a) suspends, departs or reactivates one. The tenant's own `self` client
+ * is shown as the company itself; its row offers only Contacts and
+ * Addresses — its name mirrors the tenant's and it never changes status.
  *
  * Gating copies `sku-table.tsx`: the role is read through the session
  * subscription, so a `/me` role rewrite re-renders the affordances.
@@ -104,6 +131,10 @@ function ClientsCardSessioned() {
   const canInvoice = roleHasCapability(role, 'billing.invoice');
   const [panel, setPanel] = useState<Panel | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  // Story 1-2a — an unsaved draft in the open panel, and the panel asked for
+  // over it (the discard question shows while it is set).
+  const dirtyRef = useRef(false);
+  const [pending, setPending] = useState<Panel | null>(null);
   // The panel as it is NOW — a status response that lands after the owner
   // opened another panel must neither close nor overwrite it.
   const panelRef = useRef<Panel | null>(null);
@@ -112,10 +143,28 @@ function ClientsCardSessioned() {
   }, [panel]);
   const stillOpen = (kind: Panel['kind'], clientId: string) =>
     panelRef.current?.kind === kind && panelRef.current.client.id === clientId;
-  const open = (next: Panel) => {
+  const show = (next: Panel | null) => {
+    dirtyRef.current = false;
+    setPending(null);
     setPanel(next);
     setOutcome(null);
   };
+  const open = (next: Panel) => {
+    if (panel !== null && dirtyRef.current && !(panel.kind === next.kind && panel.client.id === next.client.id)) {
+      setPending(next);
+      return;
+    }
+    show(next);
+  };
+  const onDirtyChange = (dirty: boolean) => {
+    dirtyRef.current = dirty;
+  };
+
+  const rowButton = (label: string, ariaLabel: string, next: Panel) => (
+    <button key={label} type="button" aria-label={ariaLabel} onClick={() => open(next)} className={rowButtonClass}>
+      {label}
+    </button>
+  );
 
   const columns: readonly DataTableColumn<ClientDto>[] = [
     { key: 'code', header: 'Code', render: (client) => <span className="font-mono">{client.code}</span> },
@@ -123,43 +172,30 @@ function ClientsCardSessioned() {
     { key: 'status', header: 'Status', render: (client) => clientStatusLabel(client.status) },
     // Story 21-5 — every member reads a brand's tax details (what its invoices print).
     { key: 'tax', header: 'Tax details', render: (client) => <span className="text-xs">{taxDetailsSummary(client)}</span> },
-    ...(canManage || canInvoice
-      ? [
-          {
-            key: 'actions',
-            header: '',
-            render: (client: ClientDto) => {
-              if (client.systemOwned) return null;
-              const statusAction = canManage ? clientStatusAction(client) : null;
-              return (
-                <div className="flex gap-1">
-                  {canManage ? (
-                    <button type="button" onClick={() => open({ kind: 'rename', client })} className={rowButtonClass}>
-                      Rename
-                    </button>
-                  ) : null}
-                  {canInvoice ? (
-                    <button type="button" onClick={() => open({ kind: 'tax', client })} className={rowButtonClass}>
-                      Tax details
-                    </button>
-                  ) : null}
-                  {statusAction !== null ? (
-                    <button
-                      type="button"
-                      aria-label={`${statusAction === 'suspend' ? 'Suspend' : 'Reactivate'} ${client.code}`}
-                      onClick={() => open({ kind: statusAction, client })}
-                      className={rowButtonClass}
-                    >
-                      {statusAction === 'suspend' ? 'Suspend' : 'Reactivate'}
-                    </button>
-                  ) : null}
-                </div>
-              );
-            },
-          } satisfies DataTableColumn<ClientDto>,
-        ]
-      : []),
+    {
+      key: 'actions',
+      header: '',
+      render: (client: ClientDto) => {
+        const statusActions = canManage ? clientStatusAction(client) : [];
+        // Row actions WRAP at narrow widths (flex-wrap) rather than overflow.
+        return (
+          <div className="flex flex-wrap gap-1">
+            {statusActions.includes('reactivate')
+              ? rowButton('Reactivate', `Reactivate ${client.code}`, { kind: 'reactivate', client })
+              : null}
+            {canManage && !client.systemOwned ? rowButton('Rename', `Rename ${client.code}`, { kind: 'rename', client }) : null}
+            {canInvoice && !client.systemOwned ? rowButton('Tax details', `Tax details of ${client.code}`, { kind: 'tax', client }) : null}
+            {rowButton('Contacts', `Contacts of ${client.code}`, { kind: 'contacts', client })}
+            {rowButton('Addresses', `Addresses of ${client.code}`, { kind: 'addresses', client })}
+            {statusActions.includes('suspend') ? rowButton('Suspend', `Suspend ${client.code}`, { kind: 'suspend', client }) : null}
+            {statusActions.includes('depart') ? rowButton('Depart', `Depart ${client.code}`, { kind: 'depart', client }) : null}
+          </div>
+        );
+      },
+    } satisfies DataTableColumn<ClientDto>,
   ];
+
+  const statusPanel = panel !== null && (panel.kind === 'suspend' || panel.kind === 'reactivate' || panel.kind === 'depart') ? panel : null;
 
   return (
     <section aria-label="Clients" className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
@@ -195,13 +231,25 @@ function ClientsCardSessioned() {
         />
       ) : null}
 
+      {pending !== null && panel !== null ? (
+        <div role="group" aria-label="Discard unsaved changes" className="flex flex-wrap items-center gap-2">
+          <span>Discard the unsaved changes to {panelName(panel)}?</span>
+          <button type="button" onClick={() => show(pending)} className={rowButtonClass}>
+            Discard
+          </button>
+          <button type="button" onClick={() => setPending(null)} className={rowButtonClass}>
+            Keep editing
+          </button>
+        </div>
+      ) : null}
+
       {canManage && panel?.kind === 'rename' ? (
         <RenameClientForm
           key={panel.client.id}
           client={panel.client}
-          onClose={() => setPanel(null)}
+          onClose={() => show(null)}
           onRenamed={(client) => {
-            setPanel(null);
+            show(null);
             setOutcome({ tone: 'accepted', word: `${client.code} renamed`, reason: `It now reads “${client.name}”.` });
             notifyClientsChanged();
           }}
@@ -213,9 +261,9 @@ function ClientsCardSessioned() {
         <TaxDetailsForm
           key={panel.client.id}
           client={panel.client}
-          onClose={() => setPanel(null)}
+          onClose={() => show(null)}
           onSaved={(client, changed) => {
-            setPanel(null);
+            show(null);
             setOutcome(
               changed
                 ? { tone: 'accepted', word: `${client.code} tax details saved`, reason: 'Refresh a draft invoice to pick them up — an issued invoice keeps what it printed.' }
@@ -227,32 +275,69 @@ function ClientsCardSessioned() {
         />
       ) : null}
 
-      {canManage && (panel?.kind === 'suspend' || panel?.kind === 'reactivate') ? (
+      {panel?.kind === 'contacts' ? (
+        <ClientContactsPanel
+          key={panel.client.id}
+          client={panel.client}
+          canManage={canManage}
+          onClose={() => show(null)}
+          onDirtyChange={onDirtyChange}
+        />
+      ) : null}
+
+      {panel?.kind === 'addresses' ? (
+        <ClientAddressesPanel
+          key={panel.client.id}
+          client={panel.client}
+          canManage={canManage}
+          onClose={() => show(null)}
+          onSaved={() => notifyClientsChanged()}
+          onDirtyChange={onDirtyChange}
+        />
+      ) : null}
+
+      {canManage && statusPanel !== null ? (
         // Keyed by action AND client: Reactivate right after Suspend mounts a
         // fresh confirmation, so it mints a fresh Idempotency-Key.
         <ConfirmRow<ClientDto>
-          key={`${panel.kind}-${panel.client.id}`}
-          question={clientStatusQuestion(panel.kind, panel.client.name)}
-          confirmLabel={panel.kind === 'suspend' ? `Suspend ${panel.client.code}` : `Reactivate ${panel.client.code}`}
-          ariaLabel={panel.kind === 'suspend' ? 'Confirm suspend' : 'Confirm reactivate'}
-          run={(key, tenantId) => fetchApiUpdateClientStatus(tenantId, panel.client.id, clientStatusTarget(panel.kind), key)}
-          reason={(error) => clientReason(error, panel.kind === 'suspend' ? 'suspended' : 'reactivated')}
-          onClose={() => setPanel(null)}
+          key={`${statusPanel.kind}-${statusPanel.client.id}`}
+          question={clientStatusQuestion(statusPanel.kind, statusPanel.client.name, statusPanel.client.status)}
+          confirmLabel={clientStatusConfirmLabel(statusPanel.kind, statusPanel.client.code)}
+          ariaLabel={`Confirm ${clientStatusActionLabel(statusPanel.kind).toLowerCase()}`}
+          run={(key, tenantId) => fetchApiUpdateClientStatus(tenantId, statusPanel.client.id, clientStatusTarget(statusPanel.kind), key)}
+          reason={(error) => clientReason(error, clientStatusReasonAction(statusPanel.kind))}
+          // Story 1-2a — a refused departure lists every blocker under the
+          // confirmation, which stays open for a retry once they are cleared.
+          detail={
+            statusPanel.kind === 'depart'
+              ? (error) => {
+                  const blockers = departureBlockers(error);
+                  if (blockers === null) return null;
+                  return (
+                    <div className="flex flex-col gap-1 rounded-md border border-(--destructive) px-3 py-2">
+                      <span className="font-medium">{DEPARTURE_BLOCKED_LEAD}</span>
+                      <ul aria-label={`What keeps ${statusPanel.client.code} from departing`} className="list-disc pl-5">
+                        {blockers.map((blocker) => (
+                          <li key={blocker.kind}>{departureBlockerLine(blocker)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                }
+              : undefined
+          }
+          onClose={() => show(null)}
           onDone={(client) => {
-            const { kind } = panel;
+            const { kind } = statusPanel;
             if (stillOpen(kind, client.id)) {
               setPanel((p) => (p?.kind === kind && p.client.id === client.id ? null : p));
-              setOutcome({
-                tone: 'accepted',
-                word: client.status === 'suspended' ? `${client.code} suspended` : `${client.code} reactivated`,
-                reason: clientStatusSuccess(client),
-              });
+              setOutcome({ tone: 'accepted', word: clientStatusWord(client), reason: clientStatusSuccess(client) });
             }
             notifyClientsChanged();
           }}
           onRejected={(reason) => {
-            if (!stillOpen(panel.kind, panel.client.id)) return;
-            setOutcome({ tone: 'rejected', word: panel.kind === 'suspend' ? 'Not suspended' : 'Not reactivated', reason });
+            if (!stillOpen(statusPanel.kind, statusPanel.client.id)) return;
+            setOutcome({ tone: 'rejected', word: clientStatusRefusedWord(statusPanel.kind), reason });
           }}
         />
       ) : null}

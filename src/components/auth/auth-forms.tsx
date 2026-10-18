@@ -12,7 +12,7 @@ import type {
 } from '@/lib/api/generated';
 import { failedAttemptsNotice, RELOAD_REASON, secondFactorReason, signInStep } from '@/lib/second-factor';
 import { writeSession } from '@/lib/auth';
-import { PORTAL_SUSPENDED_MESSAGE, signInDestination } from '@/lib/portal';
+import { PORTAL_DEPARTED_MESSAGE, PORTAL_SUSPENDED_MESSAGE, signInDestination } from '@/lib/portal';
 import { GSTIN_HELP } from '@/lib/gstin';
 import { registerTenantBody } from '@/lib/tenancy-forms';
 import { ulid } from '@/lib/ulid';
@@ -433,6 +433,9 @@ function rejectionReason(error: unknown): string {
         return 'Too many sign-in attempts from this network. Wait a minute and try again.';
       case 'client-suspended':
         return PORTAL_SUSPENDED_MESSAGE;
+      // Story 1-2a — a portal user whose client has departed.
+      case 'client-departed':
+        return PORTAL_DEPARTED_MESSAGE;
       case 'invite-pending':
         return 'This invitation has not been accepted yet — use the link from your invitation.';
       case 'invite-invalid':
