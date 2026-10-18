@@ -1398,6 +1398,13 @@ function MappingEditor({
   const mappingClient = clientOfSku(skuList, rows[0]?.skuId);
   const rowOptions = (index: number, currentId: string) =>
     index === 0 ? skuList : keepCurrentSku(narrowToClient(skuList, mappingClient), skuList, currentId);
+  // A row left holding another client's SKU (row 0 changed client, or was
+  // removed) is flagged and blocks the save — a mixed set is never sent.
+  const offClient = (index: number, skuId: string) => {
+    if (index === 0 || mappingClient === null) return false;
+    const rowClient = clientOfSku(skuList, skuId);
+    return rowClient !== null && rowClient !== mappingClient;
+  };
 
   function addRow() {
     keySeq.current += 1;
@@ -1432,6 +1439,15 @@ function MappingEditor({
         });
         return;
       }
+    }
+    if (rows.some((row, index) => offClient(index, row.skuId))) {
+      onOutcome({
+        tone: 'rejected',
+        word: 'Not saved',
+        reason:
+          "Some rows map to another client's SKU than the first row — a connection sells one client's goods. Change or remove the flagged rows; nothing was sent.",
+      });
+      return;
     }
     const seen = new Set<string>();
     for (const row of rows) {
@@ -1545,6 +1561,11 @@ function MappingEditor({
                               </option>
                             ))}
                           </select>
+                          {offClient(index, row.skuId) && (
+                            <div className="mt-1 text-[10px] text-(--destructive)" data-testid="mapping-off-client">
+                              Another client&apos;s SKU — change or remove this row.
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-1.5 text-right">
                           <button

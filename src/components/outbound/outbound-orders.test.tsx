@@ -916,6 +916,29 @@ describe('OrderCreateForm: client first (story 1-1)', () => {
     expect(skuOptions(view.container).map((o) => o.value)).toEqual(['', 'self-tshirt']);
   });
 
+  test('suspended and departed clients are not offered — only active clients take orders', async () => {
+    clientsBody = [
+      SELF_CLIENT,
+      ACME_CLIENT,
+      { ...clientRow('c-sus', 'SUS', 'Suspended Co'), status: 'suspended' },
+      { ...clientRow('c-gone', 'GONE', 'Departed Co'), status: 'departed' },
+    ];
+    view = await mountForm();
+    expect([...clientSelect(view.container)!.querySelectorAll('option')].map((o) => o.textContent)).toEqual([
+      'Choose a client…',
+      'Priya Spices (your company)',
+      'ACME — Acme Foods',
+    ]);
+  });
+
+  test('one active client among inactive ones: no Client select, only its SKUs offered', async () => {
+    clientsBody = [SELF_CLIENT, { ...ACME_CLIENT, status: 'suspended' }];
+    view = await mountForm();
+    expect(clientSelect(view.container)).toBeNull();
+    expect(skuOptions(view.container).map((o) => o.value)).toEqual(['', 'self-tshirt']);
+    expect(skuOptions(view.container)[0]!.text).toBe('Pick a SKU…');
+  });
+
   test('one client: no Client select, every SKU offered — nothing changes', async () => {
     clientsBody = [SELF_CLIENT];
     view = await mountForm();

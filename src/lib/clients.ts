@@ -291,6 +291,14 @@ export function orderSkuOptions<T extends { id: string; clientId?: string | null
   return showClients(clients) ? skusOfClient(skus, pickedClientId) : skus;
 }
 
+/**
+ * The clients an order can be entered for: active ones only — a suspended or
+ * departed client takes no new orders. Null passes through (not loaded).
+ */
+export function orderableClients(clients: readonly ClientDto[] | null): readonly ClientDto[] | null {
+  return clients === null ? null : clients.filter((client) => client.status === 'active');
+}
+
 /** The submit's client problem: a multi-client tenant must pick one first. */
 export function orderClientProblem(clients: readonly ClientDto[] | null, pickedClientId: string): string | null {
   return showClients(clients) && pickedClientId === '' ? 'Choose the client this order is for.' : null;

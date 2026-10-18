@@ -48,9 +48,11 @@ import {
   clientLabel,
   linesKeptForClient,
   orderClientProblem,
+  orderableClients,
   orderSkuOptions,
   PICK_CLIENT_FIRST,
   showClients,
+  skusOfClient,
 } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -159,7 +161,9 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   // select is not shown and nothing changes. No `clientId` is sent: the
   // server derives it from the lines, so the request hash is unchanged.
   const clientsState = useClients();
-  const clients = readyClients(clientsState);
+  // Only active clients take new orders; the one-client rule runs over them.
+  const allClients = readyClients(clientsState);
+  const clients = orderableClients(allClients);
   const tenantName = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.name ?? null,
@@ -195,7 +199,11 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   const skuList: readonly SkuResponse[] =
     skuMap === null ? [] : Object.values(skuMap).sort((a, b) => a.code.localeCompare(b.code));
   const pickClient = showClients(clients);
-  const skuOptions = orderSkuOptions(skuList, clients, clientId);
+  // One active client among inactive ones: no select, but only its SKUs.
+  const soleClientId =
+    allClients !== null && clients !== null && clients.length === 1 && allClients.length > 1 ? clients[0]!.id : null;
+  const skuOptions =
+    soleClientId === null ? orderSkuOptions(skuList, clients, clientId) : skusOfClient(skuList, soleClientId);
   const pendingCleared =
     pendingClient === null ? 0 : draft.length - linesKeptForClient(draft, skuList, pendingClient).length;
 

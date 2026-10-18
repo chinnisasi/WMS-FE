@@ -991,6 +991,35 @@ describe('ChannelsView: SKU pickers name the client (story 1-1)', () => {
     expect(row1.value).toBe(BETA_TEE);
   });
 
+  test('row 0 changing client flags the rows left on the old client and blocks the save — a mixed set is never sent', async () => {
+    mappingsList = [
+      { externalRef: 'v-1', skuId: ACME_TEE },
+      { externalRef: 'v-2', skuId: ACME_CAP },
+    ];
+    connectionRows = [connection({ buffers: [] })];
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    expect(view.container.querySelectorAll('[data-testid="mapping-off-client"]')).toHaveLength(0);
+
+    const row0 = view.container.querySelector('select[aria-label="Warehouse SKU for row row-0"]') as HTMLSelectElement;
+    setInput(row0, BETA_TEE);
+    await settle();
+    expect(view.container.querySelectorAll('[data-testid="mapping-off-client"]')).toHaveLength(1);
+
+    const before = requests.filter((r) => r.method !== 'GET');
+    await click(button(view.container, 'Save mappings'));
+    await settle();
+    expect(requests.filter((r) => r.method !== 'GET')).toEqual(before); // no PUT
+    expect(view.container.textContent).toContain("another client's SKU than the first row");
+
+    // Removing row 0 makes the ACME row the mapping client — nothing is flagged.
+    await click(button(row0.closest('tr')!, 'Remove'));
+    expect(view.container.querySelector('select[aria-label="Warehouse SKU for row row-0"]')).toBeNull();
+    expect(view.container.querySelector('select[aria-label="Warehouse SKU for row row-1"]')).not.toBeNull();
+    expect(view.container.querySelectorAll('[data-testid="mapping-off-client"]')).toHaveLength(0);
+  });
+
   test('the buffers select labels each SKU with its client', async () => {
     connectionRows = [connection({ buffers: [{ warehouseId: WAREHOUSE_ID, skuId: BETA_TEE, bufferMilli: 4000 }] })];
     view = await mount();
