@@ -144,7 +144,13 @@ function stubRouter(): void {
         decision === 'apply' ? 'applied' : decision === 'recount' ? 'recounted' : 'discarded';
       return json(200, {
         rejectedOp: { ...opRows[0]!, status, resolvedBy: 'u-1', resolvedAt: '2026-09-30T00:00:00.000Z' },
-        outcome: status === 'recounted' ? { countTaskId: '0198task0000000000000000000' } : null,
+        outcome:
+          status === 'recounted'
+            ? { countTaskId: '0198task0000000000000000000' }
+            : status === 'applied' && opRows[0]!.opType === 'grn.shelf-life-refused'
+              ? // The waived re-run refused the line again (story 1-2b review).
+                { kind: 'applied', note: 'x', snapshot: { goodsReceipt: null, refusedReceipt: { rejectedLines: [{ code: 'client-departed' }] } } }
+              : null,
       });
     }
     return json(404, { code: 'not-found', title: 'Unrouted in this test', status: 404 });
@@ -573,6 +579,8 @@ describe('story 1-2b — a grn.shelf-life-refused row: Accept anyway needs a not
     expect(posts[0]!.body).toEqual({ decision: 'apply', note: 'Vendor credit agreed' });
     expect(header(posts[0]!, 'idempotency-key')!.length).toBe(26);
     expect(view.container.textContent).toContain('Accepted anyway');
+    // The re-run's own result reaches the reviewer.
+    expect(view.container.textContent).toContain('No line booked; 1 refused again:');
   });
 
   test('Discard on the shelf-life row sends the discard arm with no note', async () => {

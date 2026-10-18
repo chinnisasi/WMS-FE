@@ -30,6 +30,7 @@ import {
   acceptAnywayNote,
   applyNeedsNote,
   rejectedOpResolvedOutcome,
+  shelfLifeRerunSummary,
   rejectedOpsListReason,
   rejectedOpsResolveReason,
   resolveDraftProblem,
@@ -618,10 +619,27 @@ describe('story 1-2b — the expiry refusals and the shelf-life row', () => {
   test('the resolve outcome names Accept anyway on a shelf-life row and keeps the other words', () => {
     expect(rejectedOpResolvedOutcome(shelfRow, 'applied')).toEqual({
       word: 'Accepted anyway',
-      reason: 'The short-dated lines booked with the shelf-life rule waived for this receipt only — QC and tolerance applied as on any receipt; the note is audited.',
+      reason: 'The short-dated lines booked — the shelf-life rule waived for this receipt only; QC and tolerance applied as on any receipt; the note is audited.',
     });
+    // The re-run's own answer names what happened (story 1-2b review).
+    const booked = { kind: 'applied', snapshot: { goodsReceipt: { code: 'GRN-0042', lines: [{}, {}], rejectedLines: [{ code: 'client-departed' }] } } };
+    expect(rejectedOpResolvedOutcome(shelfRow, 'applied', booked).reason).toBe(
+      `2 line(s) booked on GRN-0042; 1 refused again: ${GRN_REFUSAL_LABEL['client-departed']} — the shelf-life rule waived for this receipt only; QC and tolerance applied as on any receipt; the note is audited.`,
+    );
     expect(rejectedOpResolvedOutcome({ opType: 'pick.record' }, 'applied').word).toBe('Op applied');
     expect(rejectedOpResolvedOutcome({ opType: 'pick.record' }, 'recounted').word).toBe('Recount opened');
     expect(rejectedOpResolvedOutcome(shelfRow, 'discarded').word).toBe('Discarded');
+  });
+
+  test('shelfLifeRerunSummary reads the re-run receipt: booked, refused again, or nothing recorded', () => {
+    expect(shelfLifeRerunSummary(null)).toBeNull();
+    expect(shelfLifeRerunSummary({ kind: 'applied' })).toBeNull();
+    expect(shelfLifeRerunSummary({ snapshot: { goodsReceipt: { code: 'GRN-0007', lines: [{}] } } })).toBe('1 line(s) booked on GRN-0007');
+    expect(
+      shelfLifeRerunSummary({
+        snapshot: { goodsReceipt: null, refusedReceipt: { rejectedLines: [{ code: 'batch-expiry-mismatch' }, { code: 'batch-expiry-mismatch' }] } },
+      }),
+    ).toBe(`No line booked; 2 refused again: ${GRN_REFUSAL_LABEL['batch-expiry-mismatch']}`);
+    expect(shelfLifeRerunSummary({ snapshot: { goodsReceipt: null, refusedReceipt: { rejectedLines: [] } } })).toBe('No receipt was recorded');
   });
 });

@@ -166,7 +166,7 @@ function RejectedOpsQueueSessioned() {
         note === undefined ? { decision } : { decision, note },
         ulid(),
       );
-      showOutcome({ tone: 'accepted', ...rejectedOpResolvedOutcome(entry, resolved.rejectedOp.status) });
+      showOutcome({ tone: 'accepted', ...rejectedOpResolvedOutcome(entry, resolved.rejectedOp.status, resolved.outcome) });
       queue.reload();
     } catch (error) {
       // A 409 `rejected-op-resolved` means another reviewer moved first —

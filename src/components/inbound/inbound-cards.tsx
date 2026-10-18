@@ -337,9 +337,9 @@ function PurchaseOrdersCard({
   );
 }
 
-/** One PO line: `SKU 2.500 kg ord · 1.000 kg rec · 1.500 kg open` (negative open = over-received). */
+/** One PO line: `SKU 2.500 kg ord · 1.000 kg rec · 1.500 kg open` (received past ordered = over-received). */
 function PoLineRow({ line, sku }: { line: PurchaseOrderLineDto; sku: SkuResponse | undefined }) {
-  const open = openQtyLabel(line.openQty, sku);
+  const open = openQtyLabel({ openQty: line.openQty, receivedQty: line.receivedQty, expected: line.orderedQty }, sku);
   const qty = (value: number) => quantityLabel(value, sku ?? null);
   return (
     <div className="flex flex-wrap items-center gap-x-2 text-xs">

@@ -102,7 +102,7 @@ beforeEach(() => {
           statusNote: null,
           updatedAt: '2026-10-08T00:00:00.000Z',
           lines: [
-            { id: 'al-1', skuId: 's-1', announcedQty: 10, receivedQty: 12, openQty: -2 },
+            { id: 'al-1', skuId: 's-1', announcedQty: 10, receivedQty: 12, openQty: 0 },
             { id: 'al-2', skuId: 's-1', announcedQty: 5, receivedQty: 5, openQty: 0 },
           ],
         },
@@ -155,7 +155,7 @@ describe('OverReceiptQueue — documents (story 21-6)', () => {
     const cards = [...view.container.querySelectorAll('article')].map((card) => card.textContent ?? '');
     expect(cards).toHaveLength(3);
     expect(cards[0]).toContain('ASN ASN-9');
-    expect(cards[0]).toContain('Line: 10 each announced · 12 each received-to-date · -2 each (over-received) open');
+    expect(cards[0]).toContain('Line: 10 each announced · 12 each received-to-date · 0 each (over-received) open');
     expect(cards[1]).toContain('ASN ASN-9');
     expect(cards[1]).toContain('Line: 5 each announced · 5 each received-to-date · 0 each open');
     expect(cards[2]).toContain('PO PO-0004');

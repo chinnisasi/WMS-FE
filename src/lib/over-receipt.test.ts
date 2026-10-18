@@ -23,25 +23,27 @@ import {
  * pinned here (the components render exactly these strings).
  */
 
-describe('openQtyLabel (the negative-open callout)', () => {
-  test('a negative open quantity carries the over-received callout', () => {
-    expect(openQtyLabel(-5)).toBe('-5 units (over-received)');
+describe('openQtyLabel (the over-received callout)', () => {
+  // Story 1-2b: the server clamps openQty at 0 — the callout keys on received
+  // past ordered / announced, the shape the server sends.
+  test('a line received past its ordered quantity carries the callout (openQty 0 as sent)', () => {
+    expect(openQtyLabel({ openQty: 0, receivedQty: 105, expected: 100 })).toBe('0 units (over-received)');
   });
 
-  test('a zero or positive open quantity renders as-is', () => {
-    expect(openQtyLabel(0)).toBe('0 units');
-    expect(openQtyLabel(60)).toBe('60 units');
+  test('a line at or under its ordered quantity renders as-is', () => {
+    expect(openQtyLabel({ openQty: 0, receivedQty: 100, expected: 100 })).toBe('0 units');
+    expect(openQtyLabel({ openQty: 60, receivedQty: 40, expected: 100 })).toBe('60 units');
   });
 
   test('a line whose SKU resolves names its unit at the unit\'s declared precision', () => {
     // Story 10.5: the PO-lines column mixes units, so each row states its
     // own — declared precision, unit named, and the negative callout intact.
     const kg = { uom: 'kg', uomPrecision: 3 };
-    expect(openQtyLabel(1.5, kg)).toBe('1.500 kg');
-    expect(openQtyLabel(-0.5, kg)).toBe('-0.500 kg (over-received)');
+    expect(openQtyLabel({ openQty: 1.5, receivedQty: 1, expected: 2.5 }, kg)).toBe('1.500 kg');
+    expect(openQtyLabel({ openQty: 0, receivedQty: 3, expected: 2.5 }, kg)).toBe('0.000 kg (over-received)');
     // An unresolvable SKU keeps the unit-agnostic fallback, never a guessed precision.
-    expect(openQtyLabel(1.5, null)).toBe('1.5 units');
-    expect(openQtyLabel(-1.5, null)).toBe('-1.5 units (over-received)');
+    expect(openQtyLabel({ openQty: 1.5, receivedQty: 1, expected: 2.5 }, null)).toBe('1.5 units');
+    expect(openQtyLabel({ openQty: 0, receivedQty: 4, expected: 2.5 }, null)).toBe('0 units (over-received)');
   });
 });
 

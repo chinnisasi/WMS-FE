@@ -465,6 +465,37 @@ export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'p
   return returnReceiveGuidance(entry);
 }
 
+/**
+ * Story 1-2b — what the waived re-run of an Accept anyway actually did, read
+ * from the resolve's outcome (`outcome.snapshot` is the re-run receipt's own
+ * answer): "N line(s) booked on GRN-…; M refused again: <reasons>". The
+ * re-run applies every other rule (departure, tolerance, a batch's expiry),
+ * so lines can be refused again — or no receipt recorded at all. Null when
+ * the outcome carries no recognisable snapshot.
+ */
+export function shelfLifeRerunSummary(outcome: Record<string, unknown> | null): string | null {
+  const snapshot = outcome?.['snapshot'];
+  if (typeof snapshot !== 'object' || snapshot === null) return null;
+  const goodsReceipt = (snapshot as { goodsReceipt?: unknown }).goodsReceipt;
+  const refusedReceipt = (snapshot as { refusedReceipt?: unknown }).refusedReceipt;
+  const codesOf = (lines: unknown): string[] =>
+    Array.isArray(lines)
+      ? lines.map((line) => (typeof line === 'object' && line !== null ? String((line as { code?: unknown }).code ?? '') : '')).filter((code) => code !== '')
+      : [];
+  const refusedWords = (codes: string[]): string =>
+    `${codes.length} refused again: ${[...new Set(codes)].map(grnRefusalWords).join(', ')}`;
+  if (goodsReceipt === null) {
+    const codes = codesOf((refusedReceipt as { rejectedLines?: unknown } | undefined)?.rejectedLines);
+    return codes.length === 0 ? 'No receipt was recorded' : `No line booked; ${refusedWords(codes)}`;
+  }
+  if (typeof goodsReceipt !== 'object') return null;
+  const grn = goodsReceipt as { code?: unknown; lines?: unknown; rejectedLines?: unknown };
+  const booked = Array.isArray(grn.lines) ? grn.lines.length : 0;
+  const head = `${booked} line(s) booked on ${typeof grn.code === 'string' ? grn.code : 'the receipt'}`;
+  const codes = codesOf(grn.rejectedLines);
+  return codes.length === 0 ? head : `${head}; ${refusedWords(codes)}`;
+}
+
 function grnRefusalWords(reason: string): string {
   return (GRN_REFUSAL_LABEL as Readonly<Record<string, string>>)[reason] ?? reason;
 }
@@ -623,11 +654,15 @@ export function acceptAnywayNote(text: string): { note: string; problem: null } 
 export function rejectedOpResolvedOutcome(
   entry: Pick<RejectedOpResponse, 'opType'>,
   status: string,
+  outcome?: Record<string, unknown> | null,
 ): { word: string; reason: string } {
   if (status === 'applied' && applyNeedsNote(entry)) {
+    const rerun = shelfLifeRerunSummary(outcome ?? null);
     return {
       word: 'Accepted anyway',
-      reason: 'The short-dated lines booked with the shelf-life rule waived for this receipt only — QC and tolerance applied as on any receipt; the note is audited.',
+      reason:
+        (rerun === null ? 'The short-dated lines booked' : rerun) +
+        ' — the shelf-life rule waived for this receipt only; QC and tolerance applied as on any receipt; the note is audited.',
     };
   }
   if (status === 'applied') {
