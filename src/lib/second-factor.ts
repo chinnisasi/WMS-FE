@@ -69,6 +69,10 @@ export function secondFactorReason(error: unknown): string {
     }
     case 'challenge-ended':
       return 'This sign-in step has ended — sign in again.';
+    case 'enrolment-code-expired':
+      return 'Your enrolment code has expired. Ask an owner to reset your two-factor sign-in again.';
+    case 'second-factor-unavailable':
+      return 'Two-factor sign-in cannot be checked right now — tell an owner.';
     case 'client-outdated':
       return RELOAD_REASON;
     case 'password-invalid':
@@ -147,6 +151,21 @@ export function backupCodesText(codes: readonly string[], label: string): string
     ...codes,
     '',
   ].join('\n');
+}
+
+/** The enrolment step after a reset: the wrong code may be either one (the server counts it the same). */
+export function enrolmentStepReason(error: unknown): string {
+  if (error instanceof ApiProblem && error.code === 'second-factor-invalid') {
+    const left = attemptsLeftOf(error);
+    const base = 'The authenticator code or the enrolment code is not right';
+    return left === null || left <= 0 ? `${base}.` : `${base} — ${left === 1 ? '1 attempt' : `${left} attempts`} left.`;
+  }
+  return secondFactorReason(error);
+}
+
+/** Story 6-1b (amendment) — the Team card offers Reset 2FA on another user with 2FA on, or with a reset still pending. */
+export function canResetSecondFactor(user: { secondFactorEnabled?: boolean; secondFactorResetPending?: boolean }): boolean {
+  return user.secondFactorEnabled === true || user.secondFactorResetPending === true;
 }
 
 /** The Team card's chip text — shown only to `users.role_change` holders, never when unknown. */

@@ -22,7 +22,7 @@ import {
   type UserRole,
 } from '@/lib/users';
 import { showClients } from '@/lib/clients';
-import { secondFactorChip, secondFactorReason } from '@/lib/second-factor';
+import { canResetSecondFactor, secondFactorChip, secondFactorReason } from '@/lib/second-factor';
 import { ulid } from '@/lib/ulid';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { useUsers } from '@/lib/use-users';
@@ -506,8 +506,8 @@ function UserActions({
   }
   return (
     <span className="flex flex-wrap gap-1">
-      {/* Story 6-1b — never on your own row (Security handles your own). */}
-      {!isSelf && user.secondFactorEnabled === true && (
+      {/* Story 6-1b — never on your own row (Security handles your own); also while a reset is pending (re-issue an expired code). */}
+      {!isSelf && canResetSecondFactor(user) && (
         <button type="button" className={rowButtonClass} onClick={() => open('reset-2fa')}>
           Reset 2FA
         </button>

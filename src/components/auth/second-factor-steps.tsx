@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { ApiProblem, fetchApiSecondFactor } from '@/lib/api/client';
 import type { EnrollChallengeResponse, SecondFactorSignInResponse, TotpChallengeResponse } from '@/lib/api/generated';
 import {
+  enrolmentStepReason,
   expiresInLabel,
   groupSecret,
   normaliseBackupInput,
@@ -188,7 +189,7 @@ export function EnrollStep({ challenge, expiresAt, onSession, onEnded }: StepPro
         return;
       }
       setCode('');
-      setRejection(secondFactorReason(error));
+      setRejection(challenge.enrolmentCodeRequired ? enrolmentStepReason(error) : secondFactorReason(error));
     } finally {
       inFlight.current = false;
       setPending(false);

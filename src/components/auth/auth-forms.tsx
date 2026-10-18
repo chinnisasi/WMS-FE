@@ -10,7 +10,7 @@ import type {
   SignInResponse,
   TotpChallengeResponse,
 } from '@/lib/api/generated';
-import { failedAttemptsNotice, RELOAD_REASON, signInStep } from '@/lib/second-factor';
+import { failedAttemptsNotice, RELOAD_REASON, secondFactorReason, signInStep } from '@/lib/second-factor';
 import { writeSession } from '@/lib/auth';
 import { PORTAL_SUSPENDED_MESSAGE, signInDestination } from '@/lib/portal';
 import { GSTIN_HELP } from '@/lib/gstin';
@@ -139,7 +139,7 @@ type LoginStep =
   | { readonly kind: 'totp'; readonly challenge: TotpChallengeResponse; readonly expiresAt: number }
   | { readonly kind: 'enroll'; readonly challenge: EnrollChallengeResponse; readonly expiresAt: number }
   /** Signed in, held until Continue: the backup codes to save, or the failed-attempts notice. */
-  | { readonly kind: 'done'; readonly body: SignInResponse | SecondFactorSignInResponse };
+  | { readonly kind: 'done'; readonly body: SignInResponse | SecondFactorSignInResponse; readonly arrivedAt: number };
 
 const STEP_ANNOUNCEMENT: Readonly<Record<LoginStep['kind'], string>> = {
   password: '',
@@ -173,17 +173,21 @@ export function LoginForm({ initialEmail = '', notice = null }: { initialEmail?:
   const [step, setStep] = useState<LoginStep>({ kind: 'password' });
   const passwordRef = useRef<HTMLInputElement>(null);
 
-  /** Writes the session and leaves for the shell. */
-  function enter(body: SignInResponse | SecondFactorSignInResponse) {
+  /**
+   * Writes the session and leaves for the shell. The expiries count from
+   * `arrivedAt` — when the response arrived — not from Continue: time spent
+   * reading the backup codes is already off the token's life.
+   */
+  function enter(body: SignInResponse | SecondFactorSignInResponse, arrivedAt: number) {
     const written = writeSession({
       token: body.accessToken,
       tenant: body.tenant,
       user: body.user,
       // Story 21-7 — a client-portal user's client brand (null for staff).
       client: body.client ?? null,
-      expiresAt: Date.now() + body.expiresInSeconds * 1000,
+      expiresAt: arrivedAt + body.expiresInSeconds * 1000,
       // Story 6-1a — refreshable until the session's absolute end.
-      refreshUntil: Date.now() + body.refreshExpiresInSeconds * 1000,
+      refreshUntil: arrivedAt + body.refreshExpiresInSeconds * 1000,
     });
     if (!written) {
       setStep({ kind: 'password' });
@@ -195,12 +199,13 @@ export function LoginForm({ initialEmail = '', notice = null }: { initialEmail?:
 
   /** A session arrived: hold it when there is something to read first, else go in. */
   function arrived(body: SignInResponse | SecondFactorSignInResponse) {
+    const arrivedAt = Date.now();
     const extra = body as SecondFactorSignInResponse;
     if ((extra.backupCodes?.length ?? 0) > 0 || failedAttemptsNotice(extra.secondFactorFailedAttempts) !== null) {
-      setStep({ kind: 'done', body });
+      setStep({ kind: 'done', body, arrivedAt });
       return;
     }
-    enter(body);
+    enter(body, arrivedAt);
   }
 
   function stepEnded() {
@@ -227,7 +232,13 @@ export function LoginForm({ initialEmail = '', notice = null }: { initialEmail?:
       setPassword('');
       setStep({ kind: answer.kind, challenge: answer.challenge, expiresAt: Date.now() + answer.challenge.expiresInSeconds * 1000 } as LoginStep);
     } catch (error) {
-      setRejection(error instanceof ApiProblem && error.code === 'client-outdated' ? RELOAD_REASON : rejectionReason(error));
+      setRejection(
+        error instanceof ApiProblem && error.code === 'client-outdated'
+          ? RELOAD_REASON
+          : error instanceof ApiProblem && error.code === 'enrolment-code-expired'
+            ? secondFactorReason(error)
+            : rejectionReason(error),
+      );
     } finally {
       setPending(false);
     }
@@ -259,11 +270,11 @@ export function LoginForm({ initialEmail = '', notice = null }: { initialEmail?:
         {announcement}
         {failed !== null && <FeedbackBanner tone="warning" word="Failed attempts" reason={failed} />}
         {extra.backupCodes !== undefined && extra.backupCodes.length > 0 ? (
-          <BackupCodesPanel codes={extra.backupCodes} label={email} onContinue={() => enter(step.body)} />
+          <BackupCodesPanel codes={extra.backupCodes} label={email} onContinue={() => enter(step.body, step.arrivedAt)} />
         ) : (
           <button
             type="button"
-            onClick={() => enter(step.body)}
+            onClick={() => enter(step.body, step.arrivedAt)}
             className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90"
           >
             Continue

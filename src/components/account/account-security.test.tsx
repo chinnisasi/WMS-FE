@@ -37,6 +37,8 @@ const USERS = [
   { id: 'u-owner', email: 'owner@example.com', role: 'owner', status: 'active', clientId: null, createdAt: '2026-01-01T00:00:00.000Z', lockedUntil: null, secondFactorEnabled: true },
   { id: 'u-other', email: 'other@example.com', role: 'owner', status: 'active', clientId: null, createdAt: '2026-01-02T00:00:00.000Z', lockedUntil: null, secondFactorEnabled: true },
   { id: 'u-op', email: 'op@example.com', role: 'operator', status: 'active', clientId: null, createdAt: '2026-01-03T00:00:00.000Z', lockedUntil: null, secondFactorEnabled: false },
+  // A reset still pending (2FA off, an enrolment code outstanding): Reset is offered again.
+  { id: 'u-pending', email: 'pending@example.com', role: 'operator', status: 'active', clientId: null, createdAt: '2026-01-05T00:00:00.000Z', lockedUntil: null, secondFactorEnabled: false, secondFactorResetPending: true },
   // A stored snapshot without the field: no chip, no reset.
   { id: 'u-old', email: 'old@example.com', role: 'operator', status: 'active', clientId: null, createdAt: '2026-01-04T00:00:00.000Z', lockedUntil: null },
 ];
@@ -175,15 +177,15 @@ describe('My account → Security (story 6-1b)', () => {
 });
 
 describe('Team card — two-factor (story 6-1b)', () => {
-  test('an owner sees the 2FA chip (none when the field is absent) and Reset 2FA only on another user with 2FA on', async () => {
+  test('an owner sees the 2FA chip (none when the field is absent) and Reset 2FA on another user with 2FA on or a reset pending', async () => {
     writeSession(sessionAs('owner', 'u-owner'));
     view = render(<UsersCard />);
     await settle();
     const chips = [...view.container.querySelectorAll('[data-testid="second-factor-chip"]')].map((chip) => chip.textContent);
-    expect(chips).toEqual(['2FA On', '2FA On', '2FA Off']);
+    expect(chips).toEqual(['2FA On', '2FA On', '2FA Off', '2FA Off']);
     const resets = [...view.container.querySelectorAll('button')].filter((candidate) => candidate.textContent === 'Reset 2FA');
-    expect(resets).toHaveLength(1);
-    expect(resets[0]!.closest('tr')!.textContent).toContain('other@example.com');
+    expect(resets.map((reset) => reset.closest('tr')!.textContent!.includes('other@example.com') || reset.closest('tr')!.textContent!.includes('pending@example.com'))).toEqual([true, true]);
+    expect(resets).toHaveLength(2);
   });
 
   test('Reset 2FA confirms, sends one keyed POST and shows the enrolment code once', async () => {

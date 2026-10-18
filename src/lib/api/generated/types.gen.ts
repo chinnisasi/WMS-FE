@@ -61,6 +61,10 @@ export type UserResponse = {
      * Story 6-1b — the user has two-factor sign-in set up; on the user list only (absent on stored invite / role-change snapshots)
      */
     secondFactorEnabled?: boolean;
+    /**
+     * Story 6-1b — an owner reset this user’s two-factor sign-in and they have not set it up again (an enrolment code is outstanding); on the user list only
+     */
+    secondFactorResetPending?: boolean;
 };
 
 export type SessionClientResponse = {
@@ -8115,7 +8119,7 @@ export type TenancyControllerSignInErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Invitation not yet accepted (invite-pending), or a client-portal user whose client is not active (client-suspended, story 21-7)
+     * Invitation not yet accepted (invite-pending), a client-portal user whose client is not active (client-suspended, story 21-7), or — story 6-1b — an owner reset this user’s two-factor sign-in and the enrolment code has expired (enrolment-code-expired: ask for another reset; nothing counted)
      */
     403: ProblemDetailsDto;
     /**
@@ -8164,6 +8168,10 @@ export type TenancyControllerSignInSecondFactorErrors = {
      * Too many attempts from this address (rate-limited; `retryAfterSeconds`)
      */
     429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
 };
 
 export type TenancyControllerSignInSecondFactorError = TenancyControllerSignInSecondFactorErrors[keyof TenancyControllerSignInSecondFactorErrors];
@@ -9267,6 +9275,10 @@ export type UsersControllerSecondFactorSetupErrors = {
      * Too many attempts from this address (rate-limited)
      */
     429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
 };
 
 export type UsersControllerSecondFactorSetupError = UsersControllerSecondFactorSetupErrors[keyof UsersControllerSecondFactorSetupErrors];
@@ -9318,6 +9330,10 @@ export type UsersControllerSecondFactorConfirmErrors = {
      * Too many attempts from this address (rate-limited)
      */
     429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
 };
 
 export type UsersControllerSecondFactorConfirmError = UsersControllerSecondFactorConfirmErrors[keyof UsersControllerSecondFactorConfirmErrors];
@@ -9369,6 +9385,10 @@ export type UsersControllerSecondFactorBackupCodesErrors = {
      * Too many attempts from this address (rate-limited)
      */
     429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
 };
 
 export type UsersControllerSecondFactorBackupCodesError = UsersControllerSecondFactorBackupCodesErrors[keyof UsersControllerSecondFactorBackupCodesErrors];
@@ -9420,6 +9440,10 @@ export type UsersControllerSecondFactorDisableErrors = {
      * Too many attempts from this address (rate-limited)
      */
     429: ProblemDetailsDto;
+    /**
+     * The stored secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
 };
 
 export type UsersControllerSecondFactorDisableError = UsersControllerSecondFactorDisableErrors[keyof UsersControllerSecondFactorDisableErrors];

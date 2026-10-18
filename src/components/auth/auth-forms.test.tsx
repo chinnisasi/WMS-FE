@@ -327,6 +327,37 @@ describe('LoginForm: the second step (story 6-1b)', () => {
     expect(pushes).toEqual(['/settings']);
   });
 
+  test('the stored expiries count from the arrival of the second step, not from Continue', async () => {
+    challenge = ENROLL;
+    secondFactorAnswers = [{ status: 200, body: { ...SESSION_BODY, backupCodes: ['AAAAA-BBBBB'] } }];
+    const container = await passwordStep();
+    setInput(field(container, 'Code from the app'), '654321');
+    const realNow = Date.now;
+    const arrival = realNow();
+    try {
+      await submit(container);
+      // Ten minutes reading the codes before Continue.
+      Date.now = () => arrival + 10 * 60_000;
+      act(() => (container.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+      const proceed = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Continue')!;
+      act(() => proceed.click());
+      await settle();
+    } finally {
+      Date.now = realNow;
+    }
+    const stored = JSON.parse(localStorage.getItem('wms-session') ?? 'null') as { expiresAt: number; refreshUntil: number } | null;
+    // The clock moved past the access token's life while reading, so the row reads as stored-but-expiring:
+    expect(stored).not.toBeNull();
+    expect(stored!.expiresAt).toBeLessThan(arrival + 900_000 + 5_000);
+    expect(stored!.refreshUntil).toBeLessThan(arrival + 43_200_000 + 5_000);
+  });
+
+  test('an expired enrolment code is answered at the password step with the reset words', async () => {
+    signInRefusal = { code: 'enrolment-code-expired', status: 403, title: 'Enrolment code expired' };
+    const container = await passwordStep();
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain('Ask an owner to reset your two-factor sign-in again.');
+  });
+
   test('after an owner\'s reset the enrolment code field appears and is sent', async () => {
     challenge = { ...ENROLL, enrolmentCodeRequired: true };
     secondFactorAnswers = [{ status: 200, body: { ...SESSION_BODY, backupCodes: ['AAAAA-BBBBB'] } }];

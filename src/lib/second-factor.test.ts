@@ -9,6 +9,8 @@ import { loginNotice, operatorShellRoute, SESSION_ENDED_NOTICE } from './portal'
 import {
   backupCodesText,
   backupCodesWarning,
+  canResetSecondFactor,
+  enrolmentStepReason,
   expiresInLabel,
   failedAttemptsNotice,
   groupSecret,
@@ -75,6 +77,13 @@ describe('secondFactorReason — every code the routes answer', () => {
   test('the remaining codes', () => {
     expect(secondFactorReason(problem('challenge-ended'))).toBe('This sign-in step has ended — sign in again.');
     expect(secondFactorReason(problem('client-outdated'))).toBe(RELOAD_REASON);
+    expect(secondFactorReason(problem('enrolment-code-expired'))).toContain('Ask an owner to reset your two-factor sign-in again.');
+    expect(enrolmentStepReason(problem('second-factor-invalid', { attemptsLeft: 2 }))).toBe(
+      'The authenticator code or the enrolment code is not right — 2 attempts left.',
+    );
+    expect(canResetSecondFactor({ secondFactorEnabled: false, secondFactorResetPending: true })).toBe(true);
+    expect(canResetSecondFactor({ secondFactorEnabled: true })).toBe(true);
+    expect(canResetSecondFactor({})).toBe(false);
     expect(secondFactorReason(problem('password-invalid'))).toBe('That password is not right.');
     expect(secondFactorReason(problem('second-factor-required'))).toBe('Owners must use two-factor sign-in — it cannot be turned off.');
     expect(secondFactorReason(problem('mystery', {}, 'Server words.'))).toBe('Server words.');
