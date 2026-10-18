@@ -34,6 +34,20 @@ import {
   parseReturnAddress,
   registeredAddressLine,
   addressesReason,
+  percentToBps,
+  bpsToPercent,
+  parseReceivingPolicyDraft,
+  receivingPolicyFieldsOf,
+  receivingToleranceLabel,
+  qcOnReceiptLabel,
+  expiryRequiredLabel,
+  minShelfLifeLabel,
+  untrackedSkusNote,
+  QC_NOT_HELD_NOTE,
+  receivingPolicySaved,
+  receivingPolicyFieldOf,
+  receivingPolicyReason,
+  receivingPolicyReadReason,
   correctClientReason,
   importClientChoice,
   importClientParam,
@@ -594,5 +608,118 @@ describe('story 1-2a — departure, no new work, contacts and addresses', () => 
     expect(addressesReason(problem('validation-failed', 400, 'registeredAddress.stateCode must be a GST registration state code'))).toBe(
       'registeredAddress.stateCode must be a GST registration state code',
     );
+  });
+});
+
+describe('story 1-2b — the receiving policy', () => {
+  const p = (code: string, status: number, detail?: string) => new ApiProblem(code, status, detail);
+
+  test('percentToBps by decimal string arithmetic — never float multiplication', () => {
+    expect(percentToBps('5')).toEqual({ bps: 500, problem: null });
+    expect(percentToBps('2.5')).toEqual({ bps: 250, problem: null });
+    expect(percentToBps('0.01')).toEqual({ bps: 1, problem: null });
+    expect(percentToBps('100')).toEqual({ bps: 10000, problem: null });
+    expect(percentToBps('0')).toEqual({ bps: 0, problem: null });
+    expect(percentToBps(' 7.25 ')).toEqual({ bps: 725, problem: null });
+    expect(percentToBps('007')).toEqual({ bps: 700, problem: null });
+    expect(percentToBps('.5')).toEqual({ bps: 50, problem: null });
+    // 1.005 * 100 in floats is 100.49999… — a string conversion refuses it, never 100.
+    expect(percentToBps('1.005')).toEqual({ bps: null, problem: 'The tolerance takes at most two decimal places (0.01 %).' });
+    expect(percentToBps('100.01')).toEqual({ bps: null, problem: 'The tolerance is at most 100 %.' });
+    expect(percentToBps('1000')).toEqual({ bps: null, problem: 'The tolerance is at most 100 %.' });
+    const shape = 'Enter the tolerance as a percent from 0 to 100, e.g. 5 or 2.5.';
+    for (const bad of ['', '  ', 'abc', '-1', '5%', '1e2', '.', '1.2.3']) expect(percentToBps(bad)).toEqual({ bps: null, problem: shape });
+  });
+
+  test('bpsToPercent by integer arithmetic', () => {
+    expect(bpsToPercent(250)).toBe('2.5');
+    expect(bpsToPercent(500)).toBe('5');
+    expect(bpsToPercent(1)).toBe('0.01');
+    expect(bpsToPercent(0)).toBe('0');
+    expect(bpsToPercent(10000)).toBe('100');
+    expect(bpsToPercent(725)).toBe('7.25');
+    expect(bpsToPercent(5)).toBe('0.05');
+    for (const bps of [0, 1, 9, 10, 99, 100, 101, 250, 999, 5000, 10000]) expect(percentToBps(bpsToPercent(bps)).bps).toBe(bps);
+  });
+
+  test('the form → the full-replace body; a minimum only beside Expiry required; problems per field', () => {
+    const fields = { tolerancePercent: '2.5', qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: '90' };
+    expect(parseReceivingPolicyDraft(fields)).toEqual({
+      body: { receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: 90 },
+      problems: null,
+    });
+    expect(parseReceivingPolicyDraft({ ...fields, minShelfLifeDays: ' ' }).body?.minShelfLifeDays).toBeNull();
+    // Without Expiry required the minimum is never sent (the backend 400s the pair).
+    expect(parseReceivingPolicyDraft({ ...fields, expiryRequired: false }).body).toEqual({
+      receivingToleranceBps: 250,
+      qcOnReceipt: true,
+      expiryRequired: false,
+      minShelfLifeDays: null,
+    });
+    const days = 'The minimum shelf life is a whole number of days from 1 to 3650, or blank for none.';
+    for (const bad of ['0', '3651', '1.5', 'x', '-3']) {
+      expect(parseReceivingPolicyDraft({ ...fields, minShelfLifeDays: bad })).toEqual({ body: null, problems: { minShelfLife: days } });
+    }
+    expect(parseReceivingPolicyDraft({ ...fields, tolerancePercent: '1.005', minShelfLifeDays: '0' })).toEqual({
+      body: null,
+      problems: { tolerance: 'The tolerance takes at most two decimal places (0.01 %).', minShelfLife: days },
+    });
+    expect(receivingPolicyFieldsOf({ receivingToleranceBps: 1, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null })).toEqual({
+      tolerancePercent: '0.01',
+      qcOnReceipt: false,
+      expiryRequired: false,
+      minShelfLifeDays: '',
+    });
+  });
+
+  test('the read-only words, the panel notes and the saved outcome', () => {
+    expect(receivingToleranceLabel(0)).toBe('None — any quantity over the PO or ASN waits for approval');
+    expect(receivingToleranceLabel(250)).toBe('2.5 % — excess within it books at once');
+    expect(qcOnReceiptLabel(true)).toBe('On — every booked line is held for QC until released');
+    expect(qcOnReceiptLabel(false)).toBe('Off');
+    expect(expiryRequiredLabel(true)).toBe('Required on batch-tracked lines');
+    expect(expiryRequiredLabel(false)).toBe('Not required');
+    expect(minShelfLifeLabel(null)).toBe('None');
+    expect(minShelfLifeLabel(1)).toBe('1 day');
+    expect(minShelfLifeLabel(90)).toBe('90 days');
+    expect(untrackedSkusNote(3)).toBe("Expiry rules apply to batch-tracked SKUs only — 3 of this client's SKUs are untracked and receive as before.");
+    expect(untrackedSkusNote(1)).toBe("Expiry rules apply to batch-tracked SKUs only — 1 of this client's SKUs is untracked and receives as before.");
+    expect(untrackedSkusNote(0)).toBe("Expiry rules apply to batch-tracked SKUs only — every one of this client's SKUs is batch-tracked.");
+    expect(QC_NOT_HELD_NOTE).toBe('Serial-tracked and catch-weight SKUs are not QC-held on receipt — they book unheld.');
+    expect(receivingPolicySaved('ACME')).toEqual({
+      word: "ACME's receiving policy saved",
+      reason: 'It applies to every receipt submitted from now on — web, handheld and offline replay.',
+    });
+  });
+
+  test('a validation-failed names its field (the backend detail); the reasons branch on code', () => {
+    const tol = p('validation-failed', 400, 'receivingToleranceBps must be a whole number of basis points from 0 to 10000 (got 10001).');
+    const min = p('validation-failed', 400, 'minShelfLifeDays needs expiryRequired — a minimum remaining life is judged against a required expiry date.');
+    expect(receivingPolicyFieldOf(tol)).toBe('tolerance');
+    expect(receivingPolicyFieldOf(min)).toBe('minShelfLife');
+    expect(receivingPolicyFieldOf(p('validation-failed', 400, 'qcOnReceipt must be true or false'))).toBeNull();
+    expect(receivingPolicyFieldOf(p('role-denied', 403, 'receivingToleranceBps'))).toBeNull();
+    expect(receivingPolicyFieldOf(new Error('x'))).toBeNull();
+    // The structured `field` member (the command's refusal) wins over the prose.
+    expect(receivingPolicyFieldOf(new ApiProblem('validation-failed', 400, 'some other words', undefined, { field: 'minShelfLifeDays' }))).toBe('minShelfLife');
+    expect(receivingPolicyFieldOf(new ApiProblem('validation-failed', 400, 'receivingToleranceBps …', undefined, { field: 'expiryRequired' }))).toBeNull();
+    expect(receivingPolicyReason(tol)).toBe(tol.detail!);
+    expect(receivingPolicyReason(p('validation-failed', 400))).toBe('Check the receiving policy and try again.');
+    expect(receivingPolicyReason(p('role-denied', 403))).toBe('Only an owner can set a client’s receiving policy.');
+    expect(receivingPolicyReason(p('not-found', 404))).toBe('That client no longer exists — refresh the page.');
+    expect(receivingPolicyReason(p('permission-denied', 403))).toBe('Your session belongs to another tenant — sign in again.');
+    expect(receivingPolicyReason(p('idempotency-key-reuse', 422))).toBe(
+      'This submission was already processed with different details — edit and save again.',
+    );
+    expect(receivingPolicyReason(p('conflict', 409))).toBe('The same submission is still in flight — retry to read the settled result.');
+    expect(receivingPolicyReason(p('unauthenticated', 401))).toBe('Your session expired — sign in again.');
+    expect(receivingPolicyReason(p('mystery', 500))).toBe('Receiving policy not saved (mystery).');
+    expect(receivingPolicyReason(new TypeError('fetch failed'))).toBe('The API is unreachable — is wms-be running?');
+    expect(receivingPolicyReadReason(p('not-found', 404))).toBe('That client no longer exists — refresh the page.');
+    expect(receivingPolicyReadReason(p('unauthenticated', 401))).toBe('Your session expired — sign in again.');
+    expect(receivingPolicyReadReason(p('permission-denied', 403))).toBe('Your session belongs to another tenant — sign in again.');
+    expect(receivingPolicyReadReason(p('mystery', 500, 'boom'))).toBe('boom');
+    expect(receivingPolicyReadReason(p('mystery', 500))).toBe('Receiving policy not loaded (mystery).');
+    expect(receivingPolicyReadReason(new TypeError('x'))).toBe('The API is unreachable — is wms-be running?');
   });
 });

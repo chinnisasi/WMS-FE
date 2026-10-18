@@ -509,3 +509,85 @@ describe('story 13-2 — a return.receive row is Discard only', () => {
     expect(labels).toEqual(expect.arrayContaining(['Discard', 'Open a recount', 'Apply (re-execute)']));
   });
 });
+
+describe('story 1-2b — a grn.shelf-life-refused row: Accept anyway needs a note', () => {
+  const SHELF_OP_ID = '01989f7a-1b3c-7d4e-8f90-aaaaaaaaaaaa';
+  const shelfRow = () =>
+    rejectedOp(
+      {
+        opType: 'grn.shelf-life-refused',
+        classification: 'rejected',
+        problemCode: 'shelf-life-short',
+        problemDetail: null,
+        decisions: ['apply', 'discard'],
+        payload: {
+          warehouseId: WAREHOUSE_ID,
+          poId: null,
+          blindReasonCode: 'unannounced-delivery',
+          occurredAt: '2026-10-19T05:00:00.000Z',
+          grnId: '01989f7a-1b3c-7d4e-8f90-bbbbbbbbbbbb',
+          grnCode: 'GRN-0042',
+          clientLabel: 'ACME',
+          lines: [{ poLineId: null, skuId: 'sku-1', batchCode: 'L7', mfgDate: null, expiryDate: '2026-12-18', qty: 10 }],
+          refusals: [
+            { lineIndex: 0, skuId: 'sku-1', skuCode: 'MILK-1', skuClientId: 'c', skuClientLabel: 'ACME', reason: 'shelf-life-short', batchCode: 'L7', expiryDate: '2026-12-18', minShelfLifeDays: 90, remainingDays: 60 },
+          ],
+        },
+      },
+      SHELF_OP_ID,
+    );
+
+  function setNote(card: Element, value: string): void {
+    const textarea = card.querySelector('textarea') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(textarea, value);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  test('the row names the expiry and the minimum; Accept anyway is disabled until a non-blank note, then sends {decision:"apply", note}', async () => {
+    opRows = [shelfRow()];
+    view = await mount();
+    const card = article(view, 'GRN-0042');
+    expect(card.textContent).toContain('GRN-0042 — 1 line not booked: short-dated for ACME');
+    expect(card.textContent).toContain('MILK-1 × 10 · batch L7 · expires 2026-12-18 — shelf life too short (60 days left, minimum 90 days) (ACME)');
+    const labels = [...card.querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels).toContain('Accept anyway');
+    expect(labels).toContain('Discard');
+    expect(labels).not.toContain('Apply (re-execute)');
+    expect(labels).not.toContain('Open a recount');
+    const accept = articleButton(card, 'Accept anyway');
+    expect(accept.disabled).toBe(true);
+    await click(accept);
+    expect(resolvePosts()).toHaveLength(0);
+    setNote(card, '    ');
+    expect(articleButton(card, 'Accept anyway').disabled).toBe(true);
+    setNote(card, '  Vendor credit agreed  ');
+    expect(articleButton(card, 'Accept anyway').disabled).toBe(false);
+    await click(articleButton(card, 'Accept anyway'));
+    await settle();
+    const posts = resolvePosts();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.pathname.endsWith(`/rejected-ops/${SHELF_OP_ID}/resolve`)).toBe(true);
+    expect(posts[0]!.body).toEqual({ decision: 'apply', note: 'Vendor credit agreed' });
+    expect(header(posts[0]!, 'idempotency-key')!.length).toBe(26);
+    expect(view.container.textContent).toContain('Accepted anyway');
+  });
+
+  test('Discard on the shelf-life row sends the discard arm with no note', async () => {
+    opRows = [shelfRow()];
+    view = await mount();
+    await click(articleButton(article(view, 'GRN-0042'), 'Discard'));
+    await settle();
+    expect(resolvePosts()[0]!.body).toEqual({ decision: 'discard' });
+  });
+
+  test('a role holding no review.decide reads the row with no note and no Accept anyway', async () => {
+    opRows = [shelfRow()];
+    view = await mount(OPERATOR_SESSION);
+    const card = article(view, 'GRN-0042');
+    expect(card.querySelector('textarea')).toBeNull();
+    expect([...card.querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Accept anyway');
+  });
+});

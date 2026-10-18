@@ -1045,7 +1045,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused';
     /**
      * The replay fate the server refused with
      */
@@ -1121,7 +1121,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -1167,6 +1167,10 @@ export type ResolveRejectedOpDto = {
      * The decision instant (ISO-8601 UTC; server clock when absent)
      */
     occurredAt?: string;
+    /**
+     * Story 1-2b — the reviewer's note (trimmed, at most 500 characters). REQUIRED to apply a `grn.shelf-life-refused` row — accepting short-dated goods (400 without one; the row stays open); recorded in the outcome on any decision
+     */
+    note?: string;
 };
 
 export type RejectedOpResolveResponse = {
@@ -1963,7 +1967,7 @@ export type PurchaseOrderLineDto = {
      */
     receivedQty: number;
     /**
-     * Derived: orderedQty − receivedQty (may go negative after an approved over-receipt — Story 3.3 relaxes the 3.1 `minimum: 0` bound)
+     * Derived: orderedQty − receivedQty, clamped at 0 for display (story 1-2b — received may pass ordered after an approved over-receipt or a within-tolerance receipt)
      */
     openQty: number;
     /**
@@ -2102,7 +2106,7 @@ export type AsnLineDto = {
      */
     receivedQty: number;
     /**
-     * Derived: announcedQty − receivedQty (negative after an approved over-receipt)
+     * Derived: announcedQty − receivedQty, clamped at 0 for display (story 1-2b — received may pass announced after an approved over-receipt or a within-tolerance receipt)
      */
     openQty: number;
 };
@@ -3340,6 +3344,10 @@ export type GrnLineInputDto = {
      */
     mfgDate?: string | null;
     /**
+     * Story 1-2b — the batch's expiry date as the label states it: an IST calendar date YYYY-MM-DD (a malformed one is a 400). Omit when there is none. Every rule about it is a per-line refusal: on an untracked SKU (`expiry-on-untracked`), before the line's mfg date (`expiry-before-mfg`), unlike the batch's existing expiry or another line's for the same batch (`batch-expiry-mismatch`), missing when the client requires it (`expiry-required`), or fewer days away than the client's minimum (`shelf-life-short`, its own review row)
+     */
+    expiryDate?: string | null;
+    /**
      * Physically received quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     qty: number;
@@ -3407,6 +3415,10 @@ export type GrnLineDto = {
      */
     excessQty: number;
     /**
+     * Story 1-2b — the part of appliedQty past the open quantity that booked at once within the client's receiving tolerance (no over-receipt). Present only when > 0
+     */
+    toleranceQty?: number;
+    /**
      * Catch weight (story 10.3): the handling units this line produced, in the order their weights were supplied — present only on a catch-weight line. These ids are what a unit label carries and what the pack bench scans back.
      */
     handlingUnitIds?: Array<string>;
@@ -3424,13 +3436,29 @@ export type RejectedGrnLineDto = {
     skuId: string;
     qty: number;
     /**
-     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only). Story 1-2a: `client-departed` — a line of ANY receipt whose SKU's client has departed; also to review (Discard only — re-receive after an owner reactivates the client)
+     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only). Story 1-2a: `client-departed` — a line of ANY receipt whose SKU's client has departed; also to review (Discard only — re-receive after an owner reactivates the client). Story 1-2b — the expiry rules, each per line: `expiry-on-untracked`, `expiry-before-mfg`, `batch-expiry-mismatch`, `expiry-required` (review, Discard only) and `shelf-life-short` (its own review row — Accept anyway with a note, or Discard)
      */
-    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found' | 'sku-client-mismatch' | 'client-departed';
+    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found' | 'sku-client-mismatch' | 'client-departed' | 'expiry-on-untracked' | 'expiry-before-mfg' | 'batch-expiry-mismatch' | 'expiry-required' | 'shelf-life-short';
     /**
      * Human-readable reason naming the line state
      */
     reason: string;
+    /**
+     * Story 1-2b — the line's index in the request (present on an expiry refusal only)
+     */
+    index?: number;
+    /**
+     * Story 1-2b — the line's batch code (present on an expiry refusal only)
+     */
+    batchCode?: string | null;
+    /**
+     * Story 1-2b — the expiry date the rule judged (YYYY-MM-DD, IST): the line's own, or for `expiry-required` / `shelf-life-short` the effective one (the line's, else its batch's); null when none. Present on an expiry refusal only
+     */
+    expiryDate?: string | null;
+    /**
+     * Story 1-2b — `shelf-life-short` only: the client's minimum remaining shelf life in days (0 when the client sets none — the batch had expired)
+     */
+    minShelfLifeDays?: number;
 };
 
 export type UnmatchedGrnLineDto = {
@@ -3494,9 +3522,21 @@ export type GoodsReceiptDto = {
      */
     unmatchedLines?: Array<UnmatchedGrnLineDto>;
     /**
-     * Story 1-1 — the op id of the review row raised for the `sku-client-mismatch` lines (Conflicts & Reviews, type `grn.lines-refused`, Discard only); present only when one was raised
+     * Story 1-1 — the op id of the review row raised for the refused lines (Conflicts & Reviews, type `grn.lines-refused`, Discard only) — since 1-2a/1-2b every per-line refusal but `shelf-life-short` (which has its own row, `shelfLifeReviewOpId`); present only when one was raised
      */
     reviewOpId?: string;
+    /**
+     * Story 1-2b — the op id of the review row raised for the `shelf-life-short` lines (type `grn.shelf-life-refused` — Accept anyway with a note, or Discard); present only when one was raised
+     */
+    shelfLifeReviewOpId?: string;
+    /**
+     * Story 1-2b — how many booked lines were put on receipt QC holds (the client's QC on receipt); present only when > 0
+     */
+    qcHeldLines?: number;
+    /**
+     * Story 1-2b — how many booked lines of a QC-on-receipt client were NOT held because the SKU is serial-tracked or catch-weight; present only when > 0
+     */
+    qcSkippedLines?: number;
 };
 
 export type RefusedReceiptDto = {
@@ -3511,13 +3551,17 @@ export type RefusedReceiptDto = {
      */
     occurredAt: string;
     /**
-     * Every request line, each `sku-client-mismatch` or (story 1-2a) `client-departed`
+     * Every request line, each `sku-client-mismatch` or (story 1-2a) `client-departed` or (story 1-2b) one of the expiry codes (`expiry-on-untracked`, `expiry-before-mfg`, `batch-expiry-mismatch`, `expiry-required`, `shelf-life-short`)
      */
     rejectedLines: Array<RejectedGrnLineDto>;
     /**
-     * The op id of the review row (`grn.lines-refused`, Discard only)
+     * The op id of the review row (`grn.lines-refused`, Discard only). Story 1-2b: absent when every line was refused `shelf-life-short` (only that row was raised)
      */
-    reviewOpId: string;
+    reviewOpId?: string;
+    /**
+     * Story 1-2b — the op id of the `grn.shelf-life-refused` review row, when one was raised
+     */
+    shelfLifeReviewOpId?: string;
 };
 
 export type GoodsReceiptResponse = {
@@ -3594,7 +3638,7 @@ export type CatalogSnapshotAsnLineDto = {
      */
     receivedQty: number;
     /**
-     * Derived: announcedQty − receivedQty (negative after an approved over-receipt)
+     * Derived: announcedQty − receivedQty, clamped at 0 for display (story 1-2b — received may pass announced after an approved over-receipt or a within-tolerance receipt)
      */
     openQty: number;
 };
@@ -3886,6 +3930,25 @@ export type CatalogOpenReturnDto = {
     lines: Array<CatalogOpenReturnLineDto>;
 };
 
+export type CatalogClientReceivingPolicyDto = {
+    /**
+     * Over-receipt tolerance, basis points of the ordered / announced quantity (500 = 5 %)
+     */
+    receivingToleranceBps: number;
+    /**
+     * Booked lines are put on receipt QC holds
+     */
+    qcOnReceipt: boolean;
+    /**
+     * A batch-tracked line needs an expiry date
+     */
+    expiryRequired: boolean;
+    /**
+     * Minimum remaining shelf life in IST calendar days, or null
+     */
+    minShelfLifeDays: number | null;
+};
+
 export type CatalogSnapshotClientDto = {
     id: string;
     /**
@@ -3900,6 +3963,10 @@ export type CatalogSnapshotClientDto = {
      * False when suspended or departed — a blind receipt picks only an active client
      */
     active: boolean;
+    /**
+     * Story 1-2b — the client's receiving policy, so the handheld can WARN at the dock (it never blocks; the server decides on replay). Absent = the device warns about nothing
+     */
+    receivingPolicy?: CatalogClientReceivingPolicyDto;
 };
 
 export type CatalogSnapshotResponse = {
@@ -4060,6 +4127,10 @@ export type OverReceiptDto = {
      * Row creation time (the keyset cursor field), ISO-8601 UTC
      */
     createdAt: string;
+    /**
+     * Story 1-2b — on an approval's answer only: the receipt QC hold the approved excess was put on (the client's QC on receipt)
+     */
+    qcHoldId?: string;
 };
 
 export type OverReceiptListResponse = {
@@ -4115,14 +4186,107 @@ export type QcHoldDto = {
      * Row creation time (the keyset cursor field), ISO-8601 UTC
      */
     createdAt: string;
+    /**
+     * Story 1-2b — `receipt`: placed by the receipt itself (the client's QC on receipt), one per GRN line; `manual`: an Ops Manager's (sku, bin) scope hold. Always present on the list; on a command's answer present only for a receipt hold
+     */
+    kind?: 'manual' | 'receipt';
+    /**
+     * Story 1-2b — the GRN line a receipt hold holds (receipt holds only)
+     */
+    grnLineId?: string;
 };
 
 export type QcHoldResponse = {
     qcHold: QcHoldDto;
 };
 
+export type ReleaseReceiptHoldsDto = {
+    /**
+     * The goods receipt whose open QC-on-receipt holds are released
+     */
+    grnId: string;
+};
+
+export type ReleaseReceiptHoldsResponse = {
+    grnId: string;
+    /**
+     * The GRN code
+     */
+    grnCode: string;
+    /**
+     * Every hold this call released
+     */
+    qcHolds: Array<QcHoldDto>;
+};
+
+export type QcHoldEntryDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    skuId: string;
+    /**
+     * The origin bin (release returns here)
+     */
+    binId: string;
+    /**
+     * Why the stock is quarantined (carried verbatim)
+     */
+    reason: string;
+    status: 'open' | 'released';
+    heldBy: string;
+    /**
+     * ISO-8601 UTC
+     */
+    heldAt: string;
+    releasedBy: string | null;
+    /**
+     * ISO-8601 UTC instant when released; null while the hold is open
+     */
+    releasedAt: string | null;
+    /**
+     * Row creation time (the keyset cursor field), ISO-8601 UTC
+     */
+    createdAt: string;
+    /**
+     * Story 1-2b — `receipt`: placed by the receipt itself (the client's QC on receipt), one per GRN line; `manual`: an Ops Manager's (sku, bin) scope hold
+     */
+    kind: 'manual' | 'receipt';
+    /**
+     * Story 1-2b — the GRN line a receipt hold holds (receipt holds only)
+     */
+    grnLineId?: string;
+    /**
+     * Story 1-2b — the receipt hold's GRN (null on a manual hold)
+     */
+    grnId: string | null;
+    /**
+     * Story 1-2b — the receipt hold's GRN code (null on a manual hold)
+     */
+    grnCode: string | null;
+    /**
+     * Story 1-2b — set when the receipt hold holds an approved over-receipt's excess
+     */
+    overReceiptId: string | null;
+    /**
+     * Story 1-2b — the held SKU's client
+     */
+    clientId: string;
+    /**
+     * Story 1-2b — the batch held (null on an untracked SKU, or when a manual hold moved several batches)
+     */
+    batchId: string | null;
+    /**
+     * Story 1-2b — that batch's code
+     */
+    batchCode: string | null;
+    /**
+     * Story 1-2b — the quantity the hold moved into QC (the sum of its own qc.held events), base UoM
+     */
+    heldQty: number;
+};
+
 export type QcHoldListResponse = {
-    items: Array<QcHoldDto>;
+    items: Array<QcHoldEntryDto>;
     nextCursor?: string | null;
 };
 
@@ -6371,6 +6535,25 @@ export type ClientRegisteredAddressDto = {
     pincode: string;
 };
 
+export type ClientReceivingPolicyDto = {
+    /**
+     * Over-receipt tolerance in basis points of the ordered / announced quantity (500 = 5 %). Excess within it books at once (floored to the unit's step); the rest pends for approval as before. 0 = every excess pends
+     */
+    receivingToleranceBps: number;
+    /**
+     * Every booked receipt line of this client is put on its own receipt-scoped QC hold (released one by one or per receipt). Serial-tracked and catch-weight lines are not held
+     */
+    qcOnReceipt: boolean;
+    /**
+     * A batch-tracked line must carry an expiry date (or its batch must already have one), else it is refused per line (`expiry-required`); an already expired batch is refused (`shelf-life-short`). Untracked SKUs are not covered
+     */
+    expiryRequired: boolean;
+    /**
+     * The minimum remaining shelf life, in IST calendar days from the receipt's business date to the expiry date; a shorter line is refused (`shelf-life-short`, its own review row, Accept anyway with a note). Only beside expiryRequired; null = none
+     */
+    minShelfLifeDays: number | null;
+};
+
 export type ClientDto = {
     id: string;
     tenantId: string;
@@ -6407,6 +6590,10 @@ export type ClientDto = {
      * Story 1-2a — where returned goods go back to, in the shipment address shape (null when unset)
      */
     returnAddress: AddressDto | null;
+    /**
+     * Story 1-2b — the receiving policy. Optional: a mutation answer stored before 1-2b replays without it; every fresh read carries it
+     */
+    receivingPolicy?: ClientReceivingPolicyDto;
 };
 
 export type ClientListResponse = {
@@ -6487,6 +6674,43 @@ export type UpdateClientAddressesDto = {
      * Where returned goods go back to — the shipment address shape (absent = unchanged, null = cleared)
      */
     return?: AddressDto | null;
+};
+
+export type ClientReceivingPolicyResponse = {
+    /**
+     * Over-receipt tolerance in basis points of the ordered / announced quantity (500 = 5 %). Excess within it books at once (floored to the unit's step); the rest pends for approval as before. 0 = every excess pends
+     */
+    receivingToleranceBps: number;
+    /**
+     * Every booked receipt line of this client is put on its own receipt-scoped QC hold (released one by one or per receipt). Serial-tracked and catch-weight lines are not held
+     */
+    qcOnReceipt: boolean;
+    /**
+     * A batch-tracked line must carry an expiry date (or its batch must already have one), else it is refused per line (`expiry-required`); an already expired batch is refused (`shelf-life-short`). Untracked SKUs are not covered
+     */
+    expiryRequired: boolean;
+    /**
+     * The minimum remaining shelf life, in IST calendar days from the receipt's business date to the expiry date; a shorter line is refused (`shelf-life-short`, its own review row, Accept anyway with a note). Only beside expiryRequired; null = none
+     */
+    minShelfLifeDays: number | null;
+    clientId: string;
+    /**
+     * How many of the client's SKUs are NOT batch-tracked (kits excluded) — the expiry rules do not reach them; they receive as before
+     */
+    untrackedSkuCount: number;
+};
+
+export type UpdateClientReceivingPolicyDto = {
+    /**
+     * Basis points, an integer (500 = 5 %)
+     */
+    receivingToleranceBps: number;
+    qcOnReceipt: boolean;
+    expiryRequired: boolean;
+    /**
+     * IST calendar days; null for none. Requires expiryRequired
+     */
+    minShelfLifeDays: number | null;
 };
 
 export type ClientContactDto = {
@@ -7905,11 +8129,46 @@ export type LedgerChainBreakNotificationDto = {
     resolution: 'acknowledged' | null;
 };
 
+export type QcReceiptSummaryDto = {
+    grnId: string;
+    /**
+     * The goods receipt code
+     */
+    grnCode: string;
+    /**
+     * How many lines were held
+     */
+    count: number;
+};
+
+export type QcReceiptNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'qc-receipt';
+    summary: QcReceiptSummaryDto;
+    resolution: 'released' | null;
+};
+
 export type NotificationListResponse = {
     /**
      * Visible entries, newest first. A member sees only the sources it can act on.
      */
-    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto | AuditExportNotificationDto | LedgerChainBreakNotificationDto>;
+    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto | AuditExportNotificationDto | LedgerChainBreakNotificationDto | QcReceiptNotificationDto>;
     nextCursor: string | null;
 };
 
@@ -10853,7 +11112,7 @@ export type DevicesControllerResolveRejectedOpData = {
 
 export type DevicesControllerResolveRejectedOpErrors = {
     /**
-     * Missing or malformed Idempotency-Key, unknown decision, or the payload refusing an arm (validation-failed — including a payload recount cannot re-plan)
+     * Missing or malformed Idempotency-Key, unknown decision, or the payload refusing an arm (validation-failed — including a payload recount cannot re-plan; story 1-2b: Apply on a grn.shelf-life-refused row without a note, or a note over 500 characters)
      */
     400: ProblemDetailsDto;
     /**
@@ -10869,7 +11128,7 @@ export type DevicesControllerResolveRejectedOpErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Row already resolved (rejected-op-resolved), a decision the op type does not admit — story 13-2: a return.receive row is Discard only (decision-not-available, member decisions), a pending count task on the bin (count-task-open), or the re-executed command's own conflict (verbatim)
+     * Row already resolved (rejected-op-resolved), a decision the op type does not admit — story 13-2: a return.receive row is Discard only; story 1-2b: a grn.shelf-life-refused row admits Apply and Discard (decision-not-available, member decisions), a pending count task on the bin (count-task-open), or the re-executed command's own conflict (verbatim)
      */
     409: ProblemDetailsDto;
     /**
@@ -14085,6 +14344,10 @@ export type ReceivingControllerListQcHoldsData = {
         warehouseId?: string;
         status?: 'open' | 'released';
         /**
+         * Story 1-2b — only one goods receipt's QC-on-receipt holds
+         */
+        grnId?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -14235,6 +14498,62 @@ export type ReceivingControllerReleaseQcHoldResponses = {
 };
 
 export type ReceivingControllerReleaseQcHoldResponse = ReceivingControllerReleaseQcHoldResponses[keyof ReceivingControllerReleaseQcHoldResponses];
+
+export type ReceivingControllerReleaseReceiptHoldsData = {
+    body: ReleaseReceiptHoldsDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/qc-holds/release-receipt';
+};
+
+export type ReceivingControllerReleaseReceiptHoldsErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed grnId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks qc.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No goods receipt with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The receipt has no open QC-on-receipt hold (qc-hold-released), a hold's origin bin is gone (qc-hold-origin-bin-gone), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerReleaseReceiptHoldsError = ReceivingControllerReleaseReceiptHoldsErrors[keyof ReceivingControllerReleaseReceiptHoldsErrors];
+
+export type ReceivingControllerReleaseReceiptHoldsResponses = {
+    /**
+     * The released holds (a matching Idempotency-Key replays it)
+     */
+    200: ReleaseReceiptHoldsResponse;
+};
+
+export type ReceivingControllerReleaseReceiptHoldsResponse = ReceivingControllerReleaseReceiptHoldsResponses[keyof ReceivingControllerReleaseReceiptHoldsResponses];
 
 export type PutawayControllerListPlacementsData = {
     body?: never;
@@ -17952,6 +18271,100 @@ export type ClientsControllerUpdateAddressesResponses = {
 };
 
 export type ClientsControllerUpdateAddressesResponse = ClientsControllerUpdateAddressesResponses[keyof ClientsControllerUpdateAddressesResponses];
+
+export type ClientsControllerGetReceivingPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/receiving-policy';
+};
+
+export type ClientsControllerGetReceivingPolicyErrors = {
+    /**
+     * A malformed clientId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientsControllerGetReceivingPolicyError = ClientsControllerGetReceivingPolicyErrors[keyof ClientsControllerGetReceivingPolicyErrors];
+
+export type ClientsControllerGetReceivingPolicyResponses = {
+    200: ClientReceivingPolicyResponse;
+};
+
+export type ClientsControllerGetReceivingPolicyResponse = ClientsControllerGetReceivingPolicyResponses[keyof ClientsControllerGetReceivingPolicyResponses];
+
+export type ClientsControllerUpdateReceivingPolicyData = {
+    body: UpdateClientReceivingPolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/receiving-policy';
+};
+
+export type ClientsControllerUpdateReceivingPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, or a field that breaks its rule — a tolerance outside 0-10000 basis points, a minimum shelf life outside 1-3650 days or without expiryRequired (validation-failed, naming the field)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerUpdateReceivingPolicyError = ClientsControllerUpdateReceivingPolicyErrors[keyof ClientsControllerUpdateReceivingPolicyErrors];
+
+export type ClientsControllerUpdateReceivingPolicyResponses = {
+    200: ClientResponse;
+};
+
+export type ClientsControllerUpdateReceivingPolicyResponse = ClientsControllerUpdateReceivingPolicyResponses[keyof ClientsControllerUpdateReceivingPolicyResponses];
 
 export type ClientsControllerListContactsData = {
     body?: never;

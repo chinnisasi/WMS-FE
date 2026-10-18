@@ -20,6 +20,16 @@ import {
   rejectedOpGuidance,
   GRN_REFUSAL_LABEL,
   GRN_CLIENT_GUIDANCE,
+  GRN_DEPARTED_GUIDANCE,
+  GRN_EXPIRY_ON_UNTRACKED_GUIDANCE,
+  GRN_EXPIRY_BEFORE_MFG_GUIDANCE,
+  GRN_BATCH_EXPIRY_MISMATCH_GUIDANCE,
+  GRN_EXPIRY_REQUIRED_GUIDANCE,
+  GRN_SHELF_LIFE_GUIDANCE,
+  MAX_RESOLVE_NOTE_LENGTH,
+  acceptAnywayNote,
+  applyNeedsNote,
+  rejectedOpResolvedOutcome,
   rejectedOpsListReason,
   rejectedOpsResolveReason,
   resolveDraftProblem,
@@ -459,13 +469,159 @@ describe('story 1-1 — a blind receipt\'s lines of another client (grn.lines-re
   test('every GRN line refusal reason has words', () => {
     expect(GRN_REFUSAL_LABEL['sku-client-mismatch']).toBe("another client's SKU");
     expect(Object.keys(GRN_REFUSAL_LABEL).sort()).toEqual(
-      // Story 1-2a adds `client-departed`.
-      ['asn-line-not-found', 'client-departed', 'po-line-not-found', 'po-line-not-open', 'sku-client-mismatch'],
+      // Story 1-2a adds `client-departed`; story 1-2b the five expiry codes.
+      [
+        'asn-line-not-found',
+        'batch-expiry-mismatch',
+        'client-departed',
+        'expiry-before-mfg',
+        'expiry-on-untracked',
+        'expiry-required',
+        'po-line-not-found',
+        'po-line-not-open',
+        'shelf-life-short',
+        'sku-client-mismatch',
+      ],
     );
     expect(GRN_REFUSAL_LABEL['client-departed']).toBe('its client has departed');
   });
 
   test('its decisions are the server\'s — Discard only', () => {
     expect(rejectedOpDecisions({ decisions: ['discard'], payload: row.payload })).toEqual(['discard']);
+  });
+});
+
+describe('story 1-2b — the expiry refusals and the shelf-life row', () => {
+  const GRN = '01989f7a-0000-7000-8000-0000000000bb';
+  const linesRefused = (problemCode: string, refusals: Record<string, unknown>[], lines?: Record<string, unknown>[]) => ({
+    opType: 'grn.lines-refused' as const,
+    problemCode,
+    payload: {
+      grnId: GRN,
+      grnCode: 'GRN-0042',
+      clientLabel: 'ACME',
+      lines: lines ?? refusals.map((_, i) => ({ skuId: `sku-${i}`, batchCode: 'B1', mfgDate: null, qty: 2 })),
+      refusals,
+    },
+  });
+
+  test('each new code has its words', () => {
+    expect(GRN_REFUSAL_LABEL['expiry-on-untracked']).toBe('expiry date on an untracked SKU');
+    expect(GRN_REFUSAL_LABEL['expiry-before-mfg']).toBe('expiry date before its mfg date');
+    expect(GRN_REFUSAL_LABEL['batch-expiry-mismatch']).toBe("expiry date differs from its batch's");
+    expect(GRN_REFUSAL_LABEL['expiry-required']).toBe('expiry date required');
+    expect(GRN_REFUSAL_LABEL['shelf-life-short']).toBe('shelf life too short');
+  });
+
+  test('each lines-refused code reads its own remedy', () => {
+    const cases: [string, string][] = [
+      ['client-departed', GRN_DEPARTED_GUIDANCE],
+      ['sku-client-mismatch', GRN_CLIENT_GUIDANCE],
+      ['batch-expiry-mismatch', GRN_BATCH_EXPIRY_MISMATCH_GUIDANCE],
+      ['expiry-before-mfg', GRN_EXPIRY_BEFORE_MFG_GUIDANCE],
+      ['expiry-on-untracked', GRN_EXPIRY_ON_UNTRACKED_GUIDANCE],
+      ['expiry-required', GRN_EXPIRY_REQUIRED_GUIDANCE],
+    ];
+    for (const [code, guidance] of cases) {
+      expect(rejectedOpGuidance(linesRefused(code, [{ reason: code, skuCode: 'X' }]))).toEqual([guidance]);
+    }
+    expect(GRN_EXPIRY_ON_UNTRACKED_GUIDANCE).toBe(
+      'These SKUs are not batch-tracked, so they carry no expiry date — receive these lines again without one, then discard this row.',
+    );
+    expect(GRN_EXPIRY_BEFORE_MFG_GUIDANCE).toBe(
+      'The expiry date is before the mfg date — check the label, receive these lines again with the right dates, then discard this row.',
+    );
+    expect(GRN_BATCH_EXPIRY_MISMATCH_GUIDANCE).toBe(
+      "The expiry date differs from the one this batch already has (or another line's for the same batch) — check the label; receive these lines again with the batch's expiry, or under their own batch code, then discard this row.",
+    );
+    expect(GRN_EXPIRY_REQUIRED_GUIDANCE).toBe(
+      "This client requires an expiry date on batch-tracked goods — receive these lines again with the label's expiry date, then discard this row.",
+    );
+  });
+
+  test('a row mixing codes reads one remedy per code, in the server precedence (departed first)', () => {
+    const mixed = linesRefused('client-departed', [{ reason: 'expiry-required' }, { reason: 'client-departed' }, { reason: 'expiry-required' }]);
+    expect(rejectedOpGuidance(mixed)).toEqual([GRN_DEPARTED_GUIDANCE, GRN_EXPIRY_REQUIRED_GUIDANCE]);
+    // An unknown code only: the receive-again remedy, never nothing.
+    expect(rejectedOpGuidance(linesRefused('something-new', [{ reason: 'something-new' }]))).toEqual([GRN_CLIENT_GUIDANCE]);
+  });
+
+  test('the summary names the batch, the judged expiry and, for short-dated lines, the days left and the minimum', () => {
+    const row = linesRefused(
+      'batch-expiry-mismatch',
+      [
+        { reason: 'batch-expiry-mismatch', skuCode: 'MILK-1', skuClientLabel: 'ACME', batchCode: 'L7', expiryDate: '2026-12-01' },
+        { reason: 'expiry-required', skuCode: 'MILK-2', skuClientLabel: 'ACME', batchCode: 'L8', expiryDate: null },
+      ],
+      [
+        { skuId: 'a', batchCode: 'L7', mfgDate: null, expiryDate: '2026-12-01', qty: 3 },
+        { skuId: 'b', batchCode: 'L8', mfgDate: null, qty: 1 },
+      ],
+    );
+    expect(rejectedOpSummary(row)).toEqual({
+      heading: 'GRN-0042 — 2 lines not booked on a receipt for ACME',
+      lines: [
+        "MILK-1 × 3 · batch L7 · expires 2026-12-01 — expiry date differs from its batch's (ACME)",
+        'MILK-2 × 1 · batch L8 — expiry date required (ACME)',
+      ],
+    });
+  });
+
+  const shelfRow = {
+    opType: 'grn.shelf-life-refused' as const,
+    problemCode: 'shelf-life-short',
+    payload: {
+      warehouseId: 'w-1',
+      poId: 'po-1',
+      blindReasonCode: null,
+      occurredAt: '2026-10-19T05:00:00.000Z',
+      grnId: GRN,
+      grnCode: 'GRN-0042',
+      clientLabel: 'ACME',
+      lines: [
+        { poLineId: 'pl-1', skuId: 'a', batchCode: 'L7', mfgDate: null, expiryDate: '2026-12-18', qty: 10 },
+        { poLineId: 'pl-2', skuId: 'b', batchCode: 'L9', mfgDate: null, expiryDate: '2026-10-16', qty: 1 },
+      ],
+      refusals: [
+        { lineIndex: 0, skuId: 'a', skuCode: 'MILK-1', skuClientId: 'c', skuClientLabel: 'ACME', reason: 'shelf-life-short', batchCode: 'L7', expiryDate: '2026-12-18', minShelfLifeDays: 90, remainingDays: 60 },
+        { lineIndex: 1, skuId: 'b', skuCode: 'MILK-2', skuClientId: 'c', skuClientLabel: 'ACME', reason: 'shelf-life-short', batchCode: 'L9', expiryDate: '2026-10-16', minShelfLifeDays: 0, remainingDays: -3 },
+      ],
+    },
+  };
+
+  test('the shelf-life row: its own heading, the expiry, the days left and the minimum per line; its remedy', () => {
+    expect(rejectedOpSummary(shelfRow)).toEqual({
+      heading: 'GRN-0042 — 2 lines not booked: short-dated for ACME',
+      lines: [
+        'MILK-1 × 10 · batch L7 · expires 2026-12-18 — shelf life too short (60 days left, minimum 90 days) (ACME)',
+        'MILK-2 × 1 · batch L9 · expires 2026-10-16 — shelf life too short (expired 3 days ago, expired goods refused) (ACME)',
+      ],
+    });
+    expect(rejectedOpGuidance(shelfRow)).toEqual([GRN_SHELF_LIFE_GUIDANCE]);
+    expect(GRN_SHELF_LIFE_GUIDANCE).toBe(
+      "Short-dated for this client's minimum: accept them anyway with a note saying why (they book as on any receipt — QC and tolerance still apply), or discard this row and return the goods.",
+    );
+    expect(rejectedOpDecisions({ decisions: ['apply', 'discard'], payload: shelfRow.payload })).toEqual(['apply', 'discard']);
+  });
+
+  test('Accept anyway needs a trimmed note of at most 500 characters; only the shelf-life row asks for one', () => {
+    expect(applyNeedsNote(shelfRow)).toBe(true);
+    expect(applyNeedsNote({ opType: 'grn.lines-refused' })).toBe(false);
+    expect(applyNeedsNote({ opType: 'pick.record' })).toBe(false);
+    expect(acceptAnywayNote('  Vendor confirmed a credit note  ')).toEqual({ note: 'Vendor confirmed a credit note', problem: null });
+    expect(acceptAnywayNote('   ')).toEqual({ note: null, problem: 'Say why these short-dated goods are accepted — the note is required.' });
+    expect(MAX_RESOLVE_NOTE_LENGTH).toBe(500);
+    expect(acceptAnywayNote('x'.repeat(500)).note).toHaveLength(500);
+    expect(acceptAnywayNote('x'.repeat(501))).toEqual({ note: null, problem: 'The note is at most 500 characters.' });
+  });
+
+  test('the resolve outcome names Accept anyway on a shelf-life row and keeps the other words', () => {
+    expect(rejectedOpResolvedOutcome(shelfRow, 'applied')).toEqual({
+      word: 'Accepted anyway',
+      reason: 'The short-dated lines booked with the shelf-life rule waived for this receipt only — QC and tolerance applied as on any receipt; the note is audited.',
+    });
+    expect(rejectedOpResolvedOutcome({ opType: 'pick.record' }, 'applied').word).toBe('Op applied');
+    expect(rejectedOpResolvedOutcome({ opType: 'pick.record' }, 'recounted').word).toBe('Recount opened');
+    expect(rejectedOpResolvedOutcome(shelfRow, 'discarded').word).toBe('Discarded');
   });
 });

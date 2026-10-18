@@ -398,6 +398,12 @@ export const GRN_REFUSAL_LABEL: Readonly<Record<RejectedGrnLineDto['code'], stri
   'sku-client-mismatch': "another client's SKU",
   // Story 1-2a — a line of any receipt whose SKU's client has departed.
   'client-departed': 'its client has departed',
+  // Story 1-2b — the expiry rules, each per line.
+  'expiry-on-untracked': 'expiry date on an untracked SKU',
+  'expiry-before-mfg': 'expiry date before its mfg date',
+  'batch-expiry-mismatch': "expiry date differs from its batch's",
+  'expiry-required': 'expiry date required',
+  'shelf-life-short': 'shelf life too short',
 };
 
 /** The remedy a `grn.lines-refused` row's reviewer reads (Discard only). */
@@ -407,14 +413,54 @@ export const GRN_CLIENT_GUIDANCE = 'Receive these lines again on a receipt for t
 export const GRN_DEPARTED_GUIDANCE =
   'Their client has departed — an owner can reactivate it in Settings → Clients; receive these lines again after that, then discard this row.';
 
+/** Story 1-2b — the remedies for the expiry refusals of a `grn.lines-refused` row. */
+export const GRN_EXPIRY_ON_UNTRACKED_GUIDANCE =
+  'These SKUs are not batch-tracked, so they carry no expiry date — receive these lines again without one, then discard this row.';
+export const GRN_EXPIRY_BEFORE_MFG_GUIDANCE =
+  'The expiry date is before the mfg date — check the label, receive these lines again with the right dates, then discard this row.';
+export const GRN_BATCH_EXPIRY_MISMATCH_GUIDANCE =
+  "The expiry date differs from the one this batch already has (or another line's for the same batch) — check the label; receive these lines again with the batch's expiry, or under their own batch code, then discard this row.";
+export const GRN_EXPIRY_REQUIRED_GUIDANCE =
+  "This client requires an expiry date on batch-tracked goods — receive these lines again with the label's expiry date, then discard this row.";
+
+/** Story 1-2b — the `grn.shelf-life-refused` row's remedy (Accept anyway with a note, or Discard). */
+export const GRN_SHELF_LIFE_GUIDANCE =
+  "Short-dated for this client's minimum: accept them anyway with a note saying why (they book as on any receipt — QC and tolerance still apply), or discard this row and return the goods.";
+
+/**
+ * The remedy per `grn.lines-refused` code, in the server's `problemCode`
+ * precedence order (`client-departed` > `sku-client-mismatch` >
+ * `batch-expiry-mismatch` > `expiry-before-mfg` > `expiry-on-untracked` >
+ * `expiry-required`) — the row's remedies read in this order.
+ */
+const GRN_LINES_GUIDANCE: readonly (readonly [RejectedGrnLineDto['code'], string])[] = [
+  ['client-departed', GRN_DEPARTED_GUIDANCE],
+  ['sku-client-mismatch', GRN_CLIENT_GUIDANCE],
+  ['batch-expiry-mismatch', GRN_BATCH_EXPIRY_MISMATCH_GUIDANCE],
+  ['expiry-before-mfg', GRN_EXPIRY_BEFORE_MFG_GUIDANCE],
+  ['expiry-on-untracked', GRN_EXPIRY_ON_UNTRACKED_GUIDANCE],
+  ['expiry-required', GRN_EXPIRY_REQUIRED_GUIDANCE],
+];
+
 /**
  * Every remedy a row's reviewer reads: the returns remedies for a
- * `return.receive` row, the receive-again remedy for a `grn.lines-refused`
- * row, none otherwise.
+ * `return.receive` row; for a `grn.lines-refused` row one remedy per
+ * distinct refusal code its lines carry (story 1-2b — a row may mix codes;
+ * a row whose refusals name none reads its `problemCode`), in precedence
+ * order; the Accept-anyway remedy for a `grn.shelf-life-refused` row; none
+ * otherwise.
  */
 export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
+  if (entry.opType === 'grn.shelf-life-refused') return [GRN_SHELF_LIFE_GUIDANCE];
   if (entry.opType === 'grn.lines-refused') {
-    return [entry.problemCode === 'client-departed' ? GRN_DEPARTED_GUIDANCE : GRN_CLIENT_GUIDANCE];
+    const refusals = Array.isArray(entry.payload['refusals']) ? (entry.payload['refusals'] as unknown[]) : [];
+    const codes = new Set<string>([entry.problemCode]);
+    for (const refusal of refusals) {
+      const reason = typeof refusal === 'object' && refusal !== null ? (refusal as Record<string, unknown>)['reason'] : undefined;
+      if (typeof reason === 'string') codes.add(reason);
+    }
+    const out = GRN_LINES_GUIDANCE.filter(([code]) => codes.has(code)).map(([, guidance]) => guidance);
+    return out.length > 0 ? out : [GRN_CLIENT_GUIDANCE];
   }
   return returnReceiveGuidance(entry);
 }
@@ -431,7 +477,7 @@ function grnRefusalWords(reason: string): string {
  * refused). `lines[i]` pairs with `refusals[i]`.
  */
 function grnLinesRefusedSummary(
-  entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>,
+  entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>,
   skuLabel: (skuId: string) => string | null,
 ): { heading: string; lines: readonly string[] } {
   const payload = entry.payload;
@@ -450,19 +496,47 @@ function grnLinesRefusedSummary(
       (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
     const qty = typeof item['qty'] === 'number' ? item['qty'] : '?';
     const parts = [`${sku} × ${qty}`];
-    if (typeof item['batchCode'] === 'string') parts.push(`batch ${item['batchCode']}`);
+    const batchCode = typeof refusal['batchCode'] === 'string' ? refusal['batchCode'] : item['batchCode'];
+    if (typeof batchCode === 'string') parts.push(`batch ${batchCode}`);
+    // Story 1-2b — the expiry the rule judged (the refusal's; else the line's own).
+    const expiry = typeof refusal['expiryDate'] === 'string' ? refusal['expiryDate'] : item['expiryDate'];
+    if (typeof expiry === 'string') parts.push(`expires ${expiry}`);
     const owner = typeof refusal['skuClientLabel'] === 'string' ? refusal['skuClientLabel'] : null;
     const reason = grnRefusalWords(String(refusal['reason'] ?? entry.problemCode));
-    return `${parts.join(' · ')} — ${reason}${owner === null ? '' : ` (${owner})`}`;
+    const shelf = shelfLifeWords(refusal);
+    return `${parts.join(' · ')} — ${reason}${shelf === null ? '' : ` (${shelf})`}${owner === null ? '' : ` (${owner})`}`;
   });
   const count = lines.length;
+  const noun = `${count} line${count === 1 ? '' : 's'}`;
+  if (entry.opType === 'grn.shelf-life-refused') {
+    return {
+      heading: `${grn} — ${noun} not booked: short-dated${clientLabel === null ? '' : ` for ${clientLabel}`}`,
+      lines: rendered,
+    };
+  }
   const forClient =
     clientLabel === null
       ? ''
       : entry.problemCode === 'client-departed'
         ? ` — ${clientLabel} has departed`
         : ` on a receipt for ${clientLabel}`;
-  return { heading: `${grn} — ${count} line${count === 1 ? '' : 's'} not booked${forClient}`, lines: rendered };
+  return { heading: `${grn} — ${noun} not booked${forClient}`, lines: rendered };
+}
+
+/**
+ * Story 1-2b — a short-dated refusal's numbers: the days left and the
+ * client's minimum (`0 days left, minimum 0` reads as expired — a client
+ * that requires expiry with no minimum refuses an expired batch). Null when
+ * the refusal carries neither.
+ */
+function shelfLifeWords(refusal: Record<string, unknown>): string | null {
+  const remaining = typeof refusal['remainingDays'] === 'number' ? refusal['remainingDays'] : null;
+  const minimum = typeof refusal['minShelfLifeDays'] === 'number' ? refusal['minShelfLifeDays'] : null;
+  if (remaining === null && minimum === null) return null;
+  const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
+  const left = remaining === null ? null : remaining < 0 ? `expired ${days(-remaining)} ago` : `${days(remaining)} left`;
+  const floor = minimum === null ? null : minimum === 0 ? 'expired goods refused' : `minimum ${days(minimum)}`;
+  return [left, floor].filter((part) => part !== null).join(', ');
 }
 
 function refusalWords(reason: string): string {
@@ -489,7 +563,9 @@ export function rejectedOpSummary(
   entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>,
   skuCode: (skuId: string) => string | null = () => null,
 ): { heading: string; lines: readonly string[] } | null {
-  if (entry.opType === 'grn.lines-refused') return grnLinesRefusedSummary(entry, skuCode);
+  // Story 1-2b — a `grn.shelf-life-refused` row has the same shape (the
+  // receipt's header plus its short-dated lines, `lines[i]` ↔ `refusals[i]`).
+  if (entry.opType === 'grn.lines-refused' || entry.opType === 'grn.shelf-life-refused') return grnLinesRefusedSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
   const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;
@@ -515,4 +591,56 @@ export function rejectedOpSummary(
   });
   const units = entries.length;
   return { heading: `${rma} — ${units} entr${units === 1 ? 'y' : 'ies'} not booked`, lines };
+}
+
+// ── story 1-2b: Accept anyway (a grn.shelf-life-refused row) ─────────────────
+
+/** The backend's `RESOLVE_NOTE_MAX` — code points, after trimming. */
+export const MAX_RESOLVE_NOTE_LENGTH = 500;
+
+/**
+ * Whether a row's Apply is the Accept-anyway arm — accepting short-dated
+ * goods, which needs a note (the server 400s Apply without one).
+ */
+export function applyNeedsNote(entry: Pick<RejectedOpResponse, 'opType'>): boolean {
+  return entry.opType === 'grn.shelf-life-refused';
+}
+
+/**
+ * The note an Accept anyway sends, trimmed, or a problem (blank, or past
+ * 500 code points) — the button stays disabled while there is one.
+ */
+export function acceptAnywayNote(text: string): { note: string; problem: null } | { note: null; problem: string } {
+  const note = text.trim();
+  if (note === '') return { note: null, problem: 'Say why these short-dated goods are accepted — the note is required.' };
+  if ([...note].length > MAX_RESOLVE_NOTE_LENGTH) {
+    return { note: null, problem: `The note is at most ${MAX_RESOLVE_NOTE_LENGTH} characters.` };
+  }
+  return { note, problem: null };
+}
+
+/** The outcome banner of a settled resolve, by the row's new status and type. */
+export function rejectedOpResolvedOutcome(
+  entry: Pick<RejectedOpResponse, 'opType'>,
+  status: string,
+): { word: string; reason: string } {
+  if (status === 'applied' && applyNeedsNote(entry)) {
+    return {
+      word: 'Accepted anyway',
+      reason: 'The short-dated lines booked with the shelf-life rule waived for this receipt only — QC and tolerance applied as on any receipt; the note is audited.',
+    };
+  }
+  if (status === 'applied') {
+    return {
+      word: 'Op applied',
+      reason: 'The op re-executed against the live guards and landed — the same ledger truth every other path writes.',
+    };
+  }
+  if (status === 'recounted') {
+    return {
+      word: 'Recount opened',
+      reason: 'A fresh count task is the corrected basis — the bin’s history, not a force-write, answers the op.',
+    };
+  }
+  return { word: 'Discarded', reason: 'The op is retired with a discard marker — its refusal stays readable in the row.' };
 }

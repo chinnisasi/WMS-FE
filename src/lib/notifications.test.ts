@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { CONFLICTS_QUEUES, parseQueueParam } from './conflicts-queues';
 import { parseDrill, type DrillScreen } from './drill';
-import { parseInboundTab } from './inbound-tabs';
+import { parseInboundQcGrn, parseInboundTab } from './inbound-tabs';
 import {
   bellLabel,
   knownNotifications,
@@ -21,6 +21,7 @@ const SKU = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
 const UNKNOWN_SKU = '0198f7a2-1b3c-7d4e-8f90-0000000000ff';
 const CONNECTION = '0198f7a2-1b3c-7d4e-8f90-00000000c0de';
 const RAISED = '2026-10-06T04:30:00.000Z';
+const GRN = '0198f7a2-1b3c-7d4e-8f90-0000000000b7';
 
 const LOOKUPS: NotificationLookups = {
   sku: (id) => (id === SKU ? { code: 'SPICE-01', uom: 'kg', uomPrecision: 3 } : null),
@@ -46,6 +47,8 @@ const ENTRIES: Readonly<Record<NotificationEntry['sourceType'], NotificationEntr
     warehouseId: W,
     summary: { kind: 'chain', firstSeq: 1042, reason: 'hash mismatch at seq 1042', detectedBy: 'anchor' },
   },
+  // Story 1-2b — one entry per receipt of a QC-on-receipt client.
+  'qc-receipt': { ...base, sourceType: 'qc-receipt', warehouseId: W, summary: { grnId: GRN, grnCode: 'GRN-0042', count: 3 } },
 };
 
 function resolved(entry: NotificationEntry, resolution: string): NotificationEntry {
@@ -65,6 +68,7 @@ describe('notification copy', () => {
       'Channel sync failing',
       'Audit export',
       'Ledger integrity',
+      'Held for QC on receipt',
     ]);
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
     expect(notificationCategory(expiring)).toBe('Batch nearing expiry');
@@ -82,6 +86,7 @@ describe('notification copy', () => {
       'Connection 0198f7a2 — deliveries are failing',
       'Audit export ready — 1,02,345 events',
       'Ledger chain broken at #1042 — MAIN Chennai DC',
+      'GRN-0042: 3 lines held for QC on receipt · MAIN Chennai DC',
     ]);
     // The expiry arm names the IST date (18:30Z is the next IST day).
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
@@ -116,6 +121,12 @@ describe('notification copy', () => {
     const elsewhere = { ...ENTRIES['ledger-chain-break'], warehouseId: '0198f7a2-ffff-7d4e-8f90-99aabbccdd09' } as NotificationEntry;
     expect(notificationDescription(elsewhere, LOOKUPS)).toBe('Ledger chain broken at #1042 — Warehouse 0198f7a2');
     expect(notificationResolvedLabel(resolved(ENTRIES['ledger-chain-break'], 'acknowledged'))).toBe('Resolved · acknowledged');
+  });
+
+  test('the QC-on-receipt entry (1-2b): one line per receipt, singular for one line; it resolves released', () => {
+    const one = { ...ENTRIES['qc-receipt'], warehouseId: null, summary: { grnId: GRN, grnCode: 'GRN-0007', count: 1 } } as NotificationEntry;
+    expect(notificationDescription(one, LOOKUPS)).toBe('GRN-0007: 1 line held for QC on receipt');
+    expect(notificationResolvedLabel(resolved(ENTRIES['qc-receipt'], 'released'))).toBe('Resolved · released');
   });
 
   test('resolved: null while open; "Resolved · {resolution}" once cleared', () => {
@@ -155,6 +166,8 @@ describe('click-through links', () => {
       'audit-export': ['/reports#audit-exports', '/reports#audit-exports'],
       // Story 9-3c — the Ledger integrity section.
       'ledger-chain-break': ['/reports#ledger-integrity', '/reports#ledger-integrity'],
+      // Story 1-2b — the QC holds tab narrowed to the receipt.
+      'qc-receipt': [`/inbound?tab=qc-holds&grnId=${GRN}`, `/inbound?tab=qc-holds&grnId=${GRN}`],
     };
     for (const [sourceType, entry] of Object.entries(ENTRIES)) {
       const [open, done] = expected[sourceType as NotificationEntry['sourceType']];
@@ -186,6 +199,10 @@ describe('click-through links', () => {
         expect(parseDrill('inbound', params)).toBeNull();
         expect(parseInboundTab(params)).not.toBeNull();
         if (entry.sourceType === 'qc-hold') expect(parseInboundTab(params)).toBe('qc-holds');
+        if (entry.sourceType === 'qc-receipt') {
+          expect(parseInboundTab(params)).toBe('qc-holds');
+          expect(parseInboundQcGrn(params)).toBe(GRN);
+        }
         continue;
       }
       if (params.list === undefined) {

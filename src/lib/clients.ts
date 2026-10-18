@@ -1142,3 +1142,198 @@ export function addressesReason(error: unknown): string {
   }
   return UNREACHABLE_REASON;
 }
+
+// ── story 1-2b: the receiving policy ────────────────────────────────────────
+
+/** The backend's `RECEIVING_TOLERANCE_BPS_MAX` (100 %), the 0078 CHECK. */
+export const MAX_RECEIVING_TOLERANCE_BPS = 10000;
+/** The backend's `MIN_SHELF_LIFE_DAYS_MIN` / `_MAX` (the 0078 CHECK). */
+export const MIN_SHELF_LIFE_DAYS_MIN = 1;
+export const MIN_SHELF_LIFE_DAYS_MAX = 3650;
+
+/**
+ * A percent the owner typed → basis points, by DECIMAL STRING arithmetic —
+ * never a float multiplication (`1.005 * 100` is 100.49999…, which would
+ * round to a value the owner never typed). At most two decimals (0.01 % is
+ * one basis point), 0 to 100.
+ */
+export function percentToBps(text: string): { bps: number; problem: null } | { bps: null; problem: string } {
+  const trimmed = text.trim();
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(trimmed);
+  if (match === null || trimmed === '' || trimmed === '.') {
+    return { bps: null, problem: 'Enter the tolerance as a percent from 0 to 100, e.g. 5 or 2.5.' };
+  }
+  const whole = (match[1] ?? '').replace(/^0+(?=\d)/, '');
+  const fraction = match[2] ?? '';
+  if (fraction.length > 2) {
+    return { bps: null, problem: 'The tolerance takes at most two decimal places (0.01 %).' };
+  }
+  if (whole.length > 3) return { bps: null, problem: 'The tolerance is at most 100 %.' };
+  const bps = Number(whole === '' ? '0' : whole) * 100 + Number(fraction.padEnd(2, '0'));
+  if (bps > MAX_RECEIVING_TOLERANCE_BPS) return { bps: null, problem: 'The tolerance is at most 100 %.' };
+  return { bps, problem: null };
+}
+
+/** Basis points → the percent text the form shows (integer arithmetic): 250 → "2.5", 1 → "0.01". */
+export function bpsToPercent(bps: number): string {
+  const whole = Math.floor(bps / 100);
+  const fraction = bps % 100;
+  if (fraction === 0) return String(whole);
+  return `${whole}.${String(fraction).padStart(2, '0').replace(/0$/, '')}`;
+}
+
+/** The policy as the server holds it (the read's fields, or `ClientDto.receivingPolicy`). */
+export interface ReceivingPolicy {
+  readonly receivingToleranceBps: number;
+  readonly qcOnReceipt: boolean;
+  readonly expiryRequired: boolean;
+  readonly minShelfLifeDays: number | null;
+}
+
+/** The policy form's fields (text where the owner types). */
+export interface ReceivingPolicyFields {
+  readonly tolerancePercent: string;
+  readonly qcOnReceipt: boolean;
+  readonly expiryRequired: boolean;
+  readonly minShelfLifeDays: string;
+}
+
+export type ReceivingPolicyField = 'tolerance' | 'minShelfLife';
+
+export function receivingPolicyFieldsOf(policy: ReceivingPolicy): ReceivingPolicyFields {
+  return {
+    tolerancePercent: bpsToPercent(policy.receivingToleranceBps),
+    qcOnReceipt: policy.qcOnReceipt,
+    expiryRequired: policy.expiryRequired,
+    minShelfLifeDays: policy.minShelfLifeDays === null ? '' : String(policy.minShelfLifeDays),
+  };
+}
+
+/**
+ * The form → the PUT body (a FULL replace: all four fields, the minimum
+ * `null` for none), or a problem per field and no body. A minimum is only
+ * meaningful beside Expiry required — without it the minimum is sent as
+ * `null` (the form clears and disables it; the backend 400s the pair).
+ */
+export function parseReceivingPolicyDraft(
+  fields: ReceivingPolicyFields,
+): { body: ReceivingPolicy; problems: null } | { body: null; problems: Partial<Record<ReceivingPolicyField, string>> } {
+  const problems: Partial<Record<ReceivingPolicyField, string>> = {};
+  const tolerance = percentToBps(fields.tolerancePercent);
+  if (tolerance.problem !== null) problems.tolerance = tolerance.problem;
+  let minShelfLifeDays: number | null = null;
+  const days = fields.minShelfLifeDays.trim();
+  if (fields.expiryRequired && days !== '') {
+    const n = /^\d+$/.test(days) ? Number(days) : NaN;
+    if (!Number.isInteger(n) || n < MIN_SHELF_LIFE_DAYS_MIN || n > MIN_SHELF_LIFE_DAYS_MAX) {
+      problems.minShelfLife = `The minimum shelf life is a whole number of days from ${MIN_SHELF_LIFE_DAYS_MIN} to ${MIN_SHELF_LIFE_DAYS_MAX}, or blank for none.`;
+    } else {
+      minShelfLifeDays = n;
+    }
+  }
+  if (tolerance.bps === null || problems.minShelfLife !== undefined) return { body: null, problems };
+  return {
+    body: {
+      receivingToleranceBps: tolerance.bps,
+      qcOnReceipt: fields.qcOnReceipt,
+      expiryRequired: fields.expiryRequired,
+      minShelfLifeDays,
+    },
+    problems: null,
+  };
+}
+
+/** The read-only rendering of each setting. */
+export function receivingToleranceLabel(bps: number): string {
+  return bps === 0 ? 'None — any quantity over the PO or ASN waits for approval' : `${bpsToPercent(bps)} % — excess within it books at once`;
+}
+
+export function qcOnReceiptLabel(on: boolean): string {
+  return on ? 'On — every booked line is held for QC until released' : 'Off';
+}
+
+export function expiryRequiredLabel(required: boolean): string {
+  return required ? 'Required on batch-tracked lines' : 'Not required';
+}
+
+export function minShelfLifeLabel(days: number | null): string {
+  if (days === null) return 'None';
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+/** Decision 3 — the expiry rules reach batch-tracked SKUs only; the panel says how many are not. */
+export function untrackedSkusNote(untrackedSkuCount: number): string {
+  if (untrackedSkuCount === 0) return "Expiry rules apply to batch-tracked SKUs only — every one of this client's SKUs is batch-tracked.";
+  return untrackedSkuCount === 1
+    ? "Expiry rules apply to batch-tracked SKUs only — 1 of this client's SKUs is untracked and receives as before."
+    : `Expiry rules apply to batch-tracked SKUs only — ${untrackedSkuCount} of this client's SKUs are untracked and receive as before.`;
+}
+
+/** Serial-tracked and catch-weight SKUs book unheld under QC on receipt (recorded in PENDING). */
+export const QC_NOT_HELD_NOTE = 'Serial-tracked and catch-weight SKUs are not QC-held on receipt — they book unheld.';
+
+/** The save's outcome. */
+export function receivingPolicySaved(code: string): { word: string; reason: string } {
+  return { word: `${code}'s receiving policy saved`, reason: 'It applies to every receipt submitted from now on — web, handheld and offline replay.' };
+}
+
+/**
+ * Which field a `validation-failed` names, so the error renders under that
+ * input; null for anything else (the banner). The command's refusal carries
+ * the field as a structured `field` member (`extensions.field`) — read that
+ * first; a DTO-level 400 (a non-integer, say) carries none, and only then is
+ * the detail's field name the fallback.
+ */
+export function receivingPolicyFieldOf(error: unknown): ReceivingPolicyField | null {
+  if (!(error instanceof ApiProblem) || error.code !== 'validation-failed') return null;
+  const field = error.extensions['field'];
+  if (field === 'receivingToleranceBps') return 'tolerance';
+  if (field === 'minShelfLifeDays') return 'minShelfLife';
+  if (typeof field === 'string') return null;
+  if (error.detail === undefined) return null;
+  if (error.detail.includes('receivingToleranceBps')) return 'tolerance';
+  if (error.detail.includes('minShelfLifeDays')) return 'minShelfLife';
+  return null;
+}
+
+/** The policy write's refusals (and the read's, through `receivingPolicyReadReason`). */
+export function receivingPolicyReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'validation-failed':
+        return error.detail ?? 'Check the receiving policy and try again.';
+      case 'not-found':
+        return 'That client no longer exists — refresh the page.';
+      case 'role-denied':
+        return 'Only an owner can set a client’s receiving policy.';
+      case 'permission-denied':
+        return 'Your session belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This submission was already processed with different details — edit and save again.';
+      case 'conflict':
+        return 'The same submission is still in flight — retry to read the settled result.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      default:
+        return error.detail ?? `Receiving policy not saved (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+/** The policy read's failure. */
+export function receivingPolicyReadReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'not-found':
+        return 'That client no longer exists — refresh the page.';
+      case 'permission-denied':
+        return 'Your session belongs to another tenant — sign in again.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      default:
+        return error.detail ?? `Receiving policy not loaded (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}

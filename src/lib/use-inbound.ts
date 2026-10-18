@@ -24,7 +24,7 @@ import type {
   OverReceiptDto,
   PurchaseOrderDto,
   PurchaseOrderLineDto,
-  QcHoldDto,
+  QcHoldEntryDto,
   SkuResponse,
   StockEntryDto,
   UserResponse,
@@ -552,7 +552,8 @@ export function useUserMap(): Readonly<Record<string, UserResponse>> | null {
  * and holder emails through `useSkuMap` / `useUserMap`.
  */
 export interface QcHoldsPage {
-  items: readonly QcHoldDto[];
+  /** Story 1-2b — the list rows carry the kind, GRN, client, batch and held quantity. */
+  items: readonly QcHoldEntryDto[];
   /** Cursor for the Next button; null on the last page. */
   nextCursor: string | null;
 }
@@ -560,6 +561,12 @@ export interface QcHoldsPage {
 export function useQcHolds(
   warehouseId: string | null,
   status: 'open' | 'released',
+  /**
+   * Story 1-2b — one goods receipt's holds only. The GRN pins its own
+   * warehouse, so a narrowed read sends `grnId` without the warehouse (a
+   * notification may name a receipt of another warehouse than the active one).
+   */
+  grnId: string | null = null,
 ): (QcHoldsPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
   const tenantId = useSyncExternalStore(
     subscribeSession,
@@ -570,6 +577,7 @@ export function useQcHolds(
     tenantId: string;
     warehouseId: string | null;
     status: 'open' | 'released';
+    grnId: string | null;
     cursor: string | null;
   } | null>(null);
   // The cursor is scoped to the scope it was asked for — a cursor paged on
@@ -578,7 +586,8 @@ export function useQcHolds(
     requested !== null &&
     requested.tenantId === tenantId &&
     requested.warehouseId === warehouseId &&
-    requested.status === status
+    requested.status === status &&
+    requested.grnId === grnId
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
@@ -586,6 +595,7 @@ export function useQcHolds(
     tenantId: string;
     warehouseId: string | null;
     status: 'open' | 'released';
+    grnId: string | null;
     requested: string | null;
     page: QcHoldsPage;
   } | null>(null);
@@ -595,17 +605,17 @@ export function useQcHolds(
     let cancelled = false;
     (async () => {
       try {
+        const scope = grnId === null ? { warehouseId, status } : { status, grnId };
         const result = await fetchApiListQcHolds(
           tenantId,
-          activeCursor === null
-            ? { warehouseId, status }
-            : { warehouseId, status, cursor: activeCursor },
+          activeCursor === null ? scope : { ...scope, cursor: activeCursor },
         );
         if (cancelled) return;
         setPage({
           tenantId,
           warehouseId,
           status,
+          grnId,
           requested: activeCursor,
           page: { items: result.items, nextCursor: result.nextCursor ?? null },
         });
@@ -616,14 +626,14 @@ export function useQcHolds(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, status, activeCursor, revision]);
+  }, [tenantId, warehouseId, status, grnId, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null || warehouseId === null) return;
-      setRequested({ tenantId, warehouseId, status, cursor });
+      setRequested({ tenantId, warehouseId, status, grnId, cursor });
     },
-    [tenantId, warehouseId, status],
+    [tenantId, warehouseId, status, grnId],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
@@ -634,6 +644,7 @@ export function useQcHolds(
     page.tenantId !== tenantId ||
     page.warehouseId !== warehouseId ||
     page.status !== status ||
+    page.grnId !== grnId ||
     page.requested !== activeCursor
   ) {
     return null;

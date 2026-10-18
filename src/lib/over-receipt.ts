@@ -142,3 +142,42 @@ export function qcReason(error: unknown): string {
   }
   return 'The API is unreachable — is wms-be running?';
 }
+// ── story 1-2b: receipt holds (QC on receipt) ───────────────────────────────
+
+/**
+ * A hold's kind, in words: a receipt hold was placed by the receipt itself
+ * (its client's QC on receipt), a manual one by an Ops Manager. A row from
+ * a backend without the field reads as manual.
+ */
+export function qcHoldKindLabel(kind: 'manual' | 'receipt' | undefined): string {
+  return kind === 'receipt' ? 'Auto · QC on receipt' : 'Manual';
+}
+
+/** The GRN filter's banner: the receipt's code, else the id's random tail (guide §1.10). */
+export function qcGrnFilterLabel(grnCode: string | null, grnId: string): string {
+  return `Showing the QC holds of ${grnCode ?? `receipt …${grnId.slice(-8)}`}`;
+}
+
+/** The Release receipt outcome, from the RESPONSE (the holds it released). */
+export function releaseReceiptOutcome(response: { grnCode: string; qcHolds: readonly unknown[] }): { word: string; reason: string } {
+  const n = response.qcHolds.length;
+  return {
+    word: `${response.grnCode} released from QC`,
+    reason: `${n} receipt ${n === 1 ? 'hold' : 'holds'} released — the units are back in Receiving and awaiting putaway.`,
+  };
+}
+
+/**
+ * The Release receipt refusals: `qc-hold-released` here means the receipt
+ * has no open receipt hold left (another release moved first); the rest are
+ * the QC surface's (`qcReason`).
+ */
+export function releaseReceiptReason(error: unknown): string {
+  if (error instanceof ApiProblem && error.code === 'qc-hold-released') {
+    return 'This receipt has no open QC hold left — refresh the list.';
+  }
+  if (error instanceof ApiProblem && error.code === 'not-found') {
+    return 'This goods receipt no longer exists — refresh the list.';
+  }
+  return qcReason(error);
+}

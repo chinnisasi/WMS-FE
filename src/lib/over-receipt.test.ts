@@ -10,6 +10,10 @@ import {
   openQtyLabel,
   overReceiptDocumentLabel,
   qcReason,
+  qcGrnFilterLabel,
+  qcHoldKindLabel,
+  releaseReceiptOutcome,
+  releaseReceiptReason,
 } from './over-receipt';
 
 /**
@@ -182,5 +186,35 @@ describe('story 21-9 — late receipts and unmatched lines', () => {
   test('approving a null-line row credits no line', () => {
     expect(approvedReason({ poLineId: null })).toBe('Applied to stock; no line credited.');
     expect(approvedReason({ poLineId: null, asnId: 'a-1' })).toBe('Applied to stock; no line credited.');
+  });
+});
+
+describe('story 1-2b — receipt holds', () => {
+  test('a hold names its kind; an older row without one reads manual', () => {
+    expect(qcHoldKindLabel('receipt')).toBe('Auto · QC on receipt');
+    expect(qcHoldKindLabel('manual')).toBe('Manual');
+    expect(qcHoldKindLabel(undefined)).toBe('Manual');
+  });
+
+  test('the GRN filter names the receipt by code, else by the id tail', () => {
+    expect(qcGrnFilterLabel('GRN-0042', '0198f7a2-1b3c-7d4e-8f90-0000000000b7')).toBe('Showing the QC holds of GRN-0042');
+    expect(qcGrnFilterLabel(null, '0198f7a2-1b3c-7d4e-8f90-0000000000b7')).toBe('Showing the QC holds of receipt …000000b7');
+  });
+
+  test('Release receipt: the outcome counts the RESPONSE’s holds; the refusals branch on code', () => {
+    expect(releaseReceiptOutcome({ grnCode: 'GRN-0042', qcHolds: [{}, {}, {}] })).toEqual({
+      word: 'GRN-0042 released from QC',
+      reason: '3 receipt holds released — the units are back in Receiving and awaiting putaway.',
+    });
+    expect(releaseReceiptOutcome({ grnCode: 'GRN-7', qcHolds: [{}] }).reason).toBe(
+      '1 receipt hold released — the units are back in Receiving and awaiting putaway.',
+    );
+    expect(releaseReceiptReason(new ApiProblem('qc-hold-released', 409))).toBe('This receipt has no open QC hold left — refresh the list.');
+    expect(releaseReceiptReason(new ApiProblem('not-found', 404))).toBe('This goods receipt no longer exists — refresh the list.');
+    expect(releaseReceiptReason(new ApiProblem('role-denied', 403))).toBe('Your role cannot place or release QC holds.');
+    expect(releaseReceiptReason(new ApiProblem('qc-hold-origin-bin-gone', 409))).toBe(
+      'The origin bin no longer exists, so the stock cannot return to it — the hold stays open.',
+    );
+    expect(releaseReceiptReason(new TypeError('x'))).toBe('The API is unreachable — is wms-be running?');
   });
 });

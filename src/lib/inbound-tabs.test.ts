@@ -4,8 +4,10 @@ import { parseDrill } from './drill';
 import {
   DEFAULT_INBOUND_TAB,
   INBOUND_TABS,
+  inboundQcHoldsHref,
   inboundTabHref,
   initialInboundTab,
+  parseInboundQcGrn,
   parseInboundTab,
   sumTabCounts,
   tabCountLabel,
@@ -54,5 +56,19 @@ describe('inbound-tabs', () => {
     expect(sumTabCounts([])).toEqual({ count: 0, more: false });
     expect(sumTabCounts([{ count: 3, more: false }, { count: 4, more: false }])).toEqual({ count: 7, more: false });
     expect(sumTabCounts([{ count: 100, more: true }, { count: 2, more: false }])).toEqual({ count: 102, more: true });
+  });
+
+  test('story 1-2b — the QC holds tab narrowed to one receipt: href and parse round-trip; anything malformed opens the whole list', () => {
+    const grn = '0198f7a2-1b3c-7d4e-8f90-0000000000b7';
+    expect(inboundQcHoldsHref()).toBe('/inbound?tab=qc-holds');
+    expect(inboundQcHoldsHref(grn)).toBe(`/inbound?tab=qc-holds&grnId=${grn}`);
+    const params = Object.fromEntries(new URLSearchParams(inboundQcHoldsHref(grn).split('?')[1]).entries());
+    expect(parseInboundQcGrn(params)).toBe(grn);
+    // Not a drill: no `list`, a plain visit.
+    expect(parseDrill('inbound', params)).toBeNull();
+    expect(parseInboundQcGrn({ tab: 'qc-holds', grnId: 'GRN-0042' })).toBeNull();
+    expect(parseInboundQcGrn({ tab: 'qc-holds', grnId: [grn, grn] })).toBeNull();
+    expect(parseInboundQcGrn({ tab: 'grns', grnId: grn })).toBeNull();
+    expect(parseInboundQcGrn({ tab: 'qc-holds' })).toBeNull();
   });
 });
