@@ -9,18 +9,19 @@ export const metadata = { title: 'Sign in' };
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ email?: string; portal?: string }>;
+  searchParams: Promise<{ email?: string; portal?: string; ended?: string }>;
 }) {
-  const { email, portal } = await searchParams;
-  // Story 21-7 — a portal session ended by a `client-suspended` refusal.
-  const notice = loginNotice(portal);
+  const { email, portal, ended } = await searchParams;
+  // Story 21-7 — a portal session ended by a `client-suspended` refusal;
+  // story 6-1a — any other session end, by the server's reason.
+  const notice = loginNotice(portal, ended);
 
   return (
     <section className="flex flex-col gap-6 rounded-lg border border-(--border) bg-(--card) p-6">
       <header className="flex flex-col gap-1">
         <h1 className="text-lg font-semibold">Sign in</h1>
         <p className="text-sm text-(--muted-foreground)">
-          Sessions last 15 minutes — sign in again when they lapse.
+          You stay signed in while you work. After 2 hours without activity, or 12 hours in all, you’ll be asked to sign in again.
         </p>
       </header>
       {notice !== null && <FeedbackBanner tone="rejected" word="Signed out" reason={notice} />}

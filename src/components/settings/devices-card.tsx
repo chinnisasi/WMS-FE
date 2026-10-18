@@ -2,7 +2,7 @@
 
 import { useState, useSyncExternalStore } from 'react';
 
-import { ApiProblem, fetchApiMintEnrollmentCode, fetchApiRevokeDevice } from '@/lib/api/client';
+import { ApiProblem, fetchApiDeviceAction, fetchApiMintEnrollmentCode, fetchApiRevokeDevice } from '@/lib/api/client';
 import type { DeviceResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { roleHasCapability } from '@/lib/users';
@@ -10,6 +10,7 @@ import { ulid } from '@/lib/ulid';
 import { useDevices } from '@/lib/use-devices';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { ConfirmRow } from '@/components/settings/confirm-row';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
@@ -46,11 +47,15 @@ export function DevicesCard() {
 function DevicesCardSessioned() {
   const devices = useDevices();
   const session = readSession();
+  // The role through the session subscription (frontend guide), not a bare render-time read.
+  const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
+  // Story 6-1a — which row's Release / Unlock confirmation is open.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The minted one-time code, kept visible until the next action.
   const [code, setCode] = useState<{ code: string; expiresAt: string } | null>(null);
 
-  const canManage = roleHasCapability(session?.user.role, 'device.manage');
+  const canManage = roleHasCapability(role, 'device.manage');
 
   const columns: readonly DataTableColumn<DeviceResponse>[] = [
     { key: 'label', header: 'Device', render: (d) => d.label ?? '—' },
@@ -88,8 +93,15 @@ function DevicesCardSessioned() {
             Revoked · wipe flagged
           </span>
         ) : (
-          <span className="rounded-full border border-(--accent) px-2 py-0.5 text-xs text-(--accent-foreground)">
-            Active
+          <span className="flex flex-wrap gap-1">
+            <span className="rounded-full border border-(--accent) px-2 py-0.5 text-xs text-(--accent-foreground)">
+              Active
+            </span>
+            {badgeLocked(d) && (
+              <span className="rounded-full border border-(--warning,#b45309) px-2 py-0.5 text-xs text-(--warning,#b45309)">
+                Badge-in locked
+              </span>
+            )}
           </span>
         ),
     },
@@ -100,7 +112,16 @@ function DevicesCardSessioned() {
             header: '',
             render: (d: DeviceResponse) =>
               d.status === 'active' ? (
-                <RevokeButton device={d} onDone={setOutcome} devices={devices} />
+                <DeviceActions
+                  device={d}
+                  confirming={confirming}
+                  setConfirming={setConfirming}
+                  onDone={(next) => {
+                    setOutcome(next);
+                    devices?.reload();
+                  }}
+                  revoke={<RevokeButton device={d} onDone={setOutcome} devices={devices} />}
+                />
               ) : null,
           },
         ]
@@ -189,6 +210,81 @@ function DevicesCardSessioned() {
 }
 
 /** The mint form: one click, fresh ULID key per mint. */
+/** Story 6-1a — a badge-in lock still in the future (words, not colour alone). */
+export function badgeLocked(device: Pick<DeviceResponse, 'badgeLockedUntil'>, now = Date.now()): boolean {
+  return typeof device.badgeLockedUntil === 'string' && Date.parse(device.badgeLockedUntil) > now;
+}
+
+const rowButtonClass = 'rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40';
+
+/**
+ * Story 6-1a — Release device (an operator left with the device still badged
+ * in: frees it for the next operator; their queued scans go to review) and
+ * Unlock (5 wrong PINs). Each behind a confirmation.
+ */
+function DeviceActions({
+  device,
+  confirming,
+  setConfirming,
+  onDone,
+  revoke,
+}: {
+  device: DeviceResponse;
+  confirming: string | null;
+  setConfirming: (value: string | null) => void;
+  onDone: (outcome: Outcome) => void;
+  revoke: React.ReactNode;
+}) {
+  const label = device.label ?? 'this device';
+  const close = () => setConfirming(null);
+  for (const action of ['release', 'unlock'] as const) {
+    if (confirming === `${action}-${device.id}`) {
+      return (
+        <ConfirmRow
+          key={`${action}-${device.id}`}
+          question={
+            action === 'release'
+              ? `Release ${label}? ${device.operatorEmail ?? 'The operator'} is badged out; scans still queued on it go to review under their name.`
+              : `Unlock badge-in on ${label}?`
+          }
+          confirmLabel={action === 'release' ? 'Release' : 'Unlock'}
+          ariaLabel={`Confirm ${action} for ${label}`}
+          run={(key, tenantId) => fetchApiDeviceAction(tenantId, device.id, action, key)}
+          reason={rejectionReason}
+          onDone={() => {
+            close();
+            onDone(
+              action === 'release'
+                ? { tone: 'accepted', word: `${label} released`, reason: 'Another operator can badge in on it now.' }
+                : { tone: 'accepted', word: `${label} unlocked`, reason: 'Operators can badge in again.' },
+            );
+          }}
+          onRejected={(reason) => {
+            close();
+            onDone({ tone: 'rejected', word: action === 'release' ? 'Not released' : 'Not unlocked', reason });
+          }}
+          onClose={close}
+        />
+      );
+    }
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {badgeLocked(device) && (
+        <button type="button" className={rowButtonClass} onClick={() => setConfirming(`unlock-${device.id}`)}>
+          Unlock
+        </button>
+      )}
+      {device.operatorUserId !== null && (
+        <button type="button" className={rowButtonClass} onClick={() => setConfirming(`release-${device.id}`)}>
+          Release device
+        </button>
+      )}
+      {revoke}
+    </span>
+  );
+}
+
 function MintCodeForm({ onMinted }: { onMinted: (minted: { code: string; expiresAt: string }) => void }) {
   const [pending, setPending] = useState(false);
   const [rejection, setRejection] = useState<string | null>(null);

@@ -5,7 +5,9 @@ import { useState, useSyncExternalStore } from 'react';
 import {
   ApiProblem,
   fetchApiInviteUser,
+  fetchApiSetUserActive,
   fetchApiSetUserRole,
+  fetchApiUnlockUser,
 } from '@/lib/api/client';
 import type { ClientDto, UserResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -24,6 +26,7 @@ import { readyClients, useClients } from '@/lib/use-clients';
 import { useUsers } from '@/lib/use-users';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { ConfirmRow } from '@/components/settings/confirm-row';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 
 const inputClass =
@@ -77,14 +80,19 @@ export function UsersCard() {
 
 function UsersCardSessioned() {
   const users = useUsers();
-  const session = readSession();
+  // The role through the session subscription, never a bare render-time read
+  // (frontend guide: a role change elsewhere must re-render the gates).
+  const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
+  const selfId = useSyncExternalStore(subscribeSession, () => readSession()?.user.id, () => undefined);
   const clients = readyClients(useClients());
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The invite response's one-time link, kept visible until the next action.
   const [inviteLink, setInviteLink] = useState<string | null>(null);
 
-  const canInvite = roleHasCapability(session?.user.role, 'users.invite');
-  const canChangeRole = roleHasCapability(session?.user.role, 'users.role_change');
+  const canInvite = roleHasCapability(role, 'users.invite');
+  const canChangeRole = roleHasCapability(role, 'users.role_change');
+  // Story 6-1a — which row's confirmation is open (`${action}-${userId}`).
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   const columns: readonly DataTableColumn<UserResponse>[] = [
     { key: 'email', header: 'Email' },
@@ -108,17 +116,31 @@ function UsersCardSessioned() {
     {
       key: 'status',
       header: 'Status',
-      render: (user) =>
-        user.status === 'invited' ? (
-          <span className="rounded-full border border-(--border) bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">
-            Invited
-          </span>
-        ) : (
-          <span className="rounded-full border border-(--accent) px-2 py-0.5 text-xs text-(--accent-foreground)">
-            Active
-          </span>
-        ),
+      render: (user) => <UserStatusBadges user={user} />,
     },
+    // Story 6-1a — offboarding and unlock, for `users.role_change` holders.
+    ...(canChangeRole
+      ? [
+          {
+            key: 'actions',
+            header: '',
+            render: (user: UserResponse) => (
+              <UserActions
+                user={user}
+                isSelf={user.id === selfId}
+                confirming={confirming}
+                setConfirming={setConfirming}
+                onDone={(next, link) => {
+                  setOutcome(next);
+                  if (link !== undefined) setInviteLink(link);
+                  users?.reload();
+                  notifyUsersChanged();
+                }}
+              />
+            ),
+          } satisfies DataTableColumn<UserResponse>,
+        ]
+      : []),
   ];
 
   return (
@@ -287,6 +309,151 @@ function InviteForm({
   );
 }
 
+const chipClass = 'rounded-full border px-2 py-0.5 text-xs';
+
+/** Story 6-1a — `lockedUntil` in the future reads "Locked" (words, not colour alone). */
+export function isSignInLocked(user: Pick<UserResponse, 'lockedUntil'>, now = Date.now()): boolean {
+  return typeof user.lockedUntil === 'string' && Date.parse(user.lockedUntil) > now;
+}
+
+function UserStatusBadges({ user }: { user: UserResponse }) {
+  return (
+    <span className="flex flex-wrap gap-1">
+      {user.status === 'invited' ? (
+        <span className={`${chipClass} border-(--border) bg-(--muted) text-(--muted-foreground)`}>Invited</span>
+      ) : user.status === 'deactivated' ? (
+        <span className={`${chipClass} border-(--destructive) text-(--destructive)`}>Deactivated</span>
+      ) : (
+        <span className={`${chipClass} border-(--accent) text-(--accent-foreground)`}>Active</span>
+      )}
+      {isSignInLocked(user) && (
+        <span className={`${chipClass} border-(--warning,#b45309) text-(--warning,#b45309)`} title={`Locked until ${user.lockedUntil}`}>
+          Sign-in locked
+        </span>
+      )}
+    </span>
+  );
+}
+
+const rowButtonClass = 'rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40';
+
+/** Story 6-1a — Deactivate / Reactivate / Unlock for one user row, each behind a confirmation. */
+function UserActions({
+  user,
+  isSelf,
+  confirming,
+  setConfirming,
+  onDone,
+}: {
+  user: UserResponse;
+  isSelf: boolean;
+  confirming: string | null;
+  setConfirming: (value: string | null) => void;
+  onDone: (outcome: Outcome, inviteLink?: string) => void;
+}) {
+  const open = (action: string) => setConfirming(`${action}-${user.id}`);
+  const close = () => setConfirming(null);
+  const rejected = (reason: string) => onDone({ tone: 'rejected', word: 'Not changed', reason });
+
+  if (confirming === `deactivate-${user.id}`) {
+    return (
+      <ConfirmRow
+        key={`deactivate-${user.id}`}
+        question={
+          isSelf
+            ? 'Deactivate your own account? You will be signed out everywhere.'
+            : `Deactivate ${user.email}? They are signed out everywhere and cannot sign in or badge in. Their history stays.`
+        }
+        confirmLabel="Deactivate"
+        ariaLabel={`Confirm deactivating ${user.email}`}
+        run={(key, tenantId) => fetchApiSetUserActive(tenantId, user.id, false, key)}
+        reason={rejectionReason}
+        onDone={(result) => {
+          close();
+          onDone({ tone: 'accepted', word: `${result.user.email} deactivated`, reason: 'Every session they had has ended.' });
+        }}
+        onRejected={(reason) => {
+          close();
+          rejected(reason);
+        }}
+        onClose={close}
+      />
+    );
+  }
+  if (confirming === `reactivate-${user.id}`) {
+    return (
+      <ConfirmRow
+        key={`reactivate-${user.id}`}
+        question={`Reactivate ${user.email}?`}
+        confirmLabel="Reactivate"
+        ariaLabel={`Confirm reactivating ${user.email}`}
+        run={(key, tenantId) =>
+          fetchApiSetUserActive(tenantId, user.id, true, key).then((result) => ({ result, tenantId }))
+        }
+        reason={rejectionReason}
+        onDone={({ result, tenantId }) => {
+          close();
+          if (result.inviteToken !== undefined) {
+            const url = new URL('/accept-invite', window.location.origin);
+            url.searchParams.set('tenant', tenantId);
+            url.searchParams.set('token', result.inviteToken);
+            onDone(
+              { tone: 'accepted', word: `${result.user.email} reactivated`, reason: 'They had not accepted their invite — share the new invite link below.' },
+              url.toString(),
+            );
+            return;
+          }
+          onDone({ tone: 'accepted', word: `${result.user.email} reactivated`, reason: 'They can sign in again.' });
+        }}
+        onRejected={(reason) => {
+          close();
+          rejected(reason);
+        }}
+        onClose={close}
+      />
+    );
+  }
+  if (confirming === `unlock-${user.id}`) {
+    return (
+      <ConfirmRow
+        key={`unlock-${user.id}`}
+        question={`Unlock sign-in for ${user.email}?`}
+        confirmLabel="Unlock"
+        ariaLabel={`Confirm unlocking ${user.email}`}
+        run={(key, tenantId) => fetchApiUnlockUser(tenantId, user.id, key)}
+        reason={rejectionReason}
+        onDone={(result) => {
+          close();
+          onDone({ tone: 'accepted', word: `${result.email} unlocked`, reason: 'They can try signing in again now.' });
+        }}
+        onRejected={(reason) => {
+          close();
+          rejected(reason);
+        }}
+        onClose={close}
+      />
+    );
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {isSignInLocked(user) && (
+        <button type="button" className={rowButtonClass} onClick={() => open('unlock')}>
+          Unlock
+        </button>
+      )}
+      {user.status === 'deactivated' ? (
+        <button type="button" className={rowButtonClass} onClick={() => open('reactivate')}>
+          Reactivate
+        </button>
+      ) : (
+        <button type="button" className={rowButtonClass} onClick={() => open('deactivate')}>
+          Deactivate
+        </button>
+      )}
+    </span>
+  );
+}
+
 /** The inline role cell: a select that PATCHes on change (sku-table pattern). */
 function RoleSelect({
   user,
@@ -316,7 +483,7 @@ function RoleSelect({
         reason:
           updated.role === 'owner'
             ? 'Owners can manage users — invite, change roles, and demote everyone but the last Owner.'
-            : 'The change applies on their next action — no re-login needed.',
+            : 'They are signed out and sign in again under the new role.',
       });
       users?.reload();
       notifyUsersChanged();
@@ -354,7 +521,7 @@ function rejectionReason(error: unknown): string {
       case 'email-exists':
         return error.detail ?? 'An account for this email already exists.';
       case 'last-owner':
-        return 'The last Owner cannot be demoted — invite another Owner first.';
+        return 'The last active Owner cannot be demoted or deactivated — make another user an Owner first.';
       case 'not-found':
         return 'That user no longer exists — refresh the page.';
       case 'role-denied':

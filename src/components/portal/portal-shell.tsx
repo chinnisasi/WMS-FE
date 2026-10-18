@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
 import { refreshSessionUser } from '@/lib/api/client';
-import { clearSession, PORTAL_SUSPENDED_EVENT, readSession, subscribeSession } from '@/lib/auth';
+import { clearSession, PORTAL_SUSPENDED_EVENT, readSession, subscribeSession, signedOutLoginHref } from '@/lib/auth';
 import { PORTAL_NAV, PORTAL_SUSPENDED_LOGIN, portalCompanyLabel, portalShellRoute } from '@/lib/portal';
 
 import { SignOutButton } from '@/components/auth/sign-out';
@@ -43,7 +43,9 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (decision === 'render' || decision === 'unknown') return;
-    router.replace(suspended.current ? PORTAL_SUSPENDED_LOGIN : decision);
+    router.replace(
+      suspended.current ? PORTAL_SUSPENDED_LOGIN : decision === '/login' ? signedOutLoginHref() : decision,
+    );
   }, [decision, router]);
 
   useEffect(() => {

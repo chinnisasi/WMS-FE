@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import { refreshSessionUser } from '@/lib/api/client';
-import { readSession, subscribeSession } from '@/lib/auth';
+import { readSession, subscribeSession, signedOutLoginHref } from '@/lib/auth';
 import { visibleNavItems } from '@/lib/navigation';
 import { operatorShellRoute } from '@/lib/portal';
 
@@ -38,7 +38,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     () => 'unknown',
   );
   useEffect(() => {
-    if (decision !== 'render' && decision !== 'unknown') router.replace(decision);
+    if (decision === 'render' || decision === 'unknown') return;
+    // Story 6-1a — a signed-out redirect carries why the session ended (read
+    // here, in the effect, never in the pure snapshot).
+    router.replace(decision === '/login' ? signedOutLoginHref() : decision);
   }, [decision, router]);
   if (decision !== 'render') return null;
   return <OperatorShell>{children}</OperatorShell>;

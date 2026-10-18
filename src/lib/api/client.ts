@@ -47,6 +47,8 @@ import {
   devicesControllerMintEnrollmentCode,
   devicesControllerResolveRejectedOp,
   devicesControllerRevokeDevice,
+  devicesControllerReleaseDevice,
+  devicesControllerUnlockDevice,
   healthControllerHealth,
   inboundControllerAmendAsn,
   inboundControllerCancelAsn,
@@ -120,6 +122,9 @@ import {
   usersControllerListUsers,
   usersControllerMe,
   usersControllerSetUserRole,
+  usersControllerDeactivateUser,
+  usersControllerReactivateUser,
+  usersControllerUnlockUser,
   reportingControllerOverview,
   notificationsControllerList,
   notificationsControllerStatus,
@@ -175,7 +180,16 @@ import {
   returnsControllerList,
   returnsControllerReturnable,
 } from './generated/sdk.gen';
-import { ensureSessionHint, readSession, clearSession, writeSession, PORTAL_SUSPENDED_EVENT } from '../auth';
+import {
+  accessTokenExpired,
+  ensureSessionHint,
+  readSession,
+  clearSession,
+  writeSession,
+  PORTAL_SUSPENDED_EVENT,
+} from '../auth';
+import { refreshAccessToken } from '../session-refresh';
+import { API_BASE_URL as API_BASE_URL_VALUE } from './base-url';
 import type {
   PortalAsnDetailResponse,
   PortalAsnPageResponse,
@@ -237,6 +251,7 @@ import type {
   CountVarianceListResponse,
   DeviceListResponse,
   DeviceResponse,
+  UserStatusResponse,
   ExcursionListResponse,
   LedgerEventListResponse,
   ExcursionResponse,
@@ -362,8 +377,7 @@ import type {
  * `/api/v1` shell; every typed function lives in ./generated (AD-8 — no
  * hand-written API types anywhere in wms-fe).
  */
-// `||` (not `??`) so a set-but-empty env var still falls back to the default.
-const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000/api/v1';
+const baseUrl = API_BASE_URL_VALUE;
 
 // Story 7-2: the ONE origin every surface composes absolute API URLs from —
 // the channel webhook rows are built on this base, never on
@@ -381,27 +395,62 @@ client.setConfig({
  * Server-side renders (no session) send nothing — the tenancy endpoints
  * answer 401 and surfaces degrade honestly.
  */
-client.interceptors.request.use((request) => {
-  const session = readSession();
+/**
+ * Story 6-1a — a copy of each outgoing request, kept until its response, so a
+ * 401 `token-expired` can be retried ONCE with a fresh token: the original's
+ * body is consumed by the time the response arrives. The copy keeps every
+ * header, so a retried write carries the same Idempotency-Key.
+ */
+const retryCopies = new WeakMap<Request, Request>();
+
+/** Story 6-1a — the session routes manage tokens themselves; nothing refreshes around them. */
+function isSessionRoute(url: string): boolean {
+  return /\/tenants\/(sign-in|session\/refresh|session\/sign-out)$/.test(new URL(url).pathname);
+}
+
+client.interceptors.request.use(async (request) => {
+  let session = readSession();
+  // Story 6-1a — a lapsed access token is refreshed BEFORE the request, not
+  // after a guaranteed 401 (a reopened tab, a laptop back from sleep).
+  if (session !== null && accessTokenExpired(session) && !isSessionRoute(request.url)) {
+    await refreshAccessToken();
+    session = readSession();
+  }
   if (session !== null) {
     request.headers.set('Authorization', `Bearer ${session.token}`);
     // Bootstrap: the proxy gate may have rendered this page on an expired
     // hint cookie even though localStorage holds a fresh token — re-assert
     // the mirror so the next hard navigation doesn't bounce to /login.
     ensureSessionHint();
+    if (!isSessionRoute(request.url)) retryCopies.set(request, request.clone());
   }
   return request;
 });
 
 /**
- * The backend's 401 is authoritative: the token was rejected (expired,
- * revoked, tampered). Drop the stale session immediately so the UI flips to
- * signed-out — the proxy gate then also sees the cleared hint cookie.
+ * Story 6-1a — the backend's 401 says what to do:
+ *  - `token-expired`: refresh once and retry the request (its copy, same
+ *    Idempotency-Key); a failed refresh leaves the 401 as the answer.
+ *  - `session-ended`: the session is over — clear it with the server's
+ *    `reason`, which the sign-in page shows.
+ *  - anything else (a forged or malformed token): clear it.
  */
-client.interceptors.response.use((response) => {
-  if (response.status === 401) {
-    clearSession();
+client.interceptors.response.use(async (response, request) => {
+  if (response.status !== 401 || isSessionRoute(request.url)) return response;
+  const body = (await response.clone().json().catch(() => ({}))) as { code?: unknown; reason?: unknown };
+  if (body.code === 'token-expired') {
+    const copy = retryCopies.get(request);
+    retryCopies.delete(request);
+    if (copy !== undefined && (await refreshAccessToken())) {
+      const session = readSession();
+      if (session !== null) {
+        copy.headers.set('Authorization', `Bearer ${session.token}`);
+        return fetch(copy);
+      }
+    }
+    return response;
   }
+  clearSession(body.code === 'session-ended' && typeof body.reason === 'string' ? body.reason : undefined);
   return response;
 });
 
@@ -540,7 +589,8 @@ export async function fetchApiRegisterTenant(
 }
 
 export async function fetchApiSignIn(body: SignInDto): Promise<SignInResponse> {
-  const { data, error } = await tenancyControllerSignIn({ body });
+  // Story 6-1a — `include`, so the browser keeps the cross-origin refresh cookie.
+  const { data, error } = await tenancyControllerSignIn({ body, credentials: 'include' });
   if (error || !data) {
     throw unwrapError(error, 400);
   }
@@ -1609,6 +1659,37 @@ export async function fetchApiSetUserRole(
   return data;
 }
 
+/**
+ * Story 6-1a — offboarding: deactivate ends every session of the user now;
+ * reactivate restores them (a never-accepted invitee comes back with a fresh
+ * invite token). `users.role_change`.
+ */
+export async function fetchApiSetUserActive(
+  tenantId: string,
+  userId: string,
+  active: boolean,
+  idempotencyKey: string,
+): Promise<UserStatusResponse> {
+  const options = { path: { tenantId, userId }, headers: { 'Idempotency-Key': idempotencyKey } };
+  const { data, error } = active ? await usersControllerReactivateUser(options) : await usersControllerDeactivateUser(options);
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 6-1a — clears a user's sign-in lock (`users.role_change`). */
+export async function fetchApiUnlockUser(tenantId: string, userId: string, idempotencyKey: string): Promise<UserResponse> {
+  const { data, error } = await usersControllerUnlockUser({
+    path: { tenantId, userId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
 /** Accept a one-time invite (unauthenticated) — sets the invitee's password. */
 export async function fetchApiAcceptInvite(
   tenantId: string,
@@ -1685,6 +1766,26 @@ export async function fetchApiRevokeDevice(
     path: { tenantId, deviceId },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 6-1a — supervisor device actions (`device.manage`): Release ends the
+ * badge session and frees the device for another operator; Unlock clears the
+ * wrong-PIN lock.
+ */
+export async function fetchApiDeviceAction(
+  tenantId: string,
+  deviceId: string,
+  action: 'release' | 'unlock',
+  idempotencyKey: string,
+): Promise<DeviceResponse> {
+  const options = { path: { tenantId, deviceId }, headers: { 'Idempotency-Key': idempotencyKey } };
+  const { data, error } =
+    action === 'release' ? await devicesControllerReleaseDevice(options) : await devicesControllerUnlockDevice(options);
   if (error || !data) {
     throw unwrapError(error, 400);
   }

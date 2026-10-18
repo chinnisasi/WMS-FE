@@ -4,8 +4,11 @@
  * (readers). Same pattern as src/lib/theme.ts: the key and shape live here
  * so the sides cannot drift.
  *
- * The token is the backend's 15-minute HS256 session (no refresh in Story
- * 1.2) — an expired session reads as signed-out, honestly.
+ * Story 6-1a — the token is a 15-minute ACCESS token over a server-side
+ * session that lives on through refresh (`lib/session-refresh.ts`, the
+ * httpOnly refresh cookie) until `refreshUntil`, the session's absolute end.
+ * An expired access token is therefore NOT signed-out: it is refreshable. A
+ * session past `refreshUntil` (or one the server ended) reads as signed-out.
  */
 import type { SessionClientResponse, TenantResponse, UserResponse } from '@/lib/api/generated';
 
@@ -65,8 +68,24 @@ export interface StoredSession {
    * `portal/me` refresh); null/absent for staff and for a pre-21-7 row.
    */
   client?: SessionClient | null;
-  /** Unix ms — token expiry, from the sign-in response TTL. */
+  /** Unix ms — ACCESS token expiry, from the sign-in / refresh response TTL. */
   expiresAt: number;
+  /**
+   * Story 6-1a — Unix ms: the session's absolute end (`refreshExpiresInSeconds`).
+   * Until then an expired access token is refreshable. Absent on a row stored
+   * before 6-1a — then `expiresAt` is the end, as it always was.
+   */
+  refreshUntil?: number;
+}
+
+/** Story 6-1a — the instant a stored session is over (refresh can no longer revive it). */
+export function sessionEndsAt(session: Pick<StoredSession, 'expiresAt' | 'refreshUntil'>): number {
+  return typeof session.refreshUntil === 'number' ? session.refreshUntil : session.expiresAt;
+}
+
+/** Story 6-1a — true when the access token has lapsed (or is about to) and needs a refresh first. */
+export function accessTokenExpired(session: Pick<StoredSession, 'expiresAt'>, skewMs = 5_000): boolean {
+  return session.expiresAt - skewMs <= Date.now();
 }
 
 /** What every reader gets: `user.clientId` and `client` always present (null for staff). */
@@ -110,7 +129,9 @@ export function readSession(): Session | null {
       return null;
     }
     const stored = parsed as StoredSession;
-    if (stored.expiresAt <= Date.now()) {
+    // Story 6-1a — an expired ACCESS token is refreshable, not signed-out;
+    // only the session's own end is.
+    if (sessionEndsAt(stored) <= Date.now()) {
       return null;
     }
     // Story 21-7: normalise the two keys a pre-21-7 row lacks. Memoised on
@@ -160,12 +181,42 @@ export function writeSession(session: StoredSession): void {
     // the API, which is worse than an honest /login.
     return;
   }
-  writeSessionHint(session.expiresAt);
-  scheduleExpiryDispatch(session.expiresAt);
+  writeSessionHint(sessionEndsAt(session));
+  scheduleExpiryDispatch(sessionEndsAt(session));
   window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
 }
 
-export function clearSession(): void {
+/**
+ * Story 6-1a — why the last session ended (the server's `reason`), kept in
+ * sessionStorage for the shell's redirect to put on /login (`?ended=`), so
+ * the sign-in page can say why. Read once.
+ */
+export const SIGNED_OUT_REASON_KEY = 'wms-signed-out-reason';
+
+export function takeSignedOutReason(): string | null {
+  try {
+    const reason = sessionStorage.getItem(SIGNED_OUT_REASON_KEY);
+    if (reason !== null) sessionStorage.removeItem(SIGNED_OUT_REASON_KEY);
+    return reason;
+  } catch {
+    return null;
+  }
+}
+
+/** The /login href a signed-out shell goes to, carrying the reason when there is one. */
+export function signedOutLoginHref(): string {
+  const reason = takeSignedOutReason();
+  return reason === null ? '/login' : `/login?ended=${encodeURIComponent(reason)}`;
+}
+
+export function clearSession(reason?: string): void {
+  if (reason !== undefined) {
+    try {
+      sessionStorage.setItem(SIGNED_OUT_REASON_KEY, reason);
+    } catch {
+      // no session storage — the sign-in page just shows no reason
+    }
+  }
   if (expiryTimer !== undefined) {
     clearTimeout(expiryTimer);
     expiryTimer = undefined;
@@ -207,7 +258,7 @@ export function ensureSessionHint(): void {
     .split('; ')
     .some((pair) => pair.startsWith(`${SESSION_HINT_COOKIE}=`));
   if (!present) {
-    writeSessionHint(session.expiresAt);
+    writeSessionHint(sessionEndsAt(session));
   }
 }
 
