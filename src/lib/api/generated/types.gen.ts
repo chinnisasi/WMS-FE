@@ -1994,6 +1994,82 @@ export type AsnResponse = {
     asn: AsnDto;
 };
 
+export type AsnImportAsnDto = {
+    /**
+     * The created ASN; null on a dry run
+     */
+    asnId: string | null;
+    asnCode: string;
+    clientId: string;
+    /**
+     * The client as people read it (the tenant’s own: "<name> (your company)")
+     */
+    clientLabel: string;
+    lineCount: number;
+    /**
+     * The spreadsheet row of the ASN’s first line
+     */
+    firstRow: number;
+};
+
+export type AsnImportRowErrorDto = {
+    /**
+     * The spreadsheet row — the header is row 1
+     */
+    rowNumber: number;
+    /**
+     * The row’s asn_code; null when blank
+     */
+    asnCode: string | null;
+    /**
+     * Why the row (and with it its whole ASN) was refused
+     */
+    code: 'unknown-client' | 'unknown-warehouse' | 'wrong-warehouse' | 'unknown-sku' | 'sku-client-mismatch' | 'mixed-client' | 'kit-cannot-hold-stock' | 'duplicate-asn-code' | 'invalid-asn-code' | 'too-many-lines' | 'asn-rows-disagree' | 'duplicate-sku-in-asn' | 'invalid-quantity' | 'quantity-precision' | 'invalid-expected-at' | 'missing-value';
+    detail: string;
+    /**
+     * The row’s sku cell as written; null when blank
+     */
+    sku: string | null;
+    /**
+     * The row’s quantity cell as written; null when blank
+     */
+    quantity: string | null;
+};
+
+export type AsnImportResponseDto = {
+    /**
+     * The import (its audit row’s target); null on a dry run
+     */
+    importId: string | null;
+    dryRun: boolean;
+    warehouseId: string;
+    /**
+     * SHA-256 of the uploaded file (hex) — with the warehouse, the import’s idempotency fingerprint
+     */
+    fileSha256: string;
+    /**
+     * Data rows read (blank rows not counted)
+     */
+    rowCount: number;
+    /**
+     * ASNs the file describes
+     */
+    asnCount: number;
+    /**
+     * ASNs created — on a dry run, ready to create
+     */
+    acceptedCount: number;
+    /**
+     * ASNs refused whole (an ASN with any bad row)
+     */
+    refusedCount: number;
+    asns: Array<AsnImportAsnDto>;
+    /**
+     * Every refused row, in sheet order
+     */
+    errors: Array<AsnImportRowErrorDto>;
+};
+
 export type AsnEntryDto = {
     id: string;
     /**
@@ -5938,7 +6014,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target
      */
-    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
     /**
      * Only actions on this target
      */
@@ -5965,7 +6041,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target
      */
-    targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
     /**
      * Only actions on this target
      */
@@ -10897,7 +10973,7 @@ export type InboundControllerCreateAsnErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The lines span clients (mixed-client), their client is not clientId (sku-client-mismatch), the client already has this code (duplicate-asn-code), or a concurrent idempotent request (conflict)
+     * The lines span clients (mixed-client), their client is not clientId (sku-client-mismatch), a line names a kit SKU, which can never be received (kit-cannot-hold-stock, naming it), the client already has this code (duplicate-asn-code), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -10916,6 +10992,83 @@ export type InboundControllerCreateAsnResponses = {
 };
 
 export type InboundControllerCreateAsnResponse = InboundControllerCreateAsnResponses[keyof InboundControllerCreateAsnResponses];
+
+export type InboundControllerImportAsnsData = {
+    body: {
+        /**
+         * CSV or XLSX — header row required (asn_code, sku, quantity; optional client, warehouse, expected_at; other columns ignored)
+         */
+        file: Blob | File;
+        /**
+         * The warehouse every ASN is announced into
+         */
+        warehouseId: string;
+        /**
+         * `true`: Check file — nothing written, no Idempotency-Key needed
+         */
+        dryRun?: 'true' | 'false';
+    };
+    headers?: {
+        /**
+         * Client-generated ULID key — required for an import, ignored on a dry run; a replay returns the original response
+         */
+        'Idempotency-Key'?: string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inbound/asn-imports';
+};
+
+export type InboundControllerImportAsnsErrors = {
+    /**
+     * Missing or malformed Idempotency-Key on an import, no file, a malformed warehouseId or dryRun (validation-failed), a file that cannot be read (file-unreadable), or a header without asn_code, sku or quantity (missing-columns, naming each)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks asn.manage (role-denied), or a client-portal session (role-denied — 21-7 opens the portal)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent import with the same Idempotency-Key (conflict) — retry to read the settled result
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a .csv/.xlsx file (unsupported-file-type)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * More than 5 MB, 5,000 data rows or 500 ASNs (import-too-large), or the Idempotency-Key reused with a different file or warehouse (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InboundControllerImportAsnsError = InboundControllerImportAsnsErrors[keyof InboundControllerImportAsnsErrors];
+
+export type InboundControllerImportAsnsResponses = {
+    /**
+     * Check file (dryRun=true): what would be created and every refused row — nothing written
+     */
+    200: AsnImportResponseDto;
+    /**
+     * Import: the created ASNs and every refused row (a 201 can carry refusals) — the idempotency snapshot
+     */
+    201: AsnImportResponseDto;
+};
+
+export type InboundControllerImportAsnsResponse = InboundControllerImportAsnsResponses[keyof InboundControllerImportAsnsResponses];
 
 export type InboundControllerListAsnsData = {
     body?: never;
@@ -11048,7 +11201,7 @@ export type InboundControllerAmendAsnErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The ASN is received, closed or cancelled (asn-not-open), a line that has received stock would be removed, change SKU or announce less than it received (asn-line-received), a SKU of another client (sku-client-mismatch), or a concurrent idempotent request (conflict)
+     * The ASN is received, closed or cancelled (asn-not-open), a line that has received stock would be removed, change SKU or announce less than it received (asn-line-received), a SKU of another client (sku-client-mismatch), a line names a kit SKU (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -16240,7 +16393,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target
          */
-        targetType?: 'advance_shipment_notice' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
         /**
          * Only actions on this target
          */

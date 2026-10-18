@@ -52,6 +52,7 @@ import {
   inboundControllerCancelAsn,
   inboundControllerCloseAsn,
   inboundControllerCreateAsn,
+  inboundControllerImportAsns,
   inboundControllerGetAsn,
   inboundControllerGetPurchaseOrder,
   inboundControllerListAsns,
@@ -320,6 +321,7 @@ import type {
   ReturnAuthorizationDto,
   ReturnAuthorizationListResponse,
   AsnListResponse,
+  AsnImportResponseDto,
   AsnResponse,
   CreateAsnDto,
   RegisterTenantDto,
@@ -1783,6 +1785,31 @@ export async function fetchApiCreateAsn(
     path: { tenantId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * The ASN import (2026-10-17) — `POST …/inbound/asn-imports` (`asn.manage`),
+ * multipart: the file, the warehouse every ASN lands in, and the step.
+ * `{ dryRun: true }` is Check file: it writes nothing and sends NO
+ * Idempotency-Key. `{ dryRun: false, idempotencyKey }` is Import: the key is
+ * minted once per checked file and reused until another file is picked, so
+ * an Import retried after a timeout replays the stored answer.
+ */
+export async function fetchApiImportAsns(
+  tenantId: string,
+  file: File,
+  warehouseId: string,
+  step: { readonly dryRun: true } | { readonly dryRun: false; readonly idempotencyKey: string },
+): Promise<AsnImportResponseDto> {
+  const { data, error } = await inboundControllerImportAsns({
+    path: { tenantId },
+    body: { file, warehouseId, ...(step.dryRun ? { dryRun: 'true' as const } : {}) },
+    ...(step.dryRun ? {} : { headers: { 'Idempotency-Key': step.idempotencyKey } }),
   });
   if (error || !data) {
     throw unwrapError(error, 400);

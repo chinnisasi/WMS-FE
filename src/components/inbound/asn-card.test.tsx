@@ -65,7 +65,9 @@ function sku(id: string, code: string, clientId: string) {
     updatedAt: '2026-10-06T00:00:00.000Z',
   };
 }
-const SKUS = [sku('s-acme', 'ACME-1', ACME.id), sku('s-self', 'SELF-1', SELF.id)];
+// ACME-KIT is a kit (the kit list names it): the operator pickers never offer it.
+const SKUS = [sku('s-acme', 'ACME-1', ACME.id), sku('s-self', 'SELF-1', SELF.id), sku('s-kit', 'ACME-KIT', ACME.id)];
+const KITS = [{ skuId: 's-kit', skuCode: 'ACME-KIT', components: [{ skuId: 's-acme', quantity: 1 }] }];
 
 function asn(id: string, code: string, status: string, received: number) {
   return {
@@ -121,6 +123,7 @@ function stubRouter(): void {
     requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key') });
     if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: [SELF, ACME] });
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) return json(200, { items: SKUS, nextCursor: null });
+    if (method === 'GET' && pathname.endsWith('/catalog/kits')) return json(200, { items: KITS, nextCursor: null });
     if (method === 'GET' && pathname.endsWith(`/warehouses/${WAREHOUSE_ID}/inbound/asns`)) {
       return json(200, { items: [PARTIAL, ANNOUNCED], nextCursor: null });
     }
@@ -265,6 +268,7 @@ describe('AsnsCard', () => {
     expect(clientOptions).toEqual(['Pick the client…', 'Priya Logistics (your company)', 'ACME — Acme Foods']);
     setSelect(form.querySelector<HTMLSelectElement>('select[aria-label="Client"]')!, ACME.id);
     const skuOptions = [...form.querySelectorAll('select[aria-label="Line 1 SKU"] option')].map((o) => o.textContent);
+    // ACME-KIT is ACME's too, but a kit: never offered (409 kit-cannot-hold-stock otherwise).
     expect(skuOptions).toEqual(['Pick a SKU…', 'ACME-1 — ACME-1 name']);
 
     setInput(form.querySelector<HTMLInputElement>('input[aria-label="ASN code"]')!, ' ASN-77 ');

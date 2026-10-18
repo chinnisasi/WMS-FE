@@ -38,6 +38,7 @@ import {
   fetchApiPortalService,
   fetchApiReplaceRateCardLines,
   fetchApiImportCatalog,
+  fetchApiImportAsns,
   fetchApiListClients,
   fetchApiRenameClient,
   fetchApiCancelOrder,
@@ -1578,6 +1579,54 @@ describe('client admin + attribution wrappers (story 21-2b)', () => {
     const without = await lastRequest!.formData();
     expect(without.get('clientId')).toBeNull();
     expect(without.get('mode')).toBe('fix');
+    clearSession();
+  });
+});
+
+describe('fetchApiImportAsns (the ASN import, 2026-10-17)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const WAREHOUSE = '0198f7a2-1b3c-7d4e-8f90-0000000000aa';
+  const RESULT = {
+    importId: null,
+    dryRun: true,
+    warehouseId: WAREHOUSE,
+    fileSha256: 'ab'.repeat(32),
+    rowCount: 1,
+    asnCount: 1,
+    acceptedCount: 1,
+    refusedCount: 0,
+    asns: [],
+    errors: [],
+  };
+
+  test('Check file posts the multipart form with dryRun=true and NO Idempotency-Key; Import sends the key and no dryRun', async () => {
+    writeSession(SESSION);
+    const file = new File(['asn_code,sku,quantity\nA,S,1\n'], 'asns.csv', { type: 'text/csv' });
+    stubFetch(200, RESULT);
+    await fetchApiImportAsns(SESSION.tenant.id, file, WAREHOUSE, { dryRun: true });
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/inbound/asn-imports`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    const checked = await lastRequest!.formData();
+    expect(checked.get('warehouseId')).toBe(WAREHOUSE);
+    expect(checked.get('dryRun')).toBe('true');
+    expect((checked.get('file') as File).name).toBe('asns.csv');
+
+    stubFetch(201, { ...RESULT, dryRun: false, importId: 'i-1' });
+    const imported = await fetchApiImportAsns(SESSION.tenant.id, file, WAREHOUSE, { dryRun: false, idempotencyKey: KEY });
+    expect(imported.importId).toBe('i-1');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    const form = await lastRequest!.formData();
+    expect(form.get('dryRun')).toBeNull();
+    expect(form.get('warehouseId')).toBe(WAREHOUSE);
+    clearSession();
+  });
+
+  test('a file-level refusal surfaces as an ApiProblem with its code', async () => {
+    writeSession(SESSION);
+    const file = new File(['x'], 'asns.pdf', { type: 'application/pdf' });
+    stubFetch(415, { type: 'about:blank', title: 'Unsupported import file type', status: 415, code: 'unsupported-file-type', detail: 'Only .csv and .xlsx files can be imported (got "asns.pdf").' });
+    await expect(fetchApiImportAsns(SESSION.tenant.id, file, WAREHOUSE, { dryRun: true })).rejects.toMatchObject({ code: 'unsupported-file-type', status: 415 });
     clearSession();
   });
 });
