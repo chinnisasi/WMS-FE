@@ -52,12 +52,16 @@ export type UserResponse = {
     id: string;
     email: string;
     role: 'owner' | 'ops_manager' | 'operator' | 'accountant' | 'client';
-    status: 'invited' | 'active';
+    status: 'invited' | 'active' | 'deactivated';
     /**
      * Story 21-7 — the client brand a client-portal user belongs to (role `client`); null for the tenant’s own staff
      */
     clientId: string | null;
     createdAt: string;
+    /**
+     * Story 6-1a — sign-in is locked for this email (5 failed attempts from one address) until this instant; on the user list only, null or absent when not locked
+     */
+    lockedUntil?: string | null;
 };
 
 export type SessionClientResponse = {
@@ -73,12 +77,26 @@ export type SignInResponse = {
     accessToken: string;
     tokenType: string;
     expiresInSeconds: number;
+    /**
+     * Story 6-1a — seconds until the session can no longer be refreshed (its absolute end). The refresh token itself rides an httpOnly cookie; the client stores this to tell a refreshable session from an ended one.
+     */
+    refreshExpiresInSeconds: number;
     tenant: TenantResponse;
     user: UserResponse;
     /**
      * Story 21-7 — the client brand of a client-portal user (the portal shell prints its name); null for the tenant’s own staff
      */
     client: SessionClientResponse | null;
+};
+
+export type RefreshResponse = {
+    accessToken: string;
+    tokenType: string;
+    expiresInSeconds: number;
+    /**
+     * Seconds until the session's absolute end.
+     */
+    refreshExpiresInSeconds: number;
 };
 
 export type AddressDto = {
@@ -395,6 +413,15 @@ export type UserListResponse = {
 
 export type SetUserRoleDto = {
     role: 'owner' | 'ops_manager' | 'operator' | 'accountant';
+};
+
+export type UserStatusResponse = {
+    user: UserResponse;
+    /**
+     * Present only when reactivation restored an `invited` user — the new one-time invite token
+     */
+    inviteToken?: string;
+    inviteExpiresAt?: string;
 };
 
 export type AcceptInviteDto = {
@@ -807,7 +834,15 @@ export type BadgeInResponse = {
      */
     accessToken: string;
     tokenType: 'Bearer';
+    /**
+     * Story 6-1a — the badge session lasts one shift (43200 = 12 h)
+     */
     expiresInSeconds: number;
+    /**
+     * Story 6-1a — the renewed device credential (a rolling 30 days); store it before the session. The previous one stays valid until its own expiry.
+     */
+    deviceToken: string;
+    deviceTokenExpiresInSeconds: number;
     operator: BadgeInOperatorResponse;
     device: BadgeInDeviceResponse;
 };
@@ -823,6 +858,10 @@ export type DeviceResponse = {
     lastSeenAt: string | null;
     revokedAt: string | null;
     createdAt: string;
+    /**
+     * Story 6-1a — badge-in is locked (5 wrong PINs) until this instant; null or absent when not locked
+     */
+    badgeLockedUntil?: string | null;
 };
 
 export type DeviceListResponse = {
@@ -6838,7 +6877,7 @@ export type PortalUserDto = {
     id: string;
     email: string;
     role: 'client';
-    status: 'invited' | 'active';
+    status: 'invited' | 'active' | 'deactivated';
     clientId: string;
 };
 
@@ -7942,13 +7981,21 @@ export type TenancyControllerSignInErrors = {
      */
     400: ProblemDetailsDto;
     /**
-     * Unknown email or wrong password (unauthenticated)
+     * Unknown email, wrong password, or a deactivated account (unauthenticated — one answer for all three)
      */
     401: ProblemDetailsDto;
     /**
      * Invitation not yet accepted (invite-pending), or a client-portal user whose client is not active (client-suspended, story 21-7)
      */
     403: ProblemDetailsDto;
+    /**
+     * Too many failed attempts for this email from this address (sign-in-locked; `retryAfterSeconds`)
+     */
+    423: ProblemDetailsDto;
+    /**
+     * Too many attempts from this address (rate-limited; `retryAfterSeconds`)
+     */
+    429: ProblemDetailsDto;
 };
 
 export type TenancyControllerSignInError = TenancyControllerSignInErrors[keyof TenancyControllerSignInErrors];
@@ -7958,6 +8005,57 @@ export type TenancyControllerSignInResponses = {
 };
 
 export type TenancyControllerSignInResponse = TenancyControllerSignInResponses[keyof TenancyControllerSignInResponses];
+
+export type TenancyControllerRefreshSessionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/tenants/session/refresh';
+};
+
+export type TenancyControllerRefreshSessionErrors = {
+    /**
+     * No session to refresh (unauthenticated), or the session is over (session-ended with `reason`: signed-out | deactivated | role-changed | client-suspended | refresh-reuse | idle | absolute)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Origin not allow-listed or the X-WMS-Session header missing (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type TenancyControllerRefreshSessionError = TenancyControllerRefreshSessionErrors[keyof TenancyControllerRefreshSessionErrors];
+
+export type TenancyControllerRefreshSessionResponses = {
+    200: RefreshResponse;
+};
+
+export type TenancyControllerRefreshSessionResponse = TenancyControllerRefreshSessionResponses[keyof TenancyControllerRefreshSessionResponses];
+
+export type TenancyControllerSignOutData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/tenants/session/sign-out';
+};
+
+export type TenancyControllerSignOutErrors = {
+    /**
+     * Origin not allow-listed or the X-WMS-Session header missing (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type TenancyControllerSignOutError = TenancyControllerSignOutErrors[keyof TenancyControllerSignOutErrors];
+
+export type TenancyControllerSignOutResponses = {
+    /**
+     * Signed out (or there was nothing to sign out)
+     */
+    204: void;
+};
+
+export type TenancyControllerSignOutResponse = TenancyControllerSignOutResponses[keyof TenancyControllerSignOutResponses];
 
 export type TenancyControllerListWarehousesData = {
     body?: never;
@@ -8648,6 +8746,164 @@ export type UsersControllerSetUserRoleResponses = {
 };
 
 export type UsersControllerSetUserRoleResponse = UsersControllerSetUserRoleResponses[keyof UsersControllerSetUserRoleResponses];
+
+export type UsersControllerDeactivateUserData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/users/{userId}/deactivate';
+};
+
+export type UsersControllerDeactivateUserErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed userId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks users.role_change (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * User does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The last active Owner (last-owner — self-deactivation included), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type UsersControllerDeactivateUserError = UsersControllerDeactivateUserErrors[keyof UsersControllerDeactivateUserErrors];
+
+export type UsersControllerDeactivateUserResponses = {
+    200: UserStatusResponse;
+};
+
+export type UsersControllerDeactivateUserResponse = UsersControllerDeactivateUserResponses[keyof UsersControllerDeactivateUserResponses];
+
+export type UsersControllerReactivateUserData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/users/{userId}/reactivate';
+};
+
+export type UsersControllerReactivateUserErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed userId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks users.role_change (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * User does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type UsersControllerReactivateUserError = UsersControllerReactivateUserErrors[keyof UsersControllerReactivateUserErrors];
+
+export type UsersControllerReactivateUserResponses = {
+    200: UserStatusResponse;
+};
+
+export type UsersControllerReactivateUserResponse = UsersControllerReactivateUserResponses[keyof UsersControllerReactivateUserResponses];
+
+export type UsersControllerUnlockUserData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/users/{userId}/unlock';
+};
+
+export type UsersControllerUnlockUserErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed userId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks users.role_change (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * User does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type UsersControllerUnlockUserError = UsersControllerUnlockUserErrors[keyof UsersControllerUnlockUserErrors];
+
+export type UsersControllerUnlockUserResponses = {
+    200: UserResponse;
+};
+
+export type UsersControllerUnlockUserResponse = UsersControllerUnlockUserResponses[keyof UsersControllerUnlockUserResponses];
 
 export type UsersControllerAcceptInviteData = {
     body: AcceptInviteDto;
@@ -9433,13 +9689,21 @@ export type DevicesControllerBadgeInData = {
 
 export type DevicesControllerBadgeInErrors = {
     /**
-     * Missing/invalid device token (unauthenticated), or wrong operator/PIN (badge-invalid)
+     * Missing/invalid device token (unauthenticated, with `reason` when a session ended), or wrong operator/PIN — and a deactivated operator (badge-invalid)
      */
     401: ProblemDetailsDto;
     /**
      * Unknown or revoked device (device-revoked)
      */
     403: ProblemDetailsDto;
+    /**
+     * Story 6-1a — 5 wrong PINs on this device lock badge-in for 15 minutes, for any PIN (badge-locked; `retryAfterSeconds`)
+     */
+    423: ProblemDetailsDto;
+    /**
+     * Story 6-1a — more than 30 badge-in attempts a minute on this device (rate-limited; `retryAfterSeconds`)
+     */
+    429: ProblemDetailsDto;
 };
 
 export type DevicesControllerBadgeInError = DevicesControllerBadgeInErrors[keyof DevicesControllerBadgeInErrors];
@@ -9449,6 +9713,140 @@ export type DevicesControllerBadgeInResponses = {
 };
 
 export type DevicesControllerBadgeInResponse = DevicesControllerBadgeInResponses[keyof DevicesControllerBadgeInResponses];
+
+export type DevicesControllerBadgeOutData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/badge-out';
+};
+
+export type DevicesControllerBadgeOutErrors = {
+    /**
+     * Missing/invalid badge token (unauthenticated, with `reason`)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * A bare device credential (no operator badged in) (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type DevicesControllerBadgeOutError = DevicesControllerBadgeOutErrors[keyof DevicesControllerBadgeOutErrors];
+
+export type DevicesControllerBadgeOutResponses = {
+    /**
+     * Badged out
+     */
+    204: void;
+};
+
+export type DevicesControllerBadgeOutResponse = DevicesControllerBadgeOutResponses[keyof DevicesControllerBadgeOutResponses];
+
+export type DevicesControllerReleaseDeviceData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        deviceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/{deviceId}/release';
+};
+
+export type DevicesControllerReleaseDeviceErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed deviceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks device.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Device does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DevicesControllerReleaseDeviceError = DevicesControllerReleaseDeviceErrors[keyof DevicesControllerReleaseDeviceErrors];
+
+export type DevicesControllerReleaseDeviceResponses = {
+    200: DeviceResponse;
+};
+
+export type DevicesControllerReleaseDeviceResponse = DevicesControllerReleaseDeviceResponses[keyof DevicesControllerReleaseDeviceResponses];
+
+export type DevicesControllerUnlockDeviceData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        deviceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/{deviceId}/unlock';
+};
+
+export type DevicesControllerUnlockDeviceErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed deviceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks device.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Device does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DevicesControllerUnlockDeviceError = DevicesControllerUnlockDeviceErrors[keyof DevicesControllerUnlockDeviceErrors];
+
+export type DevicesControllerUnlockDeviceResponses = {
+    200: DeviceResponse;
+};
+
+export type DevicesControllerUnlockDeviceResponse = DevicesControllerUnlockDeviceResponses[keyof DevicesControllerUnlockDeviceResponses];
 
 export type DevicesControllerListDevicesData = {
     body?: never;

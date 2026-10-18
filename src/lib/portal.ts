@@ -50,23 +50,46 @@ export function signInDestination(user: { clientId?: string | null }): string {
  * replace the URL. A client session never renders the operator shell (so no
  * operator hook ever runs); no session goes to /login.
  */
-export function operatorShellRoute(session: Session | null): { kind: 'render' } | { kind: 'redirect'; href: string } {
-  if (session === null) return { kind: 'redirect', href: '/login' };
+export function operatorShellRoute(
+  session: Session | null,
+  loginHref = '/login',
+): { kind: 'render' } | { kind: 'redirect'; href: string } {
+  if (session === null) return { kind: 'redirect', href: loginHref };
   if (session.user.clientId !== null) return { kind: 'redirect', href: PORTAL_HOME };
   return { kind: 'render' };
 }
 
 /** The portal shell's decision: staff go back to their own shell; no session goes to /login. */
-export function portalShellRoute(session: Session | null): { kind: 'render' } | { kind: 'redirect'; href: string } {
-  if (session === null) return { kind: 'redirect', href: '/login' };
+export function portalShellRoute(
+  session: Session | null,
+  loginHref = '/login',
+): { kind: 'render' } | { kind: 'redirect'; href: string } {
+  if (session === null) return { kind: 'redirect', href: loginHref };
   if (session.user.clientId === null) return { kind: 'redirect', href: OPERATOR_HOME };
   return { kind: 'render' };
 }
 
 /** The login page's notice for its query (`portal=suspended`), or null. */
-export function loginNotice(portal: string | undefined): string | null {
-  return portal === 'suspended' ? PORTAL_SUSPENDED_MESSAGE : null;
+export function loginNotice(portal: string | undefined, ended?: string): string | null {
+  if (portal === 'suspended') return PORTAL_SUSPENDED_MESSAGE;
+  // Own keys only: `?ended=constructor` must not read an Object.prototype member.
+  return ended !== undefined && Object.hasOwn(SESSION_ENDED_NOTICE, ended) ? SESSION_ENDED_NOTICE[ended]! : null;
 }
+
+/**
+ * Story 6-1a — the sign-in page's words for why a session ended (the
+ * server's `reason` on a 401 `session-ended`, carried as `?ended=`).
+ */
+export const SESSION_ENDED_NOTICE: Readonly<Record<string, string>> = {
+  idle: 'You were signed out after 2 hours of inactivity.',
+  absolute: 'Your session reached its time limit — sign in again.',
+  'signed-out': 'You were signed out.',
+  deactivated: 'Your account has been deactivated. Ask your administrator if you think this is a mistake.',
+  'role-changed': 'Your role changed — sign in again to continue.',
+  'client-suspended': PORTAL_SUSPENDED_MESSAGE,
+  'refresh-reuse': 'Your session was used from somewhere else and was ended for safety — sign in again.',
+  legacy: 'Sign-in was upgraded — please sign in again.',
+};
 
 export interface PortalNavItem {
   readonly id: 'stock' | 'orders' | 'inbound' | 'invoices' | 'service';

@@ -150,6 +150,8 @@ export function LoginForm({ initialEmail = '' }: { initialEmail?: string }) {
         // Story 21-7 — a client-portal user's client brand (null for staff).
         client: signIn.client ?? null,
         expiresAt: Date.now() + signIn.expiresInSeconds * 1000,
+        // Story 6-1a — refreshable until the session's absolute end.
+        refreshUntil: Date.now() + signIn.refreshExpiresInSeconds * 1000,
       });
       router.push(signInDestination(signIn.user));
     } catch (error) {
@@ -283,6 +285,13 @@ export function AcceptInviteForm({ initialToken = '' }: { initialToken?: string 
   );
 }
 
+/** Story 6-1a — "N minutes" from a lockout's `retryAfterSeconds` (15 when absent). */
+function minutesFrom(error: ApiProblem): string {
+  const seconds = typeof error.extensions?.retryAfterSeconds === 'number' ? error.extensions.retryAfterSeconds : 15 * 60;
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+}
+
 /** Clients branch on the machine-readable problem `code`, never on prose. */
 function rejectionReason(error: unknown): string {
   if (error instanceof ApiProblem) {
@@ -291,6 +300,11 @@ function rejectionReason(error: unknown): string {
         return 'An account for this email already exists.';
       case 'unauthenticated':
         return 'Unknown email or wrong password.';
+      // Story 6-1a — lockout and the attempt limit.
+      case 'sign-in-locked':
+        return `Too many failed attempts. Try again in ${minutesFrom(error)}, or ask an owner to unlock your account.`;
+      case 'rate-limited':
+        return 'Too many sign-in attempts from this network. Wait a minute and try again.';
       case 'client-suspended':
         return PORTAL_SUSPENDED_MESSAGE;
       case 'invite-pending':

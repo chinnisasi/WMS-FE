@@ -3,12 +3,13 @@
 import { useRouter } from 'next/navigation';
 import { useSyncExternalStore } from 'react';
 
-import { clearSession, readSession, subscribeSession } from '@/lib/auth';
+import { readSession, subscribeSession } from '@/lib/auth';
+import { signOutEverywhere } from '@/lib/session-refresh';
 
 /**
- * Sign-out (review loop 1 decision): closes the session lifecycle the story
- * introduced — `clearSession()` drops the stored token, then the user lands
- * on /login. Renders nothing while signed out, and re-renders through the
+ * Sign-out (review loop 1 decision; story 6-1a): ends the session on the
+ * server (`signOutEverywhere` — the same token in any other tab stops
+ * working), drops the stored token, then the user lands on /login. Renders nothing while signed out, and re-renders through the
  * same session subscription as every other session-aware surface.
  */
 export function SignOutButton({ className = '' }: { className?: string }) {
@@ -24,8 +25,8 @@ export function SignOutButton({ className = '' }: { className?: string }) {
       type="button"
       className={className}
       onClick={() => {
-        clearSession();
-        router.push('/login');
+        // Story 6-1a — the session ends on the server too, not only here.
+        void signOutEverywhere().then(() => router.push('/login'));
       }}
     >
       Sign out
