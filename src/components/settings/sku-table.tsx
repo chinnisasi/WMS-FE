@@ -22,7 +22,10 @@ import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useCatalogSkus, useKits, useSkus } from '@/lib/use-catalog';
 import {
+  CLIENT_DEPARTED_REASON,
   clientCell,
+  clientTakesWork,
+  skusOfWorkingClients,
   clientLabel,
   correctClientReason,
   correctionOutcome,
@@ -342,7 +345,8 @@ function CorrectClientForm({
   onSaved: (moved: readonly SkuResponse[]) => void;
   onRejected: (reason: string) => void;
 }) {
-  const options = clients.filter((client) => client.id !== sku.clientId);
+  // Story 1-2a — a departed client takes no SKUs: never a correction target.
+  const options = clients.filter((client) => client.id !== sku.clientId && clientTakesWork(client));
   const [picked, setPicked] = useState('');
   const [pending, setPending] = useState(false);
   // A pre-render double-click fires both handlers before `disabled`
@@ -763,6 +767,9 @@ function rejectionReason(error: unknown, attemptedBarcode?: string): string {
       // Story 21-2b — attaching to a product holding another client's SKUs.
       case 'mixed-client':
         return mixedClientReason(error);
+      // Story 1-2a — the SKU's client has departed (it joins no product).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       case 'duplicate-barcode':
         // The API names the conflicting SKU in the problem detail. Story
         // 1-1: a barcode is unique per client, not per tenant.
@@ -838,6 +845,8 @@ function KitForm({
   );
   const [pending, setPending] = useState(false);
   const allSkus = useCatalogSkus();
+  // Story 1-2a — a departed client's SKUs are never offered as components.
+  const kitClients = readyClients(useClients());
 
   const skuMap = allSkus.state === 'ready' ? allSkus.data : null;
   // A kit's components are ordinary SKUs: the kit itself (self-reference) and
@@ -849,7 +858,7 @@ function KitForm({
   const pickerOptions: readonly SkuResponse[] =
     skuMap === null
       ? []
-      : narrowToClient(Object.values(skuMap), sku.clientId ?? null)
+      : skusOfWorkingClients(narrowToClient(Object.values(skuMap), sku.clientId ?? null), kitClients)
           .filter((candidate) => {
             if (candidate.id === sku.id) return false;
             return kitOf(candidate.id) === undefined;

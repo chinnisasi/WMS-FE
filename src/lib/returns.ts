@@ -19,6 +19,7 @@ import type {
 } from '@/lib/api/generated';
 import { formatQuantity, parseQuantityInput, quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
+import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 
 /**
  * Fired on `window` after a return mutation (create, cancel) so every returns
@@ -367,6 +368,9 @@ export function returnReason(error: unknown): string {
         return "You can't manage returns";
       case 'not-found':
         return 'Order or return not found';
+      // Story 1-2a — the client has departed (it takes no new work).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       case 'order-not-dispatched':
         return 'Only a dispatched order can be returned';
       case 'line-not-of-order':

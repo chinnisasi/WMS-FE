@@ -396,10 +396,16 @@ export const GRN_REFUSAL_LABEL: Readonly<Record<RejectedGrnLineDto['code'], stri
   'po-line-not-open': 'purchase order line not open',
   'asn-line-not-found': 'not on the shipment notice',
   'sku-client-mismatch': "another client's SKU",
+  // Story 1-2a — a line of any receipt whose SKU's client has departed.
+  'client-departed': 'its client has departed',
 };
 
 /** The remedy a `grn.lines-refused` row's reviewer reads (Discard only). */
 export const GRN_CLIENT_GUIDANCE = 'Receive these lines again on a receipt for their own client, then discard this row.';
+
+/** Story 1-2a — the remedy when the lines were refused because their client departed. */
+export const GRN_DEPARTED_GUIDANCE =
+  'Their client has departed — an owner can reactivate it in Settings → Clients; receive these lines again after that, then discard this row.';
 
 /**
  * Every remedy a row's reviewer reads: the returns remedies for a
@@ -407,7 +413,9 @@ export const GRN_CLIENT_GUIDANCE = 'Receive these lines again on a receipt for t
  * row, none otherwise.
  */
 export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
-  if (entry.opType === 'grn.lines-refused') return [GRN_CLIENT_GUIDANCE];
+  if (entry.opType === 'grn.lines-refused') {
+    return [entry.problemCode === 'client-departed' ? GRN_DEPARTED_GUIDANCE : GRN_CLIENT_GUIDANCE];
+  }
   return returnReceiveGuidance(entry);
 }
 
@@ -448,7 +456,12 @@ function grnLinesRefusedSummary(
     return `${parts.join(' · ')} — ${reason}${owner === null ? '' : ` (${owner})`}`;
   });
   const count = lines.length;
-  const forClient = clientLabel === null ? '' : ` on a receipt for ${clientLabel}`;
+  const forClient =
+    clientLabel === null
+      ? ''
+      : entry.problemCode === 'client-departed'
+        ? ` — ${clientLabel} has departed`
+        : ` on a receipt for ${clientLabel}`;
   return { heading: `${grn} — ${count} line${count === 1 ? '' : 's'} not booked${forClient}`, lines: rendered };
 }
 

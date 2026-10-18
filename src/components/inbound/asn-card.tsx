@@ -28,7 +28,7 @@ import {
   type AsnDraftLine,
 } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { clientCell, clientLabel, showClients, skusOfClient } from '@/lib/clients';
+import { clientCell, clientLabel, showClients, skusOfClient, workingClients } from '@/lib/clients';
 import { quantityLabel } from '@/lib/format-quantity';
 import { readReason } from '@/lib/outbound-orders';
 import { openQtyLabel } from '@/lib/over-receipt';
@@ -267,6 +267,9 @@ function AsnCreateForm({
   onCreated: (asn: AsnDto) => void;
 }) {
   // A tenant with only its own client sees no picker: that client is the one.
+  // Story 1-2a: the gate counts ALL clients (a self + one departed client
+  // still shows a picker, never a forced client); only the OPTIONS drop a
+  // departed client.
   const soleClient = clients !== null && !showClients(clients) ? (clients[0]?.id ?? '') : '';
   const [pickedClient, setPickedClient] = useState('');
   const clientId = soleClient !== '' ? soleClient : pickedClient;
@@ -339,7 +342,7 @@ function AsnCreateForm({
             className={inputClass}
           >
             <option value="">Pick the client…</option>
-            {(clients ?? []).map((client) => (
+            {(workingClients(clients) ?? []).map((client) => (
               <option key={client.id} value={client.id}>
                 {clientLabel(client, tenantName)}
               </option>

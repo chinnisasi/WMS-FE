@@ -9,10 +9,19 @@
  * can pin).
  */
 import { ApiProblem } from '@/lib/api/client';
-import type { ClientDto, ClientTaxDetailsDto, UpdateClientTaxDetailsDto } from '@/lib/api/generated';
+import type {
+  AddressDto,
+  ClientContactDto,
+  ClientDto,
+  ClientRegisteredAddressInputDto,
+  ClientTaxDetailsDto,
+  CreateClientContactDto,
+  UpdateClientTaxDetailsDto,
+} from '@/lib/api/generated';
+import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 import { GST_STATE_NAMES, GSTIN_STATE_CODES } from '@/lib/gst-states';
 import { parseGstinField } from '@/lib/gstin';
-import { UNREACHABLE_REASON, verbatim } from '@/lib/outbound-orders';
+import { UNREACHABLE_REASON, emptyDestinationFields, parseDestinationFields, verbatim, type DestinationFields } from '@/lib/outbound-orders';
 
 /** Fired on `window` after a client mutation so readers refetch. */
 export const CLIENTS_CHANGED_EVENT = 'wms-clients-changed';
@@ -33,6 +42,54 @@ export const MAX_CLIENT_NAME_LENGTH = 200;
 export function showClients(clients: readonly ClientDto[] | null): boolean {
   return clients !== null && clients.length > 1;
 }
+
+/**
+ * Story 1-2a — whether a client takes NEW work: every status but `departed`.
+ * A suspended client still ships (decision 5 — suspension cuts only the
+ * portal), so only departure hides a client from the pickers that start new
+ * work (orders, ASNs, imports, kits, variants, mappings, rate-card drafts,
+ * SKU corrections). History lists, reports and invoices still show it.
+ */
+export function clientTakesWork(client: Pick<ClientDto, 'status'>): boolean {
+  return client.status !== 'departed';
+}
+
+/** Story 1-2a — the clients a picker that starts new work offers. Null passes through (not loaded). */
+export function workingClients(clients: readonly ClientDto[] | null): readonly ClientDto[] | null {
+  return clients === null ? null : clients.filter(clientTakesWork);
+}
+
+/**
+ * Story 1-2a — the SKU filter built on `clientTakesWork`: drop the SKUs of a
+ * departed client. With the clients not loaded (null) nothing is dropped —
+ * the server refuses 409 `client-departed` anyway; a SKU whose client is
+ * unknown here is kept for the same reason.
+ */
+export function skusOfWorkingClients<T extends { readonly clientId?: string | null }>(
+  skus: readonly T[],
+  clients: readonly ClientDto[] | null,
+): readonly T[] {
+  if (clients === null) return skus;
+  const departed = new Set(clients.filter((client) => !clientTakesWork(client)).map((client) => client.id));
+  if (departed.size === 0) return skus;
+  return skus.filter((sku) => sku.clientId === null || sku.clientId === undefined || !departed.has(sku.clientId));
+}
+
+/** Story 1-2a — whether a SKU's client has departed (false when unknown). */
+export function skuClientDeparted(
+  sku: { readonly clientId?: string | null },
+  clients: readonly ClientDto[] | null,
+): boolean {
+  if (clients === null || sku.clientId === null || sku.clientId === undefined) return false;
+  const client = clients.find((entry) => entry.id === sku.clientId);
+  return client !== undefined && !clientTakesWork(client);
+}
+
+/** Story 1-2a — the words a return gate shows for a departed client's order. */
+export const RETURNS_CLIENT_DEPARTED = 'Client departed — reactivate to accept returns';
+
+/** Story 1-2a — the words every surface shows for a 409 `client-departed` (a leaf module). */
+export { CLIENT_DEPARTED_REASON };
 
 /** How a client is named on screen — the tenant's own client reads as the company. */
 export function clientLabel(client: ClientDto, tenantName: string | null): string {
@@ -292,11 +349,12 @@ export function orderSkuOptions<T extends { id: string; clientId?: string | null
 }
 
 /**
- * The clients an order can be entered for: active ones only — a suspended or
- * departed client takes no new orders. Null passes through (not loaded).
+ * The clients an order can be entered for. Story 1-2a decision 5: a
+ * SUSPENDED client still ships (suspension cuts only the portal), so only a
+ * departed one is left out (`clientTakesWork`). Null passes through (not loaded).
  */
 export function orderableClients(clients: readonly ClientDto[] | null): readonly ClientDto[] | null {
-  return clients === null ? null : clients.filter((client) => client.status === 'active');
+  return workingClients(clients);
 }
 
 /** The submit's client problem: a multi-client tenant must pick one first. */
@@ -353,50 +411,202 @@ export function clientStatusLabel(status: ClientDto['status']): string {
   }
 }
 
-/** Story 21-10 — the row actions that move a client between `active` and `suspended`. */
-export type ClientStatusAction = 'suspend' | 'reactivate';
+/**
+ * Story 21-10 — the row actions that move a client between `active` and
+ * `suspended`; story 1-2a adds `depart` (offboarding).
+ */
+export type ClientStatusAction = 'suspend' | 'reactivate' | 'depart';
 
 /**
- * The status action a row offers, or null: Suspend on an active brand,
- * Reactivate on a suspended one, nothing on the tenant's own `self` client
- * (the server refuses it 400) or a departed one (409 `client-not-active`).
- * The caller gates on `clients.manage` as well.
+ * The status actions a row offers, in order (story 1-2a: a list):
+ * - active → Suspend, Depart;
+ * - suspended → Reactivate, Depart;
+ * - departed → Reactivate.
+ * Nothing on the tenant's own `self` client (the server refuses it 400). The
+ * caller gates on `clients.manage` as well.
  */
-export function clientStatusAction(client: ClientDto): ClientStatusAction | null {
-  if (client.systemOwned) return null;
-  if (client.status === 'active') return 'suspend';
-  if (client.status === 'suspended') return 'reactivate';
-  return null;
+export function clientStatusAction(client: ClientDto): readonly ClientStatusAction[] {
+  if (client.systemOwned) return [];
+  switch (client.status) {
+    case 'active':
+      return ['suspend', 'depart'];
+    case 'suspended':
+      return ['reactivate', 'depart'];
+    case 'departed':
+      return ['reactivate'];
+    default:
+      return [];
+  }
 }
 
 /** The status the PATCH sends for an action. */
-export function clientStatusTarget(action: ClientStatusAction): 'active' | 'suspended' {
-  return action === 'suspend' ? 'suspended' : 'active';
+export function clientStatusTarget(action: ClientStatusAction): 'active' | 'suspended' | 'departed' {
+  switch (action) {
+    case 'suspend':
+      return 'suspended';
+    case 'depart':
+      return 'departed';
+    case 'reactivate':
+      return 'active';
+  }
 }
 
-/** The confirmation question — what suspension stops and what it does not. */
-export function clientStatusQuestion(action: ClientStatusAction, name: string): string {
-  return action === 'suspend'
-    ? `Suspend ${name}? Its portal users are signed out on their next action and cannot sign in or announce shipments; no new portal users can be invited and no new rate card can be drafted or activated. Warehouse work and billing continue (it cannot see invoices in the portal while suspended). Open ASNs stay open.`
-    : `Reactivate ${name}? Its portal users can sign in again.`;
+/** The row button's word for an action. */
+export function clientStatusActionLabel(action: ClientStatusAction): string {
+  switch (action) {
+    case 'suspend':
+      return 'Suspend';
+    case 'depart':
+      return 'Depart';
+    case 'reactivate':
+      return 'Reactivate';
+  }
 }
 
-/** The success sentence, built from the RESPONSE's client. */
+/** The confirmation question — what the change stops and what it does not. */
+export function clientStatusQuestion(action: ClientStatusAction, name: string, from?: ClientDto['status']): string {
+  switch (action) {
+    case 'suspend':
+      return `Suspend ${name}? Its portal users are signed out on their next action and cannot sign in or announce shipments; no new portal users can be invited and no new rate card can be drafted or activated. Warehouse work and billing continue (it cannot see invoices in the portal while suspended). Open ASNs stay open.`;
+    case 'depart':
+      return `Depart ${name}? It takes no new work from now on: no new orders, purchase orders, shipment notices, returns, SKUs, imports or channel mappings, and stock that turns up for it is refused until it is reactivated. Its portal users are signed out now. Its history, reports and invoices stay. It can depart only once nothing is left open for it.`;
+    case 'reactivate':
+      return from === 'departed'
+        ? `Reactivate ${name}? It takes work again; its portal users sign in again to use the portal.`
+        : `Reactivate ${name}? Its portal users can sign in again.`;
+  }
+}
+
+/** The confirm button's words for an action on a client. */
+export function clientStatusConfirmLabel(action: ClientStatusAction, code: string): string {
+  return `${clientStatusActionLabel(action)} ${code}`;
+}
+
+/** The success sentence, built from the RESPONSE's client — one per target status. */
 export function clientStatusSuccess(client: ClientDto): string {
-  return client.status === 'suspended' ? `${client.name} is suspended.` : `${client.name} is active again.`;
+  switch (client.status) {
+    case 'suspended':
+      return `${client.name} is suspended.`;
+    case 'departed':
+      return `${client.name} has departed — it takes no new work, and its history stays.`;
+    default:
+      return `${client.name} is active again.`;
+  }
 }
 
-/** Client create / rename / suspend / reactivate refusals. */
-export function clientReason(error: unknown, action: 'created' | 'renamed' | 'suspended' | 'reactivated'): string {
-  const statusAction = action === 'suspended' || action === 'reactivated';
+/** The outcome word for a status response. */
+export function clientStatusWord(client: ClientDto): string {
+  switch (client.status) {
+    case 'suspended':
+      return `${client.code} suspended`;
+    case 'departed':
+      return `${client.code} departed`;
+    default:
+      return `${client.code} reactivated`;
+  }
+}
+
+/** The refusal word per action. */
+export function clientStatusRefusedWord(action: ClientStatusAction): string {
+  switch (action) {
+    case 'suspend':
+      return 'Not suspended';
+    case 'depart':
+      return 'Not departed';
+    case 'reactivate':
+      return 'Not reactivated';
+  }
+}
+
+/** The `clientReason` action of a status action. */
+export function clientStatusReasonAction(action: ClientStatusAction): 'suspended' | 'departed' | 'reactivated' {
+  return action === 'suspend' ? 'suspended' : action === 'depart' ? 'departed' : 'reactivated';
+}
+
+// ── story 1-2a: the departure's blockers ────────────────────────────────────
+
+/** One reason a client cannot depart yet (the server's `blockers[]`). */
+export interface DepartureBlocker {
+  readonly kind: string;
+  readonly count: number;
+  readonly codes: readonly string[];
+}
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/** The words for each blocker kind the server knows (an unknown kind has its own fallback). */
+const BLOCKER_WORDS: Readonly<Record<string, (n: number) => string>> = {
+  stock: (n) => `Stock on hand in ${plural(n, 'SKU', 'SKUs')}`,
+  'open-purchase-orders': (n) => plural(n, 'open purchase order', 'open purchase orders'),
+  'open-asns': (n) => plural(n, 'open shipment notice', 'open shipment notices'),
+  'pending-over-receipts': (n) => `${plural(n, 'over-receipt', 'over-receipts')} awaiting a decision`,
+  'open-orders': (n) => plural(n, 'open order', 'open orders'),
+  'open-rmas': (n) => plural(n, 'open return', 'open returns'),
+  'pending-adjustments': (n) => `${plural(n, 'stock adjustment', 'stock adjustments')} awaiting approval`,
+  'open-counts': (n) => plural(n, 'open count', 'open counts'),
+  'open-review-items': (n) => `${plural(n, 'item', 'items')} in Conflicts & Reviews`,
+  'unsettled-invoices': (n) => plural(n, 'unsettled client invoice', 'unsettled client invoices'),
+  // Decision 9 — the owner unmaps them first (Channels → mappings).
+  'channel-mappings': (n) => `${plural(n, 'channel mapping', 'channel mappings')} of its SKUs`,
+};
+
+/**
+ * Story 1-2a — the blockers of a 409 `client-not-wound-down` (its
+ * `extensions.blockers`), or null for any other error or a malformed list.
+ * Entries that are not `{kind: string, count: number}` are dropped.
+ */
+export function departureBlockers(error: unknown): readonly DepartureBlocker[] | null {
+  if (!(error instanceof ApiProblem) || error.code !== 'client-not-wound-down') return null;
+  const raw = error.extensions['blockers'];
+  if (!Array.isArray(raw)) return null;
+  const blockers: DepartureBlocker[] = [];
+  for (const entry of raw as unknown[]) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const { kind, count, codes } = entry as { kind?: unknown; count?: unknown; codes?: unknown };
+    if (typeof kind !== 'string' || typeof count !== 'number') continue;
+    blockers.push({
+      kind,
+      count,
+      codes: Array.isArray(codes) ? codes.filter((code): code is string => typeof code === 'string') : [],
+    });
+  }
+  return blockers;
+}
+
+/**
+ * One blocker in words: "Stock on hand in 4 SKUs", "2 open orders: SO-104,
+ * SO-109 and 1 more"; an unknown kind reads "N other open items (kind)".
+ */
+export function departureBlockerLine(blocker: DepartureBlocker): string {
+  const words = Object.prototype.hasOwnProperty.call(BLOCKER_WORDS, blocker.kind)
+    ? BLOCKER_WORDS[blocker.kind]!(blocker.count)
+    : `${blocker.count} other open ${blocker.count === 1 ? 'item' : 'items'} (${blocker.kind})`;
+  if (blocker.codes.length === 0) return words;
+  const more = blocker.count - blocker.codes.length;
+  return `${words}: ${blocker.codes.join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
+}
+
+/** The lead sentence above the blocker list. */
+export const DEPARTURE_BLOCKED_LEAD = 'This client cannot depart yet. Finish, cancel or settle each of these, then depart it again:';
+
+/** Client create / rename / suspend / depart / reactivate refusals. */
+export function clientReason(
+  error: unknown,
+  action: 'created' | 'renamed' | 'suspended' | 'departed' | 'reactivated',
+): string {
+  const statusAction = action === 'suspended' || action === 'reactivated' || action === 'departed';
   if (error instanceof ApiProblem) {
     switch (error.code) {
       case 'duplicate-client-code':
         return error.detail ?? 'Another client already uses that code.';
       case 'client-not-active':
         return statusAction
-          ? 'This client has departed — its status cannot change.'
+          ? 'A departed client can only be reactivated.'
           : (error.detail ?? 'This client is not active.');
+      case 'client-not-wound-down':
+        return error.detail ?? 'This client still has open work — it cannot depart yet.';
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       case 'not-found':
         return 'That client no longer exists — refresh the page.';
       case 'role-denied':
@@ -451,6 +661,9 @@ export function correctClientReason(error: unknown): string {
         return error.detail ?? 'This SKU already has history — its client can no longer change.';
       case 'mixed-client':
         return mixedClientReason(error);
+      // Story 1-2a: the target client has departed (it takes no new SKUs).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       // Story 1-1: a code and a barcode are unique per client — the target
       // client already holds the code or barcode of a SKU that would move
       // (the server names which).
@@ -487,6 +700,9 @@ export function importReason(error: unknown): string {
         return error.detail ?? 'The file could not be read — check the header row uses the documented column names.';
       case 'client-required':
         return 'Choose the client this import is for — this tenant holds more than one client.';
+      // Story 1-2a: the run's client has departed (it takes no new SKUs).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       case 'not-found':
         return 'That client no longer exists — refresh the page and choose again.';
       case 'role-denied':
@@ -652,6 +868,276 @@ export function taxDetailsReason(error: unknown): string {
         return 'Your session expired — sign in again.';
       default:
         return error.detail ?? `Tax details not saved (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+// ── story 1-2a: contacts ────────────────────────────────────────────────────
+
+/** The contact roles, in the backend's vocabulary order. */
+export const CONTACT_ROLES = ['operations', 'billing', 'returns'] as const satisfies readonly ClientContactDto['roles'][number][];
+export type ContactRole = (typeof CONTACT_ROLES)[number];
+
+const CONTACT_ROLE_LABEL: Readonly<Record<ContactRole, string>> = {
+  operations: 'Operations',
+  billing: 'Billing',
+  returns: 'Returns',
+};
+
+export function contactRoleLabel(role: ContactRole): string {
+  return CONTACT_ROLE_LABEL[role];
+}
+
+/** A contact's roles in words — "General" when it carries none. */
+export function contactRolesLabel(roles: readonly ContactRole[]): string {
+  return roles.length === 0 ? 'General' : roles.map(contactRoleLabel).join(', ');
+}
+
+/** The backend's ceilings (the 0077 CHECKs, `ADDRESS_FIELD_LENGTHS.phone`, the email column). */
+export const MAX_CONTACT_NAME_LENGTH = 120;
+export const MAX_CONTACT_PHONE_LENGTH = 20;
+export const MAX_CONTACT_EMAIL_LENGTH = 254;
+/** The most contacts one client holds (a 21st is 409 `contact-limit`). */
+export const MAX_CLIENT_CONTACTS = 20;
+
+/**
+ * The email rule, mirrored from the server's `isEmailAddress` closely enough
+ * to never send a guaranteed refusal: trimmed and lower-cased, one `@` with
+ * something before it, a dot inside the domain, no spaces, at most 254
+ * characters. The server's `validation-failed` detail is the fallback for
+ * anything stricter it checks.
+ */
+export function contactEmailProblem(email: string): string | null {
+  const value = email.trim().toLowerCase();
+  if (value === '') return 'An email is required.';
+  if (value.length > MAX_CONTACT_EMAIL_LENGTH) return `An email is at most ${MAX_CONTACT_EMAIL_LENGTH} characters.`;
+  const at = value.lastIndexOf('@');
+  const local = at <= 0 ? '' : value.slice(0, at);
+  const domain = at <= 0 ? '' : value.slice(at + 1);
+  const dot = domain.indexOf('.');
+  if (local === '' || /\s/.test(value) || local.includes('@') || dot <= 0 || dot === domain.length - 1 || domain.endsWith('.')) {
+    return 'Enter an email address like name@company.com.';
+  }
+  return null;
+}
+
+/** The contact form's text fields. */
+export interface ContactFields {
+  readonly name: string;
+  readonly email: string;
+  readonly phone: string;
+  readonly roles: readonly ContactRole[];
+}
+
+export function emptyContactFields(): ContactFields {
+  return { name: '', email: '', phone: '', roles: [] };
+}
+
+export function contactFieldsOf(contact: ClientContactDto): ContactFields {
+  return { name: contact.name, email: contact.email, phone: contact.phone ?? '', roles: [...contact.roles] };
+}
+
+/** Whether a draft differs from where it started (the panel asks before discarding it). */
+export function contactDraftDirty(fields: ContactFields, from: ContactFields): boolean {
+  return (
+    fields.name !== from.name ||
+    fields.email !== from.email ||
+    fields.phone !== from.phone ||
+    fields.roles.length !== from.roles.length ||
+    fields.roles.some((role) => !from.roles.includes(role))
+  );
+}
+
+/**
+ * The form → the body, or a problem (nothing is sent when set): the name
+ * trimmed (1–120 code points), the email trimmed and lower-cased
+ * (`contactEmailProblem`), a blank phone sent as null (≤ 20), the roles in
+ * vocabulary order.
+ */
+export function parseContactDraft(
+  fields: ContactFields,
+): { body: CreateClientContactDto & { phone: string | null }; problem: null } | { body: null; problem: string } {
+  const name = fields.name.trim();
+  const nameLength = [...name].length;
+  if (nameLength < 1 || nameLength > MAX_CONTACT_NAME_LENGTH) {
+    return { body: null, problem: `A contact name is 1–${MAX_CONTACT_NAME_LENGTH} characters.` };
+  }
+  const emailProblem = contactEmailProblem(fields.email);
+  if (emailProblem !== null) return { body: null, problem: emailProblem };
+  const phone = fields.phone.trim();
+  if (phone.length > MAX_CONTACT_PHONE_LENGTH) {
+    return { body: null, problem: `A phone is at most ${MAX_CONTACT_PHONE_LENGTH} characters.` };
+  }
+  return {
+    body: {
+      name,
+      email: fields.email.trim().toLowerCase(),
+      phone: phone === '' ? null : phone,
+      roles: CONTACT_ROLES.filter((role) => fields.roles.includes(role)),
+    },
+    problem: null,
+  };
+}
+
+/** The contact writes' refusals. */
+export function contactReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'primary-contact-required':
+        return 'This is the primary contact — make another contact primary first.';
+      case 'duplicate-contact-email':
+        return 'Another contact of this client already uses that email.';
+      case 'contact-limit':
+        return `A client holds at most ${MAX_CLIENT_CONTACTS} contacts — remove one first.`;
+      case 'not-found':
+        return 'That contact or client no longer exists — refresh the list.';
+      case 'role-denied':
+        return 'Only an owner can manage contacts.';
+      case 'permission-denied':
+        return 'Your session belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This submission was already processed with different details — edit and save again.';
+      case 'conflict':
+        return 'The same submission is still in flight — retry to read the settled result.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Check the contact and try again.';
+      default:
+        return error.detail ?? `Contact not saved (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+/** The contacts read's failure. */
+export function contactsReadReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'not-found':
+        return 'That client no longer exists — refresh the page.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      default:
+        return error.detail ?? `Contacts not loaded (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+// ── story 1-2a: addresses ───────────────────────────────────────────────────
+
+/** The registered address form's fields (an unset value is ''). */
+export interface RegisteredAddressFields {
+  readonly line1: string;
+  readonly line2: string;
+  readonly city: string;
+  readonly stateCode: string;
+  readonly pincode: string;
+}
+
+export function registeredFieldsOf(client: Pick<ClientDto, 'registeredAddress'>): RegisteredAddressFields {
+  const address = client.registeredAddress ?? null;
+  return address === null
+    ? { line1: '', line2: '', city: '', stateCode: '', pincode: '' }
+    : { line1: address.line1, line2: address.line2 ?? '', city: address.city, stateCode: address.stateCode, pincode: address.pincode };
+}
+
+/** The return address as the shared destination field set. */
+export function returnFieldsOf(client: Pick<ClientDto, 'returnAddress'>): DestinationFields {
+  const address = client.returnAddress ?? null;
+  return address === null
+    ? emptyDestinationFields()
+    : {
+        contactName: address.contactName,
+        phone: address.phone,
+        line1: address.line1,
+        line2: address.line2 ?? '',
+        city: address.city,
+        state: address.state,
+        pincode: address.pincode,
+      };
+}
+
+/**
+ * The registered address form → the wire group, or a problem: every field
+ * but line 2 required, the 21-5 billing ceilings, a state from the GST
+ * registration list (the tax form's select), a six-digit pincode.
+ */
+export function parseRegisteredAddress(
+  fields: RegisteredAddressFields,
+): { address: ClientRegisteredAddressInputDto; problem: null } | { address: null; problem: string } {
+  const t = {
+    line1: fields.line1.trim(),
+    line2: fields.line2.trim(),
+    city: fields.city.trim(),
+    stateCode: fields.stateCode.trim(),
+    pincode: fields.pincode.trim(),
+  };
+  const missing = [
+    ['line1', 'an address line 1'],
+    ['city', 'a city'],
+    ['stateCode', 'a state'],
+    ['pincode', 'a pincode'],
+  ].filter(([key]) => t[key as keyof typeof t] === '');
+  if (missing.length > 0) {
+    const labels = missing.map(([, text]) => text);
+    const list = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+    return { address: null, problem: `The registered address needs ${list}.` };
+  }
+  if ([...t.line1].length > 200 || [...t.line2].length > 200) return { address: null, problem: 'An address line is at most 200 characters.' };
+  if ([...t.city].length > 100) return { address: null, problem: 'A city is at most 100 characters.' };
+  if (!GSTIN_STATE_CODES.includes(t.stateCode)) return { address: null, problem: 'Choose a state from the list.' };
+  if (!/^\d{6}$/.test(t.pincode)) return { address: null, problem: 'The pincode is six digits, as text — leading zeros are part of it.' };
+  return {
+    address: { line1: t.line1, ...(t.line2 === '' ? {} : { line2: t.line2 }), city: t.city, stateCode: t.stateCode, pincode: t.pincode },
+    problem: null,
+  };
+}
+
+/** The return address form → the wire address (the shared shipment parser, labelled 'return address'). */
+export function parseReturnAddress(fields: DestinationFields): { address: AddressDto | null; problem: string | null } {
+  const parsed = parseDestinationFields(fields, 'return address');
+  return { address: parsed.destination, problem: parsed.problem };
+}
+
+/** One address in a line (the card's summary). */
+export function registeredAddressLine(client: Pick<ClientDto, 'registeredAddress'>): string {
+  const address = client.registeredAddress ?? null;
+  if (address === null) return 'Not set';
+  const state = GST_STATE_NAMES[address.stateCode] ?? address.stateCode;
+  return [address.line1, address.line2, address.city, `${state} ${address.pincode}`].filter((part) => part !== null && part !== '').join(', ');
+}
+
+export function returnAddressLine(client: Pick<ClientDto, 'returnAddress'>): string {
+  const address = client.returnAddress ?? null;
+  if (address === null) return 'Not set';
+  return [`${address.contactName} (${address.phone})`, address.line1, address.line2, address.city, `${address.state} ${address.pincode}`]
+    .filter((part) => part !== undefined && part !== null && part !== '')
+    .join(', ');
+}
+
+/** The addresses write's refusals. */
+export function addressesReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'validation-failed':
+        return error.detail ?? 'Check the address and try again.';
+      case 'not-found':
+        return 'That client no longer exists — refresh the page.';
+      case 'role-denied':
+        return 'Only an owner can set a client’s addresses.';
+      case 'permission-denied':
+        return 'Your session belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This submission was already processed with different details — edit and save again.';
+      case 'conflict':
+        return 'The same submission is still in flight — retry to read the settled result.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      default:
+        return error.detail ?? `Addresses not saved (${error.code}).`;
     }
   }
   return UNREACHABLE_REASON;

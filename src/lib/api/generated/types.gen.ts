@@ -2191,7 +2191,7 @@ export type AsnImportRowErrorDto = {
     /**
      * Why the row (and with it its whole ASN) was refused
      */
-    code: 'unknown-client' | 'unknown-warehouse' | 'wrong-warehouse' | 'unknown-sku' | 'sku-client-mismatch' | 'mixed-client' | 'client-required' | 'kit-cannot-hold-stock' | 'duplicate-asn-code' | 'invalid-asn-code' | 'too-many-lines' | 'asn-rows-disagree' | 'duplicate-sku-in-asn' | 'invalid-quantity' | 'quantity-precision' | 'invalid-expected-at' | 'missing-value';
+    code: 'unknown-client' | 'unknown-warehouse' | 'wrong-warehouse' | 'unknown-sku' | 'sku-client-mismatch' | 'mixed-client' | 'client-required' | 'client-departed' | 'kit-cannot-hold-stock' | 'duplicate-asn-code' | 'invalid-asn-code' | 'too-many-lines' | 'asn-rows-disagree' | 'duplicate-sku-in-asn' | 'invalid-quantity' | 'quantity-precision' | 'invalid-expected-at' | 'missing-value';
     detail: string;
     /**
      * The row’s sku cell as written; null when blank
@@ -3424,9 +3424,9 @@ export type RejectedGrnLineDto = {
     skuId: string;
     qty: number;
     /**
-     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only)
+     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only). Story 1-2a: `client-departed` — a line of ANY receipt whose SKU's client has departed; also to review (Discard only — re-receive after an owner reactivates the client)
      */
-    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found' | 'sku-client-mismatch';
+    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found' | 'sku-client-mismatch' | 'client-departed';
     /**
      * Human-readable reason naming the line state
      */
@@ -3502,7 +3502,7 @@ export type GoodsReceiptDto = {
 export type RefusedReceiptDto = {
     warehouseId: string;
     /**
-     * The client the blind receipt named
+     * The client the blind receipt named — or (story 1-2a), when no client was named, the first refused line's client (a departed one)
      */
     clientId: string;
     blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other' | null;
@@ -3511,7 +3511,7 @@ export type RefusedReceiptDto = {
      */
     occurredAt: string;
     /**
-     * Every request line, each `sku-client-mismatch`
+     * Every request line, each `sku-client-mismatch` or (story 1-2a) `client-departed`
      */
     rejectedLines: Array<RejectedGrnLineDto>;
     /**
@@ -3522,7 +3522,7 @@ export type RefusedReceiptDto = {
 
 export type GoodsReceiptResponse = {
     /**
-     * The recorded GRN. Story 1-1 (decision 6): null when every line of a blind receipt was refused `sku-client-mismatch` — no receipt was recorded (no GRN code consumed); `refusedReceipt` then says what went to review
+     * The recorded GRN. Story 1-1 (decision 6): null when every line of a blind receipt was refused `sku-client-mismatch` — or (story 1-2a) every line of any receipt was refused `sku-client-mismatch` / `client-departed` — no receipt was recorded (no GRN code consumed); `refusedReceipt` then says what went to review
      */
     goodsReceipt: GoodsReceiptDto | null;
     /**
@@ -6357,6 +6357,20 @@ export type ClientTaxDetailsDto = {
     billingPincode: string | null;
 };
 
+export type ClientRegisteredAddressDto = {
+    line1: string;
+    line2: string | null;
+    city: string;
+    /**
+     * A two-digit GST registration state code
+     */
+    stateCode: string;
+    /**
+     * Six digits
+     */
+    pincode: string;
+};
+
 export type ClientDto = {
     id: string;
     tenantId: string;
@@ -6385,6 +6399,14 @@ export type ClientDto = {
      * Story 21-5 — the recipient's tax details a services tax invoice names (every field nullable; never required)
      */
     taxDetails: ClientTaxDetailsDto;
+    /**
+     * Story 1-2a — the client's registered address (null when unset)
+     */
+    registeredAddress: ClientRegisteredAddressDto | null;
+    /**
+     * Story 1-2a — where returned goods go back to, in the shipment address shape (null when unset)
+     */
+    returnAddress: AddressDto | null;
 };
 
 export type ClientListResponse = {
@@ -6434,9 +6456,111 @@ export type UpdateClientTaxDetailsDto = {
 
 export type UpdateClientStatusDto = {
     /**
-     * The status to move the client to: `suspended` stops its portal (sign-in, every portal call, ASN announce), new portal users and new rate-card drafts and activation; `active` restores them. Operator work continues either way
+     * The status to move the client to: `suspended` stops its portal (sign-in, every portal call, ASN announce), new portal users and new rate-card drafts and activation — operator work continues; `departed` (only once nothing is left open for it — 409 `client-not-wound-down` lists the blockers) also stops every new piece of work and ends its portal sessions, keeping its history; `active` restores either
      */
-    status: 'active' | 'suspended';
+    status: 'active' | 'suspended' | 'departed';
+};
+
+export type ClientRegisteredAddressInputDto = {
+    line1: string;
+    /**
+     * Omit (or null) when there is none
+     */
+    line2?: string | null;
+    city: string;
+    /**
+     * A two-digit GST registration state code
+     */
+    stateCode: string;
+    /**
+     * Six digits, as text
+     */
+    pincode: string;
+};
+
+export type UpdateClientAddressesDto = {
+    /**
+     * The client's registered address (absent = unchanged, null = cleared)
+     */
+    registered?: ClientRegisteredAddressInputDto | null;
+    /**
+     * Where returned goods go back to — the shipment address shape (absent = unchanged, null = cleared)
+     */
+    return?: AddressDto | null;
+};
+
+export type ClientContactDto = {
+    id: string;
+    clientId: string;
+    name: string;
+    /**
+     * Lower-cased
+     */
+    email: string;
+    phone: string | null;
+    /**
+     * In vocabulary order; empty = a general contact
+     */
+    roles: Array<'operations' | 'billing' | 'returns'>;
+    /**
+     * Exactly one contact is primary while any exist — listed first, the default recipient of client notifications
+     */
+    isPrimary: boolean;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last update
+     */
+    updatedAt: string;
+};
+
+export type ClientContactListResponse = {
+    /**
+     * The primary first, then by name, then by id (at most 20)
+     */
+    items: Array<ClientContactDto>;
+};
+
+export type CreateClientContactDto = {
+    /**
+     * 1-120 characters (code points) once trimmed
+     */
+    name: string;
+    /**
+     * An ASCII address, stored trimmed and lower-cased; unique per client
+     */
+    email: string;
+    /**
+     * Omit, null or blank for none
+     */
+    phone?: string | null;
+    /**
+     * What the contact is for — none is a general contact. No role twice
+     */
+    roles?: Array<'operations' | 'billing' | 'returns'>;
+};
+
+export type ClientContactResponse = {
+    contact: ClientContactDto;
+};
+
+export type UpdateClientContactDto = {
+    /**
+     * 1-120 characters (code points) once trimmed — checked by the command
+     */
+    name?: string;
+    email?: string;
+    /**
+     * null or blank clears it
+     */
+    phone?: string | null;
+    roles?: Array<'operations' | 'billing' | 'returns'>;
+    /**
+     * true makes this the primary contact (the previous primary is cleared). false is refused — make another contact primary instead
+     */
+    isPrimary?: boolean;
 };
 
 export type RateCardLineResponseDto = {
@@ -8195,7 +8319,7 @@ export type TenancyControllerSignInErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Invitation not yet accepted (invite-pending), a client-portal user whose client is not active (client-suspended, story 21-7), or — story 6-1b — an owner reset this user’s two-factor sign-in and the enrolment code has expired (enrolment-code-expired: ask for another reset; nothing counted)
+     * Invitation not yet accepted (invite-pending), a client-portal user whose client is suspended (client-suspended, story 21-7) or has departed (client-departed, story 1-2a), or — story 6-1b — an owner reset this user’s two-factor sign-in and the enrolment code has expired (enrolment-code-expired: ask for another reset; nothing counted)
      */
     403: ProblemDetailsDto;
     /**
@@ -8267,7 +8391,7 @@ export type TenancyControllerRefreshSessionData = {
 
 export type TenancyControllerRefreshSessionErrors = {
     /**
-     * No session to refresh (unauthenticated), or the session is over (session-ended with `reason`: signed-out | deactivated | role-changed | client-suspended | refresh-reuse | idle | absolute)
+     * No session to refresh (unauthenticated), or the session is over (session-ended with `reason`: signed-out | deactivated | role-changed | client-suspended | client-departed | refresh-reuse | idle | absolute)
      */
     401: ProblemDetailsDto;
     /**
@@ -17739,7 +17863,7 @@ export type ClientsControllerUpdateClientStatusData = {
 
 export type ClientsControllerUpdateClientStatusErrors = {
     /**
-     * Missing or malformed Idempotency-Key, a malformed clientId, a status other than active or suspended, or the tenant's own self client (validation-failed)
+     * Missing or malformed Idempotency-Key, a malformed clientId, a status other than active, suspended or departed, or the tenant's own self client (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -17755,7 +17879,7 @@ export type ClientsControllerUpdateClientStatusErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The client has departed — its status cannot change (client-not-active), or a concurrent request with the same Idempotency-Key (conflict)
+     * A departed client asked to be suspended — it can only be reactivated (client-not-active); a departure while work remains (client-not-wound-down — `blockers: [{kind, count, codes?}]` lists every blocker: stock, open-purchase-orders, open-asns, pending-over-receipts, open-orders, open-rmas, pending-adjustments, open-counts, open-review-items, unsettled-invoices); or a concurrent request with the same Idempotency-Key (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -17774,6 +17898,270 @@ export type ClientsControllerUpdateClientStatusResponses = {
 };
 
 export type ClientsControllerUpdateClientStatusResponse = ClientsControllerUpdateClientStatusResponses[keyof ClientsControllerUpdateClientStatusResponses];
+
+export type ClientsControllerUpdateAddressesData = {
+    body: UpdateClientAddressesDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/addresses';
+};
+
+export type ClientsControllerUpdateAddressesErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, or an address field that breaks its rule — a missing field, an over-long one, a registered state code off the GST registration list, a pincode that is not six digits (validation-failed, naming the field)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerUpdateAddressesError = ClientsControllerUpdateAddressesErrors[keyof ClientsControllerUpdateAddressesErrors];
+
+export type ClientsControllerUpdateAddressesResponses = {
+    200: ClientResponse;
+};
+
+export type ClientsControllerUpdateAddressesResponse = ClientsControllerUpdateAddressesResponses[keyof ClientsControllerUpdateAddressesResponses];
+
+export type ClientsControllerListContactsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/contacts';
+};
+
+export type ClientsControllerListContactsErrors = {
+    /**
+     * A malformed clientId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientsControllerListContactsError = ClientsControllerListContactsErrors[keyof ClientsControllerListContactsErrors];
+
+export type ClientsControllerListContactsResponses = {
+    200: ClientContactListResponse;
+};
+
+export type ClientsControllerListContactsResponse = ClientsControllerListContactsResponses[keyof ClientsControllerListContactsResponses];
+
+export type ClientsControllerAddContactData = {
+    body: CreateClientContactDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/contacts';
+};
+
+export type ClientsControllerAddContactErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, or a name, email, phone or role that breaks its rule (validation-failed, naming the field)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The client already has 20 contacts (contact-limit), another contact of the client has this email (duplicate-contact-email), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerAddContactError = ClientsControllerAddContactErrors[keyof ClientsControllerAddContactErrors];
+
+export type ClientsControllerAddContactResponses = {
+    /**
+     * The added contact (a matching Idempotency-Key replays it)
+     */
+    201: ClientContactResponse;
+};
+
+export type ClientsControllerAddContactResponse = ClientsControllerAddContactResponses[keyof ClientsControllerAddContactResponses];
+
+export type ClientsControllerRemoveContactData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        contactId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/contacts/{contactId}';
+};
+
+export type ClientsControllerRemoveContactErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed clientId or contactId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such client in this tenant, or no such contact of this client (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The primary contact while others remain — make another primary first (primary-contact-required), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerRemoveContactError = ClientsControllerRemoveContactErrors[keyof ClientsControllerRemoveContactErrors];
+
+export type ClientsControllerRemoveContactResponses = {
+    /**
+     * The removed contact (a matching Idempotency-Key replays it)
+     */
+    200: ClientContactResponse;
+};
+
+export type ClientsControllerRemoveContactResponse = ClientsControllerRemoveContactResponses[keyof ClientsControllerRemoveContactResponses];
+
+export type ClientsControllerEditContactData = {
+    body: UpdateClientContactDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        contactId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/contacts/{contactId}';
+};
+
+export type ClientsControllerEditContactErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId or contactId, a field that breaks its rule, or isPrimary: false (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such client in this tenant, or no such contact of this client (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Another contact of the client has this email (duplicate-contact-email), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerEditContactError = ClientsControllerEditContactErrors[keyof ClientsControllerEditContactErrors];
+
+export type ClientsControllerEditContactResponses = {
+    200: ClientContactResponse;
+};
+
+export type ClientsControllerEditContactResponse = ClientsControllerEditContactResponses[keyof ClientsControllerEditContactResponses];
 
 export type RateCardsControllerInForceData = {
     body?: never;
@@ -18818,7 +19206,7 @@ export type PortalControllerMeErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
 };
@@ -18859,7 +19247,7 @@ export type PortalControllerStockErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
 };
@@ -18901,7 +19289,7 @@ export type PortalControllerOrdersErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
 };
@@ -18937,7 +19325,7 @@ export type PortalControllerOrderErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
     /**
@@ -18983,7 +19371,7 @@ export type PortalControllerAsnsErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
 };
@@ -19024,7 +19412,7 @@ export type PortalControllerAnnounceAsnErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended); or the user may not announce for this client (role-denied)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a); or the user may not announce for this client (role-denied)
      */
     403: ProblemDetailsDto;
     /**
@@ -19075,7 +19463,7 @@ export type PortalControllerAsnErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
     /**
@@ -19121,7 +19509,7 @@ export type PortalControllerPurchaseOrdersErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
 };
@@ -19157,7 +19545,7 @@ export type PortalControllerPurchaseOrderErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
     /**
@@ -19202,7 +19590,7 @@ export type PortalControllerSkusErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
 };
@@ -19233,7 +19621,7 @@ export type PortalControllerWarehousesErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
 };
@@ -19281,7 +19669,7 @@ export type PortalControllerServiceErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
     /**
@@ -19330,7 +19718,7 @@ export type PortalControllerInvoicesErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
 };
@@ -19362,7 +19750,7 @@ export type PortalControllerInvoiceErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is not active (client-suspended)
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
      */
     403: ProblemDetailsDto;
     /**

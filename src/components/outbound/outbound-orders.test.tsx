@@ -916,7 +916,9 @@ describe('OrderCreateForm: client first (story 1-1)', () => {
     expect(skuOptions(view.container).map((o) => o.value)).toEqual(['', 'self-tshirt']);
   });
 
-  test('suspended and departed clients are not offered — only active clients take orders', async () => {
+  // Story 1-2a decision 5 changed this pin: a SUSPENDED client still ships
+  // (suspension cuts only the portal) — only a departed one is left out.
+  test('a suspended client is offered; a departed one is not (decision 5)', async () => {
     clientsBody = [
       SELF_CLIENT,
       ACME_CLIENT,
@@ -928,11 +930,12 @@ describe('OrderCreateForm: client first (story 1-1)', () => {
       'Choose a client…',
       'Priya Spices (your company)',
       'ACME — Acme Foods',
+      'SUS — Suspended Co',
     ]);
   });
 
-  test('one active client among inactive ones: no Client select, only its SKUs offered', async () => {
-    clientsBody = [SELF_CLIENT, { ...ACME_CLIENT, status: 'suspended' }];
+  test('one working client among departed ones: no Client select, only its SKUs offered', async () => {
+    clientsBody = [SELF_CLIENT, { ...ACME_CLIENT, status: 'departed' }];
     view = await mountForm();
     expect(clientSelect(view.container)).toBeNull();
     expect(skuOptions(view.container).map((o) => o.value)).toEqual(['', 'self-tshirt']);

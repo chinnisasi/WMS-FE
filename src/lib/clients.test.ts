@@ -13,6 +13,27 @@ import {
   clientStatusQuestion,
   clientStatusSuccess,
   clientStatusTarget,
+  clientStatusWord,
+  clientStatusActionLabel,
+  clientStatusRefusedWord,
+  clientTakesWork,
+  workingClients,
+  skusOfWorkingClients,
+  skuClientDeparted,
+  orderableClients,
+  departureBlockers,
+  departureBlockerLine,
+  CLIENT_DEPARTED_REASON,
+  contactEmailProblem,
+  parseContactDraft,
+  contactRolesLabel,
+  contactDraftDirty,
+  emptyContactFields,
+  contactReason,
+  parseRegisteredAddress,
+  parseReturnAddress,
+  registeredAddressLine,
+  addressesReason,
   correctClientReason,
   importClientChoice,
   importClientParam,
@@ -57,6 +78,8 @@ function client(over: Partial<ClientDto> = {}): ClientDto {
     createdAt: '2026-10-06T00:00:00.000Z',
     updatedAt: '2026-10-06T00:00:00.000Z',
     taxDetails: NO_TAX_DETAILS,
+    registeredAddress: null,
+    returnAddress: null,
     ...over,
   };
 }
@@ -317,8 +340,9 @@ describe('the refusal mappers branch on the code', () => {
 
 describe('story 21-10 — suspend and reactivate', () => {
   test('clientReason: every arm the status action can meet', () => {
-    expect(clientReason(problem('client-not-active', 409, 'Client "GONE" has departed — its status cannot change.'), 'suspended')).toBe(
-      'This client has departed — its status cannot change.',
+    // Story 1-2a changed these words: a departed client CAN be reactivated now.
+    expect(clientReason(problem('client-not-active', 409, 'Client "GONE" has departed — a departed client can only be reactivated.'), 'suspended')).toBe(
+      'A departed client can only be reactivated.',
     );
     expect(clientReason(problem('validation-failed', 400, 'The self client cannot be suspended or reactivated'), 'suspended')).toBe(
       'The self client cannot be suspended or reactivated',
@@ -346,12 +370,14 @@ describe('story 21-10 — suspend and reactivate', () => {
     expect(clientStatusLabel('active')).toBe('Active');
     expect(clientStatusLabel('suspended')).toBe('Suspended');
     expect(clientStatusLabel('departed')).toBe('Departed');
-    expect(clientStatusAction(ACME)).toBe('suspend');
-    expect(clientStatusAction(client({ status: 'suspended' }))).toBe('reactivate');
-    expect(clientStatusAction(client({ status: 'departed' }))).toBeNull();
-    expect(clientStatusAction(SELF)).toBeNull();
+    // Story 1-2a: a LIST per row — depart joins suspend; a departed client reactivates.
+    expect(clientStatusAction(ACME)).toEqual(['suspend', 'depart']);
+    expect(clientStatusAction(client({ status: 'suspended' }))).toEqual(['reactivate', 'depart']);
+    expect(clientStatusAction(client({ status: 'departed' }))).toEqual(['reactivate']);
+    expect(clientStatusAction(SELF)).toEqual([]);
     expect(clientStatusTarget('suspend')).toBe('suspended');
     expect(clientStatusTarget('reactivate')).toBe('active');
+    expect(clientStatusTarget('depart')).toBe('departed');
   });
 
   test('the confirmation and success copy', () => {
@@ -427,5 +453,146 @@ describe('skusOfClient — the ASN form offers the chosen client\'s SKUs only (s
     expect(skusOfClient(skus, '')).toEqual([]);
     expect(skusOfClient(skus, 'acme').map((sku) => sku.id)).toEqual(['s1', 's3']);
     expect(skusOfClient(skus, 'beta').map((sku) => sku.id)).toEqual(['s2']);
+  });
+});
+
+describe('story 1-2a — departure, no new work, contacts and addresses', () => {
+  const GONE = client({ id: 'c-gone', code: 'GONE', name: 'Gone Brand', status: 'departed' });
+  const SUSP = client({ id: 'c-susp', code: 'SUSP', name: 'Suspended Brand', status: 'suspended' });
+
+  test('clientTakesWork: every status but departed; the pickers drop only departed clients and their SKUs', () => {
+    expect(clientTakesWork(ACME)).toBe(true);
+    expect(clientTakesWork(SUSP)).toBe(true);
+    expect(clientTakesWork(GONE)).toBe(false);
+    expect(workingClients([SELF, ACME, SUSP, GONE])?.map((c) => c.code)).toEqual(['self', 'ACME', 'SUSP']);
+    expect(workingClients(null)).toBeNull();
+    const skus = [
+      { id: 's1', code: 'A', clientId: 'c-acme' },
+      { id: 's2', code: 'G', clientId: 'c-gone' },
+      { id: 's3', code: 'S', clientId: 'c-susp' },
+      { id: 's4', code: 'X', clientId: null },
+    ];
+    expect(skusOfWorkingClients(skus, [SELF, ACME, SUSP, GONE]).map((s) => s.id)).toEqual(['s1', 's3', 's4']);
+    expect(skusOfWorkingClients(skus, null)).toEqual(skus);
+    expect(skuClientDeparted(skus[1]!, [GONE])).toBe(true);
+    expect(skuClientDeparted(skus[0]!, [ACME, GONE])).toBe(false);
+  });
+
+  test('decision 5: a suspended client is offered on the order form; a departed one is not', () => {
+    expect(orderableClients([SELF, ACME, SUSP, GONE])?.map((c) => c.code)).toEqual(['self', 'ACME', 'SUSP']);
+  });
+
+  test('single-client gates count ALL clients: self + one departed client still shows a picker, never a forced default', () => {
+    expect(importClientChoice([SELF, GONE], 'initial', 'Priya Spices')).toEqual({ kind: 'pick' });
+  });
+
+  test('the depart and departed-reactivate copy, the success words per target', () => {
+    expect(clientStatusQuestion('depart', 'Gone Brand')).toBe(
+      'Depart Gone Brand? It takes no new work from now on: no new orders, purchase orders, shipment notices, returns, SKUs, imports or channel mappings, and stock that turns up for it is refused until it is reactivated. Its portal users are signed out now. Its history, reports and invoices stay. It can depart only once nothing is left open for it.',
+    );
+    expect(clientStatusQuestion('reactivate', 'Gone Brand', 'departed')).toBe(
+      'Reactivate Gone Brand? It takes work again; its portal users sign in again to use the portal.',
+    );
+    expect(clientStatusSuccess(GONE)).toBe('Gone Brand has departed — it takes no new work, and its history stays.');
+    expect(clientStatusWord(GONE)).toBe('GONE departed');
+    expect(clientStatusWord(SUSP)).toBe('SUSP suspended');
+    expect(clientStatusWord(ACME)).toBe('ACME reactivated');
+    expect(clientStatusActionLabel('depart')).toBe('Depart');
+    expect(clientStatusRefusedWord('depart')).toBe('Not departed');
+  });
+
+  test('departureBlockers reads extensions.blockers; words per kind; codes with "and N more"; an unknown kind has a fallback', () => {
+    const refusal = new ApiProblem('client-not-wound-down', 409, 'Client "GONE" cannot depart', undefined, {
+      blockers: [
+        { kind: 'stock', count: 4 },
+        { kind: 'open-orders', count: 3, codes: ['SO-104', 'SO-109'] },
+        { kind: 'open-rmas', count: 1, codes: ['RMA-7'] },
+        { kind: 'brand-new-kind', count: 2 },
+        { kind: 7, count: 'x' },
+      ],
+    });
+    const blockers = departureBlockers(refusal)!;
+    expect(blockers.map(departureBlockerLine)).toEqual([
+      'Stock on hand in 4 SKUs',
+      '3 open orders: SO-104, SO-109 and 1 more',
+      '1 open return: RMA-7',
+      '2 other open items (brand-new-kind)',
+    ]);
+    expect(departureBlockerLine({ kind: 'pending-adjustments', count: 1, codes: [] })).toBe('1 stock adjustment awaiting approval');
+    expect(departureBlockerLine({ kind: 'channel-mappings', count: 2, codes: ['EXT-1', 'EXT-2'] })).toBe(
+      '2 channel mappings of its SKUs: EXT-1, EXT-2',
+    );
+    expect(departureBlockerLine({ kind: 'unsettled-invoices', count: 2, codes: ['2026-09'] })).toBe(
+      '2 unsettled client invoices: 2026-09 and 1 more',
+    );
+    expect(departureBlockers(problem('client-not-active', 409))).toBeNull();
+    expect(departureBlockers(new Error('offline'))).toBeNull();
+    expect(departureBlockers(new ApiProblem('client-not-wound-down', 409, 'x', undefined, {}))).toBeNull();
+  });
+
+  test('client-departed is worded by every clients-module reason; the new status codes too', () => {
+    const departed = problem('client-departed', 409, 'Client GONE has departed');
+    expect(clientReason(departed, 'renamed')).toBe(CLIENT_DEPARTED_REASON);
+    expect(correctClientReason(departed)).toBe(CLIENT_DEPARTED_REASON);
+    expect(importReason(departed)).toBe(CLIENT_DEPARTED_REASON);
+    expect(clientReason(problem('client-not-wound-down', 409, 'Client "GONE" cannot depart while work remains'), 'departed')).toBe(
+      'Client "GONE" cannot depart while work remains',
+    );
+    expect(clientReason(problem('client-not-wound-down', 409), 'departed')).toBe('This client still has open work — it cannot depart yet.');
+    expect(clientReason(problem('weird', 500), 'departed')).toBe('Client not departed (weird).');
+  });
+
+  test('contactEmailProblem mirrors the server rule: trim, lower-case, a dot in the domain, at most 254', () => {
+    expect(contactEmailProblem(' Asha@Acme.Example ')).toBeNull();
+    expect(contactEmailProblem('')).toBe('An email is required.');
+    expect(contactEmailProblem('asha@acme')).toBe('Enter an email address like name@company.com.');
+    expect(contactEmailProblem('@acme.example')).toBe('Enter an email address like name@company.com.');
+    expect(contactEmailProblem('as ha@acme.example')).toBe('Enter an email address like name@company.com.');
+    expect(contactEmailProblem('asha@acme.')).toBe('Enter an email address like name@company.com.');
+    expect(contactEmailProblem(`${'a'.repeat(250)}@x.io`)).toBe('An email is at most 254 characters.');
+  });
+
+  test('parseContactDraft: trimmed, lower-cased, a blank phone is null, roles in vocabulary order', () => {
+    expect(parseContactDraft({ name: ' Asha ', email: ' Asha@Acme.Example ', phone: '  ', roles: ['returns', 'operations'] })).toEqual({
+      body: { name: 'Asha', email: 'asha@acme.example', phone: null, roles: ['operations', 'returns'] },
+      problem: null,
+    });
+    expect(parseContactDraft({ name: '  ', email: 'a@b.co', phone: '', roles: [] }).problem).toBe('A contact name is 1–120 characters.');
+    expect(parseContactDraft({ name: 'A', email: 'a@b.co', phone: '0'.repeat(21), roles: [] }).problem).toBe(
+      'A phone is at most 20 characters.',
+    );
+    expect(contactRolesLabel([])).toBe('General');
+    expect(contactRolesLabel(['operations', 'billing'])).toBe('Operations, Billing');
+    expect(contactDraftDirty(emptyContactFields(), emptyContactFields())).toBe(false);
+    expect(contactDraftDirty({ ...emptyContactFields(), roles: ['billing'] }, emptyContactFields())).toBe(true);
+  });
+
+  test('contactReason words the contact codes', () => {
+    expect(contactReason(problem('primary-contact-required', 409))).toBe('This is the primary contact — make another contact primary first.');
+    expect(contactReason(problem('duplicate-contact-email', 409))).toBe('Another contact of this client already uses that email.');
+    expect(contactReason(problem('contact-limit', 409))).toBe('A client holds at most 20 contacts — remove one first.');
+    expect(contactReason(problem('validation-failed', 400, 'email must be an email address'))).toBe('email must be an email address');
+    expect(contactReason(new Error('offline'))).toBe(UNREACHABLE_REASON);
+  });
+
+  test('the registered address: required fields, a state off the list, a pincode; the return address uses the shipment parser', () => {
+    const ok = { line1: ' 4th Floor ', line2: '', city: 'Mumbai', stateCode: '27', pincode: '400001' };
+    expect(parseRegisteredAddress(ok)).toEqual({
+      address: { line1: '4th Floor', city: 'Mumbai', stateCode: '27', pincode: '400001' },
+      problem: null,
+    });
+    expect(parseRegisteredAddress({ ...ok, city: '', pincode: '' }).problem).toBe('The registered address needs a city and a pincode.');
+    expect(parseRegisteredAddress({ ...ok, stateCode: '99' }).problem).toBe('Choose a state from the list.');
+    expect(parseRegisteredAddress({ ...ok, pincode: '4000' }).problem).toBe('The pincode is six digits, as text — leading zeros are part of it.');
+    expect(parseReturnAddress({ contactName: '', phone: '', line1: 'x', line2: '', city: 'Pune', state: 'Maharashtra', pincode: '411001' }).problem).toBe(
+      'The return address needs a contact name and a phone.',
+    );
+    expect(registeredAddressLine(client())).toBe('Not set');
+    expect(registeredAddressLine(client({ registeredAddress: { line1: 'L1', line2: null, city: 'Mumbai', stateCode: '27', pincode: '400001' } }))).toBe(
+      'L1, Mumbai, Maharashtra 400001',
+    );
+    expect(addressesReason(problem('validation-failed', 400, 'registeredAddress.stateCode must be a GST registration state code'))).toBe(
+      'registeredAddress.stateCode must be a GST registration state code',
+    );
   });
 });

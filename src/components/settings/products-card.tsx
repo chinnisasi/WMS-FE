@@ -16,7 +16,7 @@ import {
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useCatalogSkus, useProducts, useSkusForProduct } from '@/lib/use-catalog';
-import { narrowToClient, skuDisplayLabel, sortSkusForPicker } from '@/lib/clients';
+import { narrowToClient, skuDisplayLabel, skusOfWorkingClients, sortSkusForPicker } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -256,7 +256,10 @@ function VariantMatrix({
   const attachCandidates: readonly SkuResponse[] =
     allSkus.state === 'ready'
       ? sortSkusForPicker(
-          narrowToClient(Object.values(allSkus.data), productClient).filter((sku) => sku.productId === null),
+          // Story 1-2a — a departed client's SKUs join no product.
+          skusOfWorkingClients(narrowToClient(Object.values(allSkus.data), productClient), clients).filter(
+            (sku) => sku.productId === null,
+          ),
           clients,
         )
       : [];

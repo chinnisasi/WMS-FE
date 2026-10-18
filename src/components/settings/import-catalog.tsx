@@ -15,6 +15,7 @@ import {
   importReason,
   importedForLabel,
   showClients,
+  clientTakesWork,
 } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { roleHasCapability } from '@/lib/users';
@@ -358,7 +359,9 @@ export function ImportClientField({
         <option value="" disabled>
           Choose the client these SKUs belong to
         </option>
-        {clients.map((client) => (
+        {/* Story 1-2a — the choice gate counts every client; only the
+            options drop a departed one (it takes no new SKUs). */}
+        {clients.filter(clientTakesWork).map((client) => (
           <option key={client.id} value={client.id}>
             {clientLabel(client, tenantName)}
           </option>

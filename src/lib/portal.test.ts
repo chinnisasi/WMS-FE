@@ -22,6 +22,7 @@ import {
   receivedOfLabel,
   signInDestination,
   skuLabel,
+  PORTAL_DEPARTED_MESSAGE,
 } from './portal';
 
 describe('portal routing (story 21-7)', () => {
@@ -63,6 +64,13 @@ describe('portal refusals', () => {
     expect(portalReadReason(suspended, 'your stock')).toBe(PORTAL_SUSPENDED_MESSAGE);
     expect(portalReadReason(new TypeError('Failed to fetch'), 'your stock')).toBe('The API is unreachable — is wms-be running?');
     expect(portalReadReason(new ApiProblem('boom', 500, 'It broke.'), 'your stock')).toBe('It broke.');
+  });
+
+  test('story 1-2a: a departed client — the sign-in, the ended session and a portal read all say the account has ended', () => {
+    expect(PORTAL_DEPARTED_MESSAGE).toBe("Your company's account with the warehouse has ended.");
+    expect(loginNotice(undefined, 'client-departed')).toBe(PORTAL_DEPARTED_MESSAGE);
+    expect(portalReadReason(new ApiProblem('client-departed', 403), 'your stock')).toBe(PORTAL_DEPARTED_MESSAGE);
+    expect(portalAsnReason(new ApiProblem('client-departed', 403))).toBe(PORTAL_DEPARTED_MESSAGE);
   });
 });
 

@@ -153,6 +153,9 @@ let requests: { method: string; pathname: string; search: string }[] = [];
 let creates: { body: Record<string, unknown>; key: string | null }[] = [];
 let cancels: { pathname: string; body: Record<string, unknown>; key: string | null }[] = [];
 let orderStatus = 'dispatched';
+/** Story 1-2a — the order's client and the clients read (null = no clients route answer). */
+let orderClientId: string | null = null;
+let clientItems: unknown[] | null = null;
 let createAnswers: Response[] = [];
 let listItems: Record<string, unknown>[] = [];
 let returnableAnswer: Record<string, unknown> = RETURNABLE;
@@ -173,6 +176,7 @@ function stubRouter(): void {
           tenantId: TENANT_ID,
           warehouseId: WAREHOUSE_ID,
           status: orderStatus,
+          ...(orderClientId === null ? {} : { clientId: orderClientId }),
           source: 'manual',
           integrationId: null,
           externalEventId: null,
@@ -182,6 +186,9 @@ function stubRouter(): void {
           lines: [orderLine('l-plain', 'sku-a'), orderLine('l-kit', 'sku-kit'), orderLine('l-comp', 'sku-c', 'l-kit'), orderLine('l-ser', 'sku-s')],
         },
       });
+    }
+    if (method === 'GET' && pathname.endsWith('/clients') && clientItems !== null) {
+      return json(200, { items: clientItems });
     }
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       return json(200, {
@@ -244,6 +251,8 @@ beforeEach(() => {
   cancelAnswers = [];
   detailAnswer = null;
   orderStatus = 'dispatched';
+  orderClientId = null;
+  clientItems = null;
   stubRouter();
 });
 
@@ -311,6 +320,25 @@ async function openForm(rendered: Rendered): Promise<void> {
 }
 
 describe('order detail: Create return (story 13-1)', () => {
+  // Story 1-2a — a departed client's order offers no Create return; the words say why.
+  test('hidden for a departed client’s order, with "Client departed — reactivate to accept returns"', async () => {
+    orderClientId = 'c-gone';
+    clientItems = [
+      { id: 'c-gone', tenantId: TENANT_ID, code: 'GONE', name: 'Gone', status: 'departed', systemOwned: false, createdAt: '', updatedAt: '' },
+    ];
+    view = await mountPanel('ops_manager', true);
+    expect(button(view.container, 'Create return')).toBeUndefined();
+    expect(view.container.querySelector('[data-testid="return-client-departed"]')?.textContent).toBe(
+      'Client departed — reactivate to accept returns',
+    );
+    view.unmount();
+    clientItems = [
+      { id: 'c-gone', tenantId: TENANT_ID, code: 'GONE', name: 'Gone', status: 'suspended', systemOwned: false, createdAt: '', updatedAt: '' },
+    ];
+    view = await mountPanel('ops_manager', true);
+    expect(button(view.container, 'Create return')).toBeDefined();
+  });
+
   test('offered only for a dispatched order with the capability, and nothing is fetched until it is opened', async () => {
     view = await mountPanel('ops_manager', true);
     expect(button(view.container, 'Create return')).toBeDefined();

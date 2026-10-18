@@ -38,6 +38,8 @@ export const OPERATOR_HOME = '/settings';
 
 /** The suspended-access message the login page shows after a `client-suspended` refusal. */
 export const PORTAL_SUSPENDED_MESSAGE = "Your company's portal access is suspended.";
+/** Story 1-2a — the words when the client's account with the warehouse has ended (it departed). */
+export const PORTAL_DEPARTED_MESSAGE = "Your company's account with the warehouse has ended.";
 /** The login query that carries it (`/login?portal=suspended`). */
 export const PORTAL_SUSPENDED_LOGIN = '/login?portal=suspended';
 
@@ -88,6 +90,8 @@ export const SESSION_ENDED_NOTICE: Readonly<Record<string, string>> = {
   deactivated: 'Your account has been deactivated. Ask your administrator if you think this is a mistake.',
   'role-changed': 'Your role changed — sign in again to continue.',
   'client-suspended': PORTAL_SUSPENDED_MESSAGE,
+  // Story 1-2a — the client departed: its portal sessions ended.
+  'client-departed': PORTAL_DEPARTED_MESSAGE,
   'refresh-reuse': 'Your session was used from somewhere else and was ended for safety — sign in again.',
   legacy: 'Sign-in was upgraded — please sign in again.',
   // Story 6-1b.
@@ -129,6 +133,8 @@ export function portalReadReason(error: unknown, subject: string): string {
     switch (error.code) {
       case 'client-suspended':
         return PORTAL_SUSPENDED_MESSAGE;
+      case 'client-departed':
+        return PORTAL_DEPARTED_MESSAGE;
       case 'unauthenticated':
         return 'Your session expired — sign in again.';
       case 'permission-denied':
@@ -325,6 +331,7 @@ export function portalAsnReason(error: unknown): string {
   if (error instanceof ApiProblem) {
     switch (error.code) {
       case 'client-suspended':
+      case 'client-departed':
       case 'role-denied':
       case 'permission-denied':
       case 'unauthenticated':

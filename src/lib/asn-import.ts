@@ -59,6 +59,8 @@ export const ASN_IMPORT_REASON_LABEL: Readonly<Record<AsnImportRowErrorCode, str
   'mixed-client': 'SKUs of several clients',
   // Story 1-1: a blank-client ASN whose codes are held by several clients.
   'client-required': 'Name the client — several clients hold these codes',
+  // Story 1-2a: the ASN's client has departed (it takes no new work).
+  'client-departed': 'Client departed — reactivate it to announce shipments',
   'kit-cannot-hold-stock': 'Kit SKU',
   'duplicate-asn-code': 'ASN code already used',
   'invalid-asn-code': 'ASN code too long',

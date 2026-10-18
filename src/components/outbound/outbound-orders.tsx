@@ -53,6 +53,8 @@ import {
   PICK_CLIENT_FIRST,
   showClients,
   skusOfClient,
+  skuClientDeparted,
+  RETURNS_CLIENT_DEPARTED,
 } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -161,7 +163,8 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   // select is not shown and nothing changes. No `clientId` is sent: the
   // server derives it from the lines, so the request hash is unchanged.
   const clientsState = useClients();
-  // Only active clients take new orders; the one-client rule runs over them.
+  // Story 1-2a decision 5 — every client but a DEPARTED one takes new orders
+  // (a suspended client still ships); the one-client rule runs over them.
   const allClients = readyClients(clientsState);
   const clients = orderableClients(allClients);
   const tenantName = useSyncExternalStore(
@@ -199,7 +202,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   const skuList: readonly SkuResponse[] =
     skuMap === null ? [] : Object.values(skuMap).sort((a, b) => a.code.localeCompare(b.code));
   const pickClient = showClients(clients);
-  // One active client among inactive ones: no select, but only its SKUs.
+  // One working client among departed ones: no select, but only its SKUs.
   const soleClientId =
     allClients !== null && clients !== null && clients.length === 1 && allClients.length > 1 ? clients[0]!.id : null;
   const skuOptions =
@@ -900,6 +903,9 @@ export function OrderDetailPanel({
 }) {
   const detail = useOrderDetail(orderId);
   const skus = useOutboundSkus();
+  // Story 1-2a — a departed client's order offers no "Create return" (the
+  // server refuses 409 `client-departed`); the words say why.
+  const detailClients = readyClients(useClients());
   const [creatingReturn, setCreatingReturn] = useState(false);
   const [createdReturn, setCreatedReturn] = useState<ReturnAuthorizationDto | null>(null);
   // The SKU map only decorates: a line falls back to its raw `skuId` rather
@@ -941,7 +947,12 @@ export function OrderDetailPanel({
           </Link>
         </div>
       )}
-      {canManageReturns && canCreateReturn(detail.data.status) && !creatingReturn && (
+      {canManageReturns && canCreateReturn(detail.data.status) && skuClientDeparted(detail.data, detailClients) && (
+        <div className="text-xs text-(--muted-foreground)" data-testid="return-client-departed">
+          {RETURNS_CLIENT_DEPARTED}
+        </div>
+      )}
+      {canManageReturns && canCreateReturn(detail.data.status) && !skuClientDeparted(detail.data, detailClients) && !creatingReturn && (
         <div>
           <button
             type="button"

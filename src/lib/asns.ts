@@ -17,6 +17,7 @@ import type {
 } from '@/lib/api/generated';
 import { parseQuantityInput } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON, verbatim } from '@/lib/outbound-orders';
+import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 
 /** Fired on `window` after an ASN mutation so every inbound reader refetches. */
 export const INBOUND_CHANGED_EVENT = 'wms-inbound-changed';
@@ -231,6 +232,9 @@ export function asnReason(error: unknown): string {
         return error.detail ?? "An ASN carries only its own client's SKUs.";
       case 'kit-cannot-hold-stock':
         return error.detail ?? 'A kit SKU cannot be announced — a kit holds no stock of its own; announce its component SKUs instead.';
+      // Story 1-2a: the client has departed (no new ASNs).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       case 'asn-not-open':
         return 'This ASN is no longer open (received, closed or cancelled) — refresh the list.';
       case 'asn-line-received':

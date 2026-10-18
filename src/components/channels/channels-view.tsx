@@ -69,6 +69,7 @@ import {
   keepCurrentSku,
   narrowToClient,
   skuDisplayLabel,
+  skusOfWorkingClients,
   sortSkusForPicker,
 } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
@@ -1074,14 +1075,20 @@ function BufferEditor({
   const inFlight = working !== null;
 
   const skuList = skus === null ? [] : sortSkusForPicker(Object.values(skus), clients);
+  // Story 1-2a — a departed client's SKUs are offered for no new row; a row
+  // already holding one keeps it listed (`keepCurrentSku`).
+  const pickable = skusOfWorkingClients(skuList, clients);
 
   function addRow() {
+    // Story 1-2a — no SKU a new row could name (every SKU a departed
+    // client's): no row — a row with skuId '' would only be refused.
+    if (pickable.length === 0) return;
     const firstFree = warehouses[0]?.id ?? '';
     keySeq.current += 1;
     const nextId = keySeq.current;
     setRows((prev) => [
       ...prev,
-      { key: `new-${nextId}`, warehouseId: firstFree, skuId: skuList[0]?.id ?? '', raw: '' },
+      { key: `new-${nextId}`, warehouseId: firstFree, skuId: pickable[0]?.id ?? '', raw: '' },
     ]);
   }
 
@@ -1234,8 +1241,8 @@ function BufferEditor({
                       onChange={(e) => patch(row.key, { skuId: e.target.value })}
                       aria-label={`Buffer SKU for row ${row.key}`}
                     >
-                      {skuList.length === 0 && <option value="">no SKU</option>}
-                      {skuList.map((s) => (
+                      {keepCurrentSku(pickable, skuList, row.skuId).length === 0 && <option value="">no SKU</option>}
+                      {keepCurrentSku(pickable, skuList, row.skuId).map((s) => (
                         <option key={s.id} value={s.id}>
                           {skuDisplayLabel(s, clients)}
                         </option>
@@ -1284,7 +1291,7 @@ function BufferEditor({
         </table>
       </div>
       <div className="flex justify-end gap-1">
-        <button type="button" disabled={inFlight} onClick={addRow} className={rowButtonClass}>
+        <button type="button" disabled={inFlight || pickable.length === 0} onClick={addRow} className={rowButtonClass}>
           Add row
         </button>
         <button
@@ -1396,8 +1403,11 @@ function MappingEditor({
   // names a SKU, every other row is offered that SKU's client's SKUs only
   // (a row's own stored pick stays listed — `keepCurrentSku`).
   const mappingClient = clientOfSku(skuList, rows[0]?.skuId);
+  // Story 1-2a — a departed client's SKUs take no new mapping: never offered
+  // (a stored row's own pick stays listed).
+  const pickable = skusOfWorkingClients(skuList, clients);
   const rowOptions = (index: number, currentId: string) =>
-    index === 0 ? skuList : keepCurrentSku(narrowToClient(skuList, mappingClient), skuList, currentId);
+    keepCurrentSku(index === 0 ? pickable : narrowToClient(pickable, mappingClient), skuList, currentId);
   // A row left holding another client's SKU (row 0 changed client, or was
   // removed) is flagged and blocks the save — a mixed set is never sent.
   const offClient = (index: number, skuId: string) => {
@@ -1406,7 +1416,12 @@ function MappingEditor({
     return rowClient !== null && rowClient !== mappingClient;
   };
 
+  // Story 1-2a — the SKUs a NEW row could name (narrowed to the set's
+  // client once row 0 names one); none → Add row is blocked.
+  const nextRowOptions = rows.length === 0 ? pickable : narrowToClient(pickable, mappingClient);
+
   function addRow() {
+    if (nextRowOptions.length === 0) return;
     keySeq.current += 1;
     const nextId = keySeq.current;
     setRows((prev) => [
@@ -1414,7 +1429,7 @@ function MappingEditor({
       {
         key: `new-${nextId}`,
         externalRef: '',
-        skuId: (prev.length === 0 ? skuList : narrowToClient(skuList, clientOfSku(skuList, prev[0]?.skuId)))[0]?.id ?? '',
+        skuId: (prev.length === 0 ? pickable : narrowToClient(pickable, clientOfSku(skuList, prev[0]?.skuId)))[0]?.id ?? '',
       },
     ]);
   }
@@ -1554,7 +1569,7 @@ function MappingEditor({
                             onChange={(e) => patch(row.key, { skuId: e.target.value })}
                             aria-label={`Warehouse SKU for row ${row.key}`}
                           >
-                            {skuList.length === 0 && <option value="">no SKU</option>}
+                            {rowOptions(index, row.skuId).length === 0 && <option value="">no SKU</option>}
                             {rowOptions(index, row.skuId).map((s) => (
                               <option key={s.id} value={s.id}>
                                 {skuDisplayLabel(s, clients)}
@@ -1591,7 +1606,7 @@ function MappingEditor({
                 </table>
               </div>
               <div className="flex justify-end gap-1">
-                <button type="button" disabled={inFlight} onClick={addRow} className={rowButtonClass}>
+                <button type="button" disabled={inFlight || nextRowOptions.length === 0} onClick={addRow} className={rowButtonClass}>
                   Add row
                 </button>
                 <button

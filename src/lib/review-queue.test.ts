@@ -459,8 +459,10 @@ describe('story 1-1 — a blind receipt\'s lines of another client (grn.lines-re
   test('every GRN line refusal reason has words', () => {
     expect(GRN_REFUSAL_LABEL['sku-client-mismatch']).toBe("another client's SKU");
     expect(Object.keys(GRN_REFUSAL_LABEL).sort()).toEqual(
-      ['asn-line-not-found', 'po-line-not-found', 'po-line-not-open', 'sku-client-mismatch'],
+      // Story 1-2a adds `client-departed`.
+      ['asn-line-not-found', 'client-departed', 'po-line-not-found', 'po-line-not-open', 'sku-client-mismatch'],
     );
+    expect(GRN_REFUSAL_LABEL['client-departed']).toBe('its client has departed');
   });
 
   test('its decisions are the server\'s — Discard only', () => {

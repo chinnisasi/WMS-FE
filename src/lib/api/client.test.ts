@@ -30,6 +30,12 @@ import {
   fetchApiListAsns,
   fetchApiTransitionAsn,
   fetchApiUpdateClientTaxDetails,
+  fetchApiUpdateClientAddresses,
+  fetchApiListClientContacts,
+  fetchApiAddClientContact,
+  fetchApiEditClientContact,
+  fetchApiRemoveClientContact,
+  fetchApiUpdateClientStatus,
   fetchApiListRateCards,
   fetchApiRateCardInForce,
   fetchApiClientUsage,
@@ -1593,6 +1599,61 @@ describe('client admin + attribution wrappers (story 21-2b)', () => {
     const without = await lastRequest!.formData();
     expect(without.get('clientId')).toBeNull();
     expect(without.get('mode')).toBe('fix');
+    clearSession();
+  });
+});
+
+describe('client master record wrappers (story 1-2a)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const CLIENT_ID = '0198f7a2-1b3c-7d4e-8f90-000000000001';
+  const CONTACT = { id: 'k-1', clientId: CLIENT_ID, name: 'Asha', email: 'asha@acme.example', phone: null, roles: [], isPrimary: true, createdAt: '', updatedAt: '' };
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}/clients/${CLIENT_ID}`;
+
+  test('contacts: GET (no key), POST, PATCH and DELETE on the contact paths, each write with its key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [CONTACT] });
+    const list = await fetchApiListClientContacts(SESSION.tenant.id, CLIENT_ID);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/contacts`);
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(list[0]!.email).toBe('asha@acme.example');
+
+    stubFetch(201, { contact: CONTACT });
+    await fetchApiAddClientContact(SESSION.tenant.id, CLIENT_ID, { name: 'Asha', email: 'asha@acme.example', phone: null, roles: ['billing'] }, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/contacts`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ name: 'Asha', email: 'asha@acme.example', phone: null, roles: ['billing'] });
+
+    stubFetch(200, { contact: CONTACT });
+    await fetchApiEditClientContact(SESSION.tenant.id, CLIENT_ID, 'k-1', { isPrimary: true }, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/contacts/k-1`);
+    expect(await lastRequest!.json()).toEqual({ isPrimary: true });
+
+    stubFetch(200, { contact: CONTACT });
+    const removed = await fetchApiRemoveClientContact(SESSION.tenant.id, CLIENT_ID, 'k-1', KEY);
+    expect(lastRequest!.method).toBe('DELETE');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/contacts/k-1`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(removed.id).toBe('k-1');
+    clearSession();
+  });
+
+  test('addresses PATCH sends only the given group; a blocker refusal keeps its extensions', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { client: { id: CLIENT_ID } });
+    await fetchApiUpdateClientAddresses(SESSION.tenant.id, CLIENT_ID, { return: null }, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/addresses`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ return: null });
+
+    stubFetch(409, { type: 'about:blank', title: 'x', status: 409, code: 'client-not-wound-down', detail: 'y', blockers: [{ kind: 'stock', count: 1 }] });
+    await expect(fetchApiUpdateClientStatus(SESSION.tenant.id, CLIENT_ID, 'departed', KEY)).rejects.toMatchObject({
+      code: 'client-not-wound-down',
+      extensions: { blockers: [{ kind: 'stock', count: 1 }] },
+    });
     clearSession();
   });
 });

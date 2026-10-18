@@ -1,5 +1,6 @@
 import { ApiProblem } from '@/lib/api/client';
 import { UNREACHABLE_REASON, verbatim } from '@/lib/outbound-orders';
+import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 
 /**
  * Pure copy and derivation for the Settings products card (story 11-6) —
@@ -68,6 +69,9 @@ export function variantValuesLabel(
 export function productReason(error: unknown, action: 'created' | 'updated'): string {
   if (error instanceof ApiProblem) {
     switch (error.code) {
+      // Story 1-2a — the client has departed (it takes no new work).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       case 'duplicate-product-name':
         return error.detail ?? 'A product with this name already exists in this tenant.';
       case 'product-has-variants':
@@ -103,6 +107,9 @@ export function skuAttachReason(error: unknown): string {
     switch (error.code) {
       case 'duplicate-variant-values':
         return verbatim(error);
+      // Story 1-2a — the client has departed (it takes no new work).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       // Story 21-2b — a product's variants never span clients.
       case 'mixed-client':
         return error.detail ?? "This product already holds another client's SKUs — a product's variants share one client.";

@@ -2,6 +2,7 @@ import { ApiProblem } from '@/lib/api/client';
 import type { KitResponse } from '@/lib/api/generated';
 import { quantityLabel, parseQuantityInput, type QuantityUom } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
+import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 
 /**
  * Pure copy, parse and derivation for the SKU table's kit editor (story 11-6)
@@ -80,6 +81,9 @@ export function kitReason(error: unknown): string {
         return error.detail ?? 'A named component is itself a kit — a kit’s BOM is flat.';
       case 'kit-self-reference':
         return 'A kit cannot name itself as a component.';
+      // Story 1-2a — the client has departed (it takes no new work).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       // Story 21-2b — a kit and its components share one client.
       case 'mixed-client':
         return error.detail ?? 'A component belongs to another client — a kit and its components share one client.';

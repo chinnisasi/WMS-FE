@@ -6,6 +6,7 @@ import type {
 } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import type { Capability } from '@/lib/users';
+import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 
 /**
  * The channels surface's pure decisions (story 7-1, the `replenishment.ts`
@@ -431,6 +432,9 @@ export function listMappingsReason(error: unknown): string {
 export function setMappingsReason(error: unknown): string {
   if (error instanceof ApiProblem) {
     switch (error.code) {
+      // Story 1-2a — the client has departed (it takes no new work).
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       case 'not-found':
         return 'A connection or SKU on this editor no longer exists — refresh the page.';
       case 'role-denied':

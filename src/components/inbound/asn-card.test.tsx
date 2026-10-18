@@ -43,6 +43,8 @@ const SELF = {
   updatedAt: '2026-10-06T00:00:00.000Z',
 };
 const ACME = { ...SELF, id: 'c-acme', code: 'ACME', name: 'Acme Foods', systemOwned: false };
+/** The clients the read answers (story 1-2a widens it with a departed brand). */
+let clientItems: unknown[] = [SELF, ACME];
 
 function sku(id: string, code: string, clientId: string) {
   return {
@@ -121,7 +123,7 @@ function stubRouter(): void {
       body = null;
     }
     requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key') });
-    if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: [SELF, ACME] });
+    if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: clientItems });
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) return json(200, { items: SKUS, nextCursor: null });
     if (method === 'GET' && pathname.endsWith('/catalog/kits')) return json(200, { items: KITS, nextCursor: null });
     if (method === 'GET' && pathname.endsWith(`/warehouses/${WAREHOUSE_ID}/inbound/asns`)) {
@@ -280,5 +282,21 @@ describe('AsnsCard', () => {
     expect(created.body).toEqual({ clientId: ACME.id, warehouseId: WAREHOUSE_ID, asnCode: 'ASN-77', lines: [{ skuId: 's-acme', announcedQty: 12 }] });
     expect(created.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(view.container.textContent).toContain('ASN ASN-77 announced');
+  });
+
+  // Story 1-2a — the single-client gate counts ALL clients; only the options
+  // drop a departed one. Self + one departed brand still shows a picker —
+  // never a forced client — and the departed brand is not offered.
+  test('a departed client is not offered, but still counts toward the picker gate', async () => {
+    clientItems = [SELF, { ...ACME, status: 'departed' }];
+    try {
+      view = await mount('owner');
+      await press(buttons(view.container, 'Announce a shipment')[0]);
+      const form = view.container.querySelector('form[aria-label="Announce a shipment"]')!;
+      const clientOptions = [...form.querySelectorAll('select[aria-label="Client"] option')].map((o) => o.textContent);
+      expect(clientOptions).toEqual(['Pick the client…', 'Priya Logistics (your company)']);
+    } finally {
+      clientItems = [SELF, ACME];
+    }
   });
 });
