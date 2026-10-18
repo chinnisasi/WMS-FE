@@ -3499,8 +3499,36 @@ export type GoodsReceiptDto = {
     reviewOpId?: string;
 };
 
+export type RefusedReceiptDto = {
+    warehouseId: string;
+    /**
+     * The client the blind receipt named
+     */
+    clientId: string;
+    blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other' | null;
+    /**
+     * Device time of the receipt (ISO-8601 UTC)
+     */
+    occurredAt: string;
+    /**
+     * Every request line, each `sku-client-mismatch`
+     */
+    rejectedLines: Array<RejectedGrnLineDto>;
+    /**
+     * The op id of the review row (`grn.lines-refused`, Discard only)
+     */
+    reviewOpId: string;
+};
+
 export type GoodsReceiptResponse = {
-    goodsReceipt: GoodsReceiptDto;
+    /**
+     * The recorded GRN. Story 1-1 (decision 6): null when every line of a blind receipt was refused `sku-client-mismatch` — no receipt was recorded (no GRN code consumed); `refusedReceipt` then says what went to review
+     */
+    goodsReceipt: GoodsReceiptDto | null;
+    /**
+     * Story 1-1 — present only when goodsReceipt is null
+     */
+    refusedReceipt?: RefusedReceiptDto;
 };
 
 export type CatalogSnapshotSkuDto = {
