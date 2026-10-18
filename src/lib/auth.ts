@@ -172,18 +172,33 @@ function scheduleExpiryDispatch(expiresAt: number): void {
   }, delay);
 }
 
-export function writeSession(session: StoredSession): void {
+/**
+ * Story 6-1b — refuses a body that is not a session: a string token and a
+ * finite expiry (and a finite `refreshUntil` when one is given). An old
+ * bundle reading a challenge as a session would otherwise store `NaN`
+ * expiries and loop between /login and the shell. Answers whether it wrote.
+ */
+export function writeSession(session: StoredSession): boolean {
+  if (
+    typeof session.token !== 'string' ||
+    session.token === '' ||
+    !Number.isFinite(session.expiresAt) ||
+    (session.refreshUntil !== undefined && !Number.isFinite(session.refreshUntil))
+  ) {
+    return false;
+  }
   try {
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
   } catch {
     // private mode — session simply won't persist. Skip the hint cookie too:
     // the proxy gate would then admit the user into pages that cannot call
     // the API, which is worse than an honest /login.
-    return;
+    return false;
   }
   writeSessionHint(sessionEndsAt(session));
   scheduleExpiryDispatch(sessionEndsAt(session));
   window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
+  return true;
 }
 
 /**

@@ -87,6 +87,7 @@ import {
   fetchApiListProducts,
   fetchApiListSkus,
   fetchApiListWarehouses,
+  fetchApiSecondFactor,
   fetchApiListWavePolicies,
   fetchApiListWaves,
   fetchApiPackOrder,
@@ -409,6 +410,19 @@ describe('refreshSessionUser (story 1.5 /me bootstrap)', () => {
     // Must not throw — the refresh is cosmetic; the backend still gates
     // every command, so a stale stored role is only a hiding hint.
     await refreshSessionUser();
+    expect(store.has(SESSION_STORAGE_KEY)).toBe(true);
+    clearSession();
+  });
+
+  test('story 6-1b — a 401 from the second sign-in step (a wrong code) never clears a session', async () => {
+    writeSession(SESSION);
+    stubFetch(401, { code: 'second-factor-invalid', title: 'Wrong code', status: 401, attemptsLeft: 4 });
+    try {
+      await fetchApiSecondFactor({ challengeToken: 'x.y', code: '000000' });
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ApiProblem).extensions.attemptsLeft).toBe(4);
+    }
     expect(store.has(SESSION_STORAGE_KEY)).toBe(true);
     clearSession();
   });

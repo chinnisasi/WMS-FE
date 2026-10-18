@@ -1,7 +1,6 @@
 import Link from 'next/link';
 
 import { LoginForm } from '@/components/auth/auth-forms';
-import { FeedbackBanner } from '@/components/feedback/banner';
 import { loginNotice } from '@/lib/portal';
 
 export const metadata = { title: 'Sign in' };
@@ -24,8 +23,8 @@ export default async function LoginPage({
           You stay signed in while you work. After 2 hours without activity, or when your session reaches its time limit, you’ll be asked to sign in again.
         </p>
       </header>
-      {notice !== null && <FeedbackBanner tone="rejected" word="Signed out" reason={notice} />}
-      <LoginForm initialEmail={email ?? ''} />
+      {/* Story 6-1b — the form renders the notice, so it can hide it on the second step. */}
+      <LoginForm initialEmail={email ?? ''} notice={notice} />
       <p className="text-sm text-(--muted-foreground)">
         New here?{' '}
         <Link href="/register" className="text-(--primary) underline underline-offset-2">

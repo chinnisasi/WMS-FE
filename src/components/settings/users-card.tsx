@@ -5,6 +5,7 @@ import { useState, useSyncExternalStore } from 'react';
 import {
   ApiProblem,
   fetchApiInviteUser,
+  fetchApiResetSecondFactor,
   fetchApiSetUserActive,
   fetchApiSetUserRole,
   fetchApiUnlockUser,
@@ -21,6 +22,7 @@ import {
   type UserRole,
 } from '@/lib/users';
 import { showClients } from '@/lib/clients';
+import { secondFactorChip, secondFactorReason } from '@/lib/second-factor';
 import { ulid } from '@/lib/ulid';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { useUsers } from '@/lib/use-users';
@@ -88,6 +90,8 @@ function UsersCardSessioned() {
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The invite response's one-time link, kept visible until the next action.
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  // Story 6-1b — a reset's one-time enrolment code, shown once (with Copy).
+  const [enrolmentCode, setEnrolmentCode] = useState<{ email: string; code: string; expiresAt: string } | null>(null);
 
   const canInvite = roleHasCapability(role, 'users.invite');
   const canChangeRole = roleHasCapability(role, 'users.role_change');
@@ -116,7 +120,9 @@ function UsersCardSessioned() {
     {
       key: 'status',
       header: 'Status',
-      render: (user) => <UserStatusBadges user={user} />,
+      // Story 6-1b — the "2FA On/Off" chip only for `users.role_change`
+      // holders (it would tell anyone else which owners lack it).
+      render: (user) => <UserStatusBadges user={user} showSecondFactor={canChangeRole} />,
     },
     // Story 6-1a — offboarding and unlock, for `users.role_change` holders.
     ...(canChangeRole
@@ -133,6 +139,11 @@ function UsersCardSessioned() {
                 onDone={(next, link) => {
                   setOutcome(next);
                   if (link !== undefined) setInviteLink(link);
+                  users?.reload();
+                  notifyUsersChanged();
+                }}
+                onEnrolmentCode={(shown) => {
+                  setEnrolmentCode(shown);
                   users?.reload();
                   notifyUsersChanged();
                 }}
@@ -188,6 +199,32 @@ function UsersCardSessioned() {
           </div>
           <div className="text-xs text-(--muted-foreground)">
             Share it out-of-band — it works once, then expires.
+          </div>
+        </div>
+      )}
+
+      {enrolmentCode !== null && (
+        <div role="status" className="flex flex-col gap-1 rounded-sm border border-(--border) bg-(--muted) p-2">
+          <div className="text-xs font-medium">
+            Enrolment code for {enrolmentCode.email} (valid until{' '}
+            {new Date(enrolmentCode.expiresAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}):
+          </div>
+          <div className="flex items-center gap-2">
+            <code data-testid="enrolment-code" className="data rounded-sm bg-(--background) px-2 py-1 font-mono text-sm">
+              {enrolmentCode.code}
+            </code>
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(enrolmentCode.code);
+              }}
+              className="shrink-0 rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+            >
+              Copy
+            </button>
+          </div>
+          <div className="text-xs text-(--muted-foreground)">
+            Hand it to them in person — they need it, with their password, to set up two-factor sign-in again. It is shown only now.
           </div>
         </div>
       )}
@@ -316,7 +353,8 @@ export function isSignInLocked(user: Pick<UserResponse, 'lockedUntil'>, now = Da
   return typeof user.lockedUntil === 'string' && Date.parse(user.lockedUntil) > now;
 }
 
-function UserStatusBadges({ user }: { user: UserResponse }) {
+function UserStatusBadges({ user, showSecondFactor }: { user: UserResponse; showSecondFactor: boolean }) {
+  const chip = showSecondFactor ? secondFactorChip(user.secondFactorEnabled) : null;
   return (
     <span className="flex flex-wrap gap-1">
       {user.status === 'invited' ? (
@@ -329,6 +367,11 @@ function UserStatusBadges({ user }: { user: UserResponse }) {
       {isSignInLocked(user) && (
         <span className={`${chipClass} border-(--warning,#b45309) text-(--warning,#b45309)`} title={`Locked until ${user.lockedUntil}`}>
           Sign-in locked
+        </span>
+      )}
+      {chip !== null && (
+        <span data-testid="second-factor-chip" className={`${chipClass} border-(--border) text-(--muted-foreground)`}>
+          {chip}
         </span>
       )}
     </span>
@@ -344,12 +387,14 @@ function UserActions({
   confirming,
   setConfirming,
   onDone,
+  onEnrolmentCode,
 }: {
   user: UserResponse;
   isSelf: boolean;
   confirming: string | null;
   setConfirming: (value: string | null) => void;
   onDone: (outcome: Outcome, inviteLink?: string) => void;
+  onEnrolmentCode: (shown: { email: string; code: string; expiresAt: string }) => void;
 }) {
   const open = (action: string) => setConfirming(`${action}-${user.id}`);
   const close = () => setConfirming(null);
@@ -434,8 +479,39 @@ function UserActions({
       />
     );
   }
+  if (confirming === `reset-2fa-${user.id}`) {
+    return (
+      <ConfirmRow
+        key={`reset-2fa-${user.id}`}
+        question={`Reset two-factor sign-in for ${user.email}? They are signed out, and set it up again with a one-time code you hand them.`}
+        confirmLabel="Reset 2FA"
+        ariaLabel={`Confirm resetting two-factor sign-in for ${user.email}`}
+        run={(key, tenantId) => fetchApiResetSecondFactor(tenantId, user.id, key)}
+        reason={secondFactorReason}
+        onDone={(result) => {
+          close();
+          if (result.enrolmentCode !== null && result.enrolmentCodeExpiresAt !== null) {
+            onEnrolmentCode({ email: user.email, code: result.enrolmentCode, expiresAt: result.enrolmentCodeExpiresAt });
+            return;
+          }
+          onDone({ tone: 'accepted', word: 'Nothing to reset', reason: `${user.email} has not set up two-factor sign-in.` });
+        }}
+        onRejected={(reason) => {
+          close();
+          rejected(reason);
+        }}
+        onClose={close}
+      />
+    );
+  }
   return (
     <span className="flex flex-wrap gap-1">
+      {/* Story 6-1b — never on your own row (Security handles your own). */}
+      {!isSelf && user.secondFactorEnabled === true && (
+        <button type="button" className={rowButtonClass} onClick={() => open('reset-2fa')}>
+          Reset 2FA
+        </button>
+      )}
       {isSignInLocked(user) && (
         <button type="button" className={rowButtonClass} onClick={() => open('unlock')}>
           Unlock

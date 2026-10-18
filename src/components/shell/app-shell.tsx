@@ -119,6 +119,14 @@ function OperatorShell({ children }: { children: React.ReactNode }) {
                 />
               </div>
               <div className="border-t border-(--border) px-2 pt-2">
+                {/* Story 6-1b — My account → Security, beside Sign out. */}
+                <Link
+                  href="/account/security"
+                  onClick={() => menuRef.current && (menuRef.current.open = false)}
+                  className="mb-1 block px-2 py-1 text-left text-sm hover:bg-(--muted)"
+                >
+                  Security
+                </Link>
                 <SignOutButton className="mb-2 block px-2 py-1 text-left text-sm hover:bg-(--muted)" />
                 <ThemeToggle />
               </div>

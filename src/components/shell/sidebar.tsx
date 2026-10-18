@@ -64,7 +64,19 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="mx-2 mb-3 flex items-center gap-2 lg:mx-3">
+      <div className="mx-2 mb-3 flex flex-wrap items-center gap-2 lg:mx-3">
+        {/* Story 6-1b — My account → Security, beside Sign out (compact at icon width). */}
+        <Link
+          href="/account/security"
+          aria-label="Security"
+          aria-current={pathname.startsWith('/account/security') ? 'page' : undefined}
+          className="rounded-md border border-(--border) px-2 py-1 text-xs text-(--muted-foreground) hover:bg-(--muted)"
+        >
+          <span className="hidden lg:inline">Security</span>
+          <span className="lg:hidden" aria-hidden>
+            Sec
+          </span>
+        </Link>
         <SignOutButton className="rounded-md border border-(--border) px-2 py-1 text-xs text-(--muted-foreground) hover:bg-(--muted)" />
         <ThemeToggle />
       </div>

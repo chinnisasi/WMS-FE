@@ -1,9 +1,16 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
 import { ApiProblem, fetchApiAcceptInvite, fetchApiRegisterTenant, fetchApiSignIn } from '@/lib/api/client';
+import type {
+  EnrollChallengeResponse,
+  SecondFactorSignInResponse,
+  SignInResponse,
+  TotpChallengeResponse,
+} from '@/lib/api/generated';
+import { failedAttemptsNotice, RELOAD_REASON, signInStep } from '@/lib/second-factor';
 import { writeSession } from '@/lib/auth';
 import { PORTAL_SUSPENDED_MESSAGE, signInDestination } from '@/lib/portal';
 import { GSTIN_HELP } from '@/lib/gstin';
@@ -11,6 +18,8 @@ import { registerTenantBody } from '@/lib/tenancy-forms';
 import { ulid } from '@/lib/ulid';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { BackupCodesPanel } from '@/components/auth/backup-codes-panel';
+import { EnrollStep, SecondFactorStep } from '@/components/auth/second-factor-steps';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -124,45 +133,150 @@ export function RegisterForm() {
   );
 }
 
+/** The steps of a sign-in (story 6-1b). */
+type LoginStep =
+  | { readonly kind: 'password' }
+  | { readonly kind: 'totp'; readonly challenge: TotpChallengeResponse; readonly expiresAt: number }
+  | { readonly kind: 'enroll'; readonly challenge: EnrollChallengeResponse; readonly expiresAt: number }
+  /** Signed in, held until Continue: the backup codes to save, or the failed-attempts notice. */
+  | { readonly kind: 'done'; readonly body: SignInResponse | SecondFactorSignInResponse };
+
+const STEP_ANNOUNCEMENT: Readonly<Record<LoginStep['kind'], string>> = {
+  password: '',
+  totp: 'Step 2 of 2: enter the code from your authenticator app.',
+  enroll: 'Step 2 of 2: set up two-factor sign-in.',
+  done: 'Signed in.',
+};
+
 /**
  * Sign-in: verifies the password and stores the short-lived session the
  * warehouse endpoints require. The response's `user {id, email, role}`
  * rides along (story 1.5) — it feeds the sidebar/settings surface gating
  * until the /me bootstrap refresh on the next mount.
+ *
+ * Story 6-1b — two steps when the server asks: the form switches in place to
+ * the code step (an enrolled user) or the enrolment step (an owner not yet
+ * enrolled). The email is kept and the password cleared; an `aria-live`
+ * region announces the step; the `?ended=` notice hides. When the step ends
+ * (its expiry here, or `challenge-ended` from the server) the form returns
+ * to the password with "Sign in again" and focus on the password. The session
+ * is written — and the page left — only on Continue when there are backup
+ * codes to save or failed attempts to report; until then the access token
+ * lives in component state.
  */
-export function LoginForm({ initialEmail = '' }: { initialEmail?: string }) {
+export function LoginForm({ initialEmail = '', notice = null }: { initialEmail?: string; notice?: string | null }) {
   const router = useRouter();
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
   const [rejection, setRejection] = useState<string | null>(null);
+  const [step, setStep] = useState<LoginStep>({ kind: 'password' });
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  /** Writes the session and leaves for the shell. */
+  function enter(body: SignInResponse | SecondFactorSignInResponse) {
+    const written = writeSession({
+      token: body.accessToken,
+      tenant: body.tenant,
+      user: body.user,
+      // Story 21-7 — a client-portal user's client brand (null for staff).
+      client: body.client ?? null,
+      expiresAt: Date.now() + body.expiresInSeconds * 1000,
+      // Story 6-1a — refreshable until the session's absolute end.
+      refreshUntil: Date.now() + body.refreshExpiresInSeconds * 1000,
+    });
+    if (!written) {
+      setStep({ kind: 'password' });
+      setRejection(RELOAD_REASON);
+      return;
+    }
+    router.push(signInDestination(body.user));
+  }
+
+  /** A session arrived: hold it when there is something to read first, else go in. */
+  function arrived(body: SignInResponse | SecondFactorSignInResponse) {
+    const extra = body as SecondFactorSignInResponse;
+    if ((extra.backupCodes?.length ?? 0) > 0 || failedAttemptsNotice(extra.secondFactorFailedAttempts) !== null) {
+      setStep({ kind: 'done', body });
+      return;
+    }
+    enter(body);
+  }
+
+  function stepEnded() {
+    setStep({ kind: 'password' });
+    setRejection('Sign in again.');
+    // After the render that brings the password field back.
+    setTimeout(() => passwordRef.current?.focus(), 0);
+  }
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setPending(true);
     setRejection(null);
     try {
-      const signIn = await fetchApiSignIn({ email, password });
-      writeSession({
-        token: signIn.accessToken,
-        tenant: signIn.tenant,
-        user: signIn.user,
-        // Story 21-7 — a client-portal user's client brand (null for staff).
-        client: signIn.client ?? null,
-        expiresAt: Date.now() + signIn.expiresInSeconds * 1000,
-        // Story 6-1a — refreshable until the session's absolute end.
-        refreshUntil: Date.now() + signIn.refreshExpiresInSeconds * 1000,
-      });
-      router.push(signInDestination(signIn.user));
+      const answer = signInStep(await fetchApiSignIn({ email, password }));
+      if (answer.kind === 'unknown') {
+        setRejection(RELOAD_REASON);
+        return;
+      }
+      if (answer.kind === 'session') {
+        arrived(answer.body);
+        return;
+      }
+      setPassword('');
+      setStep({ kind: answer.kind, challenge: answer.challenge, expiresAt: Date.now() + answer.challenge.expiresInSeconds * 1000 } as LoginStep);
     } catch (error) {
-      setRejection(rejectionReason(error));
+      setRejection(error instanceof ApiProblem && error.code === 'client-outdated' ? RELOAD_REASON : rejectionReason(error));
     } finally {
       setPending(false);
     }
   }
 
+  const announcement = <p aria-live="polite" className="sr-only">{STEP_ANNOUNCEMENT[step.kind]}</p>;
+
+  if (step.kind === 'totp' || step.kind === 'enroll') {
+    return (
+      <div className="flex flex-col gap-4">
+        {announcement}
+        <p className="text-sm text-(--muted-foreground)">
+          Signing in as <span className="font-medium text-(--foreground)">{email}</span>
+        </p>
+        {step.kind === 'totp' ? (
+          <SecondFactorStep challenge={step.challenge} expiresAt={step.expiresAt} onSession={arrived} onEnded={stepEnded} />
+        ) : (
+          <EnrollStep challenge={step.challenge} expiresAt={step.expiresAt} onSession={arrived} onEnded={stepEnded} />
+        )}
+      </div>
+    );
+  }
+
+  if (step.kind === 'done') {
+    const extra = step.body as SecondFactorSignInResponse;
+    const failed = failedAttemptsNotice(extra.secondFactorFailedAttempts);
+    return (
+      <div className="flex flex-col gap-4">
+        {announcement}
+        {failed !== null && <FeedbackBanner tone="warning" word="Failed attempts" reason={failed} />}
+        {extra.backupCodes !== undefined && extra.backupCodes.length > 0 ? (
+          <BackupCodesPanel codes={extra.backupCodes} label={email} onContinue={() => enter(step.body)} />
+        ) : (
+          <button
+            type="button"
+            onClick={() => enter(step.body)}
+            className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90"
+          >
+            Continue
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      {announcement}
+      {notice !== null && <FeedbackBanner tone="rejected" word="Signed out" reason={notice} />}
       <label className="flex flex-col gap-1">
         <span className={labelClass}>Email</span>
         <input
@@ -177,6 +291,7 @@ export function LoginForm({ initialEmail = '' }: { initialEmail?: string }) {
       <label className="flex flex-col gap-1">
         <span className={labelClass}>Password</span>
         <input
+          ref={passwordRef}
           className={inputClass}
           type="password"
           value={password}
