@@ -45,6 +45,17 @@ export function systemBinLabel(code: string, systemOwned: boolean): string | nul
 export interface CodeEntry {
   readonly id: string;
   readonly code: string;
+  /**
+   * Story 1-1 — how the entry is named on screen when it differs from the
+   * code: a SKU's `skuDisplayLabel` (`TSHIRT-M · ACME` once the tenant has
+   * more than one client). Absent → the code.
+   */
+  readonly label?: string;
+}
+
+/** An entry's on-screen name. */
+export function codeEntryLabel(entry: CodeEntry): string {
+  return entry.label ?? entry.code;
 }
 
 export type CodeMap = ResourceState<readonly CodeEntry[]>;
@@ -87,24 +98,38 @@ export function searchAvailability(bins: CodeMap, skus: CodeMap): SearchAvailabi
 export type SearchResolution =
   | { readonly kind: 'blank' }
   | { readonly kind: 'bin'; readonly id: string; readonly code: string; readonly alsoSku: boolean }
-  | { readonly kind: 'sku'; readonly id: string; readonly code: string }
+  | { readonly kind: 'sku'; readonly id: string; readonly code: string; readonly label?: string }
+  | { readonly kind: 'choice'; readonly code: string; readonly matches: readonly CodeEntry[] }
   | { readonly kind: 'miss'; readonly message: string }
   | { readonly kind: 'ambiguous'; readonly message: string };
 
 /**
- * Exact code first, then a case-insensitive match — but codes are unique
- * case-SENSITIVELY (`skus_tenant_id_code_unique`), so `abc` and `ABC` can
- * both exist: more than one case-insensitive match is `'ambiguous'`, never
- * a silent pick of the first.
+ * Exact code first, then a case-insensitive match. Codes are unique
+ * case-SENSITIVELY, so `abc` and `ABC` can both exist — and since story 1-1
+ * a SKU code is unique per CLIENT, so two brands can both own `TSHIRT-M`.
+ * More than one match is never a silent pick of the first: the caller gets
+ * every match (`readonly CodeEntry[]` of length ≥ 2).
  */
-function findCode(map: CodeMap, query: string): CodeEntry | 'ambiguous' | undefined {
+function findCode(map: CodeMap, query: string): CodeEntry | readonly CodeEntry[] | undefined {
   if (map.state !== 'ready') return undefined;
-  const exact = map.data.find((entry) => entry.code === query);
-  if (exact !== undefined) return exact;
+  const exact = map.data.filter((entry) => entry.code === query);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return exact;
   const upper = query.toUpperCase();
   const matches = map.data.filter((entry) => entry.code.toUpperCase() === upper);
-  if (matches.length > 1) return 'ambiguous';
+  if (matches.length > 1) return matches;
   return matches[0];
+}
+
+function isMany(found: CodeEntry | readonly CodeEntry[] | undefined): found is readonly CodeEntry[] {
+  return Array.isArray(found);
+}
+
+/** The SKU arm a picked entry applies (the chooser's buttons, or a single match). */
+export function skuResolution(entry: CodeEntry): Extract<SearchResolution, { kind: 'sku' }> {
+  return entry.label === undefined
+    ? { kind: 'sku', id: entry.id, code: entry.code }
+    : { kind: 'sku', id: entry.id, code: entry.code, label: entry.label };
 }
 
 /**
@@ -119,18 +144,30 @@ export function resolveSearch(query: string, bins: CodeMap, skus: CodeMap): Sear
   if (code === '') return { kind: 'blank' };
   const bin = findCode(bins, code);
   const sku = findCode(skus, code);
-  if (bin === 'ambiguous') return { kind: 'ambiguous', message: `More than one bin matches ${code} — type the exact code.` };
+  // A bin code is unique per warehouse case-sensitively: case twins stay
+  // "type the exact code".
+  if (isMany(bin)) return { kind: 'ambiguous', message: `More than one bin matches ${code} — type the exact code.` };
   if (bin !== undefined) return { kind: 'bin', id: bin.id, code: bin.code, alsoSku: sku !== undefined };
-  if (sku === 'ambiguous') return { kind: 'ambiguous', message: `More than one SKU matches ${code} — type the exact code.` };
-  if (sku !== undefined) return { kind: 'sku', id: sku.id, code: sku.code };
+  // Several SKUs (two clients' `TSHIRT-M`, or case twins): the viewer picks.
+  if (isMany(sku)) return { kind: 'choice', code, matches: sku };
+  if (sku !== undefined) return skuResolution(sku);
   if (bins.state === 'failed') return { kind: 'miss', message: `No SKU with code ${code} found (bin codes are not loaded).` };
   if (skus.state === 'failed') return { kind: 'miss', message: `No bin with code ${code} found (SKU codes are not loaded).` };
   return { kind: 'miss', message: `No bin or SKU with code ${code} found.` };
 }
 
-/** The line above a resolved search's rows. */
+/** The line above a chooser: several SKUs answer to the typed code. */
+export function choicePrompt(resolution: Extract<SearchResolution, { kind: 'choice' }>): string {
+  return `${resolution.matches.length} SKUs match ${resolution.code} — pick one.`;
+}
+
+/**
+ * The line above a resolved search's rows. A SKU is named with its client
+ * (`TSHIRT-M · ACME`) once the tenant has more than one — the code alone
+ * no longer says which SKU the rows are.
+ */
 export function searchSummary(resolution: Extract<SearchResolution, { kind: 'bin' | 'sku' }>): string {
-  if (resolution.kind === 'sku') return `Where SKU ${resolution.code} is — one row per bin.`;
+  if (resolution.kind === 'sku') return `Where SKU ${resolution.label ?? resolution.code} is — one row per bin.`;
   return resolution.alsoSku
     ? `${resolution.code} is both a bin code and a SKU code — showing the bin.`
     : `What is in bin ${resolution.code}.`;

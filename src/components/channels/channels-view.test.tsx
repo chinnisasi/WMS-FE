@@ -114,6 +114,11 @@ function json(status: number, body: unknown, headers: Record<string, string> = {
   });
 }
 
+/** Story 1-1: the tenant's clients (null → unrouted, the bare-code arm). */
+let clientsBody: Record<string, unknown>[] | null = null;
+/** Story 1-1: a catalog with clients, when a test needs one. */
+let skusBody: Record<string, unknown>[] | null = null;
+
 function stubRouter(): void {
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
@@ -133,6 +138,12 @@ function stubRouter(): void {
         items: [{ id: WAREHOUSE_ID, code: 'W1', name: 'Main', origin: {}, createdAt: '2026-09-01T00:00:00.000Z' }],
         nextCursor: null,
       });
+    }
+    if (method === 'GET' && pathname.endsWith('/clients') && clientsBody !== null) {
+      return json(200, { items: clientsBody });
+    }
+    if (method === 'GET' && pathname.endsWith('/catalog/skus') && skusBody !== null) {
+      return json(200, { items: skusBody, nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       return json(200, {
@@ -236,6 +247,8 @@ beforeEach(() => {
   mappingsProblem = null;
   mappingsGetProblem = null;
   connectionRows = [connection()];
+  clientsBody = null;
+  skusBody = null;
   stubRouter();
   writeSession(OWNER_SESSION);
 });
@@ -923,5 +936,109 @@ describe('ChannelsView: the ingest warehouse and webhook rows (story 7-2)', () =
     const banner = view.container.textContent ?? '';
     expect(banner).toContain('Ingest warehouse saved');
     expect(banner).toContain('ingest-warehouse-unset');
+  });
+});
+
+describe('ChannelsView: SKU pickers name the client (story 1-1)', () => {
+  const ACME_TEE = '0198f7a2-1b3c-7d4e-8f90-aaaaaaaa0001';
+  const BETA_TEE = '0198f7a2-1b3c-7d4e-8f90-aaaaaaaa0002';
+  const ACME_CAP = '0198f7a2-1b3c-7d4e-8f90-aaaaaaaa0003';
+  function skuRow(id: string, code: string, clientId: string): Record<string, unknown> {
+    return { id, code, name: code, uom: 'each', uomPrecision: 0, uomConversions: [], reorderPoint: 0, reorderQty: 0, clientId };
+  }
+  function clientRow(id: string, code: string, systemOwned = false): Record<string, unknown> {
+    return { id, code, name: systemOwned ? 'Priya Spices' : code, status: 'active', systemOwned };
+  }
+  const optionTexts = (select: HTMLSelectElement) => [...select.querySelectorAll('option')].map((o) => o.textContent);
+
+  beforeEach(() => {
+    clientsBody = [clientRow('c-self', 'self', true), clientRow('c-acme', 'ACME'), clientRow('c-beta', 'BETA')];
+    // Listed out of order on purpose: the picker sorts by code, ties by client.
+    skusBody = [skuRow(BETA_TEE, 'TSHIRT-M', 'c-beta'), skuRow(ACME_CAP, 'CAP', 'c-acme'), skuRow(ACME_TEE, 'TSHIRT-M', 'c-acme')];
+  });
+
+  test('mapping rows: the first offers every SKU labelled with its client; the others only the first row\'s client', async () => {
+    mappingsList = [
+      { externalRef: 'v-1', skuId: ACME_TEE },
+      { externalRef: 'v-2', skuId: ACME_CAP },
+    ];
+    connectionRows = [connection({ buffers: [] })];
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    const row0 = view.container.querySelector('select[aria-label="Warehouse SKU for row row-0"]') as HTMLSelectElement;
+    const row1 = view.container.querySelector('select[aria-label="Warehouse SKU for row row-1"]') as HTMLSelectElement;
+    expect(optionTexts(row0)).toEqual(['CAP · ACME', 'TSHIRT-M · ACME', 'TSHIRT-M · BETA']);
+    expect(optionTexts(row1)).toEqual(['CAP · ACME', 'TSHIRT-M · ACME']);
+    // A new row is narrowed too, and defaults to the first row's client.
+    await click(button(view.container, 'Add row'));
+    const added = view.container.querySelector('select[aria-label="Warehouse SKU for row new-3"]') as HTMLSelectElement;
+    expect(optionTexts(added)).toEqual(['CAP · ACME', 'TSHIRT-M · ACME']);
+    expect(added.value).toBe(ACME_CAP);
+  });
+
+  test('a stored row of another client stays listed (never silently swapped)', async () => {
+    mappingsList = [
+      { externalRef: 'v-1', skuId: ACME_TEE },
+      { externalRef: 'v-2', skuId: BETA_TEE },
+    ];
+    connectionRows = [connection({ buffers: [] })];
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    const row1 = view.container.querySelector('select[aria-label="Warehouse SKU for row row-1"]') as HTMLSelectElement;
+    expect(optionTexts(row1)).toEqual(['TSHIRT-M · BETA', 'CAP · ACME', 'TSHIRT-M · ACME']);
+    expect(row1.value).toBe(BETA_TEE);
+  });
+
+  test('row 0 changing client flags the rows left on the old client and blocks the save — a mixed set is never sent', async () => {
+    mappingsList = [
+      { externalRef: 'v-1', skuId: ACME_TEE },
+      { externalRef: 'v-2', skuId: ACME_CAP },
+    ];
+    connectionRows = [connection({ buffers: [] })];
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    expect(view.container.querySelectorAll('[data-testid="mapping-off-client"]')).toHaveLength(0);
+
+    const row0 = view.container.querySelector('select[aria-label="Warehouse SKU for row row-0"]') as HTMLSelectElement;
+    setInput(row0, BETA_TEE);
+    await settle();
+    expect(view.container.querySelectorAll('[data-testid="mapping-off-client"]')).toHaveLength(1);
+
+    const before = requests.filter((r) => r.method !== 'GET');
+    await click(button(view.container, 'Save mappings'));
+    await settle();
+    expect(requests.filter((r) => r.method !== 'GET')).toEqual(before); // no PUT
+    expect(view.container.textContent).toContain("another client's SKU than the first row");
+
+    // Removing row 0 makes the ACME row the mapping client — nothing is flagged.
+    await click(button(row0.closest('tr')!, 'Remove'));
+    expect(view.container.querySelector('select[aria-label="Warehouse SKU for row row-0"]')).toBeNull();
+    expect(view.container.querySelector('select[aria-label="Warehouse SKU for row row-1"]')).not.toBeNull();
+    expect(view.container.querySelectorAll('[data-testid="mapping-off-client"]')).toHaveLength(0);
+  });
+
+  test('the buffers select labels each SKU with its client', async () => {
+    connectionRows = [connection({ buffers: [{ warehouseId: WAREHOUSE_ID, skuId: BETA_TEE, bufferMilli: 4000 }] })];
+    view = await mount();
+    const select = [...view.container.querySelectorAll('select')].find((el) =>
+      (el.getAttribute('aria-label') ?? '').startsWith('Buffer SKU'),
+    ) as HTMLSelectElement;
+    expect(optionTexts(select)).toEqual(['CAP · ACME', 'TSHIRT-M · ACME', 'TSHIRT-M · BETA']);
+    expect(select.value).toBe(BETA_TEE);
+  });
+
+  test('one client: the bare codes, as before', async () => {
+    clientsBody = [clientRow('c-self', 'self', true)];
+    skusBody = [skuRow(ACME_CAP, 'CAP', 'c-self'), skuRow(ACME_TEE, 'TSHIRT-M', 'c-self')];
+    connectionRows = [connection({ buffers: [] })];
+    mappingsList = [{ externalRef: 'v-1', skuId: ACME_TEE }];
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    const row0 = view.container.querySelector('select[aria-label="Warehouse SKU for row row-0"]') as HTMLSelectElement;
+    expect(optionTexts(row0)).toEqual(['CAP', 'TSHIRT-M']);
   });
 });

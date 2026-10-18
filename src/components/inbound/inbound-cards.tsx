@@ -28,7 +28,7 @@ import type {
   SkuResponse,
 } from '@/lib/api/generated';
 import { roleHasCapability } from '@/lib/users';
-import { clientCell, showClients } from '@/lib/clients';
+import { clientCell, showClients, skuDisplayLabel } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { ulid } from '@/lib/ulid';
 import { grnDocument, notifyInboundChanged } from '@/lib/asns';
@@ -342,9 +342,27 @@ function GoodsReceiptsCard({
   clearHref?: string;
 }) {
   const grns = useGoodsReceipts(warehouseId, drill);
+  // Story 1-1 — the receipt's client (the PO's, the ASN's, or a blind
+  // receipt's chosen one), shown once the tenant holds more than its own
+  // client. An older receipt the backfill could not attribute reads "—".
+  const clients = readyClients(useClients());
+  const tenantName = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.name ?? null,
+    () => null,
+  );
 
   const columns: readonly DataTableColumn<GoodsReceiptEntryDto>[] = [
     { key: 'code', header: 'GRN code', render: (grn) => <span className="font-mono text-xs">{grn.code}</span> },
+    ...(showClients(clients)
+      ? [
+          {
+            key: 'client',
+            header: 'Client',
+            render: (grn: GoodsReceiptEntryDto) => clientCell(grn.clientId, clients ?? [], tenantName),
+          } satisfies DataTableColumn<GoodsReceiptEntryDto>,
+        ]
+      : []),
     {
       // Story 21-6: a receipt books against a PO, an ASN, or neither (blind).
       key: 'document',
@@ -458,10 +476,21 @@ function PutawayCard({
 }) {
   const tasks = usePutawayTasks(warehouseId);
   const skus = useSkuMap();
+  // Story 1-1 — two clients may share a code: the SKU is named with its
+  // client once the tenant has several (the task's own code otherwise).
+  const clients = readyClients(useClients());
 
   const columns: readonly DataTableColumn<PutawayTaskDto & { id: string }>[] = [
     { key: 'grnCode', header: 'GRN', render: (task) => <span className="font-mono text-xs">{task.grnCode}</span> },
-    { key: 'skuCode', header: 'SKU', render: (task) => <span className="font-mono text-xs">{task.skuCode}</span> },
+    {
+      key: 'skuCode',
+      header: 'SKU',
+      render: (task) => (
+        <span className="font-mono text-xs">
+          {skuDisplayLabel({ code: task.skuCode, clientId: skus?.[task.skuId]?.clientId }, clients)}
+        </span>
+      ),
+    },
     {
       key: 'batchCode',
       header: 'Batch',

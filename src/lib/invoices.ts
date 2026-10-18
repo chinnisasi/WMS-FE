@@ -394,6 +394,26 @@ export function unpricedLineIds(document: InvoiceDocument): readonly string[] {
 }
 
 /**
+ * Story 1-1 — the SKU an invoice line is for. A SKU code is unique per
+ * client, not per tenant, so the frozen `skuCode` alone can name two SKUs:
+ * the line is matched through its `orderLineId` → the order read's line
+ * `skuId`. The code is only the fallback (an old frozen document whose order
+ * line is gone, or the order read not in hand), and only when exactly one
+ * SKU holds it — an ambiguous code matches nothing rather than the wrong SKU.
+ */
+export function invoiceLineSku<S extends { readonly code: string }>(
+  line: { readonly orderLineId: string; readonly skuCode: string },
+  lineSkus: Readonly<Record<string, string>> | null,
+  skus: Readonly<Record<string, S>> | null,
+): S | null {
+  if (skus === null) return null;
+  const skuId = lineSkus?.[line.orderLineId];
+  if (skuId !== undefined) return skus[skuId] ?? null;
+  const byCode = Object.values(skus).filter((sku) => sku.code === line.skuCode);
+  return byCode.length === 1 ? byCode[0]! : null;
+}
+
+/**
  * One invoice line's quantity, in the unit the DOCUMENT froze. The catalog
  * contributes only the unit's declared precision, and only while its unit
  * still matches the snapshot's — a renamed, re-coded or unloaded SKU leaves

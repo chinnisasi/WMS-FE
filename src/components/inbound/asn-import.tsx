@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import { fetchApiImportAsns } from '@/lib/api/client';
 import type { AsnImportResponseDto } from '@/lib/api/generated';
 import {
+  ASN_IMPORT_CLIENT_HELP,
   MAX_ASN_IMPORT_ASNS,
   MAX_ASN_IMPORT_BYTES,
   MAX_ASN_IMPORT_ROWS,
@@ -120,7 +121,7 @@ export function AsnImport({
           <h3 className="font-medium">Import from file</h3>
           <div className="text-xs text-(--muted-foreground)">
             CSV or Excel (.xlsx), one row per ASN line — columns asn_code, sku and quantity, and optionally client
-            (blank = the client the SKUs belong to), warehouse (blank or this warehouse) and expected_at
+            ({ASN_IMPORT_CLIENT_HELP}), warehouse (blank or this warehouse) and expected_at
             (YYYY-MM-DD or YYYY-MM-DD HH:mm, read as IST; or ISO-8601 with an offset, like 2026-10-20T14:30+05:30 — a
             time without an offset, like 2026-10-20T14:30, is refused). asn_code and sku are case-sensitive; client and
             warehouse are not. Other columns are ignored. At most{' '}

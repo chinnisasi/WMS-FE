@@ -42,7 +42,18 @@ import {
 } from '@/lib/outbound-orders';
 import { ledgerDocHref, type OrdersDrill } from '@/lib/drill';
 import { useOrderDetail, useOutboundOrders, useOutboundSkus } from '@/lib/use-outbound-orders';
-import { clientCell, showClients, skusForOrderClient } from '@/lib/clients';
+import {
+  clientCell,
+  clientChangeQuestion,
+  clientLabel,
+  linesKeptForClient,
+  orderClientProblem,
+  orderableClients,
+  orderSkuOptions,
+  PICK_CLIENT_FIRST,
+  showClients,
+  skusOfClient,
+} from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { roleHasCapability } from '@/lib/users';
@@ -144,6 +155,23 @@ function emptyRow(): DraftRow {
  */
 function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehouseId: string }) {
   const skus = useOutboundSkus();
+  // Story 1-1 — client first. A SKU code is unique per client, so with more
+  // than one client the form asks which client the order is for before any
+  // line, and every line offers only that client's SKUs. With one client the
+  // select is not shown and nothing changes. No `clientId` is sent: the
+  // server derives it from the lines, so the request hash is unchanged.
+  const clientsState = useClients();
+  // Only active clients take new orders; the one-client rule runs over them.
+  const allClients = readyClients(clientsState);
+  const clients = orderableClients(allClients);
+  const tenantName = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.name ?? null,
+    () => null,
+  );
+  const [clientId, setClientId] = useState('');
+  // A client change that would clear picked lines waits on a confirm row.
+  const [pendingClient, setPendingClient] = useState<string | null>(null);
   const [draft, setDraft] = useState<readonly DraftRow[]>([emptyRow()]);
   // Story 11-1: the destination is required at create, so the form owns one
   // fieldset shared by every line — one shipment, one address.
@@ -170,6 +198,32 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   const skuMap = skus.state === 'ready' ? skus.data : null;
   const skuList: readonly SkuResponse[] =
     skuMap === null ? [] : Object.values(skuMap).sort((a, b) => a.code.localeCompare(b.code));
+  const pickClient = showClients(clients);
+  // One active client among inactive ones: no select, but only its SKUs.
+  const soleClientId =
+    allClients !== null && clients !== null && clients.length === 1 && allClients.length > 1 ? clients[0]!.id : null;
+  const skuOptions =
+    soleClientId === null ? orderSkuOptions(skuList, clients, clientId) : skusOfClient(skuList, soleClientId);
+  const pendingCleared =
+    pendingClient === null ? 0 : draft.length - linesKeptForClient(draft, skuList, pendingClient).length;
+
+  /** Apply a client: lines of any other client go (at least one row stays). */
+  function applyClient(next: string) {
+    setPendingClient(null);
+    setClientId(next);
+    const kept = linesKeptForClient(draft, skuList, next);
+    if (kept.length !== draft.length) editDraft(() => (kept.length === 0 ? [emptyRow()] : kept));
+  }
+
+  /** A client change that would clear picked lines asks first. */
+  function chooseClient(next: string) {
+    if (next === clientId) return;
+    if (linesKeptForClient(draft, skuList, next).length === draft.length) {
+      applyClient(next);
+      return;
+    }
+    setPendingClient(next);
+  }
 
   /** Any draft edit invalidates the key the previous attempt would replay. */
   function editDraft(next: (rows: readonly DraftRow[]) => readonly DraftRow[]) {
@@ -200,6 +254,11 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
+    const clientProblem = orderClientProblem(clients, clientId);
+    if (clientProblem !== null) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: clientProblem });
+      return;
+    }
     const parsed = parseDraftLines(draft);
     if (parsed.problem !== null) {
       setOutcome({ tone: 'rejected', word: 'Not created', reason: parsed.problem });
@@ -261,7 +320,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     }
   }
 
-  if (skus.state === 'loading') {
+  if (skus.state === 'loading' || clientsState.state === 'loading') {
     return (
       <div className="rounded-sm border border-(--border) p-3 text-xs text-(--muted-foreground)">
         Loading SKUs…
@@ -284,6 +343,60 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
         Raise an order — acceptance reserves each line against available stock. A line above what is
         available is accepted and backordered for the remainder.
       </div>
+      {clientsState.state === 'failed' && (
+        // Degrades to every SKU (the server still refuses a mixed-client
+        // order 409 `mixed-client`), and says so — never silently.
+        <div className="flex flex-wrap items-center gap-2 text-xs text-(--muted-foreground)" data-testid="order-clients-note">
+          <span>Clients not loaded — every SKU is offered; an order is still for one client.</span>
+          <button type="button" className={buttonClass} onClick={clientsState.reload}>
+            Retry clients
+          </button>
+        </div>
+      )}
+      {pickClient && (
+        <div className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1 sm:max-w-md">
+            <span className={labelClass}>Client</span>
+            <select
+              className={selectClass}
+              value={pendingClient ?? clientId}
+              onChange={(e) => chooseClient(e.target.value)}
+              required
+            >
+              <option value="" disabled>
+                Choose a client…
+              </option>
+              {(clients ?? []).map((client) => (
+                <option key={client.id} value={client.id}>
+                  {clientLabel(client, tenantName)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {pendingClient !== null && (
+            <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="order-client-confirm">
+              <span>
+                {clientChangeQuestion(
+                  pendingCleared,
+                  (() => {
+                    const next = (clients ?? []).find((client) => client.id === pendingClient);
+                    return next === undefined ? 'that client' : clientLabel(next, tenantName);
+                  })(),
+                )}
+              </span>
+              <button type="button" className={buttonClass} onClick={() => applyClient(pendingClient)}>
+                Change client
+              </button>
+              <button type="button" className={buttonClass} onClick={() => setPendingClient(null)}>
+                Keep {(() => {
+                  const current = (clients ?? []).find((client) => client.id === clientId);
+                  return current === undefined ? 'the client' : clientLabel(current, tenantName);
+                })()}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       <fieldset className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
         <legend className="px-1 text-xs text-(--muted-foreground)">Ship to</legend>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -427,12 +540,11 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
                 required
               >
                 <option value="" disabled>
-                  Pick a SKU…
+                  {pickClient && clientId === '' ? PICK_CLIENT_FIRST : 'Pick a SKU…'}
                 </option>
-                {/* Story 21-2b — an order is for ONE client: once the first
-                    line names a SKU, the other lines are offered only that
-                    SKU's client's SKUs (the row's own pick stays listed). */}
-                {(index === 0 ? skuList : withCurrent(skusForOrderClient(skuList, draft[0]!.skuId), skuList, row.skuId)).map((sku) => (
+                {/* Story 1-1 — an order is for ONE client: every line offers
+                    the chosen client's SKUs (every SKU with one client). */}
+                {skuOptions.map((sku) => (
                   <option key={sku.id} value={sku.id}>
                     {sku.code} {sku.name}
                   </option>
@@ -938,13 +1050,3 @@ export function OrderDetailPanel({
   );
 }
 
-/** The filtered options, keeping the row's own current pick listed. */
-function withCurrent(
-  options: readonly SkuResponse[],
-  all: readonly SkuResponse[],
-  currentId: string,
-): readonly SkuResponse[] {
-  if (currentId === '' || options.some((sku) => sku.id === currentId)) return options;
-  const current = all.find((sku) => sku.id === currentId);
-  return current === undefined ? options : [current, ...options];
-}

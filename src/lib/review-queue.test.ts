@@ -17,6 +17,9 @@ import {
   rejectedOpDecisions,
   rejectedOpPayloadBinId,
   rejectedOpSummary,
+  rejectedOpGuidance,
+  GRN_REFUSAL_LABEL,
+  GRN_CLIENT_GUIDANCE,
   rejectedOpsListReason,
   rejectedOpsResolveReason,
   resolveDraftProblem,
@@ -393,5 +396,74 @@ describe('story 13-2 — per-type decisions and the return.receive summary', () 
   test('decision-not-available reads generically (the per-row guidance lives on return.receive cards)', () => {
     const error = problem('decision-not-available', 409);
     expect(rejectedOpsResolveReason(error)).toBe('That decision is not available for this op — refresh the queue.');
+  });
+});
+
+describe('story 1-1 — a blind receipt\'s lines of another client (grn.lines-refused)', () => {
+  const row = {
+    opType: 'grn.lines-refused' as const,
+    problemCode: 'sku-client-mismatch',
+    payload: {
+      warehouseId: '01989f7a-0000-7000-8000-0000000000aa',
+      grnId: '01989f7a-0000-7000-8000-0000000000bb',
+      grnCode: 'GRN-0042',
+      clientId: 'c-acme',
+      clientLabel: 'ACME',
+      blindReasonCode: 'unannounced-delivery',
+      occurredAt: '2026-10-18T05:00:00.000Z',
+      lines: [
+        { skuId: 'sku-b', batchCode: 'B1', mfgDate: null, qty: 3 },
+        { skuId: 'sku-s', batchCode: null, mfgDate: null, qty: 1.5 },
+      ],
+      refusals: [
+        { lineIndex: 1, skuId: 'sku-b', skuCode: 'TSHIRT-M', skuClientId: 'c-beta', skuClientLabel: 'BETA', reason: 'sku-client-mismatch' },
+        { lineIndex: 4, skuId: 'sku-s', skuCode: 'OWN-1', skuClientId: 'c-self', skuClientLabel: 'Priya Spices (your company)', reason: 'sku-client-mismatch' },
+      ],
+    },
+  };
+
+  test('the summary names the receipt, its client, and each line\'s own client', () => {
+    expect(rejectedOpSummary(row)).toEqual({
+      heading: 'GRN-0042 — 2 lines not booked on a receipt for ACME',
+      lines: [
+        "TSHIRT-M × 3 · batch B1 — another client's SKU (BETA)",
+        "OWN-1 × 1.5 — another client's SKU (Priya Spices (your company))",
+      ],
+    });
+  });
+
+  test('a row missing its frozen codes falls back to the catalog label, then the id tail', () => {
+    const bare = {
+      ...row,
+      payload: {
+        grnId: '01989f7a-0000-7000-8000-0000000000bb',
+        lines: [{ skuId: 'sku-b', qty: 1 }, { skuId: '01989f7a-0000-7000-8000-00000000c0de', qty: 2 }],
+        refusals: [{ reason: 'sku-client-mismatch' }, {}],
+      },
+    };
+    expect(rejectedOpSummary(bare, (id) => (id === 'sku-b' ? 'TSHIRT-M · BETA' : null))).toEqual({
+      heading: 'receipt …000000bb — 2 lines not booked',
+      lines: ["TSHIRT-M · BETA × 1 — another client's SKU", "SKU …0000c0de × 2 — another client's SKU"],
+    });
+  });
+
+  test('the remedy is to receive again for the right client; other rows keep theirs', () => {
+    expect(rejectedOpGuidance(row)).toEqual([GRN_CLIENT_GUIDANCE]);
+    expect(GRN_CLIENT_GUIDANCE).toBe('Receive these lines again on a receipt for their own client, then discard this row.');
+    expect(rejectedOpGuidance({ opType: 'return.receive', problemCode: 'rma-not-receivable', payload: {} })).toEqual([
+      'The return authorization is cancelled or already received — create a new one for these units, then receive them again.',
+    ]);
+    expect(rejectedOpGuidance({ opType: 'grn.submit', problemCode: 'x', payload: {} })).toEqual([]);
+  });
+
+  test('every GRN line refusal reason has words', () => {
+    expect(GRN_REFUSAL_LABEL['sku-client-mismatch']).toBe("another client's SKU");
+    expect(Object.keys(GRN_REFUSAL_LABEL).sort()).toEqual(
+      ['asn-line-not-found', 'po-line-not-found', 'po-line-not-open', 'sku-client-mismatch'],
+    );
+  });
+
+  test('its decisions are the server\'s — Discard only', () => {
+    expect(rejectedOpDecisions({ decisions: ['discard'], payload: row.payload })).toEqual(['discard']);
   });
 });

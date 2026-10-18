@@ -1,5 +1,10 @@
 import { ApiProblem } from '@/lib/api/client';
-import type { CountVarianceEntryResponseDto, RejectedOpResponse, ReturnEntryRefusedDto } from '@/lib/api/generated';
+import type {
+  CountVarianceEntryResponseDto,
+  RejectedGrnLineDto,
+  RejectedOpResponse,
+  ReturnEntryRefusedDto,
+} from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { shortIdTail } from '@/lib/audit';
 import { RETURN_CONDITION_LABEL } from '@/lib/returns';
@@ -378,6 +383,75 @@ export function returnReceiveGuidance(entry: Pick<RejectedOpResponse, 'opType' |
   return out;
 }
 
+// ── story 1-1: a blind receipt's lines of another client ─────────────────────
+
+/**
+ * Why a goods receipt line was not booked, in words — a `Record` over the
+ * generated union, so a new reason without words is a compile error. Story
+ * 1-1 adds `sku-client-mismatch`: a blind receipt's line whose SKU belongs
+ * to another client than the receipt's.
+ */
+export const GRN_REFUSAL_LABEL: Readonly<Record<RejectedGrnLineDto['code'], string>> = {
+  'po-line-not-found': 'not on the purchase order',
+  'po-line-not-open': 'purchase order line not open',
+  'asn-line-not-found': 'not on the shipment notice',
+  'sku-client-mismatch': "another client's SKU",
+};
+
+/** The remedy a `grn.lines-refused` row's reviewer reads (Discard only). */
+export const GRN_CLIENT_GUIDANCE = 'Receive these lines again on a receipt for their own client, then discard this row.';
+
+/**
+ * Every remedy a row's reviewer reads: the returns remedies for a
+ * `return.receive` row, the receive-again remedy for a `grn.lines-refused`
+ * row, none otherwise.
+ */
+export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
+  if (entry.opType === 'grn.lines-refused') return [GRN_CLIENT_GUIDANCE];
+  return returnReceiveGuidance(entry);
+}
+
+function grnRefusalWords(reason: string): string {
+  return (GRN_REFUSAL_LABEL as Readonly<Record<string, string>>)[reason] ?? reason;
+}
+
+/**
+ * A `grn.lines-refused` row's summary (story 1-1, server-raised): the
+ * receipt and its client, then each refused line naming the client its SKU
+ * belongs to — the stored `skuCode` and `skuClientLabel` the server froze
+ * with the row (the catalog may have moved since; the row says what was
+ * refused). `lines[i]` pairs with `refusals[i]`.
+ */
+function grnLinesRefusedSummary(
+  entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>,
+  skuLabel: (skuId: string) => string | null,
+): { heading: string; lines: readonly string[] } {
+  const payload = entry.payload;
+  const grnCode = typeof payload['grnCode'] === 'string' ? payload['grnCode'] : null;
+  const grnId = typeof payload['grnId'] === 'string' ? payload['grnId'] : null;
+  const grn = grnCode ?? (grnId === null ? 'unknown receipt' : `receipt …${shortIdTail(grnId)}`);
+  const clientLabel = typeof payload['clientLabel'] === 'string' ? payload['clientLabel'] : null;
+  const lines = Array.isArray(payload['lines']) ? (payload['lines'] as Record<string, unknown>[]) : [];
+  const refusals = Array.isArray(payload['refusals']) ? (payload['refusals'] as Record<string, unknown>[]) : [];
+  const rendered = lines.map((item, index) => {
+    const refusal = refusals[index] ?? {};
+    const skuId = typeof item['skuId'] === 'string' ? item['skuId'] : '';
+    const sku =
+      (typeof refusal['skuCode'] === 'string' ? refusal['skuCode'] : null) ??
+      skuLabel(skuId) ??
+      (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
+    const qty = typeof item['qty'] === 'number' ? item['qty'] : '?';
+    const parts = [`${sku} × ${qty}`];
+    if (typeof item['batchCode'] === 'string') parts.push(`batch ${item['batchCode']}`);
+    const owner = typeof refusal['skuClientLabel'] === 'string' ? refusal['skuClientLabel'] : null;
+    const reason = grnRefusalWords(String(refusal['reason'] ?? entry.problemCode));
+    return `${parts.join(' · ')} — ${reason}${owner === null ? '' : ` (${owner})`}`;
+  });
+  const count = lines.length;
+  const forClient = clientLabel === null ? '' : ` on a receipt for ${clientLabel}`;
+  return { heading: `${grn} — ${count} line${count === 1 ? '' : 's'} not booked${forClient}`, lines: rendered };
+}
+
 function refusalWords(reason: string): string {
   return (RETURN_REFUSAL_LABEL as Readonly<Record<string, string>>)[reason] ?? reason;
 }
@@ -392,13 +466,17 @@ function conditionWords(condition: unknown): string | null {
  * short form of its id) and each refused entry with its reason. A
  * server-raised row (`return-entries-refused`) pairs `entries[i]` with
  * `refusals[i]`; a device-uploaded whole-op refusal carries the whole op, so
- * every entry reads with the row's problem code. Null for any other op type.
- * `skuCode` resolves a SKU id to its code when the caller has the catalog.
+ * every entry reads with the row's problem code. Story 1-1: a
+ * `grn.lines-refused` row reads `grnLinesRefusedSummary`. Null for any other
+ * op type. `skuCode` resolves a SKU id to its label (`skuDisplayLabel` —
+ * the code, with its client once the tenant has several) when the caller
+ * has the catalog.
  */
 export function rejectedOpSummary(
   entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>,
   skuCode: (skuId: string) => string | null = () => null,
 ): { heading: string; lines: readonly string[] } | null {
+  if (entry.opType === 'grn.lines-refused') return grnLinesRefusedSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
   const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;

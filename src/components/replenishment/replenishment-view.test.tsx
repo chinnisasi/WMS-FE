@@ -64,6 +64,8 @@ let requests: {
   headers: Record<string, string>;
 }[] = [];
 let breachRows: Record<string, unknown>[];
+/** Story 1-1: the tenant's clients (null → unrouted, the bare-code arm). */
+let clientsBody: Record<string, unknown>[] | null = null;
 let draftRows: Record<string, unknown>[];
 let policyRows: Record<string, unknown>[];
 let batchAlertRows: Record<string, unknown>[];
@@ -207,11 +209,15 @@ function stubRouter(): void {
         nextCursor: null,
       });
     }
+    if (method === 'GET' && pathname.endsWith('/clients') && clientsBody !== null) {
+      return json(200, { items: clientsBody });
+    }
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       return json(200, {
         items: [
           {
             id: SKU_ID,
+            clientId: 'c-acme',
             code: 'SPICE-01',
             name: 'Turmeric',
             uom: 'kg',
@@ -359,6 +365,7 @@ beforeEach(() => {
   expiryPolicyRow = expiryPolicy();
   batchDetailRow = batchDetail();
   policyPageQueue = null;
+  clientsBody = null;
   stubRouter();
   writeSession(OWNER_SESSION);
 });
@@ -877,5 +884,26 @@ describe('ReplenishmentView: the policy walker\'s truncated-is-SAID contract (st
     expect(policyGets[1]!.query).toContain('cursor=cursor-2');
     const text = view.container.textContent ?? '';
     expect(text).not.toContain('More overrides exist than this table can walk');
+  });
+});
+
+describe('ReplenishmentView: a SKU named with its client (story 1-1)', () => {
+  test('several clients: the breach card and the override table read CODE · client', async () => {
+    clientsBody = [
+      { id: 'c-self', code: 'self', name: 'Priya Spices', status: 'active', systemOwned: true },
+      { id: 'c-acme', code: 'ACME', name: 'Acme Foods', status: 'active', systemOwned: false },
+    ];
+    view = await mount(OWNER_SESSION, 'breaches');
+    expect(view.container.textContent).toContain('SPICE-01 · ACME');
+    view.unmount();
+    view = await mount(OWNER_SESSION, 'policies');
+    expect(view.container.textContent).toContain('SPICE-01 · ACME');
+  });
+
+  test('one client: the bare code', async () => {
+    clientsBody = [{ id: 'c-acme', code: 'ACME', name: 'Acme Foods', status: 'active', systemOwned: false }];
+    view = await mount(OWNER_SESSION, 'breaches');
+    expect(view.container.textContent).toContain('SPICE-01');
+    expect(view.container.textContent).not.toContain('SPICE-01 ·');
   });
 });

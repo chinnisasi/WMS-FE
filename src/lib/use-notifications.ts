@@ -11,6 +11,8 @@ import { readSession, subscribeSession } from '@/lib/auth';
 import { warehouseDisplayLabel } from '@/lib/drill';
 import { knownNotifications, type NotificationEntry, type NotificationLookups } from '@/lib/notifications';
 import { useSkuMap } from '@/lib/use-inbound';
+import { skuDisplayLabel } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { readReason } from '@/lib/outbound-orders';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
@@ -167,12 +169,16 @@ export function useNotificationStatus(pathname: string): { readonly hasNew: bool
  */
 export function useNotificationLookups(): NotificationLookups {
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   const warehouses = useTenantWarehouses();
   const items = warehouses.state === 'ready' ? warehouses.data.items : null;
   return {
     sku: (skuId) => {
       const sku = skus?.[skuId];
-      return sku === undefined ? null : { code: sku.code, uom: sku.uom, uomPrecision: sku.uomPrecision };
+      return sku === undefined
+        ? null
+        : { code: sku.code, label: skuDisplayLabel(sku, clients), uom: sku.uom, uomPrecision: sku.uomPrecision };
     },
     warehouse: (warehouseId) => warehouseDisplayLabel(items, warehouseId),
   };

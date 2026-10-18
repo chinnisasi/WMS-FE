@@ -14,6 +14,7 @@ import {
 import type {
   BatchAlertDto,
   BreachDto,
+  ClientDto,
   ReorderPolicyDto,
   SkuResponse,
   SuggestedPoDto,
@@ -54,6 +55,8 @@ import { ulid } from '@/lib/ulid';
 import { drillFor, warehouseDisplayLabel, type BatchAlertsDrill, type ParsedDrill } from '@/lib/drill';
 import { REPLENISHMENT_PAGE_TABS, type ReplenishmentTab } from '@/lib/page-tabs';
 import { useSkuMap, useUserMap, useVendorMap } from '@/lib/use-inbound';
+import { skuDisplayLabel, sortSkusForPicker } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import {
   useBatchAlerts,
@@ -345,6 +348,8 @@ function BreachQueue({
   const [tab, setTab] = useState<BreachStatus>('open');
   const queue = useReplenishmentBreaches(warehouseId, tab);
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   const users = useUserMap();
   // The outcome banner belongs to the tab it spoke about (keyed state, not a
   // reset effect): a tab switch shows DIFFERENT rows, and a stale
@@ -425,6 +430,7 @@ function BreachQueue({
         <div className="flex flex-col gap-2">
           {queue.data.items.map((entry) => (
             <BreachCard
+              clients={clients}
               key={entry.id}
               entry={entry}
               sku={skus?.[entry.skuId] ?? null}
@@ -464,6 +470,7 @@ function BreachQueue({
 function BreachCard({
   entry,
   sku,
+  clients,
   warehouseLabel,
   resolvedBy,
   canManage,
@@ -472,6 +479,7 @@ function BreachCard({
 }: {
   entry: BreachDto;
   sku: SkuResponse | null;
+  clients: readonly ClientDto[] | null;
   warehouseLabel: string | null;
   resolvedBy: string | null;
   canManage: boolean;
@@ -482,7 +490,7 @@ function BreachCard({
   return (
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-mono text-xs">{sku?.code ?? '(unknown SKU)'}</span>
+        <span className="font-mono text-xs">{sku === null ? '(unknown SKU)' : skuDisplayLabel(sku, clients)}</span>
         {warehouseLabel !== null && (
           <span className="font-mono text-xs text-(--muted-foreground)">{warehouseLabel}</span>
         )}
@@ -561,6 +569,8 @@ function BatchAlertQueue({
   const queue = useBatchAlerts(warehouseId, kind, tab, drill);
   const policy = useExpiryPolicy();
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   const users = useUserMap();
   // The outcome banner belongs to the tab it spoke about (the breach
   // queue's keyed-state pattern).
@@ -672,6 +682,7 @@ function BatchAlertQueue({
         <div className="flex flex-col gap-2">
           {queue.data.items.map((entry) => (
             <BatchAlertCard
+              clients={clients}
               key={entry.id}
               entry={entry}
               sku={skus?.[entry.skuId] ?? null}
@@ -720,6 +731,7 @@ function BatchAlertQueue({
 function BatchAlertCard({
   entry,
   sku,
+  clients,
   warehouseLabel,
   resolvedBy,
   autoResolved,
@@ -731,6 +743,7 @@ function BatchAlertCard({
 }: {
   entry: BatchAlertDto;
   sku: SkuResponse | null;
+  clients: readonly ClientDto[] | null;
   warehouseLabel: string | null;
   resolvedBy: string | null;
   autoResolved: boolean;
@@ -751,7 +764,7 @@ function BatchAlertCard({
       }
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-mono text-xs">{sku?.code ?? '(unknown SKU)'}</span>
+        <span className="font-mono text-xs">{sku === null ? '(unknown SKU)' : skuDisplayLabel(sku, clients)}</span>
         {warehouseLabel !== null && (
           <span className="font-mono text-xs text-(--muted-foreground)">{warehouseLabel}</span>
         )}
@@ -879,6 +892,8 @@ function SuggestedPoQueue({
   const [tab, setTab] = useState<SuggestedPoStatus>('draft');
   const queue = useReplenishmentSuggestedPos(warehouseId, tab);
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   const vendors = useVendorMap();
   const [outcomeFor, setOutcomeFor] = useState<{
     tab: SuggestedPoStatus;
@@ -982,6 +997,7 @@ function SuggestedPoQueue({
         <div className="flex flex-col gap-2">
           {queue.data.items.map((draft) => (
             <SuggestedPoCard
+              clients={clients}
               key={draft.id}
               draft={draft}
               sku={skus?.[draft.skuId] ?? null}
@@ -1025,6 +1041,7 @@ function SuggestedPoQueue({
 function SuggestedPoCard({
   draft,
   sku,
+  clients,
   vendors,
   warehouseLabel,
   canManage,
@@ -1033,6 +1050,7 @@ function SuggestedPoCard({
 }: {
   draft: SuggestedPoDto;
   sku: SkuResponse | null;
+  clients: readonly ClientDto[] | null;
   vendors: Readonly<Record<string, VendorDto>> | null;
   warehouseLabel: string | null;
   canManage: boolean;
@@ -1052,7 +1070,7 @@ function SuggestedPoCard({
   return (
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-mono text-xs">{sku?.code ?? '(unknown SKU)'}</span>
+        <span className="font-mono text-xs">{sku === null ? '(unknown SKU)' : skuDisplayLabel(sku, clients)}</span>
         {warehouseLabel !== null && (
           <span className="font-mono text-xs text-(--muted-foreground)">{warehouseLabel}</span>
         )}
@@ -1152,6 +1170,8 @@ function PolicyTable({
 }) {
   const policies = useReorderPolicies(warehouseId);
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   const [outcome, setOutcome] = useState<Outcome>(null);
   // One re-entry guard for the table's own edits, keyed by SKU (the
   // Set-of-in-flight shape, checked in both arms).
@@ -1159,10 +1179,7 @@ function PolicyTable({
   const [editingSku, setEditingSku] = useState<string | null>(null);
   const [busySku, setBusySku] = useState<string | null>(null);
 
-  const skuList =
-    skus === null
-      ? []
-      : Object.values(skus).sort((a, b) => a.code.localeCompare(b.code));
+  const skuList = skus === null ? [] : sortSkusForPicker(Object.values(skus), clients);
   const overrideOf = (skuId: string): ReorderPolicyDto | undefined =>
     policies.state === 'ready' ? policies.data.items.find((p) => p.skuId === skuId) : undefined;
 
@@ -1261,7 +1278,7 @@ function PolicyTable({
               return (
                 <tr key={sku.id} className="border-b border-(--border)/60">
                   <td className="px-2 py-1.5">
-                    <span className="font-mono">{sku.code}</span>
+                    <span className="font-mono">{skuDisplayLabel(sku, clients)}</span>
                     <span className="text-(--muted-foreground)"> · {sku.name}</span>
                   </td>
                   <td className="px-2 py-1.5 text-right data">

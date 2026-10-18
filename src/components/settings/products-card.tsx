@@ -3,7 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiCreateProduct, fetchApiEditProduct, fetchApiEditSku } from '@/lib/api/client';
-import type { ProductResponse, SkuResponse } from '@/lib/api/generated';
+import type { ClientDto, ProductResponse, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CATALOG_CHANGED_EVENT, notifyCatalogChanged } from '@/lib/catalog';
 import {
@@ -16,6 +16,8 @@ import {
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useCatalogSkus, useProducts, useSkusForProduct } from '@/lib/use-catalog';
+import { narrowToClient, skuDisplayLabel, sortSkusForPicker } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
@@ -243,11 +245,20 @@ function VariantMatrix({
   // (its matrix would lose the variant); the frozen matrix says "choose an
   // unattached SKU". A guaranteed refusal is filtered out of the options,
   // not validated at submit.
+  //
+  // Story 1-1 — a product is one client's (a mixed product is refused 409
+  // `mixed-client`): once it has variants, only their client's SKUs are
+  // offered; with none yet, every unattached SKU, each named with its client
+  // once the tenant has several (two clients may share a code).
+  const clients = readyClients(useClients());
+  const productClient =
+    variants.state === 'ready' ? (variants.data.find((sku) => sku.clientId !== null && sku.clientId !== undefined)?.clientId ?? null) : null;
   const attachCandidates: readonly SkuResponse[] =
     allSkus.state === 'ready'
-      ? Object.values(allSkus.data)
-          .filter((sku) => sku.productId === null)
-          .sort((a, b) => a.code.localeCompare(b.code))
+      ? sortSkusForPicker(
+          narrowToClient(Object.values(allSkus.data), productClient).filter((sku) => sku.productId === null),
+          clients,
+        )
       : [];
 
   async function detach(sku: SkuResponse) {
@@ -344,6 +355,7 @@ function VariantMatrix({
             <AttachVariantForm
               product={product}
               candidates={attachCandidates}
+              clients={clients}
               onClose={() => setAttachOpen(false)}
               onAttached={(sku) => {
                 setAttachOpen(false);
@@ -373,12 +385,14 @@ function VariantMatrix({
 function AttachVariantForm({
   product,
   candidates,
+  clients,
   onClose,
   onAttached,
   onRejected,
 }: {
   product: ProductResponse;
   candidates: readonly SkuResponse[];
+  clients: readonly ClientDto[] | null;
   onClose: () => void;
   onAttached: (sku: SkuResponse) => void;
   onRejected: (reason: string) => void;
@@ -448,7 +462,7 @@ function AttachVariantForm({
             </option>
             {candidates.map((sku) => (
               <option key={sku.id} value={sku.id}>
-                {sku.code} {sku.name}
+                {skuDisplayLabel(sku, clients)} {sku.name}
               </option>
             ))}
           </select>

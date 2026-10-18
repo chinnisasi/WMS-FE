@@ -21,6 +21,8 @@ import {
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useOverReceipts, useSkuMap, useUserMap } from '@/lib/use-inbound';
+import { skuDisplayLabel } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import type { OverReceiptsDrill } from '@/lib/drill';
 
 import { DrillBanner } from '@/components/shared/drill-banner';
@@ -85,6 +87,8 @@ function OverReceiptQueueSessioned({ drill }: { drill: OverReceiptsDrill | null 
   const [tab, setTab] = useState<StatusTab>('pending');
   const queue = useOverReceipts(tab, drill);
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   const users = useUserMap();
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
   // render) so a /me bootstrap role rewrite re-renders the actions.
@@ -178,7 +182,7 @@ function OverReceiptQueueSessioned({ drill }: { drill: OverReceiptsDrill | null 
               )}
               line={lineContext(entry, queue)}
               late={isLateOverReceipt(entry, documentStatusOf(entry, queue))}
-              skuLabel={skus?.[entry.skuId]?.code ?? null}
+              skuLabel={skus?.[entry.skuId] === undefined ? null : skuDisplayLabel(skus[entry.skuId]!, clients)}
               sku={skus?.[entry.skuId]}
               requestedBy={users?.[entry.requestedBy]?.email ?? null}
               canDecide={canDecide}

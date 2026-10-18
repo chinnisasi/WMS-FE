@@ -554,6 +554,52 @@ describe('the Inventory screen — Batches', () => {
   });
 });
 
+describe('story 1-1 — a SKU code two clients share', () => {
+  const SKU_SERUM_B = '0198f7a2-1b3c-7d4e-8f90-00000000c009';
+  beforeEach(() => {
+    clients = [...clients, { id: 'client-b', code: 'BRAND', name: 'Brand', systemOwned: false, status: 'active' }];
+    SKUS.push({ ...sku(SKU_SERUM_B, 'GLOW-SERUM-30', 'Brand Serum 30ml', true), clientId: 'client-b' });
+  });
+  afterEach(() => {
+    SKUS.pop();
+  });
+
+  test('Stock: the search offers one button per client, sends nothing until one is picked, then names its client', async () => {
+    view = render(<InventoryScreen />);
+    await settle();
+    const before = stockReads().length;
+    await search('GLOW-SERUM-30');
+    const chooser = panel().querySelector('[data-testid="search-choice"]')!;
+    expect(chooser.textContent).toContain('2 SKUs match GLOW-SERUM-30 — pick one.');
+    const choices = [...chooser.querySelectorAll('button')] as HTMLButtonElement[];
+    expect(choices.map((b) => b.textContent)).toEqual(['GLOW-SERUM-30 · Glow Co', 'GLOW-SERUM-30 · BRAND']);
+    // Never a silent pick of the first: no stock read for either SKU yet.
+    expect(stockReads().slice(before).some((r) => r.params.skuId !== undefined)).toBe(false);
+
+    await click(choices[1]!);
+    expect(stockReads().at(-1)!.params.skuId).toBe(SKU_SERUM_B);
+    expect(panel().querySelector('[data-testid="search-summary"]')?.textContent).toBe(
+      'Where SKU GLOW-SERUM-30 · BRAND is — one row per bin.',
+    );
+    expect(panel().querySelector('[data-testid="search-choice"]')).toBeNull();
+  });
+
+  test('Batches: the same chooser; the datalist reads name · client', async () => {
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    const options = [...panel().querySelectorAll('datalist option')].map((o) => o.textContent);
+    expect(options).toEqual(['Glow Serum 30ml · Glow Co', 'Brand Serum 30ml · BRAND']);
+
+    await search('GLOW-SERUM-30', 'sku');
+    const choices = [...panel().querySelectorAll('[data-testid="search-choice"] button')] as HTMLButtonElement[];
+    expect(choices.map((b) => b.textContent)).toEqual(['GLOW-SERUM-30 · Glow Co', 'GLOW-SERUM-30 · BRAND']);
+    expect(batchListReads()).toHaveLength(0);
+    await click(choices[1]!);
+    expect(batchListReads().at(-1)!.params.skuId).toBe(SKU_SERUM_B);
+    expect(panelText()).toContain('Batches of GLOW-SERUM-30 · BRAND');
+  });
+});
+
 describe('the Inventory screen — Ledger and the page', () => {
   test('the Ledger tab renders the ledger for the active warehouse, and a failed warehouses read shows once', async () => {
     overrides.push({ match: (p) => p === `/api/v1/tenants/${T}/warehouses`, respond: () => problem(500, 'boom') });
