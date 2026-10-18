@@ -89,11 +89,19 @@ export function ClientAddressesPanel({
     onDirtyChange(dirtyNow(registered, next));
   };
 
-  const applied = (saved: ClientDto, word: string, reason: string) => {
+  // Only the saved (or cleared) group resets to the server's answer; the
+  // OTHER group keeps its unsaved edit, and the dirty flag is recomputed
+  // against the new baseline — never cleared wholesale.
+  const applied = (group: Group, saved: ClientDto, word: string, reason: string) => {
     setCurrent(saved);
-    setRegistered(registeredFieldsOf(saved));
-    setRet(returnFieldsOf(saved));
-    onDirtyChange(false);
+    const nextRegistered = group === 'registered' ? registeredFieldsOf(saved) : registered;
+    const nextReturn = group === 'return' ? returnFieldsOf(saved) : ret;
+    if (group === 'registered') setRegistered(nextRegistered);
+    else setRet(nextReturn);
+    onDirtyChange(
+      JSON.stringify(nextRegistered) !== JSON.stringify(registeredFieldsOf(saved)) ||
+        JSON.stringify(nextReturn) !== JSON.stringify(returnFieldsOf(saved)),
+    );
     setOutcome({ tone: 'accepted', word, reason });
     onSaved(saved);
   };
@@ -125,7 +133,7 @@ export function ClientAddressesPanel({
     try {
       const saved = await fetchApiUpdateClientAddresses(session.tenant.id, current.id, body, keys.current[group]!);
       keys.current[group] = null;
-      applied(saved, `${GROUP_NAME[group]} saved`, `${current.code}'s ${GROUP_NAME[group].toLowerCase()} is up to date.`);
+      applied(group, saved, `${GROUP_NAME[group]} saved`, `${current.code}'s ${GROUP_NAME[group].toLowerCase()} is up to date.`);
     } catch (error) {
       setOutcome({ tone: 'rejected', word: `${GROUP_NAME[group]} not saved`, reason: addressesReason(error) });
     } finally {
@@ -260,7 +268,7 @@ export function ClientAddressesPanel({
               onDone={(saved) => {
                 const group = clearing;
                 setClearing(null);
-                applied(saved, `${GROUP_NAME[group]} cleared`, `${saved.code} has no ${GROUP_NAME[group].toLowerCase()} now.`);
+                applied(group, saved, `${GROUP_NAME[group]} cleared`, `${saved.code} has no ${GROUP_NAME[group].toLowerCase()} now.`);
               }}
               onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Not cleared', reason })}
             />

@@ -1030,6 +1030,49 @@ describe('ChannelsView: SKU pickers name the client (story 1-1)', () => {
     expect(select.value).toBe(BETA_TEE);
   });
 
+  // Story 1-2a — every SKU is a departed client's: no pickable SKU, so the
+  // selects show the placeholder and Add row is blocked (never a row with
+  // skuId '').
+  test('all SKUs departed: the placeholder shows and Add row is blocked in both editors', async () => {
+    clientsBody = [
+      clientRow('c-self', 'self', true),
+      { ...clientRow('c-acme', 'ACME'), status: 'departed' },
+      { ...clientRow('c-beta', 'BETA'), status: 'departed' },
+    ];
+    connectionRows = [connection({ buffers: [] })];
+    mappingsList = [];
+    view = await mount();
+    const addButtons = () => [...view!.container.querySelectorAll('button')].filter((b) => b.textContent === 'Add row') as HTMLButtonElement[];
+    expect(addButtons()[0]!.disabled).toBe(true);
+    await click(addButtons()[0]!);
+    expect([...view.container.querySelectorAll('select')].some((el) => (el.getAttribute('aria-label') ?? '').startsWith('Buffer SKU'))).toBe(false);
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    // Both editors' Add row (buffers and mappings) are blocked.
+    expect(addButtons()).toHaveLength(2);
+    expect(addButtons().every((b) => b.disabled)).toBe(true);
+    for (const add of addButtons()) await click(add);
+    expect(view.container.querySelector('select[aria-label^="Warehouse SKU for row"]')).toBeNull();
+  });
+
+  test('a stored mapping row of a departed client keeps its SKU listed; a row with nothing pickable shows the placeholder', async () => {
+    clientsBody = [clientRow('c-self', 'self', true), { ...clientRow('c-acme', 'ACME'), status: 'departed' }, clientRow('c-beta', 'BETA')];
+    mappingsList = [{ externalRef: 'v-1', skuId: ACME_TEE }];
+    connectionRows = [connection({ buffers: [] })];
+    view = await mount();
+    await click(button(view.container, 'Edit SKU mappings'));
+    await settle();
+    const row0 = view.container.querySelector('select[aria-label="Warehouse SKU for row row-0"]') as HTMLSelectElement;
+    expect(optionTexts(row0)).toEqual(['TSHIRT-M · ACME', 'TSHIRT-M · BETA']);
+    expect(row0.value).toBe(ACME_TEE);
+    // Row 0 names a departed client: a new row (narrowed to it) has nothing — blocked.
+    // The mapping editor's Add row: the first one AFTER its table in document order.
+    const add = [...view.container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Add row' && (row0.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ) as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+  });
+
   test('one client: the bare codes, as before', async () => {
     clientsBody = [clientRow('c-self', 'self', true)];
     skusBody = [skuRow(ACME_CAP, 'CAP', 'c-self'), skuRow(ACME_TEE, 'TSHIRT-M', 'c-self')];

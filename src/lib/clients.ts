@@ -546,6 +546,8 @@ const BLOCKER_WORDS: Readonly<Record<string, (n: number) => string>> = {
   'open-counts': (n) => plural(n, 'open count', 'open counts'),
   'open-review-items': (n) => `${plural(n, 'item', 'items')} in Conflicts & Reviews`,
   'unsettled-invoices': (n) => plural(n, 'unsettled client invoice', 'unsettled client invoices'),
+  // Decision 9 — the owner unmaps them first (Channels → mappings).
+  'channel-mappings': (n) => `${plural(n, 'channel mapping', 'channel mappings')} of its SKUs`,
 };
 
 /**

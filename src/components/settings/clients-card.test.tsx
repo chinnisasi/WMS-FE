@@ -552,6 +552,49 @@ describe('ClientsCard', () => {
       expect(view.container.textContent).toContain('Addresses — ACME');
     });
 
+    test('re-clicking the open panel for the same client is a no-op: the draft stays dirty and another panel still asks', async () => {
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await pressLabelled('Contacts of ACME');
+      await press('Add contact');
+      const form = view.container.querySelector('form[aria-label="Add contact for ACME"]')!;
+      setInput(form.querySelector('input') as HTMLInputElement, 'Half typed');
+      await pressLabelled('Contacts of ACME');
+      expect(view.container.querySelector('form[aria-label="Add contact for ACME"]')).not.toBeNull();
+      expect(view.container.querySelector('[aria-label="Discard unsaved changes"]')).toBeNull();
+      await pressLabelled('Addresses of ACME');
+      expect(view.container.querySelector('[aria-label="Discard unsaved changes"]')).not.toBeNull();
+    });
+
+    test('Addresses: saving one group keeps an unsaved edit in the other (still dirty — another panel asks)', async () => {
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await pressLabelled('Addresses of ACME');
+      const returnForm = view.container.querySelector('form[aria-label="Return address of ACME"]')!;
+      const contactName = returnForm.querySelector('input') as HTMLInputElement;
+      setInput(contactName, 'Returns desk');
+      const form = view.container.querySelector('form[aria-label="Registered address of ACME"]')!;
+      const [line1, , city, pincode] = [...form.querySelectorAll('input')] as HTMLInputElement[];
+      setInput(line1!, '4th Floor');
+      setInput(city!, 'Mumbai');
+      setInput(pincode!, '400001');
+      const state = form.querySelector('select') as HTMLSelectElement;
+      await act(async () => {
+        state.value = '27';
+        state.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await act(async () => {
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+      await settle();
+      expect(view.container.textContent).toContain('Registered address saved');
+      expect((view.container.querySelector('form[aria-label="Return address of ACME"] input') as HTMLInputElement).value).toBe('Returns desk');
+      await pressLabelled('Contacts of ACME');
+      expect(view.container.querySelector('[aria-label="Discard unsaved changes"]')).not.toBeNull();
+    });
+
     test('Addresses: saving a group sends only that group; Clear asks, then sends null', async () => {
       clientRows = [SELF, { ...ACME, returnAddress: { contactName: 'Desk', phone: '1', line1: 'L1', city: 'Pune', state: 'Maharashtra', pincode: '411001' }, registeredAddress: null }];
       writeSession(session('owner'));

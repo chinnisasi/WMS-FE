@@ -1080,6 +1080,9 @@ function BufferEditor({
   const pickable = skusOfWorkingClients(skuList, clients);
 
   function addRow() {
+    // Story 1-2a — no SKU a new row could name (every SKU a departed
+    // client's): no row — a row with skuId '' would only be refused.
+    if (pickable.length === 0) return;
     const firstFree = warehouses[0]?.id ?? '';
     keySeq.current += 1;
     const nextId = keySeq.current;
@@ -1238,7 +1241,7 @@ function BufferEditor({
                       onChange={(e) => patch(row.key, { skuId: e.target.value })}
                       aria-label={`Buffer SKU for row ${row.key}`}
                     >
-                      {skuList.length === 0 && <option value="">no SKU</option>}
+                      {keepCurrentSku(pickable, skuList, row.skuId).length === 0 && <option value="">no SKU</option>}
                       {keepCurrentSku(pickable, skuList, row.skuId).map((s) => (
                         <option key={s.id} value={s.id}>
                           {skuDisplayLabel(s, clients)}
@@ -1288,7 +1291,7 @@ function BufferEditor({
         </table>
       </div>
       <div className="flex justify-end gap-1">
-        <button type="button" disabled={inFlight} onClick={addRow} className={rowButtonClass}>
+        <button type="button" disabled={inFlight || pickable.length === 0} onClick={addRow} className={rowButtonClass}>
           Add row
         </button>
         <button
@@ -1413,7 +1416,12 @@ function MappingEditor({
     return rowClient !== null && rowClient !== mappingClient;
   };
 
+  // Story 1-2a — the SKUs a NEW row could name (narrowed to the set's
+  // client once row 0 names one); none → Add row is blocked.
+  const nextRowOptions = rows.length === 0 ? pickable : narrowToClient(pickable, mappingClient);
+
   function addRow() {
+    if (nextRowOptions.length === 0) return;
     keySeq.current += 1;
     const nextId = keySeq.current;
     setRows((prev) => [
@@ -1561,7 +1569,7 @@ function MappingEditor({
                             onChange={(e) => patch(row.key, { skuId: e.target.value })}
                             aria-label={`Warehouse SKU for row ${row.key}`}
                           >
-                            {skuList.length === 0 && <option value="">no SKU</option>}
+                            {rowOptions(index, row.skuId).length === 0 && <option value="">no SKU</option>}
                             {rowOptions(index, row.skuId).map((s) => (
                               <option key={s.id} value={s.id}>
                                 {skuDisplayLabel(s, clients)}
@@ -1598,7 +1606,7 @@ function MappingEditor({
                 </table>
               </div>
               <div className="flex justify-end gap-1">
-                <button type="button" disabled={inFlight} onClick={addRow} className={rowButtonClass}>
+                <button type="button" disabled={inFlight || nextRowOptions.length === 0} onClick={addRow} className={rowButtonClass}>
                   Add row
                 </button>
                 <button

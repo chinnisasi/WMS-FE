@@ -150,7 +150,10 @@ function ClientsCardSessioned() {
     setOutcome(null);
   };
   const open = (next: Panel) => {
-    if (panel !== null && dirtyRef.current && !(panel.kind === next.kind && panel.client.id === next.client.id)) {
+    // The panel already open (same kind, same client): a no-op — re-showing
+    // it would clear the dirty flag while its draft stays on screen.
+    if (panel !== null && panel.kind === next.kind && panel.client.id === next.client.id) return;
+    if (panel !== null && dirtyRef.current) {
       setPending(next);
       return;
     }

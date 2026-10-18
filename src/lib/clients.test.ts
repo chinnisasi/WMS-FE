@@ -519,6 +519,9 @@ describe('story 1-2a — departure, no new work, contacts and addresses', () => 
       '2 other open items (brand-new-kind)',
     ]);
     expect(departureBlockerLine({ kind: 'pending-adjustments', count: 1, codes: [] })).toBe('1 stock adjustment awaiting approval');
+    expect(departureBlockerLine({ kind: 'channel-mappings', count: 2, codes: ['EXT-1', 'EXT-2'] })).toBe(
+      '2 channel mappings of its SKUs: EXT-1, EXT-2',
+    );
     expect(departureBlockerLine({ kind: 'unsettled-invoices', count: 2, codes: ['2026-09'] })).toBe(
       '2 unsettled client invoices: 2026-09 and 1 more',
     );

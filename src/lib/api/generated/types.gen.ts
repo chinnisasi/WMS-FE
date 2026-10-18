@@ -6524,9 +6524,12 @@ export type ClientContactListResponse = {
 };
 
 export type CreateClientContactDto = {
+    /**
+     * 1-120 characters (code points) once trimmed
+     */
     name: string;
     /**
-     * Stored trimmed and lower-cased; unique per client
+     * An ASCII address, stored trimmed and lower-cased; unique per client
      */
     email: string;
     /**
@@ -6544,6 +6547,9 @@ export type ClientContactResponse = {
 };
 
 export type UpdateClientContactDto = {
+    /**
+     * 1-120 characters (code points) once trimmed — checked by the command
+     */
     name?: string;
     email?: string;
     /**
