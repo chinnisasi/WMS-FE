@@ -21,7 +21,15 @@ import { skuPhysicalLabel } from '@/lib/sku-attributes';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useCatalogSkus, useKits, useSkus } from '@/lib/use-catalog';
-import { clientCell, clientLabel, correctClientReason, correctionOutcome, mixedClientReason, showClients } from '@/lib/clients';
+import {
+  clientCell,
+  clientLabel,
+  correctClientReason,
+  correctionOutcome,
+  mixedClientReason,
+  narrowToClient,
+  showClients,
+} from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -756,8 +764,9 @@ function rejectionReason(error: unknown, attemptedBarcode?: string): string {
       case 'mixed-client':
         return mixedClientReason(error);
       case 'duplicate-barcode':
-        // The API names the conflicting SKU in the problem detail.
-        return error.detail ?? `Barcode ${attemptedBarcode ?? ''} already belongs to another SKU in this tenant.`;
+        // The API names the conflicting SKU in the problem detail. Story
+        // 1-1: a barcode is unique per client, not per tenant.
+        return error.detail ?? `Barcode ${attemptedBarcode ?? ''} already belongs to another SKU for this client.`;
       case 'not-found':
         return 'That SKU no longer exists — refresh the page.';
       case 'idempotency-key-reuse':
@@ -833,11 +842,14 @@ function KitForm({
   const skuMap = allSkus.state === 'ready' ? allSkus.data : null;
   // A kit's components are ordinary SKUs: the kit itself (self-reference) and
   // every existing kit (flat BOM) are guaranteed refusals, so the picker
-  // filters them instead of validating at submit.
+  // filters them instead of validating at submit. Story 1-1: a kit is one
+  // client's — another client's SKU is a guaranteed `mixed-client`, and a
+  // code another client shares would read the same — so only the kit's
+  // client's SKUs are offered (every SKU when the kit carries no client).
   const pickerOptions: readonly SkuResponse[] =
     skuMap === null
       ? []
-      : Object.values(skuMap)
+      : narrowToClient(Object.values(skuMap), sku.clientId ?? null)
           .filter((candidate) => {
             if (candidate.id === sku.id) return false;
             return kitOf(candidate.id) === undefined;

@@ -62,6 +62,11 @@ function unknownSource<T>(entry: never, fallback: T): T {
 /** A SKU as the copy needs it: the code, and the unit for a quantity. */
 export interface NotificationSku extends QuantityUom {
   readonly code: string;
+  /**
+   * Story 1-1 — the SKU's `skuDisplayLabel` (`TSHIRT-M · ACME` once the
+   * tenant has several clients — two may share a code). Absent → the code.
+   */
+  readonly label?: string;
 }
 
 export interface NotificationLookups {
@@ -104,7 +109,8 @@ function shortId(id: string): string {
 }
 
 function skuCode(lookups: NotificationLookups, skuId: string): string {
-  return lookups.sku(skuId)?.code ?? `SKU ${shortId(skuId)}`;
+  const sku = lookups.sku(skuId);
+  return sku === null ? `SKU ${shortId(skuId)}` : (sku.label ?? sku.code);
 }
 
 function quantity(lookups: NotificationLookups, skuId: string, value: number): string {

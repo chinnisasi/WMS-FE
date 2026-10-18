@@ -91,6 +91,18 @@ export function importedForLabel(
   return client === undefined ? null : clientLabel(client, tenantName);
 }
 
+/**
+ * Story 1-1 — the import card's uniqueness rule: a SKU code and a barcode are
+ * unique per client (`skus_tenant_client_code_unique`,
+ * `skus_tenant_client_barcode_unique`), so a duplicate is refused only
+ * within the run's client.
+ */
+export const CATALOG_CODES_PER_CLIENT_HELP =
+  'SKU codes and barcodes are unique per client: two clients may both own a code or a barcode, but one client cannot hold it twice.';
+
+/** Story 1-1 — a kit cell names components of the run's own client. */
+export const KIT_CELL_CLIENT_HELP = "naming this client's SKUs";
+
 /** The fix-mode hint when the run being fixed is not in hand. */
 export const INHERIT_CLIENT_HINT =
   'A fix run imports for the same client as the latest run it fixes — the result names it.';
@@ -158,23 +170,8 @@ export function clientNameProblem(name: string): string | null {
 }
 
 /**
- * The order form's SKU options: once the first line names a SKU, only SKUs
- * of that SKU's client are offered — an order is for one client, and the
- * server refuses a mix (409 `mixed-client`).
- */
-export function skusForOrderClient<T extends { id: string; clientId?: string | null }>(
-  skus: readonly T[],
-  firstLineSkuId: string,
-): readonly T[] {
-  if (firstLineSkuId === '') return skus;
-  const first = skus.find((sku) => sku.id === firstLineSkuId);
-  if (first === undefined || first.clientId === null || first.clientId === undefined) return skus;
-  return skus.filter((sku) => sku.clientId === first.clientId);
-}
-
-/**
  * Story 21-6 — the ASN form's SKU options once its client is chosen: the
- * explicit-client sibling of `skusForOrderClient`. An ASN names its client
+ * explicit-client picker (story 1-1: the order form uses it too). An ASN names its client
  * up front (and the server refuses another client's SKU 409
  * `sku-client-mismatch`), so the picker offers only that client's SKUs —
  * and none until a client is picked. A SKU row without a client (a response
@@ -186,6 +183,147 @@ export function skusOfClient<T extends { id: string; clientId?: string | null }>
 ): readonly T[] {
   if (clientId === '') return [];
   return skus.filter((sku) => sku.clientId === clientId);
+}
+
+/**
+ * Story 1-1 — a client's short name inside a SKU label: the brand's code,
+ * or the tenant's own company by its name (the `self` client mirrors the
+ * tenant name; an empty one reads "Your company").
+ */
+export function clientShortLabel(client: Pick<ClientDto, 'code' | 'name' | 'systemOwned'>): string {
+  if (client.systemOwned) return client.name === '' ? 'Your company' : client.name;
+  return client.code;
+}
+
+/**
+ * Story 1-1 — how a SKU is named in a picker or a list. A SKU code (and a
+ * barcode) is unique per client, not per tenant, so two brands can both own
+ * `TSHIRT-M`: once the tenant holds more than one client the label appends
+ * the SKU's client — `TSHIRT-M · ACME`. With one client (or the clients not
+ * loaded, or a SKU whose client is unknown here) it is the bare code, so a
+ * single-client tenant sees nothing change.
+ */
+export function skuDisplayLabel(
+  sku: { readonly code: string; readonly clientId?: string | null },
+  clients: readonly ClientDto[] | null,
+): string {
+  if (!showClients(clients) || sku.clientId === null || sku.clientId === undefined) return sku.code;
+  const client = clients!.find((entry) => entry.id === sku.clientId);
+  return client === undefined ? sku.code : `${sku.code} · ${clientShortLabel(client)}`;
+}
+
+/**
+ * Story 1-1 — the same suffix for any SKU-named text that is not the code
+ * (a name in the Batches datalist): `Serum 30 ml · ACME`, or the text alone
+ * under the same one-client rule.
+ */
+export function withSkuClient(
+  text: string,
+  sku: { readonly clientId?: string | null },
+  clients: readonly ClientDto[] | null,
+): string {
+  return skuDisplayLabel({ code: text, clientId: sku.clientId }, clients);
+}
+
+/**
+ * Story 1-1 — the client a picker narrows to from a SKU already chosen (the
+ * channel mapping's first row, a kit, a product's existing variant): that
+ * SKU's client, or null (no narrowing) when it is not chosen, not loaded or
+ * carries no client.
+ */
+export function clientOfSku(
+  skus: readonly { readonly id: string; readonly clientId?: string | null }[],
+  skuId: string | null | undefined,
+): string | null {
+  if (skuId === null || skuId === undefined || skuId === '') return null;
+  return skus.find((sku) => sku.id === skuId)?.clientId ?? null;
+}
+
+/**
+ * Story 1-1 — a SKU picker's order: by code, two clients' same code side by
+ * side, the tie broken by the client's short name (`TSHIRT-M · ACME` before
+ * `TSHIRT-M · BETA`) so the order is stable rather than the read's.
+ */
+export function sortSkusForPicker<T extends { readonly code: string; readonly clientId?: string | null }>(
+  skus: readonly T[],
+  clients: readonly ClientDto[] | null,
+): T[] {
+  const tie = (sku: T) => {
+    const client = clients?.find((entry) => entry.id === sku.clientId);
+    return client === undefined ? '' : clientShortLabel(client);
+  };
+  return [...skus].sort((a, b) => a.code.localeCompare(b.code) || tie(a).localeCompare(tie(b)));
+}
+
+/**
+ * A narrowed picker keeps a row's CURRENT SKU listed even when it falls
+ * outside the narrowing (a stored mapping made before the narrowing): a
+ * `<select>` whose value is not among its options would show — and save —
+ * another SKU.
+ */
+export function keepCurrentSku<T extends { readonly id: string }>(
+  options: readonly T[],
+  all: readonly T[],
+  currentId: string,
+): readonly T[] {
+  if (currentId === '' || options.some((sku) => sku.id === currentId)) return options;
+  const current = all.find((sku) => sku.id === currentId);
+  return current === undefined ? options : [current, ...options];
+}
+
+/* ── story 1-1: order entry is client-first ─────────────────────────────── */
+
+/** The SKU select's placeholder before a client is chosen. */
+export const PICK_CLIENT_FIRST = 'Pick a client first';
+
+/**
+ * The order form's SKU options. With more than one client the form asks for
+ * the client first and every line offers only that client's SKUs (none
+ * until one is picked — a SKU code alone no longer names one SKU). With one
+ * client (or the clients not loaded) nothing changes: every SKU is offered.
+ * No `clientId` is sent either way — the server derives it from the lines.
+ */
+export function orderSkuOptions<T extends { id: string; clientId?: string | null }>(
+  skus: readonly T[],
+  clients: readonly ClientDto[] | null,
+  pickedClientId: string,
+): readonly T[] {
+  return showClients(clients) ? skusOfClient(skus, pickedClientId) : skus;
+}
+
+/** The submit's client problem: a multi-client tenant must pick one first. */
+export function orderClientProblem(clients: readonly ClientDto[] | null, pickedClientId: string): string | null {
+  return showClients(clients) && pickedClientId === '' ? 'Choose the client this order is for.' : null;
+}
+
+/**
+ * The lines a client change would clear: every line whose SKU is not the
+ * next client's (a blank line is kept). Pure, so the confirm row's count
+ * and the clearing itself cannot disagree.
+ */
+export function linesKeptForClient<R extends { skuId: string }>(
+  rows: readonly R[],
+  skus: readonly { id: string; clientId?: string | null }[],
+  nextClientId: string,
+): readonly R[] {
+  return rows.filter((row) => row.skuId === '' || clientOfSku(skus, row.skuId) === nextClientId);
+}
+
+/** The confirm row's question before a client change clears lines. */
+export function clientChangeQuestion(cleared: number, nextClientLabel: string): string {
+  const lines =
+    cleared === 1
+      ? "the line already picked — it is another client's SKU"
+      : `the ${cleared} lines already picked — they are another client's SKUs`;
+  return `Change the client to ${nextClientLabel}? This clears ${lines}.`;
+}
+
+/** Story 1-1 — narrow options to one client; `null` offers them all. */
+export function narrowToClient<T extends { readonly clientId?: string | null }>(
+  skus: readonly T[],
+  clientId: string | null,
+): readonly T[] {
+  return clientId === null ? skus : skus.filter((sku) => sku.clientId === clientId);
 }
 
 /** The shared `mixed-client` sentence — the server names the client codes. */
@@ -305,6 +443,13 @@ export function correctClientReason(error: unknown): string {
         return error.detail ?? 'This SKU already has history — its client can no longer change.';
       case 'mixed-client':
         return mixedClientReason(error);
+      // Story 1-1: a code and a barcode are unique per client — the target
+      // client already holds the code or barcode of a SKU that would move
+      // (the server names which).
+      case 'duplicate-sku-code':
+        return error.detail ?? 'That client already has a SKU with this code — rename one first.';
+      case 'duplicate-barcode':
+        return error.detail ?? 'That client already has a SKU with this barcode — clear or change one first.';
       case 'not-found':
         return 'That SKU or client no longer exists — refresh the page.';
       case 'role-denied':

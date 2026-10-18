@@ -4,6 +4,7 @@ import { ApiProblem } from './api/client';
 import type { InvoiceDto } from './api/generated';
 import {
   GST_STATE_NAMES,
+  invoiceLineSku,
   addressLines,
   amountInWords,
   canRegenerate,
@@ -378,3 +379,21 @@ describe('the refusal re-read', () => {
   });
 });
 
+describe('invoiceLineSku — the line\'s SKU through its order line (story 1-1)', () => {
+  const skus = {
+    'sku-a': { code: 'TSHIRT-M', id: 'sku-a' },
+    'sku-b': { code: 'TSHIRT-M', id: 'sku-b' },
+    'sku-c': { code: 'CAP', id: 'sku-c' },
+  };
+  test('the order line names the SKU, whatever its code shares', () => {
+    expect(invoiceLineSku({ orderLineId: 'l-1', skuCode: 'TSHIRT-M' }, { 'l-1': 'sku-b' }, skus)?.id).toBe('sku-b');
+    // A known line whose SKU is not in the catalog: nothing, never a code guess.
+    expect(invoiceLineSku({ orderLineId: 'l-1', skuCode: 'CAP' }, { 'l-1': 'sku-gone' }, skus)).toBeNull();
+  });
+  test('the code is the fallback for an old frozen document — only when exactly one SKU holds it', () => {
+    expect(invoiceLineSku({ orderLineId: 'l-old', skuCode: 'CAP' }, {}, skus)?.id).toBe('sku-c');
+    expect(invoiceLineSku({ orderLineId: 'l-old', skuCode: 'CAP' }, null, skus)?.id).toBe('sku-c');
+    expect(invoiceLineSku({ orderLineId: 'l-old', skuCode: 'TSHIRT-M' }, null, skus)).toBeNull();
+    expect(invoiceLineSku({ orderLineId: 'l-old', skuCode: 'CAP' }, null, null)).toBeNull();
+  });
+});

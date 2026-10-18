@@ -16,6 +16,8 @@ import { adjustmentDecisionReason } from '@/lib/review-queue';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkuMap, useUserMap } from '@/lib/use-inbound';
+import { skuDisplayLabel } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { binCodeLabel, useBinCodeMaps } from '@/lib/use-bin-code-maps';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import {
@@ -84,6 +86,8 @@ function AdjustmentPendingsQueueSessioned() {
   const [tab, setTab] = useState<AdjustmentPendingStatus>('pending');
   const queue = useAdjustmentPendings(tab);
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   const users = useUserMap();
   const warehouseRead = useTenantWarehouses();
   const warehouses = warehouseRead.state === 'ready' ? warehouseRead.data.items : [];
@@ -225,6 +229,7 @@ function AdjustmentPendingsQueueSessioned() {
               key={entry.id}
               entry={entry}
               sku={skus?.[entry.skuId]}
+              skuText={skus?.[entry.skuId] === undefined ? null : skuDisplayLabel(skus[entry.skuId]!, clients)}
               warehouseLabel={warehouses.find((w) => w.id === entry.warehouseId)?.code ?? (warehousesFailed ? entry.warehouseId : null)}
               binCode={binCodeLabel(binMaps, entry.warehouseId, entry.binId)}
               requestedBy={users?.[entry.requestedBy]?.email ?? null}
@@ -269,6 +274,7 @@ function AdjustmentPendingsQueueSessioned() {
 function AdjustmentPendingCard({
   entry,
   sku,
+  skuText,
   warehouseLabel,
   binCode,
   requestedBy,
@@ -279,6 +285,8 @@ function AdjustmentPendingCard({
 }: {
   entry: AdjustmentPendingView;
   sku: SkuResponse | undefined;
+  /** Story 1-1 — the SKU's `skuDisplayLabel`, or null when not loaded. */
+  skuText: string | null;
   warehouseLabel: string | null;
   binCode: string | null;
   requestedBy: string | null;
@@ -298,7 +306,7 @@ function AdjustmentPendingCard({
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium">{delta}</span>
-        <span className="font-mono text-xs">{sku?.code ?? '(unknown SKU)'}</span>
+        <span className="font-mono text-xs">{skuText ?? '(unknown SKU)'}</span>
         <span className="font-mono text-xs">
           {binCode ?? '(unknown bin)'}
           {warehouseLabel !== null && (

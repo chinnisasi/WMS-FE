@@ -12,6 +12,8 @@ import { isOwnerOnlyVariance, resolveDraftProblem, varianceResolveReason } from 
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkuMap, useUserMap } from '@/lib/use-inbound';
+import { skuDisplayLabel } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { binCodeLabel, useBinCodeMaps } from '@/lib/use-bin-code-maps';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import {
@@ -80,6 +82,8 @@ function VarianceQueueSessioned() {
   const [tab, setTab] = useState<VarianceStatus>('open');
   const queue = useVarianceQueue(tab);
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   const users = useUserMap();
   const warehouseRead = useTenantWarehouses();
   const warehouses = warehouseRead.state === 'ready' ? warehouseRead.data.items : [];
@@ -235,6 +239,7 @@ function VarianceQueueSessioned() {
               key={entry.id}
               entry={entry}
               sku={skus?.[entry.skuId]}
+              skuText={skus?.[entry.skuId] === undefined ? null : skuDisplayLabel(skus[entry.skuId]!, clients)}
               warehouseLabel={warehouses.find((w) => w.id === entry.warehouseId)?.code ?? (warehousesFailed ? entry.warehouseId : null)}
               binCode={binCodeLabel(binMaps, entry.warehouseId, entry.binId)}
               resolvedBy={
@@ -279,6 +284,7 @@ function VarianceQueueSessioned() {
 function VarianceCard({
   entry,
   sku,
+  skuText,
   warehouseLabel,
   binCode,
   resolvedBy,
@@ -288,6 +294,8 @@ function VarianceCard({
 }: {
   entry: LedgerVarianceEntry;
   sku: SkuResponse | undefined;
+  /** Story 1-1 — the SKU's `skuDisplayLabel`, or null when not loaded. */
+  skuText: string | null;
   warehouseLabel: string | null;
   binCode: string | null;
   resolvedBy: string | null;
@@ -309,7 +317,7 @@ function VarianceCard({
   return (
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-mono text-xs">{sku?.code ?? '(unknown SKU)'}</span>
+        <span className="font-mono text-xs">{skuText ?? '(unknown SKU)'}</span>
         <span className="font-mono text-xs">
           {binCode ?? '(unknown bin)'}
           {warehouseLabel !== null && (

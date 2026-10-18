@@ -40,6 +40,15 @@ export function asnImportTemplate(warehouseCode: string | null): string {
   );
 }
 
+/**
+ * Story 1-1 — what a blank client cell means. A SKU code is unique per
+ * client, so a blank row takes the client its ASN's other rows name, else
+ * the client its SKUs belong to; an ASN whose codes several clients hold
+ * must name its client (`client-required` otherwise).
+ */
+export const ASN_IMPORT_CLIENT_HELP =
+  "blank = the client the ASN's other rows name, else the client the SKUs belong to; a SKU code is unique per client, so when several clients hold an ASN's codes, name its client on at least one row";
+
 /** Each refused row's reason, in words — a `Record` over the generated union, so a new code fails the build. */
 export const ASN_IMPORT_REASON_LABEL: Readonly<Record<AsnImportRowErrorCode, string>> = {
   'unknown-client': 'Unknown client',
@@ -48,6 +57,8 @@ export const ASN_IMPORT_REASON_LABEL: Readonly<Record<AsnImportRowErrorCode, str
   'unknown-sku': 'Unknown SKU',
   'sku-client-mismatch': "SKU of another client",
   'mixed-client': 'SKUs of several clients',
+  // Story 1-1: a blank-client ASN whose codes are held by several clients.
+  'client-required': 'Name the client — several clients hold these codes',
   'kit-cannot-hold-stock': 'Kit SKU',
   'duplicate-asn-code': 'ASN code already used',
   'invalid-asn-code': 'ASN code too long',

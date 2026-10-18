@@ -105,6 +105,9 @@ function kit(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
+/** Story 1-1: the next client correction answers 409 with this body. */
+let correctionRefusal: Record<string, unknown> | null = null;
+
 function stubRouter(): void {
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
@@ -136,6 +139,9 @@ function stubRouter(): void {
     }
     if (method === 'GET' && pathname.endsWith('/clients') && clientRows !== null) {
       return json(200, { items: clientRows });
+    }
+    if (method === 'POST' && /\/catalog\/skus\/[^/]+\/client$/.test(pathname) && correctionRefusal !== null) {
+      return json(409, correctionRefusal);
     }
     if (method === 'POST' && /\/catalog\/skus\/[^/]+\/client$/.test(pathname)) {
       const skuId = pathname.split('/catalog/skus/')[1]!.split('/client')[0]!;
@@ -193,6 +199,7 @@ beforeEach(() => {
   forceKitConflict = false;
   kitsFail = false;
   clientRows = null;
+  correctionRefusal = null;
   nextPatchStatus = 200;
   nextPatchBody = null;
   skuRows = [
@@ -842,5 +849,74 @@ describe('story 21-2b: the client column and the owner client correction', () =>
     view = await mount();
     expect(headerTexts(view.container)).toContain('Client');
     expect(view.container.textContent).not.toContain('Correct client');
+  });
+});
+
+describe('story 1-1: per-client codes in the SKU card', () => {
+  const SELF = {
+    id: 'c-self',
+    tenantId: TENANT_ID,
+    code: 'self',
+    name: 'Priya Spices',
+    status: 'active',
+    systemOwned: true,
+    createdAt: '2026-10-06T00:00:00.000Z',
+    updatedAt: '2026-10-06T00:00:00.000Z',
+  };
+  const ACME = { ...SELF, id: 'c-acme', code: 'ACME', name: 'Acme Foods', systemOwned: false };
+
+  test('the kit component picker offers the kit\'s client\'s SKUs only', async () => {
+    clientRows = [SELF, ACME];
+    skuRows = [
+      sku({ id: 'sku-1', code: 'SPICE-01', clientId: 'c-self' }),
+      sku({ id: 'sku-3', code: 'PAD-01', name: 'Foam pad', barcode: 'BC-PAD-01', clientId: 'c-self' }),
+      // Another client's SKUs — one shares a code with this client's.
+      sku({ id: 'sku-7', code: 'PAD-01', name: 'Acme pad', barcode: 'BC-PAD-A', clientId: 'c-acme' }),
+      sku({ id: 'sku-8', code: 'ACME-ONLY', name: 'Acme only', barcode: 'BC-AO', clientId: 'c-acme' }),
+    ];
+    kitRows = [];
+    view = await mount();
+    const row = [...view.container.querySelectorAll('tbody tr')].find((r) => r.textContent!.includes('SPICE-01'))!;
+    act(() => [...row.querySelectorAll('button')].find((b) => b.textContent === 'Kit')!.click());
+    await settle();
+    const select = view.container.querySelector('form select') as HTMLSelectElement;
+    expect([...select.querySelectorAll('option')].map((o) => o.value)).toEqual(['', 'sku-3']);
+  });
+
+  test('a correction refused because the target client holds a moving SKU\'s code renders the server\'s words', async () => {
+    clientRows = [SELF, ACME];
+    skuRows = [sku({ clientId: 'c-self' })];
+    correctionRefusal = {
+      code: 'duplicate-sku-code',
+      title: 'Duplicate SKU code',
+      status: 409,
+      detail: 'ACME already has a SKU coded SPICE-01',
+    };
+    view = await mount();
+    act(() => [...view!.container.querySelectorAll('button')].find((b) => b.textContent === 'Correct client')!.click());
+    const form = view.container.querySelector('form[aria-label="Correct the client of SPICE-01"]')!;
+    const select = form.querySelector('select') as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(select, 'c-acme');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(view.container.textContent).toContain('ACME already has a SKU coded SPICE-01');
+  });
+
+  test('a duplicate barcode on edit with no detail says "for this client"', async () => {
+    nextPatchStatus = 409;
+    nextPatchBody = { code: 'duplicate-barcode', title: 'Duplicate barcode', status: 409 };
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit')!;
+    act(() => edit.click());
+    await settle();
+    submitForm(view.container);
+    await settle();
+    expect(view.container.textContent).toContain('already belongs to another SKU for this client.');
   });
 });

@@ -19,6 +19,7 @@ import type {
   ChannelBufferVerdictDto,
   ChannelConnectionListEntryDto,
   ChannelConnectionResponse,
+  ClientDto,
   SkuResponse,
   WarehouseResponse,
 } from '@/lib/api/generated';
@@ -63,6 +64,14 @@ import { ulid } from '@/lib/ulid';
 import { useSkuMap } from '@/lib/use-inbound';
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import { useChannelConnections } from '@/lib/use-channels';
+import {
+  clientOfSku,
+  keepCurrentSku,
+  narrowToClient,
+  skuDisplayLabel,
+  sortSkusForPicker,
+} from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
@@ -185,6 +194,8 @@ function ConnectionList({
   connections: ReturnType<typeof useChannelConnections>;
 }) {
   const skus = useSkuMap();
+  // Story 1-1 — SKU pickers name each SKU's client once there are several.
+  const clients = readyClients(useClients());
   const [outcome, setOutcome] = useState<Outcome>(null);
   // Which card's connect/rotate sub-form is open, keyed by connection id
   // ('connect' is the connect card's key).
@@ -232,6 +243,7 @@ function ConnectionList({
               entry={entry}
               warehouses={warehouses}
               skus={skus}
+              clients={clients}
               canManage={canManage}
               rotateOpen={rotateFor === entry.id}
               onToggleRotate={() =>
@@ -280,6 +292,7 @@ function ConnectionCard({
   entry,
   warehouses,
   skus,
+  clients,
   canManage,
   rotateOpen,
   onToggleRotate,
@@ -290,6 +303,7 @@ function ConnectionCard({
   entry: ChannelConnectionListEntryDto;
   warehouses: readonly WarehouseResponse[];
   skus: Readonly<Record<string, SkuResponse>> | null;
+  clients: readonly ClientDto[] | null;
   canManage: boolean;
   rotateOpen: boolean;
   onToggleRotate: () => void;
@@ -475,6 +489,7 @@ function ConnectionCard({
           tenantId={tenantId}
           entry={entry}
           skus={skus}
+          clients={clients}
           working={working}
           setWorking={setWorking}
           onOutcome={onOutcome}
@@ -492,6 +507,7 @@ function ConnectionCard({
           entry={entry}
           warehouses={warehouses}
           skus={skus}
+          clients={clients}
           working={working}
           setWorking={setWorking}
           onOutcome={onOutcome}
@@ -499,7 +515,7 @@ function ConnectionCard({
         />
       )}
       {!canManage && entryBuckets(entry).length > 0 && (
-        <BufferBucketsReadOnly entry={entry} skus={skus} />
+        <BufferBucketsReadOnly entry={entry} skus={skus} clients={clients} />
       )}
     </article>
   );
@@ -1020,6 +1036,7 @@ function BufferEditor({
   entry,
   warehouses,
   skus,
+  clients,
   working,
   setWorking,
   onOutcome,
@@ -1029,6 +1046,7 @@ function BufferEditor({
   entry: ChannelConnectionListEntryDto;
   warehouses: readonly WarehouseResponse[];
   skus: Readonly<Record<string, SkuResponse>> | null;
+  clients: readonly ClientDto[] | null;
   working: string | null;
   setWorking: (value: string | null) => void;
   onOutcome: (outcome: Exclude<Outcome, null>) => void;
@@ -1055,8 +1073,7 @@ function BufferEditor({
   const keySeq = useRef(0);
   const inFlight = working !== null;
 
-  const skuList =
-    skus === null ? [] : Object.values(skus).sort((a, b) => a.code.localeCompare(b.code));
+  const skuList = skus === null ? [] : sortSkusForPicker(Object.values(skus), clients);
 
   function addRow() {
     const firstFree = warehouses[0]?.id ?? '';
@@ -1220,7 +1237,7 @@ function BufferEditor({
                       {skuList.length === 0 && <option value="">no SKU</option>}
                       {skuList.map((s) => (
                         <option key={s.id} value={s.id}>
-                          {s.code}
+                          {skuDisplayLabel(s, clients)}
                         </option>
                       ))}
                     </select>
@@ -1235,7 +1252,7 @@ function BufferEditor({
                         className={`${inputClass} w-28 py-1 text-right text-xs`}
                         value={row.raw}
                         onChange={(e) => patch(row.key, { raw: e.target.value })}
-                        aria-label={`Buffer for ${sku?.code ?? row.skuId}`}
+                        aria-label={`Buffer for ${sku === null ? row.skuId : skuDisplayLabel(sku, clients)}`}
                         placeholder="0 clears"
                       />
                       <span className="text-(--muted-foreground)">
@@ -1311,6 +1328,7 @@ function MappingEditor({
   tenantId,
   entry,
   skus,
+  clients,
   working,
   setWorking,
   onOutcome,
@@ -1319,6 +1337,7 @@ function MappingEditor({
   tenantId: string;
   entry: ChannelConnectionListEntryDto;
   skus: Readonly<Record<string, SkuResponse>> | null;
+  clients: readonly ClientDto[] | null;
   working: string | null;
   setWorking: (value: string | null) => void;
   onOutcome: (outcome: Exclude<Outcome, null>) => void;
@@ -1370,16 +1389,26 @@ function MappingEditor({
     load();
   }
 
-  const skuList =
-    skus === null ? [] : Object.values(skus).sort((a, b) => a.code.localeCompare(b.code));
+  const skuList = skus === null ? [] : sortSkusForPicker(Object.values(skus), clients);
   const inFlight = working !== null;
+
+  // Story 1-1 — a connection sells one client's goods: once the first row
+  // names a SKU, every other row is offered that SKU's client's SKUs only
+  // (a row's own stored pick stays listed — `keepCurrentSku`).
+  const mappingClient = clientOfSku(skuList, rows[0]?.skuId);
+  const rowOptions = (index: number, currentId: string) =>
+    index === 0 ? skuList : keepCurrentSku(narrowToClient(skuList, mappingClient), skuList, currentId);
 
   function addRow() {
     keySeq.current += 1;
     const nextId = keySeq.current;
     setRows((prev) => [
       ...prev,
-      { key: `new-${nextId}`, externalRef: '', skuId: skuList[0]?.id ?? '' },
+      {
+        key: `new-${nextId}`,
+        externalRef: '',
+        skuId: (prev.length === 0 ? skuList : narrowToClient(skuList, clientOfSku(skuList, prev[0]?.skuId)))[0]?.id ?? '',
+      },
     ]);
   }
 
@@ -1490,7 +1519,7 @@ function MappingEditor({
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => (
+                    {rows.map((row, index) => (
                       <tr key={row.key} className="border-b border-(--border)/60">
                         <td className="px-2 py-1.5">
                           <input
@@ -1510,9 +1539,9 @@ function MappingEditor({
                             aria-label={`Warehouse SKU for row ${row.key}`}
                           >
                             {skuList.length === 0 && <option value="">no SKU</option>}
-                            {skuList.map((s) => (
+                            {rowOptions(index, row.skuId).map((s) => (
                               <option key={s.id} value={s.id}>
-                                {s.code}
+                                {skuDisplayLabel(s, clients)}
                               </option>
                             ))}
                           </select>
@@ -1577,9 +1606,11 @@ function safeMilli(
 function BufferBucketsReadOnly({
   entry,
   skus,
+  clients,
 }: {
   entry: ChannelConnectionListEntryDto;
   skus: Readonly<Record<string, SkuResponse>> | null;
+  clients: readonly ClientDto[] | null;
 }) {
   const buckets = entryBuckets(entry);
   if (buckets.length === 0) return null;
@@ -1589,7 +1620,7 @@ function BufferBucketsReadOnly({
       {buckets
         .map((b) => {
           const sku = skus?.[b.skuId] ?? null;
-          return `${sku?.code ?? b.skuId.slice(0, 8)}… ${quantityLabel(milliToBase(b.bufferMilli), sku)}`;
+          return `${sku === null ? b.skuId.slice(0, 8) : skuDisplayLabel(sku, clients)}… ${quantityLabel(milliToBase(b.bufferMilli), sku)}`;
         })
         .join(', ')}
     </div>

@@ -21,8 +21,19 @@ import {
   parseClientDraft,
   showClients,
   singleClientImportHint,
-  skusForOrderClient,
   skusOfClient,
+  skuDisplayLabel,
+  clientShortLabel,
+  clientOfSku,
+  narrowToClient,
+  withSkuClient,
+  orderSkuOptions,
+  orderClientProblem,
+  linesKeptForClient,
+  clientChangeQuestion,
+  PICK_CLIENT_FIRST,
+  CATALOG_CODES_PER_CLIENT_HELP,
+  KIT_CELL_CLIENT_HELP,
   importedForLabel,
   clientNameProblem,
   correctionOutcome,
@@ -164,21 +175,87 @@ describe('parseClientDraft mirrors the backend shape rules', () => {
   });
 });
 
-describe('skusForOrderClient — the order form offers the first line\'s client only', () => {
+describe('story 1-1 — a SKU is named with its client once the tenant has more than one', () => {
+  const BETA = client({ id: 'c-beta', code: 'BETA', name: 'Beta Brands' });
+  const tshirtA = { code: 'TSHIRT-M', clientId: 'c-acme' };
+  const tshirtB = { code: 'TSHIRT-M', clientId: 'c-beta' };
+  test('more than one client: CODE · client code, the own company by its name', () => {
+    expect(skuDisplayLabel(tshirtA, [SELF, ACME, BETA])).toBe('TSHIRT-M · ACME');
+    expect(skuDisplayLabel(tshirtB, [SELF, ACME, BETA])).toBe('TSHIRT-M · BETA');
+    expect(skuDisplayLabel({ code: 'OWN-1', clientId: 'c-self' }, [SELF, ACME])).toBe('OWN-1 · Priya Spices');
+    expect(clientShortLabel(client({ systemOwned: true, name: '' }))).toBe('Your company');
+  });
+  test('one client, clients not loaded, or the SKU\'s client unknown: the bare code', () => {
+    expect(skuDisplayLabel(tshirtA, [SELF])).toBe('TSHIRT-M');
+    expect(skuDisplayLabel(tshirtA, null)).toBe('TSHIRT-M');
+    expect(skuDisplayLabel({ code: 'OLD' }, [SELF, ACME])).toBe('OLD');
+    expect(skuDisplayLabel({ code: 'OLD', clientId: null }, [SELF, ACME])).toBe('OLD');
+    expect(skuDisplayLabel({ code: 'GHOST', clientId: 'c-gone' }, [SELF, ACME])).toBe('GHOST');
+  });
+  test('withSkuClient suffixes any text under the same rule', () => {
+    expect(withSkuClient('Serum 30 ml', { clientId: 'c-acme' }, [SELF, ACME])).toBe('Serum 30 ml · ACME');
+    expect(withSkuClient('Serum 30 ml', { clientId: 'c-acme' }, [SELF])).toBe('Serum 30 ml');
+  });
+  test('clientOfSku and narrowToClient narrow a picker to a chosen SKU\'s client', () => {
+    const skus = [
+      { id: 's-a1', clientId: 'c-acme' },
+      { id: 's-a2', clientId: 'c-acme' },
+      { id: 's-b1', clientId: 'c-beta' },
+      { id: 's-old' },
+    ];
+    expect(clientOfSku(skus, 's-a1')).toBe('c-acme');
+    expect(clientOfSku(skus, '')).toBeNull();
+    expect(clientOfSku(skus, null)).toBeNull();
+    expect(clientOfSku(skus, 's-old')).toBeNull();
+    expect(clientOfSku(skus, 's-ghost')).toBeNull();
+    expect(narrowToClient(skus, 'c-acme').map((s) => s.id)).toEqual(['s-a1', 's-a2']);
+    expect(narrowToClient(skus, null)).toBe(skus);
+  });
+});
+
+describe('story 1-1 — the catalog import help', () => {
+  test('codes and barcodes are per client; kit cells name this client\'s SKUs', () => {
+    expect(CATALOG_CODES_PER_CLIENT_HELP).toBe(
+      'SKU codes and barcodes are unique per client: two clients may both own a code or a barcode, but one client cannot hold it twice.',
+    );
+    expect(KIT_CELL_CLIENT_HELP).toBe("naming this client's SKUs");
+  });
+});
+
+describe('story 1-1 — order entry is client-first', () => {
+  const BETA = client({ id: 'c-beta', code: 'BETA', name: 'Beta Brands' });
   const skus = [
     { id: 's-a1', clientId: 'c-acme' },
-    { id: 's-a2', clientId: 'c-acme' },
-    { id: 's-s1', clientId: 'c-self' },
+    { id: 's-b1', clientId: 'c-beta' },
     { id: 's-old' },
   ];
-  test('no first pick: everything; a first pick: only its client', () => {
-    expect(skusForOrderClient(skus, '')).toBe(skus);
-    expect(skusForOrderClient(skus, 's-a1').map((s) => s.id)).toEqual(['s-a1', 's-a2']);
-    expect(skusForOrderClient(skus, 's-s1').map((s) => s.id)).toEqual(['s-s1']);
+  test('several clients: none until one is picked, then only its SKUs', () => {
+    expect(orderSkuOptions(skus, [SELF, ACME, BETA], '')).toEqual([]);
+    expect(orderSkuOptions(skus, [SELF, ACME, BETA], 'c-acme').map((s) => s.id)).toEqual(['s-a1']);
+    expect(orderClientProblem([SELF, ACME], '')).toBe('Choose the client this order is for.');
+    expect(orderClientProblem([SELF, ACME], 'c-acme')).toBeNull();
+    expect(PICK_CLIENT_FIRST).toBe('Pick a client first');
   });
-  test('a first pick with no known client restricts nothing', () => {
-    expect(skusForOrderClient(skus, 's-old')).toBe(skus);
-    expect(skusForOrderClient(skus, 's-ghost')).toBe(skus);
+  test('one client, or the clients not loaded: every SKU, no problem', () => {
+    expect(orderSkuOptions(skus, [SELF], '')).toBe(skus);
+    expect(orderSkuOptions(skus, null, '')).toBe(skus);
+    expect(orderClientProblem([SELF], '')).toBeNull();
+    expect(orderClientProblem(null, '')).toBeNull();
+  });
+  test('a client change keeps blank lines and the next client\'s lines only', () => {
+    const rows = [
+      { id: 'r1', skuId: 's-a1' },
+      { id: 'r2', skuId: '' },
+      { id: 'r3', skuId: 's-b1' },
+    ];
+    expect(linesKeptForClient(rows, skus, 'c-beta').map((r) => r.id)).toEqual(['r2', 'r3']);
+    expect(linesKeptForClient(rows, skus, 'c-acme').map((r) => r.id)).toEqual(['r1', 'r2']);
+    expect(clientChangeQuestion(1, 'BETA')).toBe(
+      "Change the client to BETA? This clears the line already picked — it is another client's SKU.",
+    );
+    expect(clientChangeQuestion(3, 'BETA')).toBe(
+      "Change the client to BETA? This clears the 3 lines already picked — they are another client's SKUs.",
+    );
   });
 });
 
@@ -206,6 +283,16 @@ describe('the refusal mappers branch on the code', () => {
     );
     expect(correctClientReason(problem('mixed-client', 409, 'kit KIT-1 mixes ACME, self'))).toBe('kit KIT-1 mixes ACME, self');
     expect(correctClientReason(problem('role-denied', 403))).toBe("Only an owner can correct a SKU's client.");
+    // Story 1-1: the target client already holds a moving SKU's code or barcode.
+    expect(correctClientReason(problem('duplicate-sku-code', 409, 'BETA already has a SKU coded TSHIRT-M'))).toBe(
+      'BETA already has a SKU coded TSHIRT-M',
+    );
+    expect(correctClientReason(problem('duplicate-sku-code', 409))).toBe(
+      'That client already has a SKU with this code — rename one first.',
+    );
+    expect(correctClientReason(problem('duplicate-barcode', 409))).toBe(
+      'That client already has a SKU with this barcode — clear or change one first.',
+    );
     expect(correctClientReason(problem('not-found', 404))).toBe('That SKU or client no longer exists — refresh the page.');
     expect(correctClientReason(new Error('offline'))).toBe(UNREACHABLE_REASON);
   });

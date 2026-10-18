@@ -89,6 +89,12 @@ describe('notification copy', () => {
     // Unknown SKU and warehouse degrade to short ids, never a blank.
     const unknown = { ...ENTRIES['qc-hold'], warehouseId: '0198f7a2-ffff-7d4e-8f90-99aabbccdd09', summary: { skuId: UNKNOWN_SKU, reason: 'Wet' } } as NotificationEntry;
     expect(notificationDescription(unknown, LOOKUPS)).toBe('SKU 0198f7a2 · Wet · Warehouse 0198f7a2');
+    // Story 1-1: a SKU carrying its client label (several clients) is named with it.
+    const labelled: NotificationLookups = {
+      ...LOOKUPS,
+      sku: (id) => (id === SKU ? { code: 'SPICE-01', label: 'SPICE-01 · ACME', uom: 'kg', uomPrecision: 3 } : null),
+    };
+    expect(notificationDescription(expiring, labelled)).toBe('SPICE-01 · ACME · batch LOT-8 · expires 21 Oct 2026 · MAIN Chennai DC');
   });
 
   test('the audit export (9-3b): ready names its events; failed names its reason — every reason has copy', () => {

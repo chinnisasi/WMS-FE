@@ -5,6 +5,7 @@ import type { AsnImportResponseDto } from '@/lib/api/generated';
 import {
   ASN_IMPORT_COLUMNS,
   ASN_IMPORT_REASON_LABEL,
+  ASN_IMPORT_CLIENT_HELP,
   acceptedLineCount,
   asnImportErrorReport,
   asnImportOutcome,
@@ -127,6 +128,10 @@ describe('the error report', () => {
   test('every generated reason code has words; an unknown one prints as itself', () => {
     for (const label of Object.values(ASN_IMPORT_REASON_LABEL)) expect(label.length).toBeGreaterThan(0);
     expect(asnImportReasonLabel('kit-cannot-hold-stock')).toBe('Kit SKU');
+    // Story 1-1: a blank-client ASN whose codes several clients hold.
+    expect(asnImportReasonLabel('client-required')).toBe('Name the client — several clients hold these codes');
+    expect(ASN_IMPORT_CLIENT_HELP).toContain('a SKU code is unique per client');
+    expect(ASN_IMPORT_CLIENT_HELP).toContain("blank = the client the ASN's other rows name");
     expect(asnImportReasonLabel('constructor')).toBe('constructor');
   });
 });

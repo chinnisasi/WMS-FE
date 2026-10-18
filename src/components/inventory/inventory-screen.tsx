@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { Fragment, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 
-import type { BatchListItemDto, BinResponse, SkuResponse, StockEntryDto } from '@/lib/api/generated';
+import type { BatchListItemDto, BinResponse, ClientDto, SkuResponse, StockEntryDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { clientCell, showClients } from '@/lib/clients';
+import { clientCell, showClients, skuDisplayLabel, withSkuClient } from '@/lib/clients';
 import { ledgerTypeLabel, warehouseDisplayLabel, type DrillWarehouse } from '@/lib/drill';
 import { quantityLabel } from '@/lib/format-quantity';
 import {
@@ -16,13 +16,17 @@ import {
   TOTAL_PAGE_FAILED,
   batchQuantityLabel,
   NOT_BATCH_TRACKED,
+  choicePrompt,
+  codeEntryLabel,
   otherWarehousesLabel,
   resolveSearch,
+  skuResolution,
   searchAvailability,
   searchSummary,
   splitBatchBins,
   systemBinLabel,
   totalAcrossBins,
+  type CodeEntry,
   type CodeMap,
   type SearchResolution,
 } from '@/lib/inventory';
@@ -147,9 +151,43 @@ interface SectionProps {
   readonly refreshNote: ReactNode;
 }
 
-function skuCodes(state: ReturnType<typeof useSkuCatalog>, only?: (sku: SkuResponse) => boolean): CodeMap {
+/**
+ * The SKU codes the search resolves, each labelled `CODE · Client` once the
+ * tenant has more than one client (story 1-1: two clients may share a code,
+ * and the chooser and summary must say which is which).
+ */
+function skuCodes(state: ReturnType<typeof useSkuCatalog>, clients: readonly ClientDto[] | null): CodeMap {
   if (state.state !== 'ready') return state.state === 'failed' ? { state: 'failed', reason: state.reason } : { state: 'loading' };
-  return { state: 'ready', data: state.data.filter((sku) => only?.(sku) ?? true).map((sku) => ({ id: sku.id, code: sku.code })) };
+  return {
+    state: 'ready',
+    data: state.data.map((sku) => {
+      const label = skuDisplayLabel(sku, clients);
+      return label === sku.code ? { id: sku.id, code: sku.code } : { id: sku.id, code: sku.code, label };
+    }),
+  };
+}
+
+/**
+ * Story 1-1 — several SKUs answer to the typed code (two clients' `TSHIRT-M`):
+ * one button per match, labelled with its client, which applies that SKU.
+ */
+function SkuChooser({
+  resolution,
+  onPick,
+}: {
+  resolution: Extract<SearchResolution, { kind: 'choice' }>;
+  onPick: (entry: CodeEntry) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="search-choice">
+      <span>{choicePrompt(resolution)}</span>
+      {resolution.matches.map((entry) => (
+        <button key={entry.id} type="button" className={rowButtonClass} data-sku-id={entry.id} onClick={() => onPick(entry)}>
+          {codeEntryLabel(entry)}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function binCodes(state: ReturnType<typeof useWarehouseBins>): CodeMap {
@@ -256,7 +294,7 @@ function ListTable<T extends { id: string }>({
 /* Stock                                                               */
 /* ------------------------------------------------------------------ */
 
-type AppliedSearch = Extract<SearchResolution, { kind: 'bin' | 'sku' | 'miss' | 'ambiguous' }>;
+type AppliedSearch = Extract<SearchResolution, { kind: 'bin' | 'sku' | 'choice' | 'miss' | 'ambiguous' }>;
 
 function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
   const skus = useSkuCatalog();
@@ -270,7 +308,7 @@ function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
   const [draft, setDraft] = useState('');
   const [applied, setApplied] = useState<AppliedSearch | null>(null);
 
-  const skuMap = skuCodes(skus);
+  const skuMap = skuCodes(skus, clients);
   const binMap = binCodes(bins);
   const availability = searchAvailability(binMap, skuMap);
   const skuById = skuIndex(skus);
@@ -281,8 +319,9 @@ function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
       : applied?.kind === 'sku'
         ? { skuId: applied.id, binId: null }
         : { skuId: null, binId: null };
-  // A miss reads nothing: the message stands in for the list.
-  const unresolved = applied?.kind === 'miss' || applied?.kind === 'ambiguous';
+  // A miss reads nothing: the message stands in for the list; a choice
+  // reads nothing until one SKU is picked.
+  const unresolved = applied?.kind === 'miss' || applied?.kind === 'ambiguous' || applied?.kind === 'choice';
   const stock = useStockList(unresolved ? null : warehouseId, filter, applied?.kind === 'sku');
 
   const submit = (event: FormEvent) => {
@@ -325,7 +364,7 @@ function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
     applied?.kind === 'bin'
       ? `Bin ${applied.code} holds no stock.`
       : applied?.kind === 'sku'
-        ? `No stock of ${applied.code} in this warehouse.`
+        ? `No stock of ${applied.label ?? applied.code} in this warehouse.`
         : 'No stock in this warehouse yet.';
 
   return (
@@ -372,6 +411,8 @@ function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
         <div data-testid="search-miss">
           <FeedbackBanner tone="warning" word="No match" reason={applied.message} />
         </div>
+      ) : applied?.kind === 'choice' ? (
+        <SkuChooser resolution={applied} onPick={(entry) => setApplied(skuResolution(entry))} />
       ) : (
         <>
           {applied !== null && (
@@ -459,6 +500,7 @@ function StockRowsView({
 
 type BatchPick =
   | { readonly kind: 'sku'; readonly sku: SkuResponse }
+  | { readonly kind: 'choice'; readonly resolution: Extract<SearchResolution, { kind: 'choice' }> }
   | { readonly kind: 'problem'; readonly message: string };
 
 const BATCH_SKU_LIST_ID = 'inventory-batch-skus';
@@ -466,6 +508,7 @@ const BATCH_SKU_LIST_ID = 'inventory-batch-skus';
 function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
   const skus = useSkuCatalog();
   const bins = useWarehouseBins(warehouseId);
+  const clients = readyClients(useClients());
   const [draft, setDraft] = useState('');
   const [pick, setPick] = useState<BatchPick | null>(null);
   const [openBatch, setOpenBatch] = useState<string | null>(null);
@@ -476,10 +519,14 @@ function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!ready) return;
-    const resolution = resolveSearch(draft, { state: 'failed', reason: '' }, skuCodes(skus));
+    const resolution = resolveSearch(draft, { state: 'failed', reason: '' }, skuCodes(skus, clients));
     setOpenBatch(null);
     if (resolution.kind === 'blank') {
       setPick(null);
+      return;
+    }
+    if (resolution.kind === 'choice') {
+      setPick({ kind: 'choice', resolution });
       return;
     }
     if (resolution.kind === 'ambiguous') {
@@ -490,7 +537,11 @@ function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) 
       setPick({ kind: 'problem', message: `No SKU with code ${draft.trim()} found.` });
       return;
     }
-    const sku = skus.data.find((s) => s.id === resolution.id)!;
+    pickSku(resolution.id);
+  };
+  const pickSku = (id: string) => {
+    if (!ready) return;
+    const sku = skus.data.find((s) => s.id === id)!;
     // Decided from the catalog before any read: the batch list has no
     // "not batch-tracked" arm of its own.
     setPick(sku.batchTracked ? { kind: 'sku', sku } : { kind: 'problem', message: NOT_BATCH_TRACKED });
@@ -516,7 +567,7 @@ function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) 
         <datalist id={BATCH_SKU_LIST_ID}>
           {tracked.map((sku) => (
             <option key={sku.id} value={sku.code}>
-              {sku.name}
+              {withSkuClient(sku.name, sku, clients)}
             </option>
           ))}
         </datalist>
@@ -546,8 +597,12 @@ function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) 
           <FeedbackBanner tone="warning" word="No batches" reason={pick.message} />
         </div>
       )}
+      {pick?.kind === 'choice' && (
+        <SkuChooser resolution={pick.resolution} onPick={(entry) => pickSku(entry.id)} />
+      )}
       {pick?.kind === 'sku' && (
         <BatchList
+          label={skuDisplayLabel(pick.sku, clients)}
           key={pick.sku.id}
           warehouseId={warehouseId}
           sku={pick.sku}
@@ -562,6 +617,7 @@ function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) 
 }
 
 function BatchList({
+  label,
   warehouseId,
   sku,
   bins,
@@ -569,6 +625,7 @@ function BatchList({
   openBatch,
   onToggle,
 }: {
+  label: string;
   warehouseId: string;
   sku: SkuResponse;
   bins: readonly BinResponse[] | null;
@@ -605,7 +662,7 @@ function BatchList({
   return (
     <div className="flex flex-col gap-2">
       <div className="text-xs">
-        Batches of <span className="font-mono">{sku.code}</span> — {sku.name}
+        Batches of <span className="font-mono">{label}</span> — {sku.name}
       </div>
       <ListTable
         columns={columns}

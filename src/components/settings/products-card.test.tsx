@@ -54,6 +54,9 @@ let productsNextCursor: unknown = null;
 let nextSkuPatchStatus = 200;
 let nextSkuPatchBody: unknown = null;
 
+/** Story 1-1: the tenant's clients (null → unrouted, the bare-code arm). */
+let clientsBody: Record<string, unknown>[] | null = null;
+
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -115,6 +118,9 @@ function stubRouter(role: string = 'owner'): void {
       body = null;
     }
     requests.push({ method, pathname, query: url.search, body });
+    if (method === 'GET' && pathname.endsWith('/clients') && clientsBody !== null) {
+      return json(200, { items: clientsBody });
+    }
     if (method === 'GET' && pathname.endsWith('/catalog/products')) {
       return json(200, { items: productRows, nextCursor: productsNextCursor });
     }
@@ -155,6 +161,7 @@ beforeEach(() => {
   requests = [];
   nextSkuPatchStatus = 200;
   nextSkuPatchBody = null;
+  clientsBody = null;
   productsNextCursor = null;
   productRows = [
     product(),
@@ -482,3 +489,37 @@ function colourInput(form: ParentNode): HTMLInputElement {
     .find((label) => label.textContent!.includes('colour'))!
     .querySelector<HTMLInputElement>('input')!;
 }
+
+describe('ProductsCard: the attach picker is one client\'s (story 1-1)', () => {
+  function clientRow(id: string, code: string, systemOwned = false): Record<string, unknown> {
+    return { id, code, name: systemOwned ? 'Priya Spices' : code, status: 'active', systemOwned };
+  }
+  beforeEach(() => {
+    clientsBody = [clientRow('c-self', 'self', true), clientRow('c-acme', 'ACME'), clientRow('c-beta', 'BETA')];
+    skuRows = [
+      sku({ clientId: 'c-acme' }),
+      sku({ id: 'sku-2', code: 'TEE-L-BLUE', productId: 'prod-1', variantValues: { size: 'L', colour: 'Blue' }, barcode: 'BC-2', clientId: 'c-acme' }),
+      // Two clients' unattached SKUs sharing a code.
+      sku({ id: 'sku-a', code: 'TEE-XL', name: 'Acme XL', productId: null, variantValues: null, barcode: 'BC-A', clientId: 'c-acme' }),
+      sku({ id: 'sku-b', code: 'TEE-XL', name: 'Beta XL', productId: null, variantValues: null, barcode: 'BC-B', clientId: 'c-beta' }),
+    ];
+  });
+
+  async function attachOptions(name: string): Promise<string[]> {
+    view = await mount();
+    await expandProduct(view.container, name);
+    const region = view.container.querySelector(`[role="region"][aria-label="Variants for ${name}"]`)!;
+    const attach = [...region.querySelectorAll('button')].find((b) => b.textContent === 'Attach variant');
+    act(() => attach!.click());
+    await settle();
+    return [...region.querySelectorAll('select option')].map((o) => o.textContent ?? '');
+  }
+
+  test('a product with variants offers only their client\'s SKUs', async () => {
+    expect(await attachOptions('T-Shirts')).toEqual(['Pick a SKU…', 'TEE-XL · ACME Acme XL']);
+  });
+
+  test('a product with none offers every unattached SKU, each named with its client', async () => {
+    expect(await attachOptions('Mugs')).toEqual(['Pick a SKU…', 'TEE-XL · ACME Acme XL', 'TEE-XL · BETA Beta XL']);
+  });
+});

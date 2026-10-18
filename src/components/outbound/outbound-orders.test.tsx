@@ -36,6 +36,10 @@ let order: Record<string, unknown> | null = null;
 let creates: { body: Record<string, unknown>; key: string | null }[] = [];
 /** The status the next create answers with — 201 unless a test fails it. */
 let createStatus = 201;
+/** Story 1-1: the tenant's clients (null → the read 404s, the degraded arm). */
+let clientsBody: Record<string, unknown>[] | null = null;
+/** Story 1-1: the catalog, when a test needs SKUs with clients. */
+let skusBody: Record<string, unknown>[] | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -135,6 +139,12 @@ function stubRouter(): void {
       }
       return json(200, { order });
     }
+    if (method === 'GET' && pathname.endsWith(`/tenants/${TENANT_ID}/clients`) && clientsBody !== null) {
+      return json(200, { items: clientsBody });
+    }
+    if (method === 'GET' && pathname.endsWith('/catalog/skus') && skusBody !== null) {
+      return json(200, { items: skusBody, nextCursor: null });
+    }
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       return json(200, {
         items: [
@@ -156,6 +166,8 @@ beforeEach(() => {
   requests = [];
   creates = [];
   createStatus = 201;
+  clientsBody = null;
+  skusBody = null;
   stubRouter();
   writeSession(SESSION);
 });
@@ -788,5 +800,138 @@ describe('OrderDetailPanel: "View ledger" (story 9-3a)', () => {
     order = plainOrder();
     view = await mount(ORDER_ID);
     expect([...view.container.querySelectorAll('a')].some((a) => a.textContent === 'View ledger')).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Story 1-1: order entry is client-first                               */
+/* ------------------------------------------------------------------ */
+
+function clientRow(id: string, code: string, name: string, systemOwned = false): Record<string, unknown> {
+  return {
+    id,
+    tenantId: TENANT_ID,
+    code,
+    name,
+    status: 'active',
+    systemOwned,
+    createdAt: '2026-10-01T00:00:00.000Z',
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    taxDetails: {},
+  };
+}
+
+const SELF_CLIENT = clientRow('c-self', 'self', 'Priya Spices', true);
+const ACME_CLIENT = clientRow('c-acme', 'ACME', 'Acme Foods');
+
+function skuOptions(container: HTMLElement, index = 0): { value: string; text: string; disabled: boolean }[] {
+  const select = labelled(container, 'SKU')[index]!.querySelector('select')!;
+  return [...select.querySelectorAll('option')].map((o) => ({ value: o.value, text: o.textContent ?? '', disabled: o.disabled }));
+}
+
+function clientSelect(container: HTMLElement): HTMLSelectElement | null {
+  return labelled(container, 'Client')[0]?.querySelector('select') ?? null;
+}
+
+describe('OrderCreateForm: client first (story 1-1)', () => {
+  beforeEach(() => {
+    clientsBody = [SELF_CLIENT, ACME_CLIENT];
+    // Both clients own TSHIRT-M.
+    skusBody = [
+      sku({ id: 'self-tshirt', code: 'TSHIRT-M', name: 'Own tee', clientId: 'c-self', barcode: 'BC-1' }),
+      sku({ id: 'acme-tshirt', code: 'TSHIRT-M', name: 'Acme tee', clientId: 'c-acme', barcode: 'BC-1' }),
+      sku({ id: 'acme-cap', code: 'CAP', name: 'Acme cap', clientId: 'c-acme', barcode: 'BC-2' }),
+    ];
+  });
+
+  test('a required Client select comes first; until one is picked the lines offer nothing but "Pick a client first"', async () => {
+    view = await mountForm();
+    const select = clientSelect(view.container)!;
+    expect(select).not.toBeNull();
+    expect(select.required).toBe(true);
+    // Before the Ship-to fieldset and the lines.
+    const form = select.closest('form')!;
+    const order = [...form.querySelectorAll('select')];
+    expect(order.indexOf(select)).toBe(0);
+    expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual([
+      'Choose a client…',
+      'Priya Spices (your company)',
+      'ACME — Acme Foods',
+    ]);
+    expect(skuOptions(view.container)).toEqual([{ value: '', text: 'Pick a client first', disabled: true }]);
+
+    setSelect(select, 'c-acme');
+    expect(skuOptions(view.container).map((o) => o.value)).toEqual(['', 'acme-cap', 'acme-tshirt']);
+    expect(skuOptions(view.container)[0]!.text).toBe('Pick a SKU…');
+  });
+
+  test('the order sends no clientId — the server derives it from the lines', async () => {
+    view = await mountForm();
+    setSelect(clientSelect(view.container)!, 'c-acme');
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'acme-tshirt', '2', '');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(1);
+    expect('clientId' in creates[0]!.body).toBe(false);
+    expect(creates[0]!.body.lines).toEqual([{ skuId: 'acme-tshirt', quantity: 2 }]);
+  });
+
+  test('a submit with no client sends nothing and names the problem', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(0);
+    expect(view.container.textContent).toContain('Choose the client this order is for.');
+  });
+
+  test('changing the client with lines picked asks first; Keep keeps them, Change clears them', async () => {
+    view = await mountForm();
+    setSelect(clientSelect(view.container)!, 'c-acme');
+    fillLine(view.container, 0, 'acme-tshirt', '2', '');
+    addLine(view.container);
+    fillLine(view.container, 1, 'acme-cap', '1', '');
+
+    setSelect(clientSelect(view.container)!, 'c-self');
+    const confirm = view.container.querySelector('[data-testid="order-client-confirm"]')!;
+    expect(confirm.textContent).toContain(
+      "Change the client to Priya Spices (your company)? This clears the 2 lines already picked — they are another client's SKUs.",
+    );
+    // Nothing cleared while the question stands.
+    expect(labelled(view.container, 'SKU')).toHaveLength(2);
+
+    const keep = [...confirm.querySelectorAll('button')].find((b) => b.textContent === 'Keep ACME — Acme Foods')!;
+    act(() => keep.click());
+    expect(view.container.querySelector('[data-testid="order-client-confirm"]')).toBeNull();
+    expect(clientSelect(view.container)!.value).toBe('c-acme');
+    expect(labelled(view.container, 'SKU')).toHaveLength(2);
+
+    setSelect(clientSelect(view.container)!, 'c-self');
+    const change = [...view.container.querySelectorAll('[data-testid="order-client-confirm"] button')].find(
+      (b) => b.textContent === 'Change client',
+    ) as HTMLButtonElement;
+    act(() => change.click());
+    expect(clientSelect(view.container)!.value).toBe('c-self');
+    // The old client's lines are gone; one blank line offers the new client's SKUs.
+    expect(labelled(view.container, 'SKU')).toHaveLength(1);
+    expect(skuOptions(view.container).map((o) => o.value)).toEqual(['', 'self-tshirt']);
+  });
+
+  test('one client: no Client select, every SKU offered — nothing changes', async () => {
+    clientsBody = [SELF_CLIENT];
+    view = await mountForm();
+    expect(clientSelect(view.container)).toBeNull();
+    expect(skuOptions(view.container).map((o) => o.value)).toEqual(['', 'acme-cap', 'self-tshirt', 'acme-tshirt']);
+    expect(skuOptions(view.container)[0]!.text).toBe('Pick a SKU…');
+    expect(view.container.querySelector('[data-testid="order-clients-note"]')).toBeNull();
+  });
+
+  test('a failed clients read offers every SKU and says so, with a Retry', async () => {
+    clientsBody = null;
+    view = await mountForm();
+    expect(clientSelect(view.container)).toBeNull();
+    expect(view.container.querySelector('[data-testid="order-clients-note"]')!.textContent).toContain(
+      'Clients not loaded — every SKU is offered',
+    );
+    expect(skuOptions(view.container)).toHaveLength(4);
   });
 });

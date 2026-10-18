@@ -9,6 +9,8 @@ import { isUuid } from '@/lib/cold-chain';
 import { useColdChainTrace } from '@/lib/use-cold-chain';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { useSkuMap } from '@/lib/use-inbound';
+import { skuDisplayLabel } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 
 import { ReadFailure, selectClass } from '@/components/outbound/shell';
 import { Section } from '@/components/shared/surface';
@@ -62,6 +64,8 @@ function ColdChainTraceSessioned() {
       : (warehouses[0]?.id ?? null);
 
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   // The loaded order is keyed by the warehouse it was loaded under: a trace
   // belongs to ONE warehouse, and switching warehouses — through this
   // surface's picker OR the shell's global one (both write the same active
@@ -181,7 +185,7 @@ function ColdChainTraceSessioned() {
         <div className="text-(--muted-foreground)">Loading…</div>
       )}
       {warehouseId !== null && orderId !== null && trace.state === 'ready' && (
-        <TraceView trace={trace.data} skuLabel={(skuId) => skus?.[skuId]?.code ?? null} />
+        <TraceView trace={trace.data} skuLabel={(skuId) => (skus?.[skuId] === undefined ? null : skuDisplayLabel(skus[skuId]!, clients))} />
       )}
     </section>
   );

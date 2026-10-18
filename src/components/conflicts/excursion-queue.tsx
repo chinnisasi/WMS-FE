@@ -10,6 +10,8 @@ import { excursionResolveReason, holdLabel } from '@/lib/excursion';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useBinCodeMap, useSkuMap, useUserMap } from '@/lib/use-inbound';
+import { skuDisplayLabel } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { useExcursions, type ExcursionHolds } from '@/lib/use-excursions';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 
@@ -85,6 +87,8 @@ function ExcursionQueueSessioned() {
   const [tab, setTab] = useState<StatusTab>('open');
   const queue = useExcursions(warehouseId, tab);
   const skus = useSkuMap();
+  // Story 1-1 — a SKU is named with its client once the tenant has several.
+  const clients = readyClients(useClients());
   const users = useUserMap();
   const binCodes = useBinCodeMap(warehouseId);
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
@@ -223,7 +227,7 @@ function ExcursionQueueSessioned() {
               key={entry.id}
               entry={entry}
               binCode={binCodes?.[entry.binId] ?? null}
-              skuLabel={(skuId) => skus?.[skuId]?.code ?? null}
+              skuLabel={(skuId) => (skus?.[skuId] === undefined ? null : skuDisplayLabel(skus[skuId]!, clients))}
               recordedBy={users?.[entry.recordedBy]?.email ?? null}
               resolvedBy={entry.resolvedBy === null ? null : (users?.[entry.resolvedBy]?.email ?? null)}
               holds={queue.data.holds}

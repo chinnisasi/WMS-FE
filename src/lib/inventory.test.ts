@@ -10,6 +10,9 @@ import {
   NOT_BATCH_TRACKED,
   otherWarehousesLabel,
   resolveSearch,
+  choicePrompt,
+  codeEntryLabel,
+  skuResolution,
   searchAvailability,
   searchSummary,
   splitBatchBins,
@@ -173,11 +176,12 @@ describe('the stock and batch words', () => {
 });
 
 describe('review follow-ups', () => {
-  test('a case-insensitive code matching two SKUs is ambiguous, never a silent pick', () => {
+  test('a case-insensitive code matching two SKUs offers a choice, never a silent pick', () => {
     const twins: CodeMap = { state: 'ready', data: [{ id: 's-a', code: 'abc' }, { id: 's-b', code: 'ABC' }] };
     expect(resolveSearch('Abc', BINS, twins)).toEqual({
-      kind: 'ambiguous',
-      message: 'More than one SKU matches Abc — type the exact code.',
+      kind: 'choice',
+      code: 'Abc',
+      matches: [{ id: 's-a', code: 'abc' }, { id: 's-b', code: 'ABC' }],
     });
     // The exact code still resolves.
     expect(resolveSearch('ABC', BINS, twins)).toEqual({ kind: 'sku', id: 's-b', code: 'ABC' });
@@ -200,5 +204,46 @@ describe('review follow-ups', () => {
     expect(batchFailureWord(batchDetailReason(new ApiProblem('not-found', 404, 'gone')))).toBe('Batch not found');
     expect(batchFailureWord(batchDetailReason(new ApiProblem('boom', 500, 'x')))).toBe('Batch unavailable');
     expect(batchFailureWord(batchDetailReason(new Error('Failed to fetch')))).toBe('Batch unavailable');
+  });
+});
+
+describe('story 1-1 — a code two clients share offers a choice labelled with the client', () => {
+  const shared: CodeMap = {
+    state: 'ready',
+    data: [
+      { id: 's-acme', code: 'TSHIRT-M', label: 'TSHIRT-M · ACME' },
+      { id: 's-beta', code: 'TSHIRT-M', label: 'TSHIRT-M · BETA' },
+      { id: 's-other', code: 'CAP', label: 'CAP · ACME' },
+    ],
+  };
+  test('two exact matches → the choice arm with both, never the first', () => {
+    const resolution = resolveSearch('TSHIRT-M', BINS, shared);
+    expect(resolution).toEqual({
+      kind: 'choice',
+      code: 'TSHIRT-M',
+      matches: [
+        { id: 's-acme', code: 'TSHIRT-M', label: 'TSHIRT-M · ACME' },
+        { id: 's-beta', code: 'TSHIRT-M', label: 'TSHIRT-M · BETA' },
+      ],
+    });
+    expect(choicePrompt(resolution as Extract<typeof resolution, { kind: 'choice' }>)).toBe('2 SKUs match TSHIRT-M — pick one.');
+    // Case-insensitively too.
+    expect(resolveSearch('tshirt-m', BINS, shared)).toMatchObject({ kind: 'choice' });
+  });
+  test('picking one applies that SKU, and the summary names its client', () => {
+    const picked = skuResolution({ id: 's-beta', code: 'TSHIRT-M', label: 'TSHIRT-M · BETA' });
+    expect(picked).toEqual({ kind: 'sku', id: 's-beta', code: 'TSHIRT-M', label: 'TSHIRT-M · BETA' });
+    expect(searchSummary(picked)).toBe('Where SKU TSHIRT-M · BETA is — one row per bin.');
+    expect(codeEntryLabel({ id: 'x', code: 'CAP' })).toBe('CAP');
+  });
+  test('a single match resolves at once and carries its label', () => {
+    expect(resolveSearch('CAP', BINS, shared)).toEqual({ kind: 'sku', id: 's-other', code: 'CAP', label: 'CAP · ACME' });
+  });
+  test('one client: no label, the summary is unchanged', () => {
+    expect(searchSummary({ kind: 'sku', id: 's-1', code: 'GLOW-SERUM-30' })).toBe('Where SKU GLOW-SERUM-30 is — one row per bin.');
+  });
+  test('a bin still wins over a shared SKU code (and says so)', () => {
+    const bins: CodeMap = { state: 'ready', data: [{ id: 'b-t', code: 'TSHIRT-M' }] };
+    expect(resolveSearch('TSHIRT-M', bins, shared)).toEqual({ kind: 'bin', id: 'b-t', code: 'TSHIRT-M', alsoSku: true });
   });
 });

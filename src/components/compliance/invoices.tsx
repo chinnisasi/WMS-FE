@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiGenerateInvoice, fetchApiGetOrder } from '@/lib/api/client';
-import type { InvoiceDto, InvoiceEntryDto, SkuResponse } from '@/lib/api/generated';
+import type { ClientDto, InvoiceDto, InvoiceEntryDto, SkuResponse } from '@/lib/api/generated';
+import { skuDisplayLabel } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { isUuid } from '@/lib/cold-chain';
 import {
@@ -20,6 +22,7 @@ import {
   generateOutcome,
   generateReason,
   gstRateLabel,
+  invoiceLineSku,
   invoiceDateLabel,
   invoiceNumberLabel,
   lineQuantityLabel,
@@ -292,6 +295,9 @@ function InvoiceDetail({
   onGenerated: (settled: { invoiceId: string; outcome: Outcome }) => void;
 }) {
   const detail = useInvoiceDetail(invoiceId);
+  // Story 1-1 — each line's SKU through its order line (two clients may
+  // share a code), read once per invoice for the print and the pricing panel.
+  const lineSkus = useOrderLineSkus(detail.state === 'ready' ? detail.data.orderId : null);
   if (detail.state === 'failed') {
     return <ReadFailure word="Invoice unavailable" reason={detail.reason} onRetry={detail.reload} />;
   }
@@ -309,7 +315,7 @@ function InvoiceDetail({
       />
     );
   }
-  const skuByCode = new Map(Object.values(skus ?? {}).map((sku) => [sku.code, sku]));
+  const skuOfLine = (line: { orderLineId: string; skuCode: string }) => invoiceLineSku(line, lineSkus, skus);
   const unpriced = unpricedLineIds(document);
   return (
     <div className="flex flex-col gap-3 py-1">
@@ -319,13 +325,14 @@ function InvoiceDetail({
         </button>
         <span className="text-xs text-(--muted-foreground)">Revision {invoice.revision}</span>
       </div>
-      <PrintableInvoice invoice={invoice} document={document} skuByCode={skuByCode} />
+      <PrintableInvoice invoice={invoice} document={document} skuOfLine={skuOfLine} />
       {canGenerate && canRegenerate(invoice.status) && (
         <PricingPanel
           key={`${invoice.id}-${invoice.revision}`}
           invoice={invoice}
           unpriced={unpriced}
           skus={skus}
+          lineSkus={lineSkus}
           onGenerated={onGenerated}
         />
       )}
@@ -341,11 +348,11 @@ function InvoiceDetail({
 function PrintableInvoice({
   invoice,
   document,
-  skuByCode,
+  skuOfLine,
 }: {
   invoice: InvoiceDto;
   document: InvoiceDocument;
-  skuByCode: ReadonlyMap<string, SkuResponse>;
+  skuOfLine: (line: { orderLineId: string; skuCode: string }) => SkuResponse | null;
 }) {
   const { header, seller, buyer, totals } = document;
   const heading = documentHeading(invoice.status);
@@ -404,7 +411,7 @@ function PrintableInvoice({
           </thead>
           <tbody>
             {document.lines.map((line) => {
-              const sku = skuByCode.get(line.skuCode);
+              const sku = skuOfLine(line) ?? undefined;
               const rates = taxRateLabels(line.gstBps, header.supplyType);
               return (
                 <tr key={line.orderLineId} className="border-b border-(--border)">
@@ -491,14 +498,17 @@ function PricingPanel({
   invoice,
   unpriced,
   skus,
+  lineSkus,
   onGenerated,
 }: {
   invoice: InvoiceDto;
   unpriced: readonly string[];
   skus: Readonly<Record<string, SkuResponse>> | null;
+  lineSkus: Readonly<Record<string, string>> | null;
   onGenerated: (settled: { invoiceId: string; outcome: Outcome }) => void;
 }) {
-  const labels = useOrderLineLabels(invoice.orderId, unpriced.length > 0, skus);
+  const clients = readyClients(useClients());
+  const labels = orderLineLabels(lineSkus, skus, clients);
   const [texts, setTexts] = useState<Record<string, string>>({});
   const [key, setKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -601,19 +611,17 @@ function PricingPanel({
 }
 
 /**
- * orderLineId → `SKU-CODE — name` through the order read and the SKU map,
- * for the pricing labels. Enrichment only: a failed read falls back to the
- * short line id (the panel still works — the ids are the server's).
+ * orderLineId → skuId through the order read (story 1-1: the invoice line's
+ * SKU is matched by its order line, never by its code alone). Enrichment
+ * only: null while loading or after a failed read — the callers fall back to
+ * the frozen code and the short line id (the panel still works — the ids
+ * are the server's).
  */
-function useOrderLineLabels(
-  orderId: string,
-  enabled: boolean,
-  skus: Readonly<Record<string, SkuResponse>> | null,
-): Readonly<Record<string, string>> {
+function useOrderLineSkus(orderId: string | null): Readonly<Record<string, string>> | null {
   const [lines, setLines] = useState<{ orderId: string; skuByLine: Record<string, string> } | null>(null);
   useEffect(() => {
     const session = readSession();
-    if (!enabled || session === null) return;
+    if (orderId === null || session === null) return;
     let cancelled = false;
     (async () => {
       try {
@@ -622,18 +630,26 @@ function useOrderLineLabels(
           setLines({ orderId, skuByLine: Object.fromEntries(order.lines.map((line) => [line.id, line.skuId])) });
         }
       } catch {
-        // Enrichment: the short-id fallback renders instead.
+        // Enrichment: the code / short-id fallbacks render instead.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [orderId, enabled]);
-  if (lines === null || lines.orderId !== orderId) return {};
+  }, [orderId]);
+  return lines === null || lines.orderId !== orderId ? null : lines.skuByLine;
+}
+
+/** orderLineId → `SKU-CODE — name` for the pricing labels (the code named with its client when several). */
+function orderLineLabels(
+  lineSkus: Readonly<Record<string, string>> | null,
+  skus: Readonly<Record<string, SkuResponse>> | null,
+  clients: readonly ClientDto[] | null,
+): Readonly<Record<string, string>> {
   const labels: Record<string, string> = {};
-  for (const [lineId, skuId] of Object.entries(lines.skuByLine)) {
+  for (const [lineId, skuId] of Object.entries(lineSkus ?? {})) {
     const sku = skus?.[skuId];
-    if (sku !== undefined) labels[lineId] = `${sku.code} — ${sku.name}`;
+    if (sku !== undefined) labels[lineId] = `${skuDisplayLabel(sku, clients)} — ${sku.name}`;
   }
   return labels;
 }

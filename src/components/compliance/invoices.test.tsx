@@ -156,6 +156,10 @@ function entry(): Record<string, unknown> {
   };
 }
 
+/** Story 1-1: the tenant's clients and catalog, when a test needs them. */
+let clientsBody: Record<string, unknown>[] | null = null;
+let skusBody: Record<string, unknown>[] | null = null;
+
 function stubRouter(): void {
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
@@ -192,6 +196,12 @@ function stubRouter(): void {
         order: { id: ORDER_ID, lines: [{ id: LINE_UNPRICED, skuId: 'sku-1' }, { id: LINE_PRICED, skuId: 'sku-2' }] },
       });
     }
+    if (method === 'GET' && pathname.endsWith('/clients') && clientsBody !== null) {
+      return json(200, { items: clientsBody });
+    }
+    if (method === 'GET' && pathname.endsWith('/catalog/skus') && skusBody !== null) {
+      return json(200, { items: skusBody, nextCursor: null });
+    }
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       return json(200, {
         items: [
@@ -214,6 +224,8 @@ beforeEach(() => {
   listFails = false;
   listPaged = false;
   documentOverride = undefined;
+  clientsBody = null;
+  skusBody = null;
   awaitingGaps = [{ kind: 'unpriced-line', detail: 'line SPICE-01 has no rate', orderLineId: LINE_UNPRICED }];
   stubRouter();
 });
@@ -538,3 +550,23 @@ describe('Invoices: refusals, keys and recovery (story 8-1)', () => {
   });
 });
 
+describe('Invoices: a line\'s SKU is its order line\'s (story 1-1)', () => {
+  test('two clients share the code: the pricing label names the order line\'s SKU and its client', async () => {
+    clientsBody = [
+      { id: 'c-self', code: 'self', name: 'Priya Spices', status: 'active', systemOwned: true },
+      { id: 'c-beta', code: 'BETA', name: 'Beta Brands', status: 'active', systemOwned: false },
+    ];
+    // Listed first, and with the same code: a code match would name it.
+    skusBody = [
+      { id: 'sku-9', code: 'SPICE-01', name: 'Beta turmeric', uom: 'kg', uomPrecision: 3, uomConversions: [], clientId: 'c-beta' },
+      { id: 'sku-1', code: 'SPICE-01', name: 'Turmeric', uom: 'kg', uomPrecision: 3, uomConversions: [], clientId: 'c-self' },
+      { id: 'sku-2', code: 'SPICE-02', name: 'Chilli', uom: 'each', uomPrecision: 0, uomConversions: [], clientId: 'c-self' },
+    ];
+    view = await mountAs('ops_manager');
+    await open(view.container);
+    const rateInputs = [...view.container.querySelectorAll('input[aria-label^="Rate for"]')] as HTMLInputElement[];
+    expect(rateInputs.map((input) => input.getAttribute('aria-label'))).toEqual(['Rate for SPICE-01 · Priya Spices — Turmeric']);
+    // The order is read once for the whole detail (print and panel).
+    expect(requests.filter((r) => r.pathname.endsWith(`/outbound/orders/${ORDER_ID}`))).toHaveLength(1);
+  });
+});

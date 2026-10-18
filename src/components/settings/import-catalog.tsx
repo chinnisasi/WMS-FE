@@ -6,7 +6,16 @@ import { fetchApiImportCatalog } from '@/lib/api/client';
 import type { CatalogImportErrorResponse, CatalogImportResponse, ClientDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyCatalogChanged } from '@/lib/catalog';
-import { clientLabel, importClientChoice, importClientParam, importReason, importedForLabel, showClients } from '@/lib/clients';
+import {
+  CATALOG_CODES_PER_CLIENT_HELP,
+  KIT_CELL_CLIENT_HELP,
+  clientLabel,
+  importClientChoice,
+  importClientParam,
+  importReason,
+  importedForLabel,
+  showClients,
+} from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -124,15 +133,15 @@ function ImportCatalogCardSessioned() {
         <h2 className="font-medium">Import catalog</h2>
         <div className="text-(--muted-foreground)">
           CSV or XLSX, at most 10,000 rows and 5 MB. Valid rows commit; invalid rows are listed
-          below — never an all-or-nothing rejection. Columns (fixed header):
+          below — never an all-or-nothing rejection. {CATALOG_CODES_PER_CLIENT_HELP} Columns (fixed header):
           sku_code, name, uom, uom_conversions, gst_rate, hsn, batch_tracked, serial_tracked,
           reorder_point, reorder_qty, barcode, product, variant_values, kit_components —
           sku_code, name, uom and gst_rate are required (gst_rate in basis points, 18% = 1800).
           UoM conversions look like <span className="font-mono">box:12;case:144</span>; variant
           values like <span className="font-mono">size=M;colour=Red</span>; a kit composition
-          like <span className="font-mono">pad:2;tape:1</span> (quantities in each component's
-          own base UoM — a kit cell is resolved after every SKU row, so it may name an earlier
-          row of the same file). A row whose kit cell is refused keeps its SKU — compose it
+          like <span className="font-mono">pad:2;tape:1</span> {KIT_CELL_CLIENT_HELP} (quantities in
+          each component&apos;s own base UoM — a kit cell is resolved after every SKU row, so it may name an
+          earlier row of the same file). A row whose kit cell is refused keeps its SKU — compose it
           with the Kit action on the SKUs table below; a fix run cannot retry it.
         </div>
       </div>

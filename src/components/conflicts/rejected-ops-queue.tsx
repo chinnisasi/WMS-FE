@@ -5,13 +5,15 @@ import { useRef, useState, useSyncExternalStore } from 'react';
 import { ApiProblem, fetchApiResolveRejectedOp } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
-  returnReceiveGuidance,
+  rejectedOpGuidance,
   rejectedOpDecisions,
   rejectedOpPayloadBinId,
   rejectedOpSummary,
   rejectedOpsResolveReason,
 } from '@/lib/review-queue';
 import { useOutboundSkus } from '@/lib/use-outbound-orders';
+import { skuDisplayLabel } from '@/lib/clients';
+import { readyClients, useClients } from '@/lib/use-clients';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useUserMap } from '@/lib/use-inbound';
@@ -99,7 +101,12 @@ function RejectedOpsQueueSessioned() {
   // catalog read has landed (the id's short form otherwise).
   const skus = useOutboundSkus();
   const skuMap = skus.state === 'ready' ? skus.data : null;
-  const skuCode = (skuId: string): string | null => skuMap?.[skuId]?.code ?? null;
+  // Story 1-1 — named with its client once the tenant has several.
+  const clients = readyClients(useClients());
+  const skuCode = (skuId: string): string | null => {
+    const sku = skuMap?.[skuId];
+    return sku === undefined ? null : skuDisplayLabel(sku, clients);
+  };
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
   // render) so a /me bootstrap role rewrite re-renders the actions.
   const role = useSyncExternalStore(
@@ -327,7 +334,7 @@ function RejectedOpCard({
             ))}
           </ul>
           {open &&
-            returnReceiveGuidance(entry).map((guidance) => (
+            rejectedOpGuidance(entry).map((guidance) => (
               <div key={guidance} className="text-(--muted-foreground)">
                 {guidance}
               </div>

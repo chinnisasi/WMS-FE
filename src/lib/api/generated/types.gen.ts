@@ -1045,7 +1045,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused';
     /**
      * The replay fate the server refused with
      */
@@ -1121,7 +1121,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -2191,7 +2191,7 @@ export type AsnImportRowErrorDto = {
     /**
      * Why the row (and with it its whole ASN) was refused
      */
-    code: 'unknown-client' | 'unknown-warehouse' | 'wrong-warehouse' | 'unknown-sku' | 'sku-client-mismatch' | 'mixed-client' | 'kit-cannot-hold-stock' | 'duplicate-asn-code' | 'invalid-asn-code' | 'too-many-lines' | 'asn-rows-disagree' | 'duplicate-sku-in-asn' | 'invalid-quantity' | 'quantity-precision' | 'invalid-expected-at' | 'missing-value';
+    code: 'unknown-client' | 'unknown-warehouse' | 'wrong-warehouse' | 'unknown-sku' | 'sku-client-mismatch' | 'mixed-client' | 'client-required' | 'kit-cannot-hold-stock' | 'duplicate-asn-code' | 'invalid-asn-code' | 'too-many-lines' | 'asn-rows-disagree' | 'duplicate-sku-in-asn' | 'invalid-quantity' | 'quantity-precision' | 'invalid-expected-at' | 'missing-value';
     detail: string;
     /**
      * The row’s sku cell as written; null when blank
@@ -3367,6 +3367,10 @@ export type SubmitGoodsReceiptDto = {
      */
     blindReasonCode?: 'unannounced-delivery' | 'po-not-found' | 'other' | null;
     /**
+     * Story 1-1 — the client a BLIND receipt is for (named only beside blindReasonCode; a PO or ASN receipt takes its document's client, and naming one there is a 400). Absent (an older build): the client is derived from the first line's SKU. A line whose SKU belongs to another client is refused per line (`sku-client-mismatch` in rejectedLines) and the rest settles. An unknown client is a 404
+     */
+    clientId?: string;
+    /**
      * Device time of the receipt (ISO-8601 UTC, Z-suffixed)
      */
     occurredAt: string;
@@ -3420,9 +3424,9 @@ export type RejectedGrnLineDto = {
     skuId: string;
     qty: number;
     /**
-     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients
+     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only)
      */
-    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found';
+    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found' | 'sku-client-mismatch';
     /**
      * Human-readable reason naming the line state
      */
@@ -3464,6 +3468,10 @@ export type GoodsReceiptDto = {
      * Story 21-6 — the ASN's code; present only on an ASN receipt
      */
     asnCode?: string;
+    /**
+     * Story 1-1 — the client whose goods the receipt booked (the PO's or ASN's client, or a blind receipt's chosen or derived client). Absent on a receipt replayed from before 1-1
+     */
+    clientId?: string;
     blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other' | null;
     /**
      * recorded (the v1 terminal state)
@@ -3485,6 +3493,10 @@ export type GoodsReceiptDto = {
      * Story 21-6 — present only when some lines of a PO/ASN receipt settled unmatched (booked in full, crediting no document line)
      */
     unmatchedLines?: Array<UnmatchedGrnLineDto>;
+    /**
+     * Story 1-1 — the op id of the review row raised for the `sku-client-mismatch` lines (Conflicts & Reviews, type `grn.lines-refused`, Discard only); present only when one was raised
+     */
+    reviewOpId?: string;
 };
 
 export type GoodsReceiptResponse = {
@@ -3521,11 +3533,19 @@ export type CatalogSnapshotSkuDto = {
      * Story 12.8 (UX-DR29): the SKU's storage class (defaults to `ambient`). It rides the snapshot beside the bin arm's class so the device's offline conformance mirror can refuse a non-conforming placement or draw in the Rejected banner — a refusal only the server knew about would queue in a dead zone and come back hours later as a rejection the operator can no longer act on.
      */
     storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    /**
+     * Story 1-1: the client the SKU belongs to. Code and barcode are unique per (tenant, client), so one barcode may name several SKUs; the device resolves a scan through the work's own SKUs first, then the document's client (`clients` names each)
+     */
+    clientId: string;
 };
 
 export type CatalogSnapshotPoDto = {
     id: string;
     code: string;
+    /**
+     * Story 1-1 (additive): the PO's client — the device resolves an unmatched scan within it
+     */
+    clientId: string;
     warehouseId: string;
     vendorId: string;
     /**
@@ -3831,7 +3851,27 @@ export type CatalogOpenReturnDto = {
      * The order's channel reference; null for a manual order
      */
     orderReference: string | null;
+    /**
+     * Story 1-1 (additive): the order's client — the device resolves a typed code within it after the RMA's own lines
+     */
+    clientId: string;
     lines: Array<CatalogOpenReturnLineDto>;
+};
+
+export type CatalogSnapshotClientDto = {
+    id: string;
+    /**
+     * The client code (the tenant's own client's is `self`)
+     */
+    code: string;
+    /**
+     * The display name (the tenant's own client carries the tenant's name)
+     */
+    name: string;
+    /**
+     * False when suspended or departed — a blind receipt picks only an active client
+     */
+    active: boolean;
 };
 
 export type CatalogSnapshotResponse = {
@@ -3881,6 +3921,10 @@ export type CatalogSnapshotResponse = {
      * Story 13-2 (additive): the warehouse's return authorizations that can still receive (open or partially received) — the handheld receives returned units against them offline, grading each unit; units not on an authorization are queued for review, never refused on the device
      */
     openReturns: Array<CatalogOpenReturnDto>;
+    /**
+     * Story 1-1 (additive): every client referenced by a SKU or an open document of the snapshot — the names the device shows when a scan belongs to another client, and the blind receipt's client picker. A snapshot WITHOUT this field (an older server) puts the device in legacy mode: no picker, no clientId sent
+     */
+    clients: Array<CatalogSnapshotClientDto>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -3900,6 +3944,10 @@ export type GoodsReceiptEntryDto = {
      * Story 21-6 — the ASN's code; present only on an ASN receipt
      */
     asnCode?: string;
+    /**
+     * Story 1-1 — the client whose goods the receipt booked. Absent on an older receipt the 0076 backfill could not attribute (its lines named several clients, or none)
+     */
+    clientId?: string;
     /**
      * Set only on a blind receipt
      */
@@ -13621,7 +13669,7 @@ export type ReceivingControllerSubmitGoodsReceiptData = {
 
 export type ReceivingControllerSubmitGoodsReceiptErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or an invalid body (validation-failed)
+     * Missing or malformed Idempotency-Key, or an invalid body (validation-failed) — story 1-1: a clientId beside a poId or an asnId
      */
     400: ProblemDetailsDto;
     /**
@@ -13633,7 +13681,7 @@ export type ReceivingControllerSubmitGoodsReceiptErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Warehouse, purchase order, advance shipment notice, or a line's SKU does not exist in this tenant (not-found)
+     * Warehouse, purchase order, advance shipment notice, a blind receipt's client (story 1-1), or a line's SKU does not exist in this tenant (not-found)
      */
     404: ProblemDetailsDto;
     /**
