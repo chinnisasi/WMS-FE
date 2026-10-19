@@ -143,10 +143,7 @@ function PartnersCardSessioned() {
     </button>
   );
 
-  // The links panel follows the list: after a link mutation the partner
-  // shown is the one the latest page carries.
   const rows = partners.state === 'ready' ? partners.data.items : [];
-  const current = (partner: PartnerDto): PartnerDto => rows.find((row) => row.id === partner.id) ?? partner;
 
   const columns: readonly DataTableColumn<PartnerDto>[] = [
     { key: 'code', header: 'Code', render: (partner) => <span className="font-mono">{partner.code}</span> },
@@ -240,11 +237,14 @@ function PartnersCardSessioned() {
       {canManage && panel?.kind === 'links' ? (
         <PartnerLinksPanel
           key={panel.partner.id}
-          partner={current(panel.partner)}
+          partner={panel.partner}
           clients={clients}
           onClose={() => show(null)}
           onDirtyChange={onDirtyChange}
-          onChanged={(word, reason) => {
+          onChanged={(updated, word, reason) => {
+            // Keep the partner the server returned: the list reloads from its
+            // first page, so a partner from a later page would show stale links.
+            setPanel({ kind: 'links', partner: updated });
             setOutcome({ tone: 'accepted', word, reason });
             notifyPartnersChanged();
           }}
@@ -583,7 +583,7 @@ function PartnerLinksPanel({
   clients: readonly ClientDto[] | null;
   onClose: () => void;
   onDirtyChange: (dirty: boolean) => void;
-  onChanged: (word: string, reason: string) => void;
+  onChanged: (partner: PartnerDto, word: string, reason: string) => void;
   onRejected: (word: string, reason: string) => void;
 }) {
   const linkRoles = LINK_ROLES.filter((role) => partner.roles.includes(role));
@@ -608,6 +608,7 @@ function PartnerLinksPanel({
   async function add(event: React.FormEvent) {
     event.preventDefault();
     if (inFlight.current) return;
+    setProblem(null);
     if (clientId === '' || role === '') {
       setProblem('Pick a client and a role.');
       return;
@@ -624,7 +625,7 @@ function PartnerLinksPanel({
     setProblem(null);
     keyRef.current ??= ulid();
     try {
-      await fetchApiCreatePartnerLink(
+      const updated = await fetchApiCreatePartnerLink(
         session.tenant.id,
         partner.id,
         {
@@ -641,7 +642,7 @@ function PartnerLinksPanel({
       setClientId('');
       setClientCode('');
       setIsDefault(false);
-      onChanged(`${partner.code} linked to ${label}`, `As a ${PARTNER_ROLE_LABEL[role].toLowerCase()}${role === 'vendor' && isDefault ? ', the client’s default vendor' : ''}.`);
+      onChanged(updated, `${partner.code} linked to ${label}`, `As a ${PARTNER_ROLE_LABEL[role].toLowerCase()}${role === 'vendor' && isDefault ? ', the client’s default vendor' : ''}.`);
     } catch (error) {
       onRejected('Not linked', partnerReason(error, 'linked'));
     } finally {
@@ -656,10 +657,11 @@ function PartnerLinksPanel({
     if (session === null) return;
     rowInFlight.current.add(link.id);
     setRowBusy(new Set(rowInFlight.current));
+    setProblem(null);
     try {
-      await fetchApiUpdatePartnerLink(session.tenant.id, partner.id, link.id, body, ulid());
+      const updated = await fetchApiUpdatePartnerLink(session.tenant.id, partner.id, link.id, body, ulid());
       setCodeEdit(null);
-      onChanged(word, `${linkClientLabel(link.clientId, clients)} · ${PARTNER_ROLE_LABEL[link.role]}`);
+      onChanged(updated, word, `${linkClientLabel(link.clientId, clients)} · ${PARTNER_ROLE_LABEL[link.role]}`);
     } catch (error) {
       onRejected('Link not changed', partnerReason(error, 'linked'));
     } finally {
@@ -692,7 +694,10 @@ function PartnerLinksPanel({
                       className={`${inputClass} w-40`}
                       value={codeEdit.text}
                       maxLength={64}
-                      onChange={(e) => setCodeEdit({ linkId: link.id, text: e.target.value })}
+                      onChange={(e) => {
+                        setProblem(null);
+                        setCodeEdit({ linkId: link.id, text: e.target.value });
+                      }}
                     />
                     <button
                       type="button"
@@ -709,12 +714,23 @@ function PartnerLinksPanel({
                     >
                       Save code
                     </button>
-                    <button type="button" className={rowButtonClass} onClick={() => setCodeEdit(null)}>
+                    <button
+                      type="button"
+                      className={rowButtonClass}
+                      onClick={() => {
+                        setProblem(null);
+                        setCodeEdit(null);
+                      }}
+                    >
                       Cancel
                     </button>
                   </>
                 ) : (
-                  <button type="button" disabled={busyRow} className={rowButtonClass} onClick={() => setCodeEdit({ linkId: link.id, text: link.clientCode ?? '' })}>
+                  <button type="button" disabled={busyRow} className={rowButtonClass} onClick={() => {
+                      setProblem(null);
+                      setCodeEdit({ linkId: link.id, text: link.clientCode ?? '' });
+                    }}
+                  >
                     Edit code
                   </button>
                 )}

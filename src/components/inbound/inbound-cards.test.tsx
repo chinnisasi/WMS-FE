@@ -34,6 +34,16 @@ let clients: Record<string, unknown>[] = [SELF];
 /** Story 1-2b — every request the surface sent (method, path + query, body, key). */
 let requests: { method: string; url: URL; body: unknown; key: string | null }[] = [];
 let qcHolds: Record<string, unknown>[] = [];
+function purchaseOrder(id: string, code: string, vendorSnapshot: Record<string, unknown> | null): Record<string, unknown> {
+  return {
+    id, tenantId: T, warehouseId: WH, vendorId: 'v-1', code, status: 'open', carriedFromPoId: null, clientId: 'c-self',
+    vendorSnapshot, createdAt: '2026-10-18T05:00:00.000Z', updatedAt: '2026-10-18T05:00:00.000Z',
+  };
+}
+const purchaseOrders: Record<string, unknown>[] = [
+  purchaseOrder('po-1', 'PO-0001', { v: 1, code: 'V-1', name: 'Frozen Vendor Name', legalName: null, gstin: null, stateCode: null, registeredAddress: null, dispatchAddress: null }),
+  purchaseOrder('po-2', 'PO-0002', null),
+];
 let role: 'owner' | 'ops_manager' | 'operator' = 'owner';
 const GRN_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000b7';
 
@@ -137,6 +147,16 @@ function stubRouter(): void {
       return json(200, { items: [{ id: WH, code: 'BLR', name: 'Bengaluru DC' }], nextCursor: null });
     }
     if (pathname === `${base}/clients`) return json(200, { items: clients });
+    // Story 1-3 — the PO list (headers) and detail (lines), and a partner list
+    // whose LIVE name differs from the PO's frozen vendor snapshot.
+    if (pathname === `${base}/warehouses/${WH}/inbound/purchase-orders`) return json(200, { items: purchaseOrders, nextCursor: null });
+    if (pathname.startsWith(`${base}/inbound/purchase-orders/`)) {
+      const po = purchaseOrders.find((row) => pathname.endsWith(`/${row['id'] as string}`));
+      return po === undefined ? json(404, { code: 'not-found', title: 'x', status: 404 }) : json(200, { purchaseOrder: { ...po, lines: [] } });
+    }
+    if (pathname === `${base}/partners`) {
+      return json(200, { items: [{ id: 'v-1', code: 'V-1', name: 'Live Partner Name', roles: ['vendor'], status: 'active', links: [] }], nextCursor: null });
+    }
     if (pathname === `${base}/receiving/goods-receipts`) {
       return json(200, {
         items: [grn('g-1', 'GRN-0001', 'c-acme'), grn('g-2', 'GRN-0002', 'c-self'), grn('g-3', 'GRN-0003')],
@@ -192,6 +212,20 @@ const panel = () => view!.container.querySelector('[role="tabpanel"]') as HTMLEl
 const headers = () => [...panel().querySelectorAll('thead th')].map((th) => th.textContent ?? '');
 const rows = () =>
   [...panel().querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent ?? ''));
+
+describe('Purchase orders — the vendor as the PO froze it (story 1-3)', () => {
+  test('the Vendor column reads vendorSnapshot.name, never a differing live partner name; "—" without a snapshot', async () => {
+    view = render(<InboundCards initialTab="pos" />);
+    await settle();
+    const vendorAt = headers().indexOf('Vendor');
+    expect(vendorAt).toBeGreaterThanOrEqual(0);
+    expect(rows().map((cells) => [cells[0], cells[vendorAt]])).toEqual([
+      ['PO-0001', 'Frozen Vendor Name'],
+      ['PO-0002', '—'],
+    ]);
+    expect(panel().textContent).not.toContain('Live Partner Name');
+  });
+});
 
 describe('Goods receipts — the receipt\'s client (story 1-1)', () => {
   test('one client: no Client column', async () => {

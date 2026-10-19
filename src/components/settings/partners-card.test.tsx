@@ -76,6 +76,8 @@ interface Recorded {
 let requests: Recorded[] = [];
 let partnerRows: Record<string, unknown>[] = [];
 let refusal: { status: number; code: string; detail: string } | null = null;
+/** When set, the list read stops carrying p-1 (as if it sat on a later page). */
+let hideP1 = false;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -94,7 +96,7 @@ function stubRouter(): void {
     }
     requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key') });
     if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: [SELF, ACME] });
-    if (method === 'GET' && pathname.endsWith('/partners')) return json(200, { items: partnerRows, nextCursor: null });
+    if (method === 'GET' && pathname.endsWith('/partners')) return json(200, { items: hideP1 ? partnerRows.filter((row) => row.id !== 'p-1') : partnerRows, nextCursor: null });
     if (refusal !== null && method !== 'GET') {
       const r = refusal;
       refusal = null;
@@ -114,6 +116,15 @@ function stubRouter(): void {
       );
       return json(201, { partner: partnerRows[0] });
     }
+    if (method === 'PATCH' && pathname.includes('/links/')) {
+      const sent = body as { active?: boolean };
+      partnerRows = partnerRows.map((row) =>
+        row.id === 'p-1'
+          ? { ...row, links: (row.links as { active: boolean }[]).map((l) => ({ ...l, ...(sent.active === undefined ? {} : { active: sent.active, isDefault: false }) })) }
+          : row,
+      );
+      return json(200, { partner: partnerRows[0] });
+    }
     if (method === 'PATCH' && pathname.endsWith('/status')) {
       const sent = body as { status: string; reason?: string };
       partnerRows = partnerRows.map((row) => (row.id === 'p-1' ? { ...row, status: sent.status, inactiveReason: sent.reason ?? null } : row));
@@ -129,6 +140,7 @@ beforeEach(() => {
   requests = [];
   partnerRows = [partner()];
   refusal = null;
+  hideP1 = false;
   stubRouter();
 });
 
@@ -263,6 +275,42 @@ describe('PartnersCard', () => {
     expect(posts[0]!.body).toEqual({ clientId: 'c-acme', role: 'vendor', isDefault: true });
     expect(posts[0]!.key).not.toBeNull();
     expect(view.container.textContent).toContain('ACME (Vendor, default)');
+  });
+
+  test('code review — the links panel shows the partner the server returned, even when the reloaded list page no longer carries it', async () => {
+    writeSession(session('owner'));
+    view = render(<PartnersCard />);
+    await settle();
+    await click(buttons(view.container, 'Links')[0]!);
+    hideP1 = true; // the reload after the link lands on a page without p-1
+    const linkForm = view.container.querySelector('form[aria-label="Link V-1 to a client"]')!;
+    setValue(inputLabelled(linkForm, 'Client') as unknown as HTMLSelectElement, 'c-acme');
+    await act(async () => {
+      (linkForm as HTMLFormElement).requestSubmit();
+    });
+    await settle();
+    const links = view.container.querySelector('[aria-label="Client links of V-1"] ul[aria-label="Links"]')!;
+    expect(links.querySelectorAll('li')).toHaveLength(2);
+    expect(links.textContent).toContain('ACME');
+  });
+
+  test('code review — a client-code problem clears on the next link action', async () => {
+    writeSession(session('owner'));
+    view = render(<PartnersCard />);
+    await settle();
+    await click(buttons(view.container, 'Links')[0]!);
+    await click(buttons(view.container, 'Edit code')[0]!);
+    setValue(view.container.querySelector('input[aria-label="Client\'s code"]') as HTMLInputElement, 'X'.repeat(65));
+    await click(buttons(view.container, 'Save code')[0]!);
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('at most 64');
+    await click(buttons(view.container, 'Cancel')[0]!);
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    await click(buttons(view.container, 'Edit code')[0]!);
+    setValue(view.container.querySelector('input[aria-label="Client\'s code"]') as HTMLInputElement, 'X'.repeat(65));
+    await click(buttons(view.container, 'Save code')[0]!);
+    expect(view.container.querySelector('[role="alert"]')).not.toBeNull();
+    await click(buttons(view.container, 'Switch off')[0]!);
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
   });
 
   test('Deactivate PATCHes the status path with the reason', async () => {
