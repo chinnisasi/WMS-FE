@@ -5,7 +5,7 @@ import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { fetchApiPlaceQcHold, fetchApiReleaseQcHold } from '@/lib/api/client';
+import { fetchApiPlaceQcHold, fetchApiReleaseQcHold, fetchApiReleaseReceiptQcHolds } from '@/lib/api/client';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import {
   useBinCodeMap,
@@ -18,13 +18,20 @@ import {
   useVendorMap,
   type PurchaseOrderHeader,
 } from '@/lib/use-inbound';
-import { openQtyLabel, qcReason } from '@/lib/over-receipt';
+import {
+  openQtyLabel,
+  qcGrnFilterLabel,
+  qcHoldKindLabel,
+  qcReason,
+  releaseReceiptOutcome,
+  releaseReceiptReason,
+} from '@/lib/over-receipt';
 import { quantityLabel } from '@/lib/format-quantity';
 import type {
   GoodsReceiptEntryDto,
   PurchaseOrderLineDto,
   PutawayTaskDto,
-  QcHoldDto,
+  QcHoldEntryDto,
   SkuResponse,
 } from '@/lib/api/generated';
 import { roleHasCapability } from '@/lib/users';
@@ -41,7 +48,14 @@ import {
   type PutawayDrill,
 } from '@/lib/drill';
 import { usePutawayTasks } from '@/lib/use-putaway';
-import { INBOUND_PAGE_TABS, inboundTabHref, initialInboundTab, tabCountLabel, type InboundTab } from '@/lib/inbound-tabs';
+import {
+  INBOUND_PAGE_TABS,
+  inboundQcHoldsHref,
+  inboundTabHref,
+  initialInboundTab,
+  tabCountLabel,
+  type InboundTab,
+} from '@/lib/inbound-tabs';
 import { useInboundTabCounts, type InboundTabCounts } from '@/lib/use-inbound-tab-counts';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
@@ -74,7 +88,8 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
 export function InboundCards({
   drill = null,
   initialTab = null,
-}: { drill?: ParsedDrill; initialTab?: InboundTab | null } = {}) {
+  qcGrnId = null,
+}: { drill?: ParsedDrill; initialTab?: InboundTab | null; qcGrnId?: string | null } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -90,10 +105,18 @@ export function InboundCards({
       </div>
     );
   }
-  return <InboundCardsSessioned drill={drill} initialTab={initialTab} />;
+  return <InboundCardsSessioned drill={drill} initialTab={initialTab} qcGrnId={qcGrnId} />;
 }
 
-function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; initialTab: InboundTab | null }) {
+function InboundCardsSessioned({
+  drill,
+  initialTab,
+  qcGrnId,
+}: {
+  drill: ParsedDrill;
+  initialTab: InboundTab | null;
+  qcGrnId: string | null;
+}) {
   const grnsDrill = drillFor(drill, 'grns');
   const putawayDrill = drillFor(drill, 'putaway');
   // inbound-tabs: one card at a time. A drill opens on its own list's tab;
@@ -177,7 +200,9 @@ function InboundCardsSessioned({ drill, initialTab }: { drill: ParsedDrill; init
               clearHref={inboundTabHref('putaway')}
             />
           ))}
-        {tab === 'qc-holds' && <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
+        {tab === 'qc-holds' && (
+          <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} initialGrnId={qcGrnId} />
+        )}
       </PageTabPanel>
     </div>
   );
@@ -312,9 +337,9 @@ function PurchaseOrdersCard({
   );
 }
 
-/** One PO line: `SKU 2.500 kg ord · 1.000 kg rec · 1.500 kg open` (negative open = over-received). */
+/** One PO line: `SKU 2.500 kg ord · 1.000 kg rec · 1.500 kg open` (received past ordered = over-received). */
 function PoLineRow({ line, sku }: { line: PurchaseOrderLineDto; sku: SkuResponse | undefined }) {
-  const open = openQtyLabel(line.openQty, sku);
+  const open = openQtyLabel({ openQty: line.openQty, receivedQty: line.receivedQty, expected: line.orderedQty }, sku);
   const qty = (value: number) => quantityLabel(value, sku ?? null);
   return (
     <div className="flex flex-wrap items-center gap-x-2 text-xs">
@@ -556,15 +581,30 @@ type HoldOutcome = { tone: 'accepted' | 'rejected'; word: string; reason: string
 function QcHoldsCard({
   warehouseId,
   warehouseLabel,
+  initialGrnId = null,
 }: {
   warehouseId: string | null;
   warehouseLabel: string | null;
+  /** Story 1-2b — open narrowed to one receipt's holds (the `qc-receipt` notification's link). */
+  initialGrnId?: string | null;
 }) {
   const [tab, setTab] = useState<HoldTab>('open');
-  const holds = useQcHolds(warehouseId, tab);
+  // Story 1-2b — the GRN filter: one receipt's holds (its code once a row
+  // or a click has named it). The list query takes `grnId`.
+  const [grnFilter, setGrnFilter] = useState<{ grnId: string; grnCode: string | null } | null>(
+    initialGrnId === null ? null : { grnId: initialGrnId, grnCode: null },
+  );
+  const holds = useQcHolds(warehouseId, tab, grnFilter?.grnId ?? null);
   const skus = useSkuMap();
   const users = useUserMap();
   const bins = useBinCodeMap(warehouseId);
+  // Story 1-2b — a receipt hold names its client (the self client reads as the company).
+  const clients = readyClients(useClients());
+  const tenantName = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.name ?? null,
+    () => null,
+  );
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
   // render) so a /me bootstrap role rewrite re-renders the actions.
   const role = useSyncExternalStore(
@@ -579,10 +619,11 @@ function QcHoldsCard({
   // A pre-render double-click fires both handlers before the disabled state
   // renders — this synchronous re-entry guard makes the second click a
   // no-op instead of a NEW command whose fresh Idempotency-Key would 409
-  // right after the first release succeeded.
+  // right after the first release succeeded. Keyed by hold id, and (story
+  // 1-2b) by `grn:<id>` for a Release receipt.
   const releaseInFlight = useRef<Set<string>>(new Set());
 
-  async function release(hold: QcHoldDto) {
+  async function release(hold: QcHoldEntryDto) {
     const session = readSession();
     if (session === null || releaseInFlight.current.has(hold.id)) return;
     releaseInFlight.current.add(hold.id);
@@ -607,13 +648,93 @@ function QcHoldsCard({
     }
   }
 
-  const columns: readonly DataTableColumn<QcHoldDto>[] = [
+  /** Story 1-2b — every open receipt hold of one GRN, in one command (per-click key). */
+  async function releaseReceipt(grnId: string) {
+    const session = readSession();
+    const guard = `grn:${grnId}`;
+    if (session === null || releaseInFlight.current.has(guard)) return;
+    releaseInFlight.current.add(guard);
+    setReleasingId(guard);
+    setOutcome(null);
+    try {
+      const released = await fetchApiReleaseReceiptQcHolds(session.tenant.id, grnId, ulid());
+      setOutcome({ tone: 'accepted', ...releaseReceiptOutcome(released) });
+      holds?.reload();
+      notifyInboundChanged();
+    } catch (error) {
+      setOutcome({ tone: 'rejected', word: 'Receipt not released', reason: releaseReceiptReason(error) });
+    } finally {
+      releaseInFlight.current.delete(guard);
+      setReleasingId(null);
+    }
+  }
+
+  const filterTo = (grnId: string, grnCode: string | null) => {
+    setGrnFilter({ grnId, grnCode });
+    setOutcome(null);
+  };
+  const clearFilter = () => {
+    setGrnFilter(null);
+    setOutcome(null);
+    // The notification's `?grnId=` must not re-narrow the list on a reload.
+    if (typeof window !== 'undefined' && window.location.search.includes('grnId=')) {
+      window.history.replaceState(null, '', inboundQcHoldsHref());
+    }
+  };
+  // The filter's code: the click's, else the first row's (a link names only the id).
+  const filterCode = grnFilter?.grnCode ?? holds?.items.find((hold) => hold.grnCode !== null)?.grnCode ?? null;
+
+  const columns: readonly DataTableColumn<QcHoldEntryDto>[] = [
+    {
+      key: 'kind',
+      header: 'Kind',
+      render: (hold) => <span className="text-xs">{qcHoldKindLabel(hold.kind)}</span>,
+    },
+    {
+      key: 'grn',
+      header: 'GRN',
+      render: (hold) =>
+        hold.grnId === null ? (
+          '—'
+        ) : grnFilter !== null ? (
+          <span className="font-mono text-xs">{hold.grnCode ?? '—'}</span>
+        ) : (
+          <button
+            type="button"
+            aria-label={`Show the QC holds of ${hold.grnCode ?? 'this receipt'}`}
+            onClick={() => filterTo(hold.grnId!, hold.grnCode)}
+            className="font-mono text-xs text-(--primary) underline underline-offset-2"
+          >
+            {hold.grnCode ?? '—'}
+          </button>
+        ),
+    },
     {
       key: 'sku',
       header: 'SKU',
       render: (hold) => (
         <span className="font-mono text-xs">{skus?.[hold.skuId]?.code ?? '(unknown SKU)'}</span>
       ),
+    },
+    ...(showClients(clients)
+      ? [
+          {
+            key: 'client',
+            header: 'Client',
+            render: (hold: QcHoldEntryDto) => clientCell(hold.clientId, clients ?? [], tenantName),
+          } satisfies DataTableColumn<QcHoldEntryDto>,
+        ]
+      : []),
+    {
+      key: 'batch',
+      header: 'Batch',
+      render: (hold) => <span className="font-mono text-xs">{hold.batchCode ?? '—'}</span>,
+    },
+    {
+      key: 'heldQty',
+      header: 'Held',
+      numeric: true,
+      render: (hold) => quantityLabel(hold.heldQty, skus?.[hold.skuId] ?? null),
     },
     {
       key: 'bin',
@@ -646,16 +767,31 @@ function QcHoldsCard({
             )}
           </span>
         ) : canManage ? (
-          <button
-            type="button"
-            disabled={releasingId === hold.id}
-            onClick={() => {
-              void release(hold);
-            }}
-            className="rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60"
-          >
-            Release
-          </button>
+          <div className="flex flex-wrap gap-1">
+            <button
+              type="button"
+              disabled={releasingId === hold.id}
+              onClick={() => {
+                void release(hold);
+              }}
+              className="rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60"
+            >
+              Release
+            </button>
+            {hold.kind === 'receipt' && hold.grnId !== null && (
+              <button
+                type="button"
+                aria-label={`Release receipt ${hold.grnCode ?? ''}`.trim()}
+                disabled={releasingId === `grn:${hold.grnId}`}
+                onClick={() => {
+                  void releaseReceipt(hold.grnId!);
+                }}
+                className="rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60"
+              >
+                Release receipt
+              </button>
+            )}
+          </div>
         ) : (
           <span className="rounded-sm bg-(--muted) px-1.5 py-0.5 text-xs">open</span>
         ),
@@ -669,7 +805,7 @@ function QcHoldsCard({
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its QC holds.'
-            : `${warehouseLabel} — a hold quarantines a (sku, bin) scope: the stock relocates into the warehouse's system QC-hold bin and drops out of ATP until released.`}
+            : `${warehouseLabel} — a hold quarantines a (sku, bin) scope: the stock relocates into the warehouse's system QC-hold bin and drops out of ATP until released. A receipt of a client with QC on receipt holds each booked line on its own; Release receipt releases all of one receipt's.`}
         </div>
       </div>
 
@@ -690,9 +826,21 @@ function QcHoldsCard({
         ))}
       </div>
 
-      {canManage && <PlaceQcHoldForm warehouseId={warehouseId} onPlaced={() => holds?.reload()} />}
+      {grnFilter !== null && (
+        <div role="group" aria-label="GRN filter" className="flex flex-wrap items-center gap-2 text-xs">
+          <span>{qcGrnFilterLabel(filterCode, grnFilter.grnId)}</span>
+          <button type="button" onClick={clearFilter} className="rounded-sm border border-(--border) px-2 py-0.5 hover:bg-(--muted)">
+            Show all holds
+          </button>
+        </div>
+      )}
 
-      <DataTable<QcHoldDto>
+      {canManage && grnFilter === null && <PlaceQcHoldForm warehouseId={warehouseId} onPlaced={() => holds?.reload()} />}
+
+      <DataTable<QcHoldEntryDto>
+        // The filter is part of the table's identity: its Prev/Next stack
+        // belongs to one query (guide §1.11).
+        key={grnFilter?.grnId ?? 'all'}
         columns={columns}
         rows={holds?.items ?? []}
         nextCursor={holds?.nextCursor ?? null}
@@ -736,8 +884,11 @@ function PlaceQcHoldForm({
   // Offerable scopes only: nothing already under an open hold (a guaranteed
   // 409) and nothing sitting in the system QC-hold bin (a guaranteed 400) —
   // until the bin codes load, nothing is offered rather than guessing.
+  // Story 1-2b — only a MANUAL open hold blocks its scope (the one-open
+  // index is `kind = 'manual'`); a receipt hold on the same (sku, Receiving)
+  // scope leaves it holdable.
   const heldScopes = new Set(
-    (openHolds?.items ?? []).map((hold) => `${hold.skuId}:${hold.binId}`),
+    (openHolds?.items ?? []).filter((hold) => hold.kind !== 'receipt').map((hold) => `${hold.skuId}:${hold.binId}`),
   );
   const offerable =
     scopesData === null || bins === null

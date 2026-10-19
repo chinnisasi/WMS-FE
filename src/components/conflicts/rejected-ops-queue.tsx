@@ -1,10 +1,14 @@
 'use client';
 
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useId, useRef, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiResolveRejectedOp } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
+  MAX_RESOLVE_NOTE_LENGTH,
+  acceptAnywayNote,
+  applyNeedsNote,
+  rejectedOpResolvedOutcome,
   rejectedOpGuidance,
   rejectedOpDecisions,
   rejectedOpPayloadBinId,
@@ -140,9 +144,12 @@ function RejectedOpsQueueSessioned() {
   // checked in both arms).
   const resolveInFlight = useRef<Set<string>>(new Set());
 
-  async function resolve(entry: RejectedOpEntry, decision: ResolutionDecision) {
+  async function resolve(entry: RejectedOpEntry, decision: ResolutionDecision, note?: string) {
     const session = readSession();
     if (session === null || resolveInFlight.current.has(entry.id)) return;
+    // Story 1-2b — Accept anyway (Apply on a shelf-life row) needs its note;
+    // the button is disabled without one (the server's 400 is the backstop).
+    if (decision === 'apply' && applyNeedsNote(entry) && (note === undefined || note === '')) return;
     // The recount arm's payload-bin rule is knowable without a server row:
     // a payload that names no bin is refused client-side (the server's 400
     // stays a backstop, never the UI's plan). The helper reads `binId ??
@@ -153,19 +160,13 @@ function RejectedOpsQueueSessioned() {
     setResolving((prev) => new Set(prev).add(entry.id));
     showOutcome(null);
     try {
-      const resolved = await fetchApiResolveRejectedOp(session.tenant.id, entry.id, { decision }, ulid());
-      const status = resolved.rejectedOp.status;
-      showOutcome({
-        tone: 'accepted',
-        word:
-          status === 'applied' ? 'Op applied' : status === 'recounted' ? 'Recount opened' : 'Discarded',
-        reason:
-          status === 'applied'
-            ? 'The op re-executed against the live guards and landed — the same ledger truth every other path writes.'
-            : status === 'recounted'
-              ? 'A fresh count task is the corrected basis — the bin’s history, not a force-write, answers the op.'
-              : 'The op is retired with a discard marker — its refusal stays readable in the row.',
-      });
+      const resolved = await fetchApiResolveRejectedOp(
+        session.tenant.id,
+        entry.id,
+        note === undefined ? { decision } : { decision, note },
+        ulid(),
+      );
+      showOutcome({ tone: 'accepted', ...rejectedOpResolvedOutcome(entry, resolved.rejectedOp.status, resolved.outcome) });
       queue.reload();
     } catch (error) {
       // A 409 `rejected-op-resolved` means another reviewer moved first —
@@ -175,7 +176,14 @@ function RejectedOpsQueueSessioned() {
       const alreadyResolved = error instanceof ApiProblem && error.code === 'rejected-op-resolved';
       showOutcome({
         tone: 'rejected',
-        word: decision === 'apply' ? 'Not applied' : decision === 'recount' ? 'No recount opened' : 'Not discarded',
+        word:
+          decision === 'apply'
+            ? applyNeedsNote(entry)
+              ? 'Not accepted'
+              : 'Not applied'
+            : decision === 'recount'
+              ? 'No recount opened'
+              : 'Not discarded',
         reason: rejectedOpsResolveReason(error),
       });
       if (alreadyResolved) queue.reload();
@@ -296,8 +304,12 @@ function RejectedOpCard({
   canDecide: boolean;
   skuCode: (skuId: string) => string | null;
   resolving: boolean;
-  onResolve: (entry: RejectedOpEntry, decision: ResolutionDecision) => void;
+  onResolve: (entry: RejectedOpEntry, decision: ResolutionDecision, note?: string) => void;
 }) {
+  // Story 1-2b — the Accept-anyway note (a shelf-life row only); it dies with the card.
+  const [note, setNote] = useState('');
+  const noteId = useId();
+  const acceptNote = acceptAnywayNote(note);
   // The expanded panel mounts the payload list — and the ledger walk when
   // the payload names a bin; its selection state dies with the card.
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -408,7 +420,34 @@ function RejectedOpCard({
                   {resolving ? 'Resolving…' : 'Open a recount'}
                 </button>
               )}
-              {decisions.includes('apply') && (
+              {decisions.includes('apply') && applyNeedsNote(entry) && (
+                <div className="flex w-full flex-col gap-1">
+                  <label htmlFor={noteId} className="text-xs font-medium">
+                    Why accept these short-dated goods? (required)
+                  </label>
+                  <textarea
+                    id={noteId}
+                    value={note}
+                    maxLength={MAX_RESOLVE_NOTE_LENGTH}
+                    rows={2}
+                    onChange={(event) => setNote(event.target.value)}
+                    className="w-full rounded-sm border border-(--input) bg-(--background) px-2 py-1 text-xs"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={resolving || acceptNote.note === null}
+                      onClick={() => {
+                        if (acceptNote.note !== null) onResolve(entry, 'apply', acceptNote.note);
+                      }}
+                      className="rounded-sm bg-(--primary) px-3 py-1 text-xs font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
+                    >
+                      {resolving ? 'Resolving…' : 'Accept anyway'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {decisions.includes('apply') && !applyNeedsNote(entry) && (
               <button
                 type="button"
                 disabled={resolving}

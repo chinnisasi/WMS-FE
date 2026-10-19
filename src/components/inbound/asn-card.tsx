@@ -446,7 +446,7 @@ function AsnDetail({
             <div key={line.id} className="flex flex-wrap gap-x-2">
               <span className="font-mono">{sku?.code ?? '(unknown SKU)'}</span>
               <span className="text-(--muted-foreground)">
-                {qty(line.announcedQty)} announced · {qty(line.receivedQty)} received · {openQtyLabel(line.openQty, sku)} open
+                {qty(line.announcedQty)} announced · {qty(line.receivedQty)} received · {openQtyLabel({ openQty: line.openQty, receivedQty: line.receivedQty, expected: line.announcedQty }, sku)} open
               </span>
             </div>
           );

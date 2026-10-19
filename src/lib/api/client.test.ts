@@ -31,6 +31,10 @@ import {
   fetchApiTransitionAsn,
   fetchApiUpdateClientTaxDetails,
   fetchApiUpdateClientAddresses,
+  fetchApiGetClientReceivingPolicy,
+  fetchApiUpdateClientReceivingPolicy,
+  fetchApiReleaseReceiptQcHolds,
+  fetchApiListQcHolds,
   fetchApiListClientContacts,
   fetchApiAddClientContact,
   fetchApiEditClientContact,
@@ -1654,6 +1658,70 @@ describe('client master record wrappers (story 1-2a)', () => {
       code: 'client-not-wound-down',
       extensions: { blockers: [{ kind: 'stock', count: 1 }] },
     });
+    clearSession();
+  });
+});
+
+describe('receiving policy and receipt-hold wrappers (story 1-2b)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const CLIENT_ID = '0198f7a2-1b3c-7d4e-8f90-000000000001';
+  const GRN_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000b7';
+  const POLICY = { receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: 90 };
+
+  test('the policy read: GET on the receiving-policy path, no key; answers the policy and the untracked count', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { clientId: CLIENT_ID, ...POLICY, untrackedSkuCount: 4 });
+    const read = await fetchApiGetClientReceivingPolicy(SESSION.tenant.id, CLIENT_ID);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/clients/${CLIENT_ID}/receiving-policy`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(read.untrackedSkuCount).toBe(4);
+    clearSession();
+  });
+
+  test('the policy write: PUT, all four fields (a null minimum sent as null), with its key; answers the client', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { client: { id: CLIENT_ID, receivingPolicy: POLICY } });
+    const body = { receivingToleranceBps: 500, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null };
+    const client = await fetchApiUpdateClientReceivingPolicy(SESSION.tenant.id, CLIENT_ID, body, KEY);
+    expect(lastRequest!.method).toBe('PUT');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/clients/${CLIENT_ID}/receiving-policy`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    expect(client.receivingPolicy).toEqual(POLICY);
+
+    stubFetch(400, { title: 'Invalid receiving policy', status: 400, code: 'validation-failed', detail: 'minShelfLifeDays needs expiryRequired' });
+    await expect(fetchApiUpdateClientReceivingPolicy(SESSION.tenant.id, CLIENT_ID, body, KEY)).rejects.toMatchObject({
+      code: 'validation-failed',
+      status: 400,
+    });
+    clearSession();
+  });
+
+  test('release-receipt: POST {grnId} with its key; a receipt with no open hold is 409 qc-hold-released', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { grnId: GRN_ID, grnCode: 'GRN-0042', qcHolds: [] });
+    const released = await fetchApiReleaseReceiptQcHolds(SESSION.tenant.id, GRN_ID, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/receiving/qc-holds/release-receipt`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ grnId: GRN_ID });
+    expect(released.grnCode).toBe('GRN-0042');
+
+    stubFetch(409, { title: 'x', status: 409, code: 'qc-hold-released', detail: 'y' });
+    await expect(fetchApiReleaseReceiptQcHolds(SESSION.tenant.id, GRN_ID, KEY)).rejects.toMatchObject({ code: 'qc-hold-released' });
+    clearSession();
+  });
+
+  test('the holds list takes a grnId filter beside status', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListQcHolds(SESSION.tenant.id, { status: 'open', grnId: GRN_ID });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/receiving/qc-holds`);
+    expect(url.searchParams.get('grnId')).toBe(GRN_ID);
+    expect(url.searchParams.get('status')).toBe('open');
+    expect(url.searchParams.get('warehouseId')).toBeNull();
     clearSession();
   });
 });

@@ -65,6 +65,9 @@ let statusGate: Promise<void> | null = null;
 let contactRows: { id: string; isPrimary: boolean; [key: string]: unknown }[] = [];
 /** Story 1-2a — when set, the next departure answers 409 with these blockers. */
 let departBlockers: unknown[] | null = null;
+/** Story 1-2b — the receiving policy the GET answers per client, and a refusal the next PUT answers. */
+let policies: Record<string, { receivingToleranceBps: number; qcOnReceipt: boolean; expiryRequired: boolean; minShelfLifeDays: number | null }> = {};
+let policyRefusal: { status: number; code: string; detail: string } | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -108,6 +111,24 @@ function stubRouter(): void {
       const status = (body as { status: string }).status;
       clientRows = clientRows.map((row) => ((row as { id: string }).id === id ? { ...(row as object), status } : row));
       return json(200, { client: clientRows.find((row) => (row as { id: string }).id === id) });
+    }
+    // Story 1-2b — the receiving policy.
+    if (pathname.endsWith('/receiving-policy')) {
+      const id = pathname.split('/').at(-2)!;
+      if (method === 'GET') {
+        const policy = policies[id] ?? { receivingToleranceBps: 0, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null };
+        return json(200, { clientId: id, ...policy, untrackedSkuCount: 3 });
+      }
+      if (method === 'PUT') {
+        if (policyRefusal !== null) {
+          const refusal = policyRefusal;
+          policyRefusal = null;
+          return json(refusal.status, { code: refusal.code, title: 'Invalid receiving policy', status: refusal.status, detail: refusal.detail });
+        }
+        policies[id] = body as (typeof policies)[string];
+        const client = clientRows.find((row) => (row as { id: string }).id === id);
+        return json(200, { client: { ...(client as object), receivingPolicy: policies[id] } });
+      }
     }
     // Story 1-2a — contacts and addresses.
     if (method === 'GET' && pathname.endsWith('/contacts')) {
@@ -157,6 +178,8 @@ beforeEach(() => {
   statusGate = null;
   contactRows = [];
   departBlockers = null;
+  policies = {};
+  policyRefusal = null;
   stubRouter();
 });
 
@@ -433,14 +456,14 @@ describe('ClientsCard', () => {
       return [...row.querySelectorAll('button')].map((b) => b.textContent);
     };
 
-    test('the self row offers only Contacts and Addresses; a departed row Reactivate, Rename, Tax details, Contacts, Addresses', async () => {
+    test('the self row offers only Contacts, Addresses and Receiving (1-2b); a departed row Reactivate, Rename, Tax details, Contacts, Addresses', async () => {
       clientRows = [SELF, GLOBEX, GONE];
       writeSession(session('owner'));
       view = render(<ClientsCard />);
       await settle();
-      expect(rowButtons('self')).toEqual(['Contacts', 'Addresses']);
-      expect(rowButtons('GONE')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses']);
-      expect(rowButtons('GLOBEX')).toEqual(['Rename', 'Tax details', 'Contacts', 'Addresses', 'Suspend', 'Depart']);
+      expect(rowButtons('self')).toEqual(['Contacts', 'Addresses', 'Receiving']);
+      expect(rowButtons('GONE')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving']);
+      expect(rowButtons('GLOBEX')).toEqual(['Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Suspend', 'Depart']);
     });
 
     test('a refused departure lists every blocker in an alert under the confirm, which stays open; the retry reuses the key and departs', async () => {
@@ -469,7 +492,7 @@ describe('ClientsCard', () => {
       expect(departs.map((r) => r.body)).toEqual([{ status: 'departed' }, { status: 'departed' }]);
       expect(departs[1]!.key).toBe(departs[0]!.key);
       expect(view.container.textContent).toContain('Globex Ltd has departed — it takes no new work, and its history stays.');
-      expect(rowButtons('GLOBEX')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses']);
+      expect(rowButtons('GLOBEX')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving']);
     });
 
     test('Contacts: any staff session reads the list, the owner adds (roles as checkboxes), makes one primary and removes one', async () => {
@@ -629,6 +652,139 @@ describe('ClientsCard', () => {
       await press('Clear return address');
       const cleared = requests.find((r) => r.method === 'PATCH' && r.pathname.endsWith('/addresses'))!;
       expect(cleared.body).toEqual({ return: null });
+    });
+  });
+
+  describe('story 1-2b: the receiving policy', () => {
+    async function openPolicy(code: string): Promise<void> {
+      await act(async () => {
+        (view!.container.querySelector(`button[aria-label="Receiving policy of ${code}"]`) as HTMLButtonElement).click();
+      });
+      await settle();
+    }
+    const policyForm = (code: string) => view!.container.querySelector(`form[aria-label="Receiving policy of ${code}"]`) as HTMLFormElement | null;
+    const field = (form: HTMLFormElement, name: string) => form.querySelector(`input[name="${name}"]`) as HTMLInputElement;
+    async function toggle(input: HTMLInputElement): Promise<void> {
+      await act(async () => {
+        input.click();
+      });
+    }
+    async function submit(form: HTMLFormElement): Promise<void> {
+      await act(async () => {
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+      await settle();
+    }
+
+    test('the owner edits and saves: Save sends the PUT with the percent as bps and every field; the key is reused on a retry, fresh after an edit', async () => {
+      policies = { 'c-acme': { receivingToleranceBps: 0, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null } };
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await openPolicy('ACME');
+      const form = policyForm('ACME')!;
+      expect(form).not.toBeNull();
+      expect(field(form, 'minShelfLifeDays').disabled).toBe(true);
+      setInput(field(form, 'tolerancePercent'), '2.5');
+      await toggle(field(form, 'qcOnReceipt'));
+      await toggle(field(form, 'expiryRequired'));
+      expect(field(form, 'minShelfLifeDays').disabled).toBe(false);
+      setInput(field(form, 'minShelfLifeDays'), '90');
+      // A failed first attempt (transport) keeps the key for the retry.
+      policyRefusal = { status: 503, code: 'unavailable', detail: 'Try again.' };
+      await submit(form);
+      await submit(form);
+      const puts = requests.filter((r) => r.method === 'PUT');
+      expect(puts).toHaveLength(2);
+      expect(puts[1]!.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-acme/receiving-policy`);
+      expect(puts[1]!.body).toEqual({ receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: 90 });
+      expect(puts[1]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(puts[1]!.key).toBe(puts[0]!.key);
+      expect(view.container.textContent).toContain("ACME's receiving policy saved");
+      // Saved: the next save (after an edit) carries a fresh key; unticking
+      // Expiry required clears the minimum and sends null.
+      await toggle(field(form, 'expiryRequired'));
+      await submit(form);
+      const third = requests.filter((r) => r.method === 'PUT')[2]!;
+      expect(third.body).toEqual({ receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: false, minShelfLifeDays: null });
+      expect(third.key).not.toBe(puts[1]!.key);
+    });
+
+    test('the notes: the untracked count and the serial / catch-weight caveat', async () => {
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await openPolicy('ACME');
+      expect(view.container.textContent).toContain(
+        "Expiry rules apply to batch-tracked SKUs only — 3 of this client's SKUs are untracked and receive as before.",
+      );
+      expect(view.container.textContent).toContain('Serial-tracked and catch-weight SKUs are not QC-held on receipt — they book unheld.');
+    });
+
+    for (const role of ['ops_manager', 'accountant', 'operator'] as const) {
+      test(`${role} reads the policy with no inputs and no Save`, async () => {
+        policies = { 'c-acme': { receivingToleranceBps: 500, qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: 90 } };
+        writeSession(session(role));
+        view = render(<ClientsCard />);
+        await settle();
+        await openPolicy('ACME');
+        expect(view.container.textContent).toContain('Receiving policy — ACME');
+        expect(policyForm('ACME')).toBeNull();
+        const panel = view.container.querySelector('section[aria-labelledby]')!;
+        expect(panel.querySelectorAll('input, textarea, select')).toHaveLength(0);
+        expect(buttons(view.container, 'Save receiving policy')).toHaveLength(0);
+        expect(panel.textContent).toContain('5 % — excess within it books at once');
+        expect(panel.textContent).toContain('90 days');
+        expect(requests.some((r) => r.method === 'PUT')).toBe(false);
+      });
+    }
+
+    test('the panel shows for the self client (and its policy saves)', async () => {
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await openPolicy('self');
+      expect(view.container.textContent).toContain('Receiving policy — self');
+      const form = policyForm('self')!;
+      setInput(field(form, 'tolerancePercent'), '5');
+      await submit(form);
+      const put = requests.find((r) => r.method === 'PUT')!;
+      expect(put.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-self/receiving-policy`);
+      expect(put.body).toEqual({ receivingToleranceBps: 500, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null });
+    });
+
+    test('a 400 validation-failed renders on the field its detail names; a client-side refusal sends nothing', async () => {
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await openPolicy('ACME');
+      const form = policyForm('ACME')!;
+      setInput(field(form, 'tolerancePercent'), '1.005');
+      await submit(form);
+      expect(requests.some((r) => r.method === 'PUT')).toBe(false);
+      expect(form.querySelector('[data-field="tolerance"]')!.textContent).toBe('The tolerance takes at most two decimal places (0.01 %).');
+
+      setInput(field(form, 'tolerancePercent'), '5');
+      await toggle(field(form, 'expiryRequired'));
+      setInput(field(form, 'minShelfLifeDays'), '30');
+      policyRefusal = {
+        status: 400,
+        code: 'validation-failed',
+        detail: 'minShelfLifeDays must be null or a whole number of days from 1 to 3650 (got 30).',
+      };
+      await submit(form);
+      expect(form.querySelector('[data-field="tolerance"]')).toBeNull();
+      expect(form.querySelector('[data-field="minShelfLife"]')!.textContent).toBe(
+        'minShelfLifeDays must be null or a whole number of days from 1 to 3650 (got 30).',
+      );
+      policyRefusal = {
+        status: 400,
+        code: 'validation-failed',
+        detail: 'receivingToleranceBps must be a whole number of basis points from 0 to 10000 (got 500).',
+      };
+      await submit(form);
+      expect(form.querySelector('[data-field="minShelfLife"]')).toBeNull();
+      expect(form.querySelector('[data-field="tolerance"]')!.textContent).toContain('receivingToleranceBps');
     });
   });
 

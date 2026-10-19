@@ -76,3 +76,28 @@ export function sumTabCounts(parts: readonly TabCount[]): TabCount {
     more: parts.some((part) => part.more),
   };
 }
+
+const QC_GRN_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Story 1-2b — the QC holds tab narrowed to one goods receipt's holds
+ * (`?tab=qc-holds&grnId=<uuid>`): the `qc-receipt` notification links here.
+ * A plain URL parameter beside the tab (guide §1.8), not a drill: no `list`,
+ * so `parseDrill` reads a plain visit. Without a GRN it is the tab's link.
+ */
+export function inboundQcHoldsHref(grnId: string | null = null): string {
+  const tab = inboundTabHref('qc-holds');
+  return grnId === null ? tab : `${tab}${tab.includes('?') ? '&' : '?'}grnId=${encodeURIComponent(grnId)}`;
+}
+
+/**
+ * The GRN the QC holds tab opens narrowed to: one well-formed uuid on the QC
+ * holds tab, else null (a repeated or malformed value, or another tab, opens
+ * the unfiltered list).
+ */
+export function parseInboundQcGrn(params: SearchParamsRecord): string | null {
+  if (parseInboundTab(params) !== 'qc-holds') return null;
+  const raw = params['grnId'];
+  if (typeof raw !== 'string') return null;
+  return QC_GRN_UUID_RE.test(raw) ? raw.toLowerCase() : null;
+}

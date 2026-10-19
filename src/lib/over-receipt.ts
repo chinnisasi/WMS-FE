@@ -11,14 +11,21 @@ import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
  */
 
 /**
- * A PO line's open quantity for the table cells — negative means
- * over-received. The line's own SKU names the unit and its precision (the
- * PO-lines column mixes units, so each row states its own); an
- * unresolvable SKU falls back to the unit-agnostic "`N` units".
+ * A PO or ASN line's open quantity for the table cells, with the
+ * "(over-received)" callout when the line received MORE than it ordered /
+ * announced. Story 1-2b: the server clamps `openQty` at 0 (received may pass
+ * ordered after an approved over-receipt or a within-tolerance receipt), so
+ * the callout keys on received > expected, never on a negative open. The
+ * line's own SKU names the unit and its precision (the PO-lines column mixes
+ * units, so each row states its own); an unresolvable SKU falls back to the
+ * unit-agnostic "`N` units".
  */
-export function openQtyLabel(openQty: number, uom?: QuantityUom | null): string {
-  const qty = quantityLabel(openQty, uom ?? null);
-  return openQty < 0 ? `${qty} (over-received)` : qty;
+export function openQtyLabel(
+  line: { readonly openQty: number; readonly receivedQty: number; readonly expected: number },
+  uom?: QuantityUom | null,
+): string {
+  const qty = quantityLabel(line.openQty, uom ?? null);
+  return line.receivedQty > line.expected ? `${qty} (over-received)` : qty;
 }
 
 /**
@@ -141,4 +148,43 @@ export function qcReason(error: unknown): string {
     }
   }
   return 'The API is unreachable — is wms-be running?';
+}
+// ── story 1-2b: receipt holds (QC on receipt) ───────────────────────────────
+
+/**
+ * A hold's kind, in words: a receipt hold was placed by the receipt itself
+ * (its client's QC on receipt), a manual one by an Ops Manager. A row from
+ * a backend without the field reads as manual.
+ */
+export function qcHoldKindLabel(kind: 'manual' | 'receipt' | undefined): string {
+  return kind === 'receipt' ? 'Auto · QC on receipt' : 'Manual';
+}
+
+/** The GRN filter's banner: the receipt's code, else the id's random tail (guide §1.10). */
+export function qcGrnFilterLabel(grnCode: string | null, grnId: string): string {
+  return `Showing the QC holds of ${grnCode ?? `receipt …${grnId.slice(-8)}`}`;
+}
+
+/** The Release receipt outcome, from the RESPONSE (the holds it released). */
+export function releaseReceiptOutcome(response: { grnCode: string; qcHolds: readonly unknown[] }): { word: string; reason: string } {
+  const n = response.qcHolds.length;
+  return {
+    word: `${response.grnCode} released from QC`,
+    reason: `${n} receipt ${n === 1 ? 'hold' : 'holds'} released — the units are back in Receiving and awaiting putaway.`,
+  };
+}
+
+/**
+ * The Release receipt refusals: `qc-hold-released` here means the receipt
+ * has no open receipt hold left (another release moved first); the rest are
+ * the QC surface's (`qcReason`).
+ */
+export function releaseReceiptReason(error: unknown): string {
+  if (error instanceof ApiProblem && error.code === 'qc-hold-released') {
+    return 'This receipt has no open QC hold left — refresh the list.';
+  }
+  if (error instanceof ApiProblem && error.code === 'not-found') {
+    return 'This goods receipt no longer exists — refresh the list.';
+  }
+  return qcReason(error);
 }

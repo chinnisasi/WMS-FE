@@ -10,6 +10,10 @@ import {
   openQtyLabel,
   overReceiptDocumentLabel,
   qcReason,
+  qcGrnFilterLabel,
+  qcHoldKindLabel,
+  releaseReceiptOutcome,
+  releaseReceiptReason,
 } from './over-receipt';
 
 /**
@@ -19,25 +23,27 @@ import {
  * pinned here (the components render exactly these strings).
  */
 
-describe('openQtyLabel (the negative-open callout)', () => {
-  test('a negative open quantity carries the over-received callout', () => {
-    expect(openQtyLabel(-5)).toBe('-5 units (over-received)');
+describe('openQtyLabel (the over-received callout)', () => {
+  // Story 1-2b: the server clamps openQty at 0 — the callout keys on received
+  // past ordered / announced, the shape the server sends.
+  test('a line received past its ordered quantity carries the callout (openQty 0 as sent)', () => {
+    expect(openQtyLabel({ openQty: 0, receivedQty: 105, expected: 100 })).toBe('0 units (over-received)');
   });
 
-  test('a zero or positive open quantity renders as-is', () => {
-    expect(openQtyLabel(0)).toBe('0 units');
-    expect(openQtyLabel(60)).toBe('60 units');
+  test('a line at or under its ordered quantity renders as-is', () => {
+    expect(openQtyLabel({ openQty: 0, receivedQty: 100, expected: 100 })).toBe('0 units');
+    expect(openQtyLabel({ openQty: 60, receivedQty: 40, expected: 100 })).toBe('60 units');
   });
 
   test('a line whose SKU resolves names its unit at the unit\'s declared precision', () => {
     // Story 10.5: the PO-lines column mixes units, so each row states its
     // own — declared precision, unit named, and the negative callout intact.
     const kg = { uom: 'kg', uomPrecision: 3 };
-    expect(openQtyLabel(1.5, kg)).toBe('1.500 kg');
-    expect(openQtyLabel(-0.5, kg)).toBe('-0.500 kg (over-received)');
+    expect(openQtyLabel({ openQty: 1.5, receivedQty: 1, expected: 2.5 }, kg)).toBe('1.500 kg');
+    expect(openQtyLabel({ openQty: 0, receivedQty: 3, expected: 2.5 }, kg)).toBe('0.000 kg (over-received)');
     // An unresolvable SKU keeps the unit-agnostic fallback, never a guessed precision.
-    expect(openQtyLabel(1.5, null)).toBe('1.5 units');
-    expect(openQtyLabel(-1.5, null)).toBe('-1.5 units (over-received)');
+    expect(openQtyLabel({ openQty: 1.5, receivedQty: 1, expected: 2.5 }, null)).toBe('1.5 units');
+    expect(openQtyLabel({ openQty: 0, receivedQty: 4, expected: 2.5 }, null)).toBe('0 units (over-received)');
   });
 });
 
@@ -182,5 +188,35 @@ describe('story 21-9 — late receipts and unmatched lines', () => {
   test('approving a null-line row credits no line', () => {
     expect(approvedReason({ poLineId: null })).toBe('Applied to stock; no line credited.');
     expect(approvedReason({ poLineId: null, asnId: 'a-1' })).toBe('Applied to stock; no line credited.');
+  });
+});
+
+describe('story 1-2b — receipt holds', () => {
+  test('a hold names its kind; an older row without one reads manual', () => {
+    expect(qcHoldKindLabel('receipt')).toBe('Auto · QC on receipt');
+    expect(qcHoldKindLabel('manual')).toBe('Manual');
+    expect(qcHoldKindLabel(undefined)).toBe('Manual');
+  });
+
+  test('the GRN filter names the receipt by code, else by the id tail', () => {
+    expect(qcGrnFilterLabel('GRN-0042', '0198f7a2-1b3c-7d4e-8f90-0000000000b7')).toBe('Showing the QC holds of GRN-0042');
+    expect(qcGrnFilterLabel(null, '0198f7a2-1b3c-7d4e-8f90-0000000000b7')).toBe('Showing the QC holds of receipt …000000b7');
+  });
+
+  test('Release receipt: the outcome counts the RESPONSE’s holds; the refusals branch on code', () => {
+    expect(releaseReceiptOutcome({ grnCode: 'GRN-0042', qcHolds: [{}, {}, {}] })).toEqual({
+      word: 'GRN-0042 released from QC',
+      reason: '3 receipt holds released — the units are back in Receiving and awaiting putaway.',
+    });
+    expect(releaseReceiptOutcome({ grnCode: 'GRN-7', qcHolds: [{}] }).reason).toBe(
+      '1 receipt hold released — the units are back in Receiving and awaiting putaway.',
+    );
+    expect(releaseReceiptReason(new ApiProblem('qc-hold-released', 409))).toBe('This receipt has no open QC hold left — refresh the list.');
+    expect(releaseReceiptReason(new ApiProblem('not-found', 404))).toBe('This goods receipt no longer exists — refresh the list.');
+    expect(releaseReceiptReason(new ApiProblem('role-denied', 403))).toBe('Your role cannot place or release QC holds.');
+    expect(releaseReceiptReason(new ApiProblem('qc-hold-origin-bin-gone', 409))).toBe(
+      'The origin bin no longer exists, so the stock cannot return to it — the hold stays open.',
+    );
+    expect(releaseReceiptReason(new TypeError('x'))).toBe('The API is unreachable — is wms-be running?');
   });
 });

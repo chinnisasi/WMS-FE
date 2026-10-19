@@ -93,6 +93,7 @@ import {
   receivingControllerListQcHolds,
   receivingControllerPlaceQcHold,
   receivingControllerReleaseQcHold,
+  receivingControllerReleaseReceiptHolds,
   receivingControllerRejectOverReceipt,
   replenishmentControllerDeleteReorderPolicy,
   replenishmentControllerDismissBatchAlert,
@@ -157,6 +158,8 @@ import {
   clientsControllerUpdateClientStatus,
   clientsControllerUpdateTaxDetails,
   clientsControllerUpdateAddresses,
+  clientsControllerGetReceivingPolicy,
+  clientsControllerUpdateReceivingPolicy,
   clientsControllerListContacts,
   clientsControllerAddContact,
   clientsControllerEditContact,
@@ -237,6 +240,9 @@ import type {
   PrepareClientInvoicesResponse,
   UpdateClientStatusDto,
   UpdateClientAddressesDto,
+  UpdateClientReceivingPolicyDto,
+  ClientReceivingPolicyResponse,
+  ReleaseReceiptHoldsResponse,
   ClientContactDto,
   CreateClientContactDto,
   UpdateClientContactDto,
@@ -1096,6 +1102,49 @@ export async function fetchApiUpdateClientAddresses(
   idempotencyKey: string,
 ): Promise<ClientDto> {
   const { data, error } = await clientsControllerUpdateAddresses({
+    path: { tenantId, clientId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.client;
+}
+
+/**
+ * Story 1-2b — a client's receiving policy (tolerance in basis points, QC on
+ * receipt, expiry required, minimum remaining shelf life) plus how many of
+ * its SKUs are untracked (any staff session).
+ */
+export async function fetchApiGetClientReceivingPolicy(
+  tenantId: string,
+  clientId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ClientReceivingPolicyResponse> {
+  const { data, error } = await clientsControllerGetReceivingPolicy({
+    path: { tenantId, clientId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 1-2b — replace a client's receiving policy (owner-only). A FULL
+ * replace: all four fields are always sent (`minShelfLifeDays` null for
+ * none). Answers the client; its `receivingPolicy` is optional on the wire
+ * (a replayed pre-1-2b answer lacks it).
+ */
+export async function fetchApiUpdateClientReceivingPolicy(
+  tenantId: string,
+  clientId: string,
+  body: UpdateClientReceivingPolicyDto,
+  idempotencyKey: string,
+): Promise<ClientDto> {
+  const { data, error } = await clientsControllerUpdateReceivingPolicy({
     path: { tenantId, clientId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
@@ -2307,6 +2356,8 @@ export async function fetchApiListQcHolds(
   options?: {
     warehouseId?: string;
     status?: 'open' | 'released';
+    /** Story 1-2b — only one goods receipt's QC-on-receipt holds. */
+    grnId?: string;
     cursor?: string;
     limit?: number;
     signal?: AbortSignal;
@@ -2315,6 +2366,7 @@ export async function fetchApiListQcHolds(
   const query = {
     ...(options?.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
     ...(options?.status === undefined ? {} : { status: options.status }),
+    ...(options?.grnId === undefined ? {} : { grnId: options.grnId }),
     ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
     ...(options?.limit === undefined ? {} : { limit: options.limit }),
   };
@@ -2357,6 +2409,27 @@ export async function fetchApiReleaseQcHold(
 ): Promise<QcHoldResponse> {
   const { data, error } = await receivingControllerReleaseQcHold({
     path: { tenantId, holdId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 1-2b — release every open QC-on-receipt hold of one goods receipt
+ * (capability `qc.manage`) in one transaction. 409 `qc-hold-released` when
+ * the receipt has no open receipt hold.
+ */
+export async function fetchApiReleaseReceiptQcHolds(
+  tenantId: string,
+  grnId: string,
+  idempotencyKey: string,
+): Promise<ReleaseReceiptHoldsResponse> {
+  const { data, error } = await receivingControllerReleaseReceiptHolds({
+    path: { tenantId },
+    body: { grnId },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {

@@ -1,6 +1,6 @@
 import type { NotificationListResponse } from '@/lib/api/generated';
 import { conflictsQueueHref } from '@/lib/conflicts-queues';
-import { inboundTabHref } from '@/lib/inbound-tabs';
+import { inboundQcHoldsHref, inboundTabHref } from '@/lib/inbound-tabs';
 import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 
 /**
@@ -37,6 +37,7 @@ const KNOWN_SOURCE_TYPES = {
   'channel-sync': true,
   'audit-export': true,
   'ledger-chain-break': true,
+  'qc-receipt': true,
 } as const satisfies Record<SourceType, true>;
 
 /** The entries this build can render — an unknown `sourceType` is dropped. */
@@ -99,6 +100,8 @@ export function notificationCategory(entry: NotificationEntry): string {
       return 'Audit export';
     case 'ledger-chain-break':
       return 'Ledger integrity';
+    case 'qc-receipt':
+      return 'Held for QC on receipt';
     default:
       return unknownSource(entry, 'Notification');
   }
@@ -209,9 +212,17 @@ export function notificationDescription(entry: NotificationEntry, lookups: Notif
       const house = entry.warehouseId === null ? '' : ` — ${lookups.warehouse(entry.warehouseId)}`;
       return `${what} at #${s.firstSeq}${house}`;
     }
+    // Story 1-2b — one entry per receipt of a QC-on-receipt client.
+    case 'qc-receipt':
+      return [qcReceiptLine(entry.summary.grnCode, entry.summary.count), ...where].join(' · ');
     default:
       return unknownSource(entry, '');
   }
+}
+
+/** Story 1-2b — `GRN-0042: 3 lines held for QC on receipt`. */
+export function qcReceiptLine(grnCode: string, count: number): string {
+  return `${grnCode}: ${count} ${count === 1 ? 'line' : 'lines'} held for QC on receipt`;
 }
 
 const RESOLUTION_WORD: Readonly<Record<string, string>> = {
@@ -260,6 +271,9 @@ export function notificationHref(entry: NotificationEntry): string {
       return '/replenishment';
     case 'qc-hold':
       return inboundTabHref('qc-holds');
+    // Story 1-2b — the QC holds tab narrowed to the receipt's holds.
+    case 'qc-receipt':
+      return inboundQcHoldsHref(entry.summary.grnId);
     case 'channel-sync':
       return '/channels';
     // Story 9-3b — the "Your exports" list on /reports; the entry never

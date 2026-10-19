@@ -49,6 +49,7 @@ import { ReadFailure } from '@/components/outbound/shell';
 import { ConfirmRow } from '@/components/settings/confirm-row';
 import { ClientContactsPanel } from '@/components/settings/client-contacts';
 import { ClientAddressesPanel } from '@/components/settings/client-addresses';
+import { ClientReceivingPolicyPanel } from '@/components/settings/client-receiving-policy';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -69,6 +70,7 @@ type Panel =
   | { kind: 'tax'; client: ClientDto }
   | { kind: 'contacts'; client: ClientDto }
   | { kind: 'addresses'; client: ClientDto }
+  | { kind: 'receiving'; client: ClientDto }
   | { kind: ClientStatusAction; client: ClientDto };
 
 /** The panel's name in the discard question. */
@@ -78,6 +80,8 @@ function panelName(panel: Panel): string {
       return `the contact for ${panel.client.code}`;
     case 'addresses':
       return `${panel.client.code}'s addresses`;
+    case 'receiving':
+      return `${panel.client.code}'s receiving policy`;
     default:
       return panel.client.code;
   }
@@ -88,9 +92,11 @@ function panelName(panel: Panel): string {
  * for. Every member reads the list (status included) and (story 1-2a) a
  * client's contacts and addresses; an owner (`clients.manage`) registers a
  * client, renames one, edits its contacts and addresses, and (story 21-10,
- * 1-2a) suspends, departs or reactivates one. The tenant's own `self` client
- * is shown as the company itself; its row offers only Contacts and
- * Addresses — its name mirrors the tenant's and it never changes status.
+ * 1-2a) suspends, departs or reactivates one. Story 1-2b — every member reads
+ * a client's receiving policy (`self` and departed clients included); an
+ * owner edits it. The tenant's own `self` client
+ * is shown as the company itself; its row offers only Contacts,
+ * Addresses and Receiving — its name mirrors the tenant's and it never changes status.
  *
  * Gating copies `sku-table.tsx`: the role is read through the session
  * subscription, so a `/me` role rewrite re-renders the affordances.
@@ -190,6 +196,7 @@ function ClientsCardSessioned() {
             {canInvoice && !client.systemOwned ? rowButton('Tax details', `Tax details of ${client.code}`, { kind: 'tax', client }) : null}
             {rowButton('Contacts', `Contacts of ${client.code}`, { kind: 'contacts', client })}
             {rowButton('Addresses', `Addresses of ${client.code}`, { kind: 'addresses', client })}
+            {rowButton('Receiving', `Receiving policy of ${client.code}`, { kind: 'receiving', client })}
             {statusActions.includes('suspend') ? rowButton('Suspend', `Suspend ${client.code}`, { kind: 'suspend', client }) : null}
             {statusActions.includes('depart') ? rowButton('Depart', `Depart ${client.code}`, { kind: 'depart', client }) : null}
           </div>
@@ -290,6 +297,17 @@ function ClientsCardSessioned() {
 
       {panel?.kind === 'addresses' ? (
         <ClientAddressesPanel
+          key={panel.client.id}
+          client={panel.client}
+          canManage={canManage}
+          onClose={() => show(null)}
+          onSaved={() => notifyClientsChanged()}
+          onDirtyChange={onDirtyChange}
+        />
+      ) : null}
+
+      {panel?.kind === 'receiving' ? (
+        <ClientReceivingPolicyPanel
           key={panel.client.id}
           client={panel.client}
           canManage={canManage}

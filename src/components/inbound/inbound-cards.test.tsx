@@ -31,6 +31,38 @@ const ACME = { id: 'c-acme', code: 'ACME', name: 'Acme Foods', status: 'active',
 const BETA = { id: 'c-beta', code: 'BETA', name: 'Beta Brands', status: 'active', systemOwned: false };
 
 let clients: Record<string, unknown>[] = [SELF];
+/** Story 1-2b — every request the surface sent (method, path + query, body, key). */
+let requests: { method: string; url: URL; body: unknown; key: string | null }[] = [];
+let qcHolds: Record<string, unknown>[] = [];
+let role: 'owner' | 'ops_manager' | 'operator' = 'owner';
+const GRN_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000b7';
+
+function hold(id: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id,
+    tenantId: T,
+    warehouseId: WH,
+    skuId: 's-acme',
+    binId: 'bin-recv',
+    reason: 'QC on receipt — GRN-0042',
+    status: 'open',
+    heldBy: 'u-1',
+    heldAt: '2026-10-19T05:00:00.000Z',
+    releasedBy: null,
+    releasedAt: null,
+    createdAt: '2026-10-19T05:00:00.000Z',
+    kind: 'receipt',
+    grnLineId: `line-${id}`,
+    grnId: GRN_ID,
+    grnCode: 'GRN-0042',
+    overReceiptId: null,
+    clientId: 'c-acme',
+    batchId: 'b-1',
+    batchCode: 'LOT-7',
+    heldQty: 12,
+    ...over,
+  };
+}
 
 function grn(id: string, code: string, clientId?: string): Record<string, unknown> {
   return {
@@ -77,8 +109,30 @@ function json(status: number, body: unknown): Response {
 function stubRouter(): void {
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
     const base = `/api/v1/tenants/${T}`;
+    let body: unknown = null;
+    try {
+      body = await request.clone().json();
+    } catch {
+      body = null;
+    }
+    requests.push({ method: request.method.toUpperCase(), url, body, key: request.headers.get('Idempotency-Key') });
+    // Story 1-2b — the QC holds list (filterable by grnId) and Release receipt.
+    if (pathname === `${base}/receiving/qc-holds`) {
+      const grnId = url.searchParams.get('grnId');
+      const status = url.searchParams.get('status');
+      return json(200, {
+        items: qcHolds.filter((h) => (grnId === null || h['grnId'] === grnId) && (status === null || h['status'] === status)),
+        nextCursor: null,
+      });
+    }
+    if (pathname === `${base}/receiving/qc-holds/release-receipt`) {
+      const released = qcHolds.filter((h) => h['grnId'] === (body as { grnId: string }).grnId && h['status'] === 'open');
+      qcHolds = qcHolds.map((h) => (released.includes(h) ? { ...h, status: 'released' } : h));
+      return json(200, { grnId: GRN_ID, grnCode: 'GRN-0042', qcHolds: released });
+    }
     if (pathname === `${base}/warehouses`) {
       return json(200, { items: [{ id: WH, code: 'BLR', name: 'Bengaluru DC' }], nextCursor: null });
     }
@@ -106,6 +160,9 @@ let view: Rendered | undefined;
 
 beforeEach(() => {
   clients = [SELF];
+  requests = [];
+  qcHolds = [];
+  role = 'owner';
   stubRouter();
   writeSession(SESSION);
   writeActiveWarehouseId(T, WH);
@@ -171,5 +228,111 @@ describe('Awaiting putaway — the SKU named with its client (story 1-1)', () =>
     await settle();
     const skuColumn = headers().indexOf('SKU');
     expect(rows().map((cells) => cells[skuColumn])).toEqual(['TSHIRT-M', 'TSHIRT-M']);
+  });
+});
+
+describe('QC holds — receipt holds (story 1-2b)', () => {
+  const MANUAL = hold('h-manual', {
+    kind: 'manual',
+    grnLineId: undefined,
+    grnId: null,
+    grnCode: null,
+    reason: 'Seal broken',
+    batchId: null,
+    batchCode: null,
+    heldQty: 4,
+  });
+
+  function asRole(next: 'owner' | 'ops_manager' | 'operator') {
+    role = next;
+    writeSession({ ...SESSION, user: { ...SESSION.user, role } } as StoredSession);
+  }
+  // The card's own reads (the tab-count read pages at the route maximum — `limit`).
+  const listReads = () =>
+    requests.filter((r) => r.method === 'GET' && r.url.pathname.endsWith('/receiving/qc-holds') && !r.url.searchParams.has('limit'));
+  const column = (name: string) => {
+    const index = headers().indexOf(name);
+    return rows().map((cells) => cells[index]);
+  };
+
+  test('a receipt hold shows its kind, GRN code, client, batch and held quantity; a manual hold reads Manual', async () => {
+    clients = [SELF, ACME, BETA];
+    qcHolds = [hold('h-1'), MANUAL];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    expect(headers()).toEqual(
+      expect.arrayContaining(['Kind', 'GRN', 'SKU', 'Client', 'Batch', 'Held', 'Origin bin', 'Reason', 'Status']),
+    );
+    expect(column('Kind')).toEqual(['Auto · QC on receipt', 'Manual']);
+    expect(column('GRN')).toEqual(['GRN-0042', '—']);
+    expect(column('Client')).toEqual(['ACME', 'ACME']);
+    expect(column('Batch')).toEqual(['LOT-7', '—']);
+    expect(column('Held')).toEqual(['12 each', '4 each']);
+  });
+
+  test('Release receipt (qc.manage) POSTs {grnId} with a fresh key, guards a double click, then re-reads the list', async () => {
+    qcHolds = [hold('h-1'), hold('h-2'), MANUAL];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    // Only the receipt holds carry it; the manual hold keeps its single Release.
+    const releaseReceipt = () => [...panel().querySelectorAll('button')].filter((b) => b.textContent === 'Release receipt');
+    expect(releaseReceipt()).toHaveLength(2);
+    const readsBefore = listReads().length;
+    await act(async () => {
+      const button = releaseReceipt()[0]!;
+      button.click();
+      button.click();
+    });
+    await settle();
+    const posts = requests.filter((r) => r.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url.pathname).toBe(`/api/v1/tenants/${T}/receiving/qc-holds/release-receipt`);
+    expect(posts[0]!.body).toEqual({ grnId: GRN_ID });
+    expect(posts[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(panel().textContent).toContain('GRN-0042 released from QC');
+    expect(panel().textContent).toContain('2 receipt holds released');
+    expect(listReads().length).toBeGreaterThan(readsBefore);
+    // The list re-read: only the manual hold is still open.
+    expect(column('Kind')).toEqual(['Manual']);
+  });
+
+  test('without qc.manage: the rows read, and no Release or Release receipt is offered', async () => {
+    asRole('operator');
+    qcHolds = [hold('h-1')];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    expect(column('Kind')).toEqual(['Auto · QC on receipt']);
+    expect([...panel().querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Release receipt');
+    expect([...panel().querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Release');
+  });
+
+  test('the GRN filter: clicking a receipt\'s code narrows the read to its grnId; Show all holds clears it', async () => {
+    qcHolds = [hold('h-1'), hold('h-9', { grnId: '0198f7a2-1b3c-7d4e-8f90-0000000000c9', grnCode: 'GRN-0043' }), MANUAL];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    await act(async () => {
+      (panel().querySelector('button[aria-label="Show the QC holds of GRN-0042"]') as HTMLButtonElement).click();
+    });
+    await settle();
+    const narrowed = listReads().at(-1)!;
+    expect(narrowed.url.searchParams.get('grnId')).toBe(GRN_ID);
+    expect(narrowed.url.searchParams.get('status')).toBe('open');
+    expect(column('GRN')).toEqual(['GRN-0042']);
+    expect(panel().textContent).toContain('Showing the QC holds of GRN-0042');
+    await act(async () => {
+      [...panel().querySelectorAll('button')].find((b) => b.textContent === 'Show all holds')!.click();
+    });
+    await settle();
+    expect(listReads().at(-1)!.url.searchParams.get('grnId')).toBeNull();
+    expect(column('GRN')).toEqual(['GRN-0042', 'GRN-0043', '—']);
+  });
+
+  test('opened from the notification link (qcGrnId): the first read is already narrowed, named by the rows\' code', async () => {
+    qcHolds = [hold('h-1'), MANUAL];
+    view = render(<InboundCards initialTab="qc-holds" qcGrnId={GRN_ID} />);
+    await settle();
+    expect(listReads().length).toBeGreaterThan(0);
+    expect(listReads().every((r) => r.url.searchParams.get('grnId') === GRN_ID)).toBe(true);
+    expect(panel().textContent).toContain('Showing the QC holds of GRN-0042');
   });
 });

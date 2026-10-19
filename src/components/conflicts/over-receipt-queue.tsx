@@ -292,7 +292,7 @@ function OverReceiptCard({
           Line: {qty(line.expected)} {line.expectedWord} · {qty(line.receivedQty)} received-to-date
           {/* Story 21-9: a late row's line belongs to a closed or cancelled
               document — it cannot receive, so it has no open figure. */}
-          {!late && <> · {openQtyLabel(line.openQty, sku)} open</>}
+          {!late && <> · {openQtyLabel({ openQty: line.openQty, receivedQty: line.receivedQty, expected: line.expected }, sku)} open</>}
         </div>
       )}
       <div className="text-xs text-(--muted-foreground)">
