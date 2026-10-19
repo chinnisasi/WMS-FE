@@ -4,6 +4,7 @@ import { act } from 'react';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
+import { CLIENT_DEPARTED_REASON } from '../../lib/client-departed';
 import { ZonesBinsSetup } from './zone-bin-setup';
 
 /**
@@ -78,6 +79,9 @@ let nextPatchStatus = 200;
 let nextPatchBody: unknown = null;
 /** Story 1-5b — the clients read: one client (the D2C default) unless a test widens it; null = the read fails. */
 let clientsItems: unknown[] | null = null;
+/** Story 1-5b — the next bin-CREATE answer, so a test can force a refusal. */
+let nextCreateStatus = 201;
+let nextCreateBody: unknown = null;
 /** Story 1-5b — the bins list, overridable per test. */
 let binsItems: unknown[] | null = null;
 
@@ -156,6 +160,13 @@ function stubRouter(): void {
       return json(201, { generatedCount: 1, firstCode: 'B-01-01', lastCode: 'B-01-01' });
     }
     if (method === 'POST' && pathname.endsWith('/bins')) {
+      if (nextCreateStatus !== 201) {
+        const refusal = nextCreateBody;
+        const status = nextCreateStatus;
+        nextCreateStatus = 201;
+        nextCreateBody = null;
+        return json(status, refusal);
+      }
       const over = (body !== null && typeof body === 'object' ? body : {}) as Record<string, unknown>;
       return json(201, bin({ id: '0198f7a2-1b3c-7d4e-8f90-666666666666', code: 'A-01-03', ...over }));
     }
@@ -174,6 +185,8 @@ beforeEach(() => {
   nextMergeBody = null;
   nextPatchStatus = 200;
   nextPatchBody = null;
+  nextCreateStatus = 201;
+  nextCreateBody = null;
   clientsItems = [SELF_CLIENT];
   binsItems = null;
   stubRouter();
@@ -631,5 +644,28 @@ describe('ZonesBinsSetup: dedicated client bins (story 1-5b)', () => {
     act(() => grid.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     await settle();
     expect(gridPost().dedicatedClientId).toBe(GLOW_ID);
+  });
+
+  test('a create with a client chosen: 409 client-departed and 404 not-found render the client-aware copy', async () => {
+    clientsItems = MULTI();
+    view = await mount();
+    const manual = formFor(view.container, 'Create bin');
+    setSelect([...manual.querySelectorAll('label')].find((l) => l.textContent!.startsWith('Zone'))!.querySelector('select')!, ZONE_ID);
+    setSelect([...manual.querySelectorAll('label')].find((l) => l.textContent!.startsWith('Client'))!.querySelector('select')!, GLOW_ID);
+    const code = [...manual.querySelectorAll('input')].find((i) => i.placeholder === 'A-01-01')!;
+
+    nextCreateStatus = 409;
+    nextCreateBody = { code: 'client-departed', title: 'Client departed', status: 409, detail: 'GLOW has departed' };
+    setInput(code, 'A-03-01');
+    act(() => manual.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(view.container.textContent).toContain(CLIENT_DEPARTED_REASON);
+
+    nextCreateStatus = 404;
+    nextCreateBody = { code: 'not-found', title: 'Not found', status: 404 };
+    setInput(code, 'A-03-02');
+    act(() => manual.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(view.container.textContent).toContain('That warehouse, zone or client no longer exists');
   });
 });
