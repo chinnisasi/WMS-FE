@@ -59,8 +59,13 @@ import {
   inboundControllerGetPurchaseOrder,
   inboundControllerListAsns,
   inboundControllerListPurchaseOrders,
-  inboundControllerListVendors,
   inventoryControllerApproveAdjustment,
+  partnersControllerCreatePartner,
+  partnersControllerCreatePartnerLink,
+  partnersControllerListPartners,
+  partnersControllerUpdatePartner,
+  partnersControllerUpdatePartnerLink,
+  partnersControllerUpdatePartnerStatus,
   inventoryControllerGetBatch,
   inventoryControllerListAdjustmentPendings,
   inventoryControllerListBatches,
@@ -390,7 +395,13 @@ import type {
   NotificationListResponse,
   NotificationStatusResponse,
   UserResponse,
-  VendorListResponse,
+  PartnerListResponse,
+  PartnerDto,
+  CreatePartnerDto,
+  UpdatePartnerDto,
+  UpdatePartnerStatusDto,
+  CreatePartnerLinkDto,
+  UpdatePartnerLinkDto,
   WarehouseListResponse,
   WarehouseResponse,
   WaveListResponse,
@@ -2057,19 +2068,120 @@ export async function fetchApiDeviceAction(
 
 // ── Inbound + receiving (stories 3.1 / 3.3) ─────────────────────────────────
 
-export async function fetchApiListVendors(
-  tenantId: string,
-  options?: { cursor?: string; signal?: AbortSignal },
-): Promise<VendorListResponse> {
-  const { data, error } = await inboundControllerListVendors({
+// ── Business partners (story 1-3) ───────────────────────────────────────────
+
+/** The partner list's filters (every one optional; `clientId` = an ACTIVE link to that client). */
+export interface PartnerListOptions {
+  role?: 'vendor' | 'consignee' | 'transporter';
+  clientId?: string;
+  status?: 'active' | 'inactive';
+  q?: string;
+  cursor?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+/** Story 1-3 — `GET /partners`: a keyset page by code, each partner with its client links. */
+export async function fetchApiListPartners(tenantId: string, options?: PartnerListOptions): Promise<PartnerListResponse> {
+  const query = {
+    ...(options?.role === undefined ? {} : { role: options.role }),
+    ...(options?.clientId === undefined ? {} : { clientId: options.clientId }),
+    ...(options?.status === undefined ? {} : { status: options.status }),
+    ...(options?.q === undefined ? {} : { q: options.q }),
+    ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options?.limit === undefined ? {} : { limit: options.limit }),
+  };
+  const { data, error } = await partnersControllerListPartners({
     path: { tenantId },
-    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    query: Object.keys(query).length === 0 ? undefined : query,
     signal: options?.signal,
   });
   if (error || !data) {
     throw unwrapError(error, 400);
   }
   return data;
+}
+
+export async function fetchApiCreatePartner(tenantId: string, body: CreatePartnerDto, idempotencyKey: string): Promise<PartnerDto> {
+  const { data, error } = await partnersControllerCreatePartner({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.partner;
+}
+
+/** Tri-state PATCH: an absent key is unchanged, `null` clears it. */
+export async function fetchApiUpdatePartner(
+  tenantId: string,
+  partnerId: string,
+  body: UpdatePartnerDto,
+  idempotencyKey: string,
+): Promise<PartnerDto> {
+  const { data, error } = await partnersControllerUpdatePartner({
+    path: { tenantId, partnerId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.partner;
+}
+
+export async function fetchApiUpdatePartnerStatus(
+  tenantId: string,
+  partnerId: string,
+  body: UpdatePartnerStatusDto,
+  idempotencyKey: string,
+): Promise<PartnerDto> {
+  const { data, error } = await partnersControllerUpdatePartnerStatus({
+    path: { tenantId, partnerId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.partner;
+}
+
+export async function fetchApiCreatePartnerLink(
+  tenantId: string,
+  partnerId: string,
+  body: CreatePartnerLinkDto,
+  idempotencyKey: string,
+): Promise<PartnerDto> {
+  const { data, error } = await partnersControllerCreatePartnerLink({
+    path: { tenantId, partnerId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.partner;
+}
+
+export async function fetchApiUpdatePartnerLink(
+  tenantId: string,
+  partnerId: string,
+  linkId: string,
+  body: UpdatePartnerLinkDto,
+  idempotencyKey: string,
+): Promise<PartnerDto> {
+  const { data, error } = await partnersControllerUpdatePartnerLink({
+    path: { tenantId, partnerId, linkId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.partner;
 }
 
 export async function fetchApiListPurchaseOrders(

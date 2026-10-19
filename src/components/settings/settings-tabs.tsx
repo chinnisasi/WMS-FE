@@ -7,6 +7,7 @@ import { SETTINGS_PAGE_TABS, type SettingsTab } from '@/lib/page-tabs';
 
 import { ClientsCard } from '@/components/settings/clients-card';
 import { DevicesCard } from '@/components/settings/devices-card';
+import { PartnersCard } from '@/components/settings/partners-card';
 import { ImportCatalogCard } from '@/components/settings/import-catalog';
 import { ProductsCard } from '@/components/settings/products-card';
 import { RateCardsCard } from '@/components/settings/rate-cards-card';
@@ -18,11 +19,12 @@ import { ZonesBinsSetup } from '@/components/settings/zone-bin-setup';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 
 /**
- * The Settings cards in five grouped tabs (page-tabs, user decision
+ * The Settings cards in grouped tabs (page-tabs, user decision
  * 2026-10-17), one group mounted at a time, `?tab=` linkable:
  *   - Warehouses (the default): create form, warehouse list, zones & bins;
  *   - Catalog: import, products, SKUs, segregation matrix;
  *   - Clients: clients, rate cards;
+ *   - Partners (story 1-3): the business partner master and its client links;
  *   - Team: users & roles;
  *   - Devices: device enrollment.
  * The header and the setup checklist stay above the bar (`settings/page.tsx`);
@@ -69,6 +71,7 @@ function SettingsTabsKnown({ initialTab }: { initialTab: SettingsTab | null }) {
               <RateCardsCard />
             </>
           )}
+          {tab === 'partners' && <PartnersCard />}
           {tab === 'team' && <UsersCard />}
           {tab === 'devices' && <DevicesCard />}
         </div>

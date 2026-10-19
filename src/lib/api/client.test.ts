@@ -6,6 +6,12 @@ import {
   ApiProblem,
   fetchApiCorrectSkuClient,
   fetchApiCreateClient,
+  fetchApiCreatePartner,
+  fetchApiCreatePartnerLink,
+  fetchApiListPartners,
+  fetchApiUpdatePartner,
+  fetchApiUpdatePartnerLink,
+  fetchApiUpdatePartnerStatus,
   fetchApiActivateRateCard,
   fetchApiCancelRateCard,
   fetchApiCreateRateCard,
@@ -2475,5 +2481,69 @@ describe('inventory-screen — the stock and batch list wrappers', () => {
   test('a refusal keeps its machine-readable code', async () => {
     stubFetch(400, { code: 'invalid-cursor', title: 'Malformed pagination cursor', status: 400, detail: 'd' });
     await expect(fetchApiListStock(T, W, { cursor: 'x', order: 'location' })).rejects.toMatchObject({ code: 'invalid-cursor' });
+  });
+});
+
+describe('business partner wrappers (story 1-3)', () => {
+  const PKEY = '01JZ3K8Q4M7N2P5R9S6T1V0W3X';
+  const PARTNER = { id: 'p-1', code: 'V-1', name: 'Prime', links: [] };
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}/partners`;
+
+  test('list sends only the filters given, and none on a bare first page', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListPartners(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(base());
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListPartners(SESSION.tenant.id, { role: 'vendor', clientId: 'c-1', status: 'active', q: 'pri', cursor: 'cur', limit: 10 });
+    const params = new URL(lastRequest!.url).searchParams;
+    expect(Object.fromEntries(params.entries())).toEqual({ role: 'vendor', clientId: 'c-1', status: 'active', q: 'pri', cursor: 'cur', limit: '10' });
+    clearSession();
+  });
+
+  test('create, update and status carry the key and unwrap the partner', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { partner: PARTNER });
+    expect((await fetchApiCreatePartner(SESSION.tenant.id, { code: 'V-1', name: 'Prime', roles: ['vendor'] }, PKEY)).id).toBe('p-1');
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(base());
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(PKEY);
+    expect(await lastRequest!.json()).toEqual({ code: 'V-1', name: 'Prime', roles: ['vendor'] });
+
+    stubFetch(200, { partner: PARTNER });
+    await fetchApiUpdatePartner(SESSION.tenant.id, 'p-1', { gstin: null }, PKEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/p-1`);
+    // null clears (tri-state) — it reaches the wire as null, not dropped.
+    expect(await lastRequest!.json()).toEqual({ gstin: null });
+
+    stubFetch(200, { partner: PARTNER });
+    await fetchApiUpdatePartnerStatus(SESSION.tenant.id, 'p-1', { status: 'inactive', reason: 'stopped' }, PKEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/p-1/status`);
+    expect(await lastRequest!.json()).toEqual({ status: 'inactive', reason: 'stopped' });
+    clearSession();
+  });
+
+  test('link create and update hit the link paths with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { partner: PARTNER });
+    await fetchApiCreatePartnerLink(SESSION.tenant.id, 'p-1', { clientId: 'c-1', role: 'vendor', isDefault: true }, PKEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/p-1/links`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(PKEY);
+    expect(await lastRequest!.json()).toEqual({ clientId: 'c-1', role: 'vendor', isDefault: true });
+    stubFetch(200, { partner: PARTNER });
+    await fetchApiUpdatePartnerLink(SESSION.tenant.id, 'p-1', 'l-1', { active: false }, PKEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/p-1/links/l-1`);
+    expect(await lastRequest!.json()).toEqual({ active: false });
+    clearSession();
+  });
+
+  test('a refusal keeps its code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { code: 'partner-gstin-taken', title: 't', status: 409, detail: 'GSTIN 27… already belongs to partner "V-9"' });
+    await expect(fetchApiCreatePartner(SESSION.tenant.id, { code: 'V-1', name: 'P', roles: ['vendor'] }, PKEY)).rejects.toMatchObject({ code: 'partner-gstin-taken', status: 409 });
+    clearSession();
   });
 });

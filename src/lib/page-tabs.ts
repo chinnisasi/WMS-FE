@@ -138,10 +138,11 @@ export const INVENTORY_PAGE_TABS = definePageTabs({
 export type InventoryTab = (typeof INVENTORY_PAGE_TABS)['defaultTab'];
 
 /**
- * `/settings` — five grouped tabs (user decision, 2026-10-17): Warehouses
+ * `/settings` — grouped tabs (user decision, 2026-10-17): Warehouses
  * (create form, warehouse list, zones & bins), Catalog (import, products,
- * SKUs, segregation matrix), Clients (clients, rate cards), Team (users &
- * roles), Devices. The setup checklist stays above the tab bar.
+ * SKUs, segregation matrix), Clients (clients, rate cards), Partners (story
+ * 1-3 — vendors, consignees, transporters and their client links), Team
+ * (users & roles), Devices. The setup checklist stays above the tab bar.
  */
 export const SETTINGS_PAGE_TABS = definePageTabs({
   route: '/settings',
@@ -150,6 +151,8 @@ export const SETTINGS_PAGE_TABS = definePageTabs({
     { id: 'warehouses', label: 'Warehouses' },
     { id: 'catalog', label: 'Catalog' },
     { id: 'clients', label: 'Clients' },
+    // Story 1-3 — the business partner master (vendors, consignees, transporters).
+    { id: 'partners', label: 'Partners' },
     { id: 'team', label: 'Team' },
     { id: 'devices', label: 'Devices' },
   ],

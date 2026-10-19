@@ -89,7 +89,7 @@ describe('page-tabs — the pages', () => {
       ['hsn', 'HSN summary'],
       ['cold-chain', 'Cold-chain trace'],
     ]);
-    expect(SETTINGS_PAGE_TABS.tabs.map((t) => t.id)).toEqual(['warehouses', 'catalog', 'clients', 'team', 'devices']);
+    expect(SETTINGS_PAGE_TABS.tabs.map((t) => t.id)).toEqual(['warehouses', 'catalog', 'clients', 'partners', 'team', 'devices']);
     expect(INVENTORY_PAGE_TABS.tabs.map((t) => [t.id, t.label])).toEqual([
       ['stock', 'Stock'],
       ['batches', 'Batches'],
