@@ -80,6 +80,8 @@ function sku(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     reorderQty: 100,
     barcode: 'BC-SPICE-01',
     uomConversions: [],
+    shelfLifeDays: null,
+    barcodes: [],
     // Story 12-7 — the class fields every response carries (storage required
     // since 12-1, hazard nullable since 12-2).
     storageClass: 'ambient',
@@ -107,10 +109,12 @@ function kit(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 
 /** Story 1-1: the next client correction answers 409 with this body. */
 let correctionRefusal: Record<string, unknown> | null = null;
+/** Story 1-4 — the next packaging PUT's refusal (null: echo a 200). */
+let packagingRefusal: Record<string, unknown> | null = null;
 
 function stubRouter(): void {
-  stubGlobal('fetch', (async (input: RequestInfo | URL) => {
-    const request = input instanceof Request ? input : new Request(input.toString());
+  stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input.toString(), init);
     const url = new URL(request.url);
     const { pathname } = url;
     const method = request.method.toUpperCase();
@@ -122,6 +126,15 @@ function stubRouter(): void {
       body = null;
     }
     requests.push({ method, pathname, body, headers });
+    if (method === 'PUT' && /\/catalog\/skus\/[^/]+\/packaging$/.test(pathname)) {
+      if (packagingRefusal !== null) {
+        const refusal = packagingRefusal;
+        packagingRefusal = null;
+        return json(409, refusal);
+      }
+      const put = body as { levels: unknown[] };
+      return json(200, { sku: sku({ uomConversions: put.levels }) });
+    }
     if (method === 'PATCH' && /\/catalog\/skus\/[^/]+$/.test(pathname)) {
       if (nextPatchStatus !== 200) {
         const refusal = nextPatchBody;
@@ -200,6 +213,7 @@ beforeEach(() => {
   kitsFail = false;
   clientRows = null;
   correctionRefusal = null;
+  packagingRefusal = null;
   nextPatchStatus = 200;
   nextPatchBody = null;
   skuRows = [
@@ -918,5 +932,163 @@ describe('story 1-1: per-client codes in the SKU card', () => {
     submitForm(view.container);
     await settle();
     expect(view.container.textContent).toContain('already belongs to another SKU for this client.');
+  });
+});
+
+describe('story 1-4: shelf life, pack levels and the Packaging panel', () => {
+  function rowOf(container: HTMLElement, code: string): HTMLTableRowElement {
+    return [...container.querySelectorAll<HTMLTableRowElement>('tbody tr')].find((row) => row.textContent!.includes(code))!;
+  }
+  function buttonIn(scope: ParentNode, text: string): HTMLButtonElement {
+    return [...scope.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text)!;
+  }
+  function setSelect(select: HTMLSelectElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(select, value);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  test('the table shows the pack levels and the shelf life', async () => {
+    skuRows = [
+      sku({ code: 'PACKED-1', uomConversions: [{ uom: 'case', factor: 12 }, { uom: 'pallet', factor: 480 }], shelfLifeDays: 365 }),
+    ];
+    view = await mount();
+    const headers = [...view.container.querySelectorAll('thead th')].map((th) => th.textContent);
+    expect(headers).toContain('Pack levels');
+    expect(headers).toContain('Shelf life');
+    const row = rowOf(view.container, 'PACKED-1');
+    expect(row.textContent).toContain('case ×12 · pallet ×480');
+    expect(row.textContent).toContain('365 d');
+  });
+
+  test('the Packaging panel PUTs the levels and the extra barcodes (never the primary), and says to refresh handhelds', async () => {
+    skuRows = [
+      sku({
+        code: 'PACKED-2',
+        barcode: 'PRIMARY-1',
+        uomConversions: [{ uom: 'case', factor: 12 }],
+        barcodes: [
+          { barcode: 'PRIMARY-1', uom: 'each', isPrimary: true },
+          { barcode: '8901234567890', uom: 'case', isPrimary: false },
+        ],
+      }),
+    ];
+    view = await mount();
+    act(() => buttonIn(rowOf(view!.container, 'PACKED-2'), 'Packaging').click());
+    await settle();
+    const form = view.container.querySelector('form[aria-label="Packaging of PACKED-2"]')!;
+    expect(form.textContent).toContain('Refresh handhelds after changing pack sizes');
+    // Add a pallet level of 480 and a pallet barcode.
+    act(() => buttonIn(form, 'Add level').click());
+    await settle();
+    const levelSelects = form.querySelectorAll<HTMLSelectElement>('select[aria-label="Pack level unit"]');
+    setSelect(levelSelects[1]!, 'pallet');
+    const factors = form.querySelectorAll<HTMLInputElement>('input[aria-label="Pack level factor"]');
+    setInput(factors[1]!, '480');
+    act(() => buttonIn(form, 'Add barcode').click());
+    await settle();
+    const barcodeInputs = form.querySelectorAll<HTMLInputElement>('input[aria-label="Extra barcode"]');
+    setInput(barcodeInputs[1]!, '8901234567891');
+    const levels = form.querySelectorAll<HTMLSelectElement>('select[aria-label="Extra barcode level"]');
+    setSelect(levels[1]!, 'pallet');
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    const put = requests.find((r) => r.method === 'PUT');
+    expect(put!.pathname).toMatch(/\/catalog\/skus\/[^/]+\/packaging$/);
+    expect(put!.body).toEqual({
+      levels: [
+        { uom: 'case', factor: 12 },
+        { uom: 'pallet', factor: 480 },
+      ],
+      barcodes: [
+        { barcode: '8901234567890', uom: 'case' },
+        { barcode: '8901234567891', uom: 'pallet' },
+      ],
+    });
+    // The banner is built from the RESPONSE (the stub echoes the fixture's code).
+    expect(view.container.textContent).toContain('packaging saved');
+  });
+
+  test('a factor of 1 refuses client-side — nothing is sent', async () => {
+    skuRows = [sku({ code: 'PACKED-3' })];
+    view = await mount();
+    act(() => buttonIn(rowOf(view!.container, 'PACKED-3'), 'Packaging').click());
+    await settle();
+    const form = view.container.querySelector('form[aria-label="Packaging of PACKED-3"]')!;
+    act(() => buttonIn(form, 'Add level').click());
+    await settle();
+    setSelect(form.querySelector<HTMLSelectElement>('select[aria-label="Pack level unit"]')!, 'case');
+    setInput(form.querySelector<HTMLInputElement>('input[aria-label="Pack level factor"]')!, '1');
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(requests.some((r) => r.method === 'PUT')).toBe(false);
+    expect(view.container.textContent).toContain('from 2 to');
+  });
+
+  test('a packaging refusal naming the holder renders the server detail', async () => {
+    skuRows = [sku({ code: 'PACKED-4' })];
+    packagingRefusal = {
+      code: 'duplicate-barcode',
+      status: 409,
+      title: 'Barcode already in use',
+      detail: 'Barcode "8901" already belongs to SKU "TEA-2" (its case barcode).',
+    };
+    view = await mount();
+    act(() => buttonIn(rowOf(view!.container, 'PACKED-4'), 'Packaging').click());
+    await settle();
+    const form = view.container.querySelector('form[aria-label="Packaging of PACKED-4"]')!;
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(view.container.textContent).toContain('Barcode "8901" already belongs to SKU "TEA-2" (its case barcode).');
+  });
+
+  test('a refused packaging save retries under the SAME Idempotency-Key; an edit afterwards mints a new one', async () => {
+    skuRows = [sku({ code: 'PACKED-5' })];
+    packagingRefusal = { code: 'duplicate-barcode', status: 409, title: 'Barcode already in use', detail: 'Taken.' };
+    view = await mount();
+    act(() => buttonIn(rowOf(view!.container, 'PACKED-5'), 'Packaging').click());
+    await settle();
+    const form = view.container.querySelector('form[aria-label="Packaging of PACKED-5"]')!;
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    packagingRefusal = { code: 'duplicate-barcode', status: 409, title: 'Barcode already in use', detail: 'Taken.' };
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    act(() => buttonIn(form, 'Add level').click());
+    await settle();
+    setSelect(form.querySelector<HTMLSelectElement>('select[aria-label="Pack level unit"]')!, 'case');
+    setInput(form.querySelector<HTMLInputElement>('input[aria-label="Pack level factor"]')!, '12');
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    const keys = requests.filter((r) => r.method === 'PUT').map((r) => r.headers['Idempotency-Key']);
+    expect(keys).toHaveLength(3);
+    expect(keys[0]).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
+  test('the edit form sends a changed shelf life and catch weight; a tracking refusal renders sku-has-stock', async () => {
+    skuRows = [sku({ code: 'SHELF-1' })];
+    view = await mount();
+    act(() => buttonIn(rowOf(view!.container, 'SHELF-1'), 'Edit').click());
+    await settle();
+    const shelf = [...view.container.querySelectorAll('label')]
+      .find((label) => label.textContent!.startsWith('Shelf life — total days from manufacture'))!
+      .querySelector<HTMLInputElement>('input')!;
+    setInput(shelf, '180');
+    submitForm(view.container);
+    await settle();
+    const patch = requests.find((r) => r.method === 'PATCH');
+    expect(patch!.body).toMatchObject({ shelfLifeDays: 180, catchWeightTracked: false });
+
+    nextPatchStatus = 409;
+    nextPatchBody = { code: 'sku-has-stock', status: 409, title: 'Tracking cannot change', detail: 'SKU "SHELF-1" has stock on hand — batch tracking cannot change.' };
+    act(() => buttonIn(rowOf(view!.container, 'SHELF-1'), 'Edit').click());
+    await settle();
+    submitForm(view.container);
+    await settle();
+    expect(view.container.textContent).toContain('SKU "SHELF-1" has stock on hand — batch tracking cannot change.');
   });
 });

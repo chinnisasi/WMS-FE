@@ -62,6 +62,8 @@ import {
   fetchApiCreateKit,
   fetchApiCreateOrder,
   fetchApiCreateProduct,
+  fetchApiCreateSku,
+  fetchApiReplacePackaging,
   fetchApiCreateWarehouse,
   fetchApiCreateWavePolicy,
   fetchApiApproveAdjustmentPending,
@@ -951,6 +953,43 @@ describe('catalog product and kit wrappers (story 11-6)', () => {
     );
     expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
     expect(await lastRequest!.json()).toEqual({ name: 'Shirts' });
+    clearSession();
+  });
+
+  test('story 1-4: create SKU POSTs the typed body (levels + barcodes included) with its Idempotency-Key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { sku: { id: 'sku-new' } });
+    const body = {
+      code: 'TEA-1',
+      name: 'Assam tea',
+      uom: 'each',
+      gstRate: 500,
+      batchTracked: false,
+      serialTracked: false,
+      catchWeightTracked: false,
+      shelfLifeDays: 365,
+      clientId: PRODUCT_ID,
+      levels: [{ uom: 'case', factor: 12 }],
+      barcodes: [{ barcode: '8901234567890', uom: 'case' }],
+    };
+    const created = await fetchApiCreateSku(SESSION.tenant.id, body, KEY);
+    expect(created.sku.id).toBe('sku-new');
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/catalog/skus`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    clearSession();
+  });
+
+  test('story 1-4: replace packaging PUTs the levels and the non-primary barcodes', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { sku: { id: 'sku-1' } });
+    const body = { levels: [{ uom: 'case', factor: 12 }], barcodes: [{ barcode: '8901', uom: 'case' }] };
+    await fetchApiReplacePackaging(SESSION.tenant.id, 'sku-1', body, KEY);
+    expect(lastRequest!.method).toBe('PUT');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/catalog/skus/sku-1/packaging`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
     clearSession();
   });
 

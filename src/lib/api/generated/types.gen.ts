@@ -614,6 +614,18 @@ export type SkuUomConversionResponse = {
     factor: number;
 };
 
+export type SkuBarcodeResponse = {
+    barcode: string;
+    /**
+     * The level this barcode names — the SKU's base uom or one of its pack levels
+     */
+    uom: 'each' | 'box' | 'case' | 'carton' | 'pack' | 'pallet' | 'bag' | 'drum' | 'roll' | 'crate' | 'bundle' | 'pair' | 'dozen' | 'bottle' | 'can' | 'tin' | 'jar' | 'tube' | 'tray' | 'sheet' | 'bar' | 'cylinder' | 'keg' | 'set' | 'g' | 'kg' | 'tonne' | 'ml' | 'litre' | 'kl' | 'mm' | 'cm' | 'm' | 'sqm' | 'sqft';
+    /**
+     * The primary barcode (always at the base uom; equals `barcode` on the SKU)
+     */
+    isPrimary: boolean;
+};
+
 export type SkuResponse = {
     id: string;
     tenantId: string;
@@ -684,7 +696,18 @@ export type SkuResponse = {
      * Generated server-side (uuidv7) unless provided
      */
     barcode: string;
+    /**
+     * Story 1-4 — the SKU's pack levels (one unit of `uom` = `factor` base units), sorted by uom
+     */
     uomConversions: Array<SkuUomConversionResponse>;
+    /**
+     * Story 1-4 — total shelf life in days from manufacture (1–3650), or null when unset. Not the client policy's minimum REMAINING shelf life.
+     */
+    shelfLifeDays: number | null;
+    /**
+     * Story 1-4 — every barcode of the SKU with its level: the primary first, then by (uom, barcode). Empty only on a replayed response stored before 1-4
+     */
+    barcodes: Array<SkuBarcodeResponse>;
     createdAt: string;
 };
 
@@ -694,6 +717,112 @@ export type SkuListResponse = {
      * Opaque keyset cursor
      */
     nextCursor: string | null;
+};
+
+export type SkuAttributesDto = {
+    /**
+     * Static catalog weight in grams
+     */
+    weightGrams?: number;
+    lengthMm?: number;
+    widthMm?: number;
+    heightMm?: number;
+    /**
+     * ISO 3166-1 alpha-2 uppercase
+     */
+    countryOfOrigin?: string;
+};
+
+export type PackLevelDto = {
+    /**
+     * The level's unit — the uom vocabulary (aliases such as `cases` resolve); never the SKU's base uom
+     */
+    uom: string;
+    /**
+     * Base units in one unit of this level — a whole number
+     */
+    factor: number;
+};
+
+export type ExtraBarcodeDto = {
+    /**
+     * Printable ASCII, trimmed, no ";"
+     */
+    barcode: string;
+    /**
+     * The SKU's base uom (an extra base-level barcode) or one of its pack levels
+     */
+    uom: string;
+};
+
+export type CreateSkuDto = {
+    /**
+     * Unique in the client; immutable
+     */
+    code: string;
+    name: string;
+    /**
+     * The base unit — the uom vocabulary; aliases such as `pcs` resolve. Immutable
+     */
+    uom: string;
+    /**
+     * GST in basis points (1800 = 18%)
+     */
+    gstRate: number;
+    hsnCode?: string;
+    /**
+     * The primary (base-level) barcode. Omitted or blank → generated server-side, as the import does
+     */
+    barcode?: string;
+    batchTracked: boolean;
+    serialTracked: boolean;
+    /**
+     * Handled by unit, priced by weight. Mutually exclusive with serialTracked
+     */
+    catchWeightTracked: boolean;
+    attributes?: SkuAttributesDto;
+    /**
+     * Defaults to ambient
+     */
+    storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    hazardClass?: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
+    abcClass?: 'a' | 'b' | 'c';
+    /**
+     * A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    reorderPoint?: number;
+    /**
+     * A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    reorderQty?: number;
+    /**
+     * Total shelf life in days from manufacture
+     */
+    shelfLifeDays?: number;
+    /**
+     * The client the SKU belongs to. Required (400 client-required) once the tenant holds more than one client
+     */
+    clientId?: string;
+    levels?: Array<PackLevelDto>;
+    /**
+     * Non-primary barcodes, each naming its level
+     */
+    barcodes?: Array<ExtraBarcodeDto>;
+};
+
+export type SkuWriteResponse = {
+    sku: SkuResponse;
+};
+
+export type ReplacePackagingDto = {
+    /**
+     * Every pack level the SKU carries afterwards (replace semantics)
+     */
+    levels: Array<PackLevelDto>;
+    /**
+     * Every NON-primary barcode the SKU carries afterwards (the primary is edited through the SKU PATCH)
+     */
+    barcodes: Array<ExtraBarcodeDto>;
 };
 
 export type SegregationPairResponse = {
@@ -715,12 +844,20 @@ export type CreateProductDto = {
      * The declared variant axes, 1–3 short names. Immutable while variants are attached.
      */
     axes: Array<string>;
+    /**
+     * Story 1-4 — the client the product belongs to. Required (400 client-required) once the tenant holds more than one client
+     */
+    clientId?: string;
 };
 
 export type ProductResponse = {
     id: string;
     tenantId: string;
     name: string;
+    /**
+     * Story 1-4 — the client the product belongs to; every attached SKU shares it
+     */
+    clientId: string;
     axes: Array<string>;
     /**
      * How many SKUs in this tenant are attached to this product (derived, never stored)
@@ -743,6 +880,10 @@ export type PatchProductDto = {
      * The declared axes. Refused 409 `product-has-variants` while any SKU is attached.
      */
     axes?: Array<string>;
+    /**
+     * Story 1-4 — moves the product to another client; refused 409 `product-has-skus` while any SKU is attached
+     */
+    clientId?: string;
 };
 
 export type PatchSkuDto = {
@@ -786,7 +927,14 @@ export type PatchSkuDto = {
      * A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     reorderQty?: number;
+    /**
+     * The primary barcode — printable ASCII, trimmed, no ";". A value that is this SKU's extra barcode is promoted
+     */
     barcode?: string;
+    /**
+     * Total shelf life in days from manufacture (1–3650). Omit to leave unchanged; null to clear.
+     */
+    shelfLifeDays?: number | null;
     /**
      * Attach the SKU to this product (variantValues is then required), or null to detach it — variantValues are cleared with the detach.
      */
@@ -3568,6 +3716,18 @@ export type GoodsReceiptResponse = {
     refusedReceipt?: RefusedReceiptDto;
 };
 
+export type CatalogSnapshotPackBarcodeDto = {
+    barcode: string;
+    /**
+     * The level this barcode names — the SKU's base uom, or one of its pack levels
+     */
+    uom: 'each' | 'box' | 'case' | 'carton' | 'pack' | 'pallet' | 'bag' | 'drum' | 'roll' | 'crate' | 'bundle' | 'pair' | 'dozen' | 'bottle' | 'can' | 'tin' | 'jar' | 'tube' | 'tray' | 'sheet' | 'bar' | 'cylinder' | 'keg' | 'set' | 'g' | 'kg' | 'tonne' | 'ml' | 'litre' | 'kl' | 'mm' | 'cm' | 'm' | 'sqm' | 'sqft';
+    /**
+     * Base units one scan of this barcode counts: the pack level's factor, or 1 at the base uom. The handheld adds it on receive, returns and pack; pick and putaway accept the barcode as SKU confirmation only.
+     */
+    factor: number;
+};
+
 export type CatalogSnapshotSkuDto = {
     id: string;
     code: string;
@@ -3602,6 +3762,10 @@ export type CatalogSnapshotSkuDto = {
      * Story 1-1: the client the SKU belongs to. Code and barcode are unique per (tenant, client), so one barcode may name several SKUs; the device resolves a scan through the work's own SKUs first, then the document's client (`clients` names each)
      */
     clientId: string;
+    /**
+     * Story 1-4: every non-primary barcode of the SKU with its level and factor (1 at the base uom). Empty when the SKU has none; an older device ignores it.
+     */
+    packBarcodes: Array<CatalogSnapshotPackBarcodeDto>;
 };
 
 export type CatalogSnapshotPoDto = {
@@ -10221,6 +10385,116 @@ export type CatalogControllerListSkusResponses = {
 
 export type CatalogControllerListSkusResponse = CatalogControllerListSkusResponses[keyof CatalogControllerListSkusResponses];
 
+export type CatalogControllerCreateSkuData = {
+    body: CreateSkuDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/skus';
+};
+
+export type CatalogControllerCreateSkuErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; an invalid field — unknown uom, GST, attributes, classes, shelf life, a level equal to the base uom or repeated, a factor outside 2–1,000,000, a barcode breaking the rule or equal to the primary (validation-failed); a barcode on a level the SKU does not declare (barcode-level-unknown); no clientId while the tenant holds more than one client (client-required)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks sku.edit (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * clientId names no client of this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The code is taken in the client (duplicate-sku-code); a barcode is taken in the client or listed twice (duplicate-barcode, naming the holder and its level); a barcode equals a SKU code of the client, or the code equals a barcode (barcode-is-code); the client has departed (client-departed); a concurrent same-key request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerCreateSkuError = CatalogControllerCreateSkuErrors[keyof CatalogControllerCreateSkuErrors];
+
+export type CatalogControllerCreateSkuResponses = {
+    /**
+     * The created SKU (a matching Idempotency-Key replays it)
+     */
+    201: SkuWriteResponse;
+};
+
+export type CatalogControllerCreateSkuResponse = CatalogControllerCreateSkuResponses[keyof CatalogControllerCreateSkuResponses];
+
+export type CatalogControllerReplacePackagingData = {
+    body: ReplacePackagingDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        skuId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/skus/{skuId}/packaging';
+};
+
+export type CatalogControllerReplacePackagingErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; a level repeated or equal to the base uom, a factor outside 2–1,000,000, a barcode breaking the rule or equal to the primary (validation-failed); a barcode on a level that is neither the base uom nor in levels (barcode-level-unknown)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks sku.edit (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The SKU does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A barcode is listed twice or held by another SKU of the client (duplicate-barcode, naming the holder and its level); a barcode equals a SKU code of the client (barcode-is-code); the SKU's client has departed (client-departed); a concurrent same-key request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerReplacePackagingError = CatalogControllerReplacePackagingErrors[keyof CatalogControllerReplacePackagingErrors];
+
+export type CatalogControllerReplacePackagingResponses = {
+    200: SkuWriteResponse;
+};
+
+export type CatalogControllerReplacePackagingResponse = CatalogControllerReplacePackagingResponses[keyof CatalogControllerReplacePackagingResponses];
+
 export type CatalogControllerGetSegregationMatrixData = {
     body?: never;
     path: {
@@ -10313,7 +10587,7 @@ export type CatalogControllerCreateProductData = {
 
 export type CatalogControllerCreateProductErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or an invalid name/axes (validation-failed)
+     * Missing or malformed Idempotency-Key, or an invalid name/axes/clientId (validation-failed), or no clientId while the tenant holds more than one client (client-required)
      */
     400: ProblemDetailsDto;
     /**
@@ -10325,7 +10599,11 @@ export type CatalogControllerCreateProductErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Product name already exists in this tenant (duplicate-product-name)
+     * clientId names no client of this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Product name already exists for this client (duplicate-product-name), or the client has departed (client-departed)
      */
     409: ProblemDetailsDto;
     /**
@@ -10378,11 +10656,11 @@ export type CatalogControllerEditProductErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Product does not exist in this tenant (not-found)
+     * Product does not exist in this tenant, or clientId names no client of this tenant (not-found)
      */
     404: ProblemDetailsDto;
     /**
-     * Axes change with variants attached (product-has-variants), or the new name is taken (duplicate-product-name)
+     * Axes change with variants attached (product-has-variants), a client change with SKUs attached (product-has-skus), the new name is taken in the client (duplicate-product-name), or the target client has departed (client-departed)
      */
     409: ProblemDetailsDto;
     /**
@@ -10436,7 +10714,7 @@ export type CatalogControllerEditSkuErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Barcode already belongs to another SKU (duplicate-barcode names it), another SKU of this product already carries identical variantValues (duplicate-variant-values), or a hazard-class change would strand stock co-located with an incompatible binmate (hazard-segregation-conflict names the bins and the parties)
+     * Barcode already belongs to another SKU (duplicate-barcode names it and its level) or equals a SKU code (barcode-is-code), another SKU of this product already carries identical variantValues (duplicate-variant-values), the product belongs to another client (product-client-mismatch), a batch/serial/catch-weight change while the SKU has stock, a pending over-receipt or a pending adjustment (sku-has-stock), or a hazard-class change would strand stock co-located with an incompatible binmate (hazard-segregation-conflict names the bins and the parties)
      */
     409: ProblemDetailsDto;
     /**
@@ -10490,7 +10768,7 @@ export type CatalogControllerCorrectSkuClientErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The SKU, or a kit partner / product sibling that must move with it, already has history — ledger events, order/PO/transfer lines, pending adjustments, count tasks, batches, serials, reservations or channel mappings (sku-has-history, naming the SKU); or a concurrent kit/product change or same-key request (conflict)
+     * The SKU, or a kit partner / product sibling that must move with it, already has history — ledger events, order/PO/transfer lines, pending adjustments, count tasks, batches, serials, reservations or channel mappings (sku-has-history, naming the SKU); a code, barcode or product name of the moving group is taken in the target client (duplicate-sku-code / duplicate-barcode / duplicate-product-name) or a barcode equals a target SKU code (barcode-is-code); or a concurrent kit/product change or same-key request (conflict)
      */
     409: ProblemDetailsDto;
     /**

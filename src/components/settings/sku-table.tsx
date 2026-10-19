@@ -9,6 +9,7 @@ import {
   fetchApiEditSku,
   fetchApiListKits,
   fetchApiReplaceKit,
+  fetchApiReplacePackaging,
 } from '@/lib/api/client';
 import type { ClientDto, KitResponse, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -16,7 +17,24 @@ import { notifyCatalogChanged } from '@/lib/catalog';
 import { kitBomLabel, kitMarkerLabel, kitReason, parseKitComponents } from '@/lib/catalog-kits';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { parseQuantityInput, quantityInputLabel } from '@/lib/format-quantity';
-import { hazardClassLabel, HAZARD_CLASSES, skuClassReason, STORAGE_CLASSES, storageClassLabel } from '@/lib/sku-admin';
+import {
+  ABC_CLASSES,
+  hazardClassLabel,
+  HAZARD_CLASSES,
+  packLevelsLabel,
+  PACKAGING_REFRESH_NOTE,
+  parsePackagingDraft,
+  parseShelfLifeInput,
+  SHELF_LIFE_LABEL,
+  shelfLifeLabel,
+  shelfLifeWarning,
+  skuClassReason,
+  skuMasterReason,
+  STORAGE_CLASSES,
+  storageClassLabel,
+  type PackBarcodeRow,
+  type PackLevelRow,
+} from '@/lib/sku-admin';
 import { skuPhysicalLabel } from '@/lib/sku-attributes';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -36,6 +54,7 @@ import {
 import { readyClients, useClients } from '@/lib/use-clients';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { PackagingEditor, packagingRowsOf } from '@/components/settings/packaging-editor';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 
 const inputClass =
@@ -75,9 +94,11 @@ function attributeInput(
 
 /**
  * The tenant's SKU master data (story 1.4), a Settings sub-card: a keyset
- * paginated DataTable with inline edit — name, GST, HSN, batch/serial
- * tracking, reorder defaults, barcode. The SKU code is immutable (imports
- * create SKUs; there is no manual create in this story).
+ * paginated DataTable with inline edit — name, GST, HSN, tracking, physical
+ * attributes, classes, shelf life, reorder defaults, barcode — and (story
+ * 1-4) the Packaging panel: pack levels and every extra barcode. The SKU
+ * code and base unit are immutable; SKUs are created by the import or the
+ * create card above.
  */
 export function SkuTableCard() {
   const sessioned = useSyncExternalStore(
@@ -105,6 +126,8 @@ function SkuTableCardSessioned() {
   const kits = useKits();
   const [editing, setEditing] = useState<SkuResponse | null>(null);
   const [kitEditing, setKitEditing] = useState<SkuResponse | null>(null);
+  // Story 1-4 — the Packaging panel, one SKU at a time.
+  const [packaging, setPackaging] = useState<SkuResponse | null>(null);
   // Story 21-2b — the owner's client correction, one SKU at a time.
   const [correcting, setCorrecting] = useState<SkuResponse | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
@@ -151,11 +174,11 @@ function SkuTableCardSessioned() {
     {
       key: 'uom',
       header: 'UoM',
-      render: (sku) =>
-        sku.uomConversions.length === 0
-          ? sku.uom
-          : `${sku.uom} · ${sku.uomConversions.map((c) => `${c.uom}:${c.factor}`).join(';')}`,
+      render: (sku) => sku.uom,
     },
+    // Story 1-4 — the pack levels and the shelf life (lib derivations, pinned by test).
+    { key: 'packLevels', header: 'Pack levels', render: (sku) => packLevelsLabel(sku) },
+    { key: 'shelfLife', header: 'Shelf life', render: (sku) => shelfLifeLabel(sku) },
     { key: 'gstRateBps', header: 'GST %', numeric: true, render: (sku) => `${sku.gstRateBps / 100}%` },
     { key: 'hsn', header: 'HSN', render: (sku) => sku.hsn ?? '—' },
     // Story 11.2 — the static physical attributes, WYSIWYG grams/millimetres;
@@ -166,7 +189,7 @@ function SkuTableCardSessioned() {
       key: 'flags',
       header: 'Tracking',
       render: (sku) =>
-        [sku.batchTracked ? 'Batch' : null, sku.serialTracked ? 'Serial' : null]
+        [sku.batchTracked ? 'Batch' : null, sku.serialTracked ? 'Serial' : null, sku.catchWeightTracked ? 'Catch weight' : null]
           .filter((flag) => flag !== null)
           .join(' + ') || '—',
     },
@@ -210,6 +233,16 @@ function SkuTableCardSessioned() {
                   className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
                 >
                   {kitOf(sku.id) === undefined ? 'Kit' : 'Edit kit'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPackaging(sku);
+                    setOutcome(null);
+                  }}
+                  className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+                >
+                  Packaging
                 </button>
                 <button
                   type="button"
@@ -261,7 +294,7 @@ function SkuTableCardSessioned() {
         rows={skus?.items ?? []}
         nextCursor={skus?.nextCursor ?? null}
         onCursor={skus?.onCursor}
-        emptyMessage="No SKUs yet — import your catalog above."
+        emptyMessage="No SKUs yet — import your catalog or create one above."
       />
 
       {correcting !== null && clients !== null && (
@@ -303,9 +336,25 @@ function SkuTableCardSessioned() {
           onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Not saved', reason })}
         />
       )}
+      {packaging !== null && (
+        <PackagingForm
+          key={packaging.id}
+          sku={packaging}
+          onClose={() => setPackaging(null)}
+          onSaved={(updated) => {
+            setPackaging(null);
+            setOutcome({ tone: 'accepted', word: `${updated.code} packaging saved`, reason: PACKAGING_REFRESH_NOTE });
+            skus?.reload();
+            notifyCatalogChanged();
+          }}
+          onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Packaging not saved', reason })}
+        />
+      )}
       {editing !== null && (
         <SkuEditForm
+          key={editing.id}
           sku={editing}
+          minShelfLifeDays={clients?.find((client) => client.id === editing.clientId)?.receivingPolicy?.minShelfLifeDays ?? null}
           onClose={() => setEditing(null)}
           onSaved={(updated) => {
             setEditing(null);
@@ -412,11 +461,14 @@ function kitBomSentence(kit: KitResponse): string {
 /** The inline edit row form: prefilled from the picked SKU, PATCH on save. */
 function SkuEditForm({
   sku,
+  minShelfLifeDays,
   onClose,
   onSaved,
   onRejected,
 }: {
   sku: SkuResponse;
+  /** Story 1-4 — the SKU's client's minimum remaining shelf life on receipt (for a warning only). */
+  minShelfLifeDays: number | null;
   onClose: () => void;
   onSaved: (updated: SkuResponse) => void;
   onRejected: (reason: string) => void;
@@ -426,6 +478,14 @@ function SkuEditForm({
   const [hsn, setHsn] = useState(sku.hsn ?? '');
   const [batchTracked, setBatchTracked] = useState(sku.batchTracked);
   const [serialTracked, setSerialTracked] = useState(sku.serialTracked);
+  // Story 1-4 — catch weight, the ABC class and the shelf life join the form.
+  const [catchWeightTracked, setCatchWeightTracked] = useState(sku.catchWeightTracked);
+  const [abcClass, setAbcClass] = useState<string>((sku.abcClass as string | null) ?? '');
+  const [shelfLifeDays, setShelfLifeDays] = useState(
+    sku.shelfLifeDays === null || sku.shelfLifeDays === undefined ? '' : String(sku.shelfLifeDays),
+  );
+  const shelfParsed = parseShelfLifeInput(shelfLifeDays);
+  const shelfWarning = shelfLifeWarning(shelfParsed.value, minShelfLifeDays);
   // Story 11.2 — the static physical attributes, edited WYSIWYG in grams and
   // millimetres; a blank field sends null (clear), following the hsn template.
   const [weightGrams, setWeightGrams] = useState(sku.weightGrams === null ? '' : String(sku.weightGrams));
@@ -475,6 +535,10 @@ function SkuEditForm({
     if (width === false) return;
     const height = attributeInput(heightMm, 'Height', 'millimetres', onRejected);
     if (height === false) return;
+    if (shelfParsed.problem !== null) {
+      onRejected(shelfParsed.problem);
+      return;
+    }
     setPending(true);
     try {
       const trimmedName = name.trim();
@@ -504,6 +568,12 @@ function SkuEditForm({
             // tracked in PENDING); the BE contract is "null clears, always
             // succeeds" (12-2), so the clear rides as null through the cast.
             (nextHazard as SkuResponse['hazardClass'] | null);
+      // Story 1-4 — the shelf life and the ABC class ride only when changed
+      // (the class's "" is the clear verb against a classed SKU).
+      const currentShelf = sku.shelfLifeDays ?? null;
+      const changedShelf = shelfParsed.value === currentShelf ? undefined : shelfParsed.value;
+      const currentAbc = (sku.abcClass as string | null) ?? '';
+      const changedAbc = abcClass === currentAbc ? undefined : abcClass === '' ? null : abcClass;
       const updated = await fetchApiEditSku(
         session.tenant.id,
         sku.id,
@@ -513,6 +583,7 @@ function SkuEditForm({
           hsn: trimmedHsn === '' ? null : trimmedHsn,
           batchTracked,
           serialTracked,
+          catchWeightTracked,
           weightGrams: weight,
           lengthMm: length,
           widthMm: width,
@@ -525,6 +596,9 @@ function SkuEditForm({
           ...(changedHazard === undefined
             ? {}
             : { hazardClass: changedHazard as SkuResponse['hazardClass'] }),
+          ...(changedShelf === undefined ? {} : { shelfLifeDays: changedShelf }),
+          // The generated type drops `| null` on the clear verb (the hazardClass precedent).
+          ...(changedAbc === undefined ? {} : { abcClass: changedAbc as SkuResponse['abcClass'] }),
         },
         ulid(),
       );
@@ -719,8 +793,34 @@ function SkuEditForm({
             ))}
           </select>
         </label>
-        <div className="flex-1" />
+        <label className="flex flex-1 flex-col gap-1">
+          <span className={labelClass}>ABC class</span>
+          <select className={inputClass} value={abcClass} onChange={(e) => setAbcClass(e.target.value)}>
+            <option value="">Not classified</option>
+            {ABC_CLASSES.map((value) => (
+              <option key={value} value={value}>
+                {value.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-1 flex-col gap-1">
+          <span className={labelClass}>{SHELF_LIFE_LABEL}</span>
+          <input
+            className={inputClass}
+            type="text"
+            inputMode="numeric"
+            value={shelfLifeDays}
+            onChange={(e) => setShelfLifeDays(e.target.value)}
+            placeholder="—"
+          />
+        </label>
       </div>
+      {shelfWarning !== null ? (
+        <div role="status" className="text-xs text-(--warning)">
+          {shelfWarning}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={batchTracked} onChange={(e) => setBatchTracked(e.target.checked)} />
@@ -729,6 +829,14 @@ function SkuEditForm({
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={serialTracked} onChange={(e) => setSerialTracked(e.target.checked)} />
           Serial tracked
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={catchWeightTracked}
+            onChange={(e) => setCatchWeightTracked(e.target.checked)}
+          />
+          Catch weight
         </label>
         <div className="flex flex-1 justify-end gap-2">
           <button
@@ -771,9 +879,16 @@ function rejectionReason(error: unknown, attemptedBarcode?: string): string {
       case 'client-departed':
         return CLIENT_DEPARTED_REASON;
       case 'duplicate-barcode':
-        // The API names the conflicting SKU in the problem detail. Story
-        // 1-1: a barcode is unique per client, not per tenant.
+        // The API names the conflicting SKU (and, since 1-4, its level) in
+        // the problem detail. Story 1-1: a barcode is unique per client.
         return error.detail ?? `Barcode ${attemptedBarcode ?? ''} already belongs to another SKU for this client.`;
+      // Story 1-4 — the SKU master's codes, through the tested lib mapper.
+      case 'sku-has-stock':
+      case 'barcode-is-code':
+      case 'barcode-level-unknown':
+      case 'product-client-mismatch':
+      case 'role-denied':
+        return skuMasterReason(error);
       case 'not-found':
         return 'That SKU no longer exists — refresh the page.';
       case 'idempotency-key-reuse':
@@ -787,6 +902,93 @@ function rejectionReason(error: unknown, attemptedBarcode?: string): string {
     }
   }
   return 'The API is unreachable — is wms-be running?';
+}
+
+/**
+ * Story 1-4 — the Packaging panel: the SKU's pack levels and every extra
+ * barcode (the primary stays on the Edit form), replaced whole by the PUT.
+ * The idempotency key is per draft: minted on first submit, reused across
+ * retries of an unchanged draft, cleared on any edit (every row is in the
+ * server's hash).
+ */
+function PackagingForm({
+  sku,
+  onClose,
+  onSaved,
+  onRejected,
+}: {
+  sku: SkuResponse;
+  onClose: () => void;
+  onSaved: (updated: SkuResponse) => void;
+  onRejected: (reason: string) => void;
+}) {
+  const initial = packagingRowsOf(sku);
+  const [levels, setLevels] = useState<readonly PackLevelRow[]>(initial.levels);
+  const [barcodes, setBarcodes] = useState<readonly PackBarcodeRow[]>(initial.barcodes);
+  const [pending, setPending] = useState(false);
+  const keyRef = useRef<string | null>(null);
+  const inFlight = useRef(false);
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const session = readSession();
+    if (session === null || inFlight.current) return;
+    const parsed = parsePackagingDraft(sku.uom, sku.barcode, levels, barcodes);
+    if (parsed.problem !== null) {
+      onRejected(parsed.problem);
+      return;
+    }
+    inFlight.current = true;
+    setPending(true);
+    keyRef.current ??= ulid();
+    try {
+      const saved = await fetchApiReplacePackaging(session.tenant.id, sku.id, parsed.body, keyRef.current);
+      keyRef.current = null;
+      onSaved(saved.sku);
+    } catch (error) {
+      onRejected(skuMasterReason(error));
+    } finally {
+      inFlight.current = false;
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} aria-label={`Packaging of ${sku.code}`} className="flex flex-col gap-3 rounded-sm border border-(--border) p-3">
+      <div className="text-xs text-(--muted-foreground)">
+        Packaging of <span className="font-mono">{sku.code}</span> — one {sku.uom} is the base unit; the primary
+        barcode <span className="font-mono">{sku.barcode}</span> is edited on the Edit form.
+      </div>
+      <div role="note" className="text-xs text-(--warning)">
+        {PACKAGING_REFRESH_NOTE}
+      </div>
+      <PackagingEditor
+        baseUom={sku.uom}
+        levels={levels}
+        barcodes={barcodes}
+        onLevels={(next) => {
+          keyRef.current = null;
+          setLevels(next);
+        }}
+        onBarcodes={(next) => {
+          keyRef.current = null;
+          setBarcodes(next);
+        }}
+      />
+      <div className="flex flex-1 justify-end gap-2">
+        <button type="button" onClick={onClose} className="rounded-sm border border-(--border) px-3 py-2 text-sm hover:bg-(--muted)">
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
+        >
+          {pending ? 'Saving…' : 'Save packaging'}
+        </button>
+      </div>
+    </form>
+  );
 }
 
 /* ------------------------------------------------------------------ */

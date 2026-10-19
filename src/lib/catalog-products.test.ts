@@ -101,11 +101,27 @@ describe('skuAttachReason (the variant attach/detach PATCH)', () => {
     expect(skuAttachReason(new Error('Failed to fetch'))).toBe(UNREACHABLE_REASON);
   });
 });
-describe('skuAttachReason — story 21-2b', () => {
-  test("mixed-client: a product's variants never span clients", () => {
-    expect(skuAttachReason(new ApiProblem('mixed-client', 409, 'Product "Tee" mixes SKUs of clients ACME, self'))).toBe(
-      'Product "Tee" mixes SKUs of clients ACME, self',
+describe('skuAttachReason — story 1-4', () => {
+  test("product-client-mismatch replaced mixed-client: a product's variants share its client", () => {
+    expect(
+      skuAttachReason(new ApiProblem('product-client-mismatch', 409, 'Product "Tee" belongs to another client than SKU "B-1"')),
+    ).toBe('Product "Tee" belongs to another client than SKU "B-1"');
+    expect(skuAttachReason(new ApiProblem('product-client-mismatch', 409))).toBe(
+      "This product belongs to another client — a product's variants share its client.",
     );
-    expect(skuAttachReason(new ApiProblem('mixed-client', 409))).toMatch(/share one client/);
+  });
+});
+
+describe('productReason — story 1-4', () => {
+  test('names are per client; a client move needs an empty product; a multi-client tenant names the client', () => {
+    expect(productReason(new ApiProblem('duplicate-product-name', 409), 'created')).toBe(
+      'A product with this name already exists for this client.',
+    );
+    expect(productReason(new ApiProblem('product-has-skus', 409), 'updated')).toBe(
+      "The product's client cannot change while SKUs are attached — detach them first.",
+    );
+    expect(productReason(new ApiProblem('client-required', 400), 'created')).toBe(
+      'Choose the client this product belongs to.',
+    );
   });
 });

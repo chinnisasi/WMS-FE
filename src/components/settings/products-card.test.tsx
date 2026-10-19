@@ -100,6 +100,8 @@ function sku(over: Record<string, unknown> = {}): Record<string, unknown> {
     variantValues: { size: 'M', colour: 'Red' },
     barcode: 'BC-1',
     uomConversions: [],
+    shelfLifeDays: null,
+    barcodes: [],
     createdAt: '2026-09-01T00:00:00.000Z',
     ...over,
   };
@@ -161,7 +163,9 @@ beforeEach(() => {
   requests = [];
   nextSkuPatchStatus = 200;
   nextSkuPatchBody = null;
-  clientsBody = null;
+  // Story 1-4 — a create waits for the clients list, so the default tenant
+  // answers it: one (self) client, the bare-code arm.
+  clientsBody = [{ id: 'c-self', code: 'self', name: 'Priya Spices', status: 'active', systemOwned: true }];
   productsNextCursor = null;
   productRows = [
     product(),
@@ -490,12 +494,17 @@ function colourInput(form: ParentNode): HTMLInputElement {
     .querySelector<HTMLInputElement>('input')!;
 }
 
-describe('ProductsCard: the attach picker is one client\'s (story 1-1)', () => {
+describe('ProductsCard: the attach picker is the product\'s client\'s (stories 1-1, 1-4)', () => {
   function clientRow(id: string, code: string, systemOwned = false): Record<string, unknown> {
     return { id, code, name: systemOwned ? 'Priya Spices' : code, status: 'active', systemOwned };
   }
   beforeEach(() => {
     clientsBody = [clientRow('c-self', 'self', true), clientRow('c-acme', 'ACME'), clientRow('c-beta', 'BETA')];
+    // Story 1-4 — a product carries its client.
+    productRows = [
+      product({ clientId: 'c-acme' }),
+      product({ id: 'prod-empty', name: 'Mugs', axes: ['size'], skuCount: 0, clientId: 'c-beta' }),
+    ];
     skuRows = [
       sku({ clientId: 'c-acme' }),
       sku({ id: 'sku-2', code: 'TEE-L-BLUE', productId: 'prod-1', variantValues: { size: 'L', colour: 'Blue' }, barcode: 'BC-2', clientId: 'c-acme' }),
@@ -515,11 +524,59 @@ describe('ProductsCard: the attach picker is one client\'s (story 1-1)', () => {
     return [...region.querySelectorAll('select option')].map((o) => o.textContent ?? '');
   }
 
-  test('a product with variants offers only their client\'s SKUs', async () => {
+  test('a product offers only its own client\'s unattached SKUs', async () => {
     expect(await attachOptions('T-Shirts')).toEqual(['Pick a SKU…', 'TEE-XL · ACME Acme XL']);
   });
 
-  test('a product with none offers every unattached SKU, each named with its client', async () => {
-    expect(await attachOptions('Mugs')).toEqual(['Pick a SKU…', 'TEE-XL · ACME Acme XL', 'TEE-XL · BETA Beta XL']);
+  test('story 1-4: an EMPTY product still offers only its client\'s SKUs (the product names its client)', async () => {
+    expect(await attachOptions('Mugs')).toEqual(['Pick a SKU…', 'TEE-XL · BETA Beta XL']);
+  });
+
+  test('story 1-4: the list shows each product\'s client', async () => {
+    view = await mount();
+    const headers = [...view.container.querySelectorAll('th')].map((th) => th.textContent);
+    expect(headers).toContain('Client');
+    expect(view.container.textContent).toContain('BETA');
+  });
+
+  test('story 1-4: create requires a client in a multi-client tenant and sends it', async () => {
+    view = await mount();
+    const create = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'New product')!;
+    act(() => create.click());
+    await settle();
+    const form = [...view.container.querySelectorAll('form')].pop()!;
+    const clientSelect = [...form.querySelectorAll('label')]
+      .find((label) => label.textContent!.startsWith('Client'))!
+      .querySelector<HTMLSelectElement>('select')!;
+    expect(clientSelect.required).toBe(true);
+    const inputs = form.querySelectorAll<HTMLInputElement>('input');
+    setInput(inputs[0]!, 'Hoodies');
+    setInput(inputs[1]!, 'size');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+      setter.call(clientSelect, 'c-acme');
+      clientSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    const post = requests.find((r) => r.method === 'POST' && r.pathname.endsWith('/catalog/products'));
+    expect(post!.body).toEqual({ name: 'Hoodies', axes: ['size'], clientId: 'c-acme' });
+  });
+
+  test('story 1-4: the client field is offered on edit only while the product has no SKUs', async () => {
+    view = await mount();
+    const editOf = (name: string) =>
+      [...view!.container.querySelectorAll('tr')]
+        .find((tr) => tr.textContent!.includes(name))!
+        .querySelector<HTMLButtonElement>('button:not([aria-expanded])')!;
+    act(() => editOf('T-Shirts').click());
+    await settle();
+    let form = [...view.container.querySelectorAll('form')].pop()!;
+    expect([...form.querySelectorAll('label')].some((label) => label.textContent!.startsWith('Client'))).toBe(false);
+    expect(view.container.textContent).toContain('it can change only while the product has none');
+    act(() => editOf('Mugs').click());
+    await settle();
+    form = [...view.container.querySelectorAll('form')].pop()!;
+    expect([...form.querySelectorAll('label')].some((label) => label.textContent!.startsWith('Client'))).toBe(true);
   });
 });

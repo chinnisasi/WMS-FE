@@ -72,8 +72,14 @@ export function productReason(error: unknown, action: 'created' | 'updated'): st
       // Story 1-2a — the client has departed (it takes no new work).
       case 'client-departed':
         return CLIENT_DEPARTED_REASON;
+      // Story 1-4 — product names are unique per client.
       case 'duplicate-product-name':
-        return error.detail ?? 'A product with this name already exists in this tenant.';
+        return error.detail ?? 'A product with this name already exists for this client.';
+      // Story 1-4 — a product's client moves only while it has no SKUs.
+      case 'product-has-skus':
+        return error.detail ?? "The product's client cannot change while SKUs are attached — detach them first.";
+      case 'client-required':
+        return 'Choose the client this product belongs to.';
       case 'product-has-variants':
         return (
           error.detail ??
@@ -110,9 +116,9 @@ export function skuAttachReason(error: unknown): string {
       // Story 1-2a — the client has departed (it takes no new work).
       case 'client-departed':
         return CLIENT_DEPARTED_REASON;
-      // Story 21-2b — a product's variants never span clients.
-      case 'mixed-client':
-        return error.detail ?? "This product already holds another client's SKUs — a product's variants share one client.";
+      // Story 1-4 — a product belongs to one client; only that client's SKUs attach.
+      case 'product-client-mismatch':
+        return error.detail ?? "This product belongs to another client — a product's variants share its client.";
       case 'not-found':
         return 'That SKU or product no longer exists — refresh the page.';
       case 'role-denied':

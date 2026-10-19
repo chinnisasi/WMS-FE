@@ -327,8 +327,18 @@ describe('the refusal mappers branch on the code', () => {
     expect(correctClientReason(problem('duplicate-sku-code', 409))).toBe(
       'That client already has a SKU with this code — rename one first.',
     );
+    // Story 1-4: every barcode of the SKU moves, and so does its product.
     expect(correctClientReason(problem('duplicate-barcode', 409))).toBe(
-      'That client already has a SKU with this barcode — clear or change one first.',
+      "That client already has a SKU with one of this SKU's barcodes — clear or change one first.",
+    );
+    expect(correctClientReason(problem('duplicate-barcode', 409, 'Barcode "890" of SKU "A" already belongs to SKU "B" (its case barcode)'))).toBe(
+      'Barcode "890" of SKU "A" already belongs to SKU "B" (its case barcode)',
+    );
+    expect(correctClientReason(problem('duplicate-product-name', 409))).toBe(
+      "That client already has a product with this SKU's product name — rename one first.",
+    );
+    expect(correctClientReason(problem('barcode-is-code', 409))).toBe(
+      "One of this SKU's barcodes equals a SKU code in that client — change the barcode first.",
     );
     expect(correctClientReason(problem('not-found', 404))).toBe('That SKU or client no longer exists — refresh the page.');
     expect(correctClientReason(new Error('offline'))).toBe(UNREACHABLE_REASON);

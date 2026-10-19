@@ -5,7 +5,7 @@ import { useState, useSyncExternalStore } from 'react';
 import { fetchApiImportCatalog } from '@/lib/api/client';
 import type { CatalogImportErrorResponse, CatalogImportResponse, ClientDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { notifyCatalogChanged } from '@/lib/catalog';
+import { catalogImportColumnsLabel, notifyCatalogChanged } from '@/lib/catalog';
 import {
   CATALOG_CODES_PER_CLIENT_HELP,
   KIT_CELL_CLIENT_HELP,
@@ -135,10 +135,13 @@ function ImportCatalogCardSessioned() {
         <div className="text-(--muted-foreground)">
           CSV or XLSX, at most 10,000 rows and 5 MB. Valid rows commit; invalid rows are listed
           below — never an all-or-nothing rejection. {CATALOG_CODES_PER_CLIENT_HELP} Columns (fixed header):
-          sku_code, name, uom, uom_conversions, gst_rate, hsn, batch_tracked, serial_tracked,
-          reorder_point, reorder_qty, barcode, product, variant_values, kit_components —
+          {catalogImportColumnsLabel()} —
           sku_code, name, uom and gst_rate are required (gst_rate in basis points, 18% = 1800).
-          UoM conversions look like <span className="font-mono">box:12;case:144</span>; variant
+          Pack levels (uom_conversions) look like <span className="font-mono">case:12;pallet:480</span>{' '}
+          (2 to 1,000,000 base units each); extra barcodes like{' '}
+          <span className="font-mono">case:8901234567890;each:8900000000001</span> (each naming the base unit
+          or a level of the same row); shelf_life_days is the total shelf life in days from manufacture
+          (1–3650). Variant
           values like <span className="font-mono">size=M;colour=Red</span>; a kit composition
           like <span className="font-mono">pad:2;tape:1</span> {KIT_CELL_CLIENT_HELP} (quantities in
           each component&apos;s own base UoM — a kit cell is resolved after every SKU row, so it may name an

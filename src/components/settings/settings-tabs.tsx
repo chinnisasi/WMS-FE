@@ -12,6 +12,7 @@ import { ImportCatalogCard } from '@/components/settings/import-catalog';
 import { ProductsCard } from '@/components/settings/products-card';
 import { RateCardsCard } from '@/components/settings/rate-cards-card';
 import { SegregationMatrixCard } from '@/components/settings/segregation-matrix-card';
+import { SkuCreateCard } from '@/components/settings/sku-create-card';
 import { SkuTableCard } from '@/components/settings/sku-table';
 import { UsersCard } from '@/components/settings/users-card';
 import { WarehouseCreateForm, WarehouseList } from '@/components/settings/warehouse-create-form';
@@ -22,7 +23,7 @@ import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page
  * The Settings cards in grouped tabs (page-tabs, user decision
  * 2026-10-17), one group mounted at a time, `?tab=` linkable:
  *   - Warehouses (the default): create form, warehouse list, zones & bins;
- *   - Catalog: import, products, SKUs, segregation matrix;
+ *   - Catalog: import, new SKU (1-4), products, SKUs, segregation matrix;
  *   - Clients: clients, rate cards;
  *   - Partners (story 1-3): the business partner master and its client links;
  *   - Team: users & roles;
@@ -60,6 +61,8 @@ function SettingsTabsKnown({ initialTab }: { initialTab: SettingsTab | null }) {
           {tab === 'catalog' && (
             <>
               <ImportCatalogCard />
+              {/* Story 1-4 — single-SKU create, gated on sku.edit inside. */}
+              <SkuCreateCard />
               <ProductsCard />
               <SkuTableCard />
               <SegregationMatrixCard />

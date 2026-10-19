@@ -13,10 +13,20 @@ import {
   skuAttachReason,
   variantValuesLabel,
 } from '@/lib/catalog-products';
+import { clientsUnavailableNote } from '@/lib/sku-admin';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useCatalogSkus, useProducts, useSkusForProduct } from '@/lib/use-catalog';
-import { narrowToClient, skuDisplayLabel, skusOfWorkingClients, sortSkusForPicker } from '@/lib/clients';
+import {
+  clientCell,
+  clientLabel,
+  narrowToClient,
+  showClients,
+  skuDisplayLabel,
+  skusOfWorkingClients,
+  sortSkusForPicker,
+  workingClients,
+} from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -91,6 +101,17 @@ function ProductsCardSessioned() {
     () => undefined,
   );
   const canEditSku = roleHasCapability(role, 'sku.edit');
+  // Story 1-4 — a product belongs to one client: the Client column (and the
+  // form's client field) appear once the tenant holds more than its own.
+  const clientsState = useClients();
+  const clients = readyClients(clientsState);
+  const clientsNote = clientsUnavailableNote(clientsState);
+  const multiClient = showClients(clients);
+  const tenantName = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.name ?? null,
+    () => null,
+  );
 
   const columns: readonly DataTableColumn<ProductResponse>[] = [
     {
@@ -113,6 +134,15 @@ function ProductsCardSessioned() {
         </button>
       ),
     },
+    ...(multiClient
+      ? [
+          {
+            key: 'client',
+            header: 'Client',
+            render: (product: ProductResponse) => clientCell(product.clientId, clients ?? [], tenantName),
+          } satisfies DataTableColumn<ProductResponse>,
+        ]
+      : []),
     { key: 'axes', header: 'Axes', render: (product) => productAxesLabel(product.axes) },
     {
       key: 'skuCount',
@@ -191,6 +221,9 @@ function ProductsCardSessioned() {
         <ProductForm
           key={editing?.id ?? 'create'}
           product={editing}
+          clients={multiClient ? clients : null}
+          clientsNote={clientsNote}
+          tenantName={tenantName}
           onClose={() => {
             setCreating(false);
             setEditing(null);
@@ -246,13 +279,13 @@ function VariantMatrix({
   // unattached SKU". A guaranteed refusal is filtered out of the options,
   // not validated at submit.
   //
-  // Story 1-1 — a product is one client's (a mixed product is refused 409
-  // `mixed-client`): once it has variants, only their client's SKUs are
-  // offered; with none yet, every unattached SKU, each named with its client
+  // Story 1-4 — a product is one client's (`ProductResponse.clientId`): only
+  // that client's unattached SKUs are offered, each named with its client
   // once the tenant has several (two clients may share a code).
   const clients = readyClients(useClients());
-  const productClient =
-    variants.state === 'ready' ? (variants.data.find((sku) => sku.clientId !== null && sku.clientId !== undefined)?.clientId ?? null) : null;
+  // Story 1-4 — the product carries its client: only that client's SKUs can
+  // attach (anything else is a guaranteed 409 `product-client-mismatch`).
+  const productClient = product.clientId ?? null;
   const attachCandidates: readonly SkuResponse[] =
     allSkus.state === 'ready'
       ? sortSkusForPicker(
@@ -511,11 +544,19 @@ function AttachVariantForm({
  */
 function ProductForm({
   product,
+  clients,
+  clientsNote,
+  tenantName,
   onClose,
   onSaved,
   onRejected,
 }: {
   product: ProductResponse | null;
+  /** Story 1-4 — the tenant's clients when it holds more than one (null: no client field). */
+  clients: readonly ClientDto[] | null;
+  /** Story 1-4 — non-null while the client list is loading or failed: submit waits for it. */
+  clientsNote: string | null;
+  tenantName: string | null;
   onClose: () => void;
   onSaved: (product: ProductResponse, created: boolean) => void;
   onRejected: (reason: string) => void;
@@ -530,20 +571,30 @@ function ProductForm({
   const [axes, setAxes] = useState(product ? product.axes.join(', ') : '');
   const [pending, setPending] = useState(false);
   const axesLocked = !created && (product?.skuCount ?? 0) > 0;
+  // Story 1-4 — the client: required on create in a multi-client tenant; on
+  // edit offered only while no SKU is attached (otherwise a guaranteed 409
+  // `product-has-skus` — the field is hidden and a note says why).
+  const [clientId, setClientId] = useState(product?.clientId ?? '');
+  const clientOptions = workingClients(clients) ?? [];
+  const showClientField = clients !== null && (created || !axesLocked);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const session = readSession();
-    if (session === null) return;
+    if (session === null || clientsNote !== null) return;
     const parsed = parseAxesOrReject(axes, onRejected);
     if (parsed === null) return;
     setPending(true);
     try {
       const trimmedName = name.trim();
       if (created) {
+        if (clients !== null && clientId === '') {
+          onRejected('Choose the client this product belongs to.');
+          return;
+        }
         const saved = await fetchApiCreateProduct(
           session.tenant.id,
-          { name: trimmedName, axes: [...parsed] },
+          { name: trimmedName, axes: [...parsed], ...(clientId === '' ? {} : { clientId }) },
           ulid(),
         );
         onSaved(saved, true);
@@ -553,7 +604,11 @@ function ProductForm({
         const saved = await fetchApiEditProduct(
           session.tenant.id,
           product.id,
-          axesLocked ? { name: trimmedName } : { name: trimmedName, axes: [...parsed] },
+          {
+            name: trimmedName,
+            ...(axesLocked ? {} : { axes: [...parsed] }),
+            ...(showClientField && clientId !== '' && clientId !== product.clientId ? { clientId } : {}),
+          },
           ulid(),
         );
         onSaved(saved, false);
@@ -594,7 +649,37 @@ function ProductForm({
             placeholder="size, colour"
           />
         </label>
+        {showClientField ? (
+          <label className="flex flex-1 flex-col gap-1">
+            <span className={labelClass}>Client</span>
+            <select
+              className={inputClass}
+              value={clientId}
+              required={created}
+              onChange={(e) => setClientId(e.target.value)}
+            >
+              <option value="" disabled>
+                Choose a client
+              </option>
+              {clientOptions.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {clientLabel(client, tenantName)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
+      {clients !== null && !created && axesLocked ? (
+        <div className="text-xs text-(--muted-foreground)">
+          The client follows the attached SKUs — it can change only while the product has none.
+        </div>
+      ) : null}
+      {clientsNote !== null ? (
+        <div role="status" className="text-xs text-(--muted-foreground)">
+          {clientsNote}
+        </div>
+      ) : null}
       <div className="flex flex-1 justify-end gap-2">
         <button
           type="button"
@@ -605,7 +690,7 @@ function ProductForm({
         </button>
         <button
           type="submit"
-          disabled={pending}
+          disabled={pending || clientsNote !== null}
           className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
         >
           {pending ? 'Saving…' : created ? 'Create product' : 'Save'}
