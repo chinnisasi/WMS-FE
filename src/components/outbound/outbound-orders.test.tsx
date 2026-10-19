@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -40,6 +41,12 @@ let createStatus = 201;
 let clientsBody: Record<string, unknown>[] | null = null;
 /** Story 1-1: the catalog, when a test needs SKUs with clients. */
 let skusBody: Record<string, unknown>[] | null = null;
+/** Story 1-5a: every order-list GET, with its query. */
+let listUrls: URL[] = [];
+/** Story 1-5a: the order list's answer per request (default: an empty page). */
+let ordersResponder: ((url: URL) => { items: Record<string, unknown>[]; nextCursor: string | null }) | null = null;
+/** Story 1-5a: the client the create answers with (absent by default). */
+let createdClientId: string | undefined;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -122,6 +129,7 @@ function stubRouter(): void {
           integrationId: null,
           externalEventId: null,
           destination: body.destination,
+          ...(createdClientId === undefined ? {} : { clientId: createdClientId }),
           createdAt: '2026-10-03T00:00:00.000Z',
           updatedAt: '2026-10-03T00:00:00.000Z',
           lines: sent.map((l, i) =>
@@ -131,7 +139,8 @@ function stubRouter(): void {
       });
     }
     if (method === 'GET' && /\/warehouses\/[^/]+\/outbound\/orders$/.test(pathname)) {
-      return json(200, { items: [], nextCursor: null });
+      listUrls.push(url);
+      return json(200, ordersResponder === null ? { items: [], nextCursor: null } : ordersResponder(url));
     }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname)) {
       if (order === null) {
@@ -168,6 +177,9 @@ beforeEach(() => {
   createStatus = 201;
   clientsBody = null;
   skusBody = null;
+  listUrls = [];
+  ordersResponder = null;
+  createdClientId = undefined;
   stubRouter();
   writeSession(SESSION);
 });
@@ -176,6 +188,11 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  try {
+    localStorage.clear();
+  } catch {
+    // no storage to clear
+  }
   restoreGlobals();
 });
 
@@ -959,5 +976,201 @@ describe('OrderCreateForm: client first (story 1-1)', () => {
       'Clients not loaded — every SKU is offered',
     );
     expect(skuOptions(view.container)).toHaveLength(4);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Story 1-5a: the client filter on the orders list and the create form */
+/* ------------------------------------------------------------------ */
+
+function entry(id: string, clientId: string): Record<string, unknown> {
+  return {
+    id,
+    tenantId: TENANT_ID,
+    warehouseId: 'wh-1',
+    status: 'accepted',
+    source: 'manual',
+    integrationId: null,
+    externalEventId: null,
+    destination: null,
+    clientId,
+    createdAt: '2026-10-03T00:00:00.000Z',
+    updatedAt: '2026-10-03T00:00:00.000Z',
+  };
+}
+
+function button(container: HTMLElement, text: string): HTMLButtonElement {
+  return [...container.querySelectorAll('button')].find((b) => b.textContent === text) as HTMLButtonElement;
+}
+
+function chip(container: HTMLElement): string | null {
+  return container.querySelector('[data-testid="client-filter-chip"]')?.textContent ?? null;
+}
+
+describe('Orders list: the client filter (story 1-5a)', () => {
+  beforeEach(() => {
+    clientsBody = [SELF_CLIENT, ACME_CLIENT];
+    // Page 1 / page 2 under all clients; ACME's own page under the filter.
+    ordersResponder = (url) => {
+      if (url.searchParams.get('clientId') === 'c-acme') return { items: [entry('acme-1', 'c-acme')], nextCursor: null };
+      if (url.searchParams.get('cursor') === 'p2') return { items: [entry('self-3', 'c-self')], nextCursor: null };
+      return { items: [entry('self-1', 'c-self'), entry('self-2', 'c-self')], nextCursor: 'p2' };
+    };
+  });
+
+  test('under a stored client the list request carries clientId and the chip names the client', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    view = await mountForm();
+    expect(listUrls.length).toBeGreaterThan(0);
+    expect(listUrls.every((url) => url.searchParams.get('clientId') === 'c-acme')).toBe(true);
+    expect(chip(view.container)).toContain('Client: ACME — Acme Foods');
+    expect(view.container.textContent).toContain('acme-1');
+    expect(view.container.textContent).not.toContain('self-1');
+  });
+
+  test('a switch restarts from page 1: no cursor, Prev disabled, the old rows gone; back to All sends no clientId', async () => {
+    view = await mountForm();
+    expect(chip(view.container)).toBeNull();
+    act(() => button(view!.container, 'Next').click());
+    await settle();
+    expect(listUrls.at(-1)!.searchParams.get('cursor')).toBe('p2');
+    expect(view.container.textContent).toContain('self-3');
+    expect(button(view.container, 'Prev').disabled).toBe(false);
+
+    act(() => writeActiveClientId(TENANT_ID, 'u-1', 'c-acme'));
+    await settle();
+    const switched = listUrls.at(-1)!;
+    expect(switched.searchParams.get('clientId')).toBe('c-acme');
+    expect(switched.searchParams.has('cursor')).toBe(false);
+    expect(button(view.container, 'Prev').disabled).toBe(true);
+    expect(view.container.textContent).toContain('acme-1');
+    expect(view.container.textContent).not.toContain('self-3');
+    expect(chip(view.container)).toContain('Client: ACME — Acme Foods');
+
+    act(() => button(view!.container, 'Show all clients').click());
+    await settle();
+    expect(listUrls.at(-1)!.searchParams.has('clientId')).toBe(false);
+    expect(chip(view.container)).toBeNull();
+  });
+
+  test('back to All after a switch restarts from page 1 too (A → B → A)', async () => {
+    view = await mountForm();
+    act(() => button(view!.container, 'Next').click());
+    await settle();
+    act(() => writeActiveClientId(TENANT_ID, 'u-1', 'c-acme'));
+    await settle();
+    act(() => button(view!.container, 'Show all clients').click());
+    await settle();
+    expect(listUrls.at(-1)!.searchParams.has('cursor')).toBe(false);
+    expect(view.container.textContent).toContain('self-1');
+  });
+
+  test('while the clients load, a stored client sends no list request', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inner = globalThis.fetch;
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      const request = input instanceof Request ? input : new Request(input.toString());
+      if (new URL(request.url).pathname.endsWith(`/tenants/${TENANT_ID}/clients`)) await gate;
+      return inner(request);
+    }) as unknown as typeof fetch);
+    view = render(
+      <OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01 Whitefield" role="owner" />,
+    );
+    await settle();
+    expect(listUrls).toHaveLength(0);
+    release();
+    await settle();
+    expect(listUrls.length).toBeGreaterThan(0);
+    expect(listUrls.every((url) => url.searchParams.get('clientId') === 'c-acme')).toBe(true);
+  });
+
+  test('a failed clients read lists all clients and keeps the stored pick', async () => {
+    clientsBody = null;
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    view = await mountForm();
+    expect(listUrls.length).toBeGreaterThan(0);
+    expect(listUrls.every((url) => !url.searchParams.has('clientId'))).toBe(true);
+    expect(chip(view.container)).toBeNull();
+    expect(localStorage.getItem(`wms-active-client:${TENANT_ID}:u-1`)).toBe('c-acme');
+  });
+
+  test('a stored client absent from the loaded list is ignored, never erased', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-gone');
+    view = await mountForm();
+    expect(listUrls.every((url) => !url.searchParams.has('clientId'))).toBe(true);
+    expect(localStorage.getItem(`wms-active-client:${TENANT_ID}:u-1`)).toBe('c-gone');
+  });
+
+  test('a single-client tenant: no chip and no clientId even with a stored id', async () => {
+    clientsBody = [SELF_CLIENT];
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-self');
+    view = await mountForm();
+    expect(listUrls.every((url) => !url.searchParams.has('clientId'))).toBe(true);
+    expect(chip(view.container)).toBeNull();
+  });
+});
+
+describe('OrderCreateForm: defaults to the active client (story 1-5a)', () => {
+  beforeEach(() => {
+    clientsBody = [SELF_CLIENT, ACME_CLIENT];
+    skusBody = [
+      sku({ id: 'self-tshirt', code: 'TSHIRT-M', name: 'Own tee', clientId: 'c-self', barcode: 'BC-1' }),
+      sku({ id: 'acme-tshirt', code: 'TSHIRT-M', name: 'Acme tee', clientId: 'c-acme', barcode: 'BC-1' }),
+    ];
+  });
+
+  test('the Client select starts on the active client; a create for another client says it is hidden', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    view = await mountForm();
+    expect(clientSelect(view.container)!.value).toBe('c-acme');
+    expect(skuOptions(view.container).map((o) => o.value)).toEqual(['', 'acme-tshirt']);
+
+    setSelect(clientSelect(view.container)!, 'c-self');
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'self-tshirt', '1', '');
+    createdClientId = 'c-self';
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(1);
+    expect(view.container.querySelector('[data-testid="hidden-by-client-filter"]')!.textContent).toBe(
+      'Created for Priya Spices (your company) — hidden by the client filter',
+    );
+  });
+
+  test('a create for the active client shows no hidden note', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'acme-tshirt', '1', '');
+    createdClientId = 'c-acme';
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(1);
+    expect(view.container.querySelector('[data-testid="hidden-by-client-filter"]')).toBeNull();
+  });
+
+  test('a switcher change mid-draft never moves the client under drafted lines; an untouched form follows it', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    view = await mountForm();
+    // Untouched: the form follows the switcher.
+    act(() => writeActiveClientId(TENANT_ID, 'u-1', 'c-self'));
+    await settle();
+    expect(clientSelect(view.container)!.value).toBe('c-self');
+    act(() => writeActiveClientId(TENANT_ID, 'u-1', 'c-acme'));
+    await settle();
+    expect(clientSelect(view.container)!.value).toBe('c-acme');
+    // A drafted line pins the client.
+    fillLine(view.container, 0, 'acme-tshirt', '1', '');
+    act(() => writeActiveClientId(TENANT_ID, 'u-1', 'c-self'));
+    await settle();
+    expect(clientSelect(view.container)!.value).toBe('c-acme');
+    expect(labelled(view.container, 'SKU')[0]!.querySelector('select')!.value).toBe('acme-tshirt');
+  });
+
+  test('without an active client the select still starts empty', async () => {
+    view = await mountForm();
+    expect(clientSelect(view.container)!.value).toBe('');
   });
 });

@@ -17,7 +17,9 @@ import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkuMap, useUserMap } from '@/lib/use-inbound';
 import { skuDisplayLabel } from '@/lib/clients';
-import { readyClients, useClients } from '@/lib/use-clients';
+import { readyClients } from '@/lib/use-clients';
+import { useActiveClient } from '@/lib/use-active-client';
+import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { binCodeLabel, useBinCodeMaps } from '@/lib/use-bin-code-maps';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import {
@@ -84,10 +86,12 @@ export function AdjustmentPendingsQueue() {
 
 function AdjustmentPendingsQueueSessioned() {
   const [tab, setTab] = useState<AdjustmentPendingStatus>('pending');
-  const queue = useAdjustmentPendings(tab);
+  // Story 1-5a — the queue's one active-client read (its clients reused for labels).
+  const active = useActiveClient();
+  const queue = useAdjustmentPendings(tab, active.filter);
   const skus = useSkuMap();
   // Story 1-1 — a SKU is named with its client once the tenant has several.
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const users = useUserMap();
   const warehouseRead = useTenantWarehouses();
   const warehouses = warehouseRead.state === 'ready' ? warehouseRead.data.items : [];
@@ -186,6 +190,7 @@ function AdjustmentPendingsQueueSessioned() {
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Adjustment pendings</h2>
+        <ClientFilterChip active={active} tenantName={active.tenantName} />
         <div className="text-(--muted-foreground)">
           Stock adjustments that exceeded the tenant&apos;s approval threshold at request time
           wait here — ATP unchanged while they pend. Approve re-executes the stored arms;

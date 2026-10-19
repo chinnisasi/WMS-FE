@@ -57,6 +57,8 @@ import {
   RETURNS_CLIENT_DEPARTED,
 } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
+import { clientFilterKey, defaultFormClientId, hiddenByClientFilterNote, type ClientFilter } from '@/lib/active-client';
+import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -64,6 +66,7 @@ import { canCreateReturn, RETURN_CREATED_REASON, returnCreatedWord } from '@/lib
 
 import { StateSelect } from '@/components/address/state-select';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { ReturnCreateForm } from '@/components/returns/return-create-form';
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -109,21 +112,27 @@ export function OutboundOrders({
   const canManageOrders = roleHasCapability(role, 'orders.manage');
   // Story 13-1 — "Create return" on a dispatched order's detail.
   const canManageReturns = roleHasCapability(role, 'returns.manage');
+  // Story 1-5a — the screen's one active-client read: the list is filtered by
+  // it, the create form defaults to it; a drill ignores it (decision 11).
+  const active = useActiveClient();
   return (
     <Section title="Orders">
       {drill !== null && <DrillBanner drill={drill} />}
+      {drill !== null ? <AllClientsNote active={active} /> : <ClientFilterChip active={active} tenantName={active.tenantName} />}
       <div className="text-(--muted-foreground)">
         {warehouseLabel === null
           ? 'Outbound orders'
           : `${warehouseLabel} — newest first. Acceptance reserves stock line by line.`}
       </div>
-      {canManageOrders && drill === null && <OrderCreateForm tenantId={tenantId} warehouseId={warehouseId} />}
+      {canManageOrders && drill === null && <OrderCreateForm tenantId={tenantId} warehouseId={warehouseId} active={active} />}
       <OrdersTable
         tenantId={tenantId}
         warehouseId={warehouseId}
         canManageOrders={canManageOrders}
         canManageReturns={canManageReturns}
         drill={drill}
+        clientFilter={active.filter}
+        clientsState={active.clients}
       />
     </Section>
   );
@@ -155,14 +164,22 @@ function emptyRow(): DraftRow {
  * body is what the backend answers 422 `idempotency-key-reuse` to — and so
  * does a successful submit, which clears the draft.
  */
-function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehouseId: string }) {
+function OrderCreateForm({
+  tenantId,
+  warehouseId,
+  active,
+}: {
+  tenantId: string;
+  warehouseId: string;
+  active: ActiveClientState;
+}) {
   const skus = useOutboundSkus();
   // Story 1-1 — client first. A SKU code is unique per client, so with more
   // than one client the form asks which client the order is for before any
   // line, and every line offers only that client's SKUs. With one client the
   // select is not shown and nothing changes. No `clientId` is sent: the
   // server derives it from the lines, so the request hash is unchanged.
-  const clientsState = useClients();
+  const clientsState = active.clients;
   // Story 1-2a decision 5 — every client but a DEPARTED one takes new orders
   // (a suspended client still ships); the one-client rule runs over them.
   const allClients = readyClients(clientsState);
@@ -172,7 +189,12 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     () => readSession()?.tenant.name ?? null,
     () => null,
   );
-  const [clientId, setClientId] = useState('');
+  // Story 1-5a — until the viewer picks, the client defaults to the active
+  // one (when it takes orders): derived at render, never a reset effect.
+  const [pickedClientId, setClientId] = useState<string | null>(null);
+  const clientId = pickedClientId ?? defaultFormClientId(active, clients, '');
+  // A create for another client than the filtered one is hidden by the filter — say so.
+  const [hiddenNote, setHiddenNote] = useState<string | null>(null);
   // A client change that would clear picked lines waits on a confirm row.
   const [pendingClient, setPendingClient] = useState<string | null>(null);
   const [draft, setDraft] = useState<readonly DraftRow[]>([emptyRow()]);
@@ -228,8 +250,19 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     setPendingClient(next);
   }
 
+  /**
+   * Story 1-5a — the first edit pins the client the draft was started for:
+   * a later switcher change must not move the client under drafted lines
+   * (only an explicit pick, through the confirm row, changes it).
+   */
+  function pinClient() {
+    // Functional: an explicit pick queued in the same handler (`applyClient`) wins.
+    if (clientId !== '') setClientId((picked) => picked ?? clientId);
+  }
+
   /** Any draft edit invalidates the key the previous attempt would replay. */
   function editDraft(next: (rows: readonly DraftRow[]) => readonly DraftRow[]) {
+    pinClient();
     setIdempotencyKey(null);
     setDraft(next);
   }
@@ -237,6 +270,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   /** The destination is part of the hashed payload — an address edit is a
    * draft edit, and mints a fresh key the same way a line edit does. */
   function editDestination(next: DestinationFields) {
+    pinClient();
     setIdempotencyKey(null);
     setDestination(next);
   }
@@ -244,6 +278,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   /** `consigneeGstin` is in the backend's request hash too — an edit mints a
    * fresh key, exactly as a line or address edit does. */
   function editConsigneeGstin(next: string) {
+    pinClient();
     setIdempotencyKey(null);
     setConsigneeGstin(next);
   }
@@ -251,6 +286,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
   /** The legal name joins the backend's request hash when sent — an edit
    * mints a fresh key, like every other field of the body. */
   function editConsigneeLegalName(next: string) {
+    pinClient();
     setIdempotencyKey(null);
     setConsigneeLegalName(next);
   }
@@ -294,6 +330,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
     setIdempotencyKey(key);
     setPending(true);
     setOutcome(null);
+    setHiddenNote(null);
     try {
       const { order } = await fetchApiCreateOrder(
         tenantId,
@@ -315,6 +352,7 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
       setConsigneeLegalName('');
       setIdempotencyKey(null);
       setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId], parsed.lines));
+      setHiddenNote(hiddenByClientFilterNote(active, order.clientId, allClients, tenantName));
       notifyOutboundChanged();
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not created', reason: createReason(error) });
@@ -627,6 +665,11 @@ function OrderCreateForm({ tenantId, warehouseId }: { tenantId: string; warehous
       {outcome !== null && (
         <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />
       )}
+      {hiddenNote !== null && (
+        <div role="status" data-testid="hidden-by-client-filter" className="text-xs text-(--muted-foreground)">
+          {hiddenNote}
+        </div>
+      )}
     </form>
   );
 }
@@ -641,6 +684,8 @@ function OrdersTable({
   canManageOrders,
   canManageReturns = false,
   drill,
+  clientFilter,
+  clientsState,
 }: {
   tenantId: string;
   warehouseId: string;
@@ -648,8 +693,12 @@ function OrdersTable({
   /** Story 13-1 — threaded down to the expanded detail's "Create return". */
   canManageReturns?: boolean;
   drill: OrdersDrill | null;
+  /** Story 1-5a — the active-client filter (the hook ignores it while drilled). */
+  clientFilter: ClientFilter;
+  /** The screen's one clients read (the client column). */
+  clientsState: ActiveClientState['clients'];
 }) {
-  const orders = useOutboundOrders(warehouseId, drill);
+  const orders = useOutboundOrders(warehouseId, clientFilter, drill);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -678,7 +727,7 @@ function OrdersTable({
   const rows = drill === null ? filterPage(loaded, statusFilter) : loaded;
   // Story 21-2b — the client column, only once the tenant holds more than
   // its own client.
-  const clients = readyClients(useClients());
+  const clients = readyClients(clientsState);
   const tenantName = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.name ?? null,
@@ -851,7 +900,8 @@ function OrdersTable({
         <ReadFailure word="Orders unavailable" reason={orders.reason} onRetry={orders.reload} />
       ) : (
         <DataTable<OrderEntryDto>
-          key={pageEpoch}
+          // Story 1-5a — a client switch remounts the table (no Prev onto another client's cursor).
+          key={`${pageEpoch}|${clientFilterKey(drill === null ? clientFilter : null)}`}
           columns={columns}
           rows={rows}
           nextCursor={orders.state === 'ready' ? orders.data.nextCursor : null}

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -101,6 +102,7 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  localStorage.clear();
   restoreGlobals();
 });
 
@@ -129,6 +131,35 @@ async function open(): Promise<HTMLElement> {
   await settle();
   return view.container;
 }
+
+describe('ClientService — the active client (story 1-5a)', () => {
+  test('a stored client and no local pick: the report reads that client', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', BRAND_A);
+    const container = await open();
+    expect(serviceUrls()).toHaveLength(1);
+    expect(lastService().pathname).toBe(`/api/v1/tenants/${TENANT_ID}/reporting/clients/${BRAND_A}/service`);
+    expect((container.querySelector('[aria-label="Report client"]') as HTMLSelectElement).value).toBe(BRAND_A);
+  });
+
+  test('a local pick wins over the stored client', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', BRAND_A);
+    const container = await open();
+    setValue(container.querySelector('[aria-label="Report client"]') as HTMLSelectElement, BRAND_B);
+    await settle();
+    expect(lastService().pathname).toContain(`/clients/${BRAND_B}/service`);
+  });
+
+  test('nothing stored: the first client (self)', async () => {
+    await open();
+    expect(lastService().pathname).toContain(`/clients/${SELF}/service`);
+  });
+
+  test('a stored client the list no longer holds falls back to the first', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', '0198f7a2-1b3c-7d4e-8f90-cccccccccc99');
+    await open();
+    expect(lastService().pathname).toContain(`/clients/${SELF}/service`);
+  });
+});
 
 describe('ClientService (21-8)', () => {
   test('the first client, the default 30-day IST period and every warehouse go out; null reads "No data"', async () => {

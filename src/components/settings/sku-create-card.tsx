@@ -22,7 +22,9 @@ import {
 } from '@/lib/sku-admin';
 import { ulid } from '@/lib/ulid';
 import { roleHasCapability } from '@/lib/users';
-import { readyClients, useClients } from '@/lib/use-clients';
+import { readyClients } from '@/lib/use-clients';
+import { defaultFormClientId, hiddenByClientFilterNote } from '@/lib/active-client';
+import { useActiveClient } from '@/lib/use-active-client';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { PackagingEditor } from '@/components/settings/packaging-editor';
@@ -52,7 +54,9 @@ export function SkuCreateCard() {
 }
 
 function SkuCreateCardAllowed() {
-  const clientsState = useClients();
+  // Story 1-5a — a new SKU's client defaults to the active one (one clients read).
+  const active = useActiveClient();
+  const clientsState = active.clients;
   const clients = readyClients(clientsState);
   const clientsNote = clientsUnavailableNote(clientsState);
   const multiClient = showClients(clients);
@@ -103,9 +107,11 @@ function SkuCreateCardAllowed() {
         tone: 'accepted',
         word: `${created.sku.code} created`,
         reason:
-          created.sku.uomConversions.length > 0
+          // Story 1-5a — created for another client than the active one: the SKU table hides it.
+          hiddenByClientFilterNote(active, created.sku.clientId, clients, tenantName) ??
+          (created.sku.uomConversions.length > 0
             ? 'It lists in the SKU table with its pack levels — refresh handhelds to scan its case and pallet barcodes.'
-            : 'It lists in the SKU table below.',
+            : 'It lists in the SKU table below.'),
       });
       notifyCatalogChanged();
     } catch (error) {
@@ -132,6 +138,11 @@ function SkuCreateCardAllowed() {
             onClick={() => {
               setOpen(true);
               setOutcome(null);
+              // Story 1-5a — the active client is the default pick (an event, not a reset effect).
+              if (multiClient && draft.clientId === '') {
+                const clientId = defaultFormClientId(active, workingClients(clients), '');
+                if (clientId !== '') setDraft((current) => ({ ...current, clientId }));
+              }
             }}
             className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90"
           >

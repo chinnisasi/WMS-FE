@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiGetInvoice, fetchApiListInvoices } from '@/lib/api/client';
+import { CLIENT_PENDING, clientFilterForDrill, type ClientFilter } from '@/lib/active-client';
+import { useClientEpoch } from '@/lib/use-client-epoch';
 import { useKeyedDrill } from '@/lib/use-drill';
 import type { InvoiceDto, InvoiceEntryDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -33,6 +35,8 @@ export interface InvoicesPage {
  * lifetime (the screen remounts on a drill change).
  */
 export function useInvoices(
+  /** Story 1-5a — the active-client filter; a drill ignores it (decision 11). */
+  clientFilter: ClientFilter,
   drillProp: InvoicesDrill | null = null,
 ): ResourceState<InvoicesPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   // Keyed on drillKey, not identity: an RSC refresh must not refetch.
@@ -42,11 +46,19 @@ export function useInvoices(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
-  const [requested, setRequested] = useState<{ tenantId: string; cursor: string | null } | null>(null);
-  const activeCursor = requested !== null && requested.tenantId === tenantId ? requested.cursor : null;
+  const effective = clientFilterForDrill(clientFilter, drill !== null);
+  const pending = effective === CLIENT_PENDING;
+  const clientId: string | null = effective === CLIENT_PENDING ? null : effective;
+  const clientEpoch = useClientEpoch(clientId, pending);
+  const [requested, setRequested] = useState<{ tenantId: string; clientId: string | null; clientEpoch: number; cursor: string | null } | null>(
+    null,
+  );
+  const activeCursor =
+    requested !== null && requested.tenantId === tenantId && requested.clientId === clientId && requested.clientEpoch === clientEpoch ? requested.cursor : null;
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{
     tenantId: string;
+    clientId: string | null;
     requested: string | null;
     state: ResourceState<InvoicesPage>;
   } | null>(null);
@@ -58,38 +70,42 @@ export function useInvoices(
   }, []);
 
   useEffect(() => {
-    if (tenantId === null) return;
+    if (tenantId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
         const page =
           drill === null
-            ? await fetchApiListInvoices(tenantId, activeCursor === null ? undefined : { cursor: activeCursor })
+            ? await fetchApiListInvoices(tenantId, {
+                ...(clientId === null ? {} : { clientId }),
+                ...(activeCursor === null ? {} : { cursor: activeCursor }),
+              })
             : await fetchInvoicesDrill(tenantId, drill, activeCursor);
         if (!cancelled) {
           setResult({
             tenantId,
+            clientId,
             requested: activeCursor,
             state: { state: 'ready', data: { items: page.items, nextCursor: page.nextCursor ?? null } },
           });
         }
       } catch (error) {
         if (!cancelled) {
-          setResult({ tenantId, requested: activeCursor, state: { state: 'failed', reason: invoiceListReason(error) } });
+          setResult({ tenantId, clientId, requested: activeCursor, state: { state: 'failed', reason: invoiceListReason(error) } });
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [tenantId, drill, activeCursor, revision]);
+  }, [tenantId, clientId, pending, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null) return;
-      setRequested({ tenantId, cursor });
+      setRequested({ tenantId, clientId, clientEpoch, cursor });
     },
-    [tenantId],
+    [tenantId, clientId, clientEpoch],
   );
   // Clear first, and restart from page one: a stale-cursor failure whose
   // Retry re-requested the same cursor would fail forever.
@@ -100,7 +116,12 @@ export function useInvoices(
   }, []);
 
   const stale =
-    tenantId === null || result === null || result.tenantId !== tenantId || result.requested !== activeCursor;
+    tenantId === null ||
+    pending ||
+    result === null ||
+    result.tenantId !== tenantId ||
+    result.clientId !== clientId ||
+    result.requested !== activeCursor;
 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
 }

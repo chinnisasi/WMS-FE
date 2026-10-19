@@ -52,8 +52,11 @@ import {
   showClients,
 } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
+import { clientFilterKey } from '@/lib/active-client';
+import { useActiveClient } from '@/lib/use-active-client';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { PackagingEditor, packagingRowsOf } from '@/components/settings/packaging-editor';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 
@@ -120,7 +123,9 @@ export function SkuTableCard() {
 }
 
 function SkuTableCardSessioned() {
-  const skus = useSkus();
+  // Story 1-5a — the client switcher filters this list (one clients read: reused below).
+  const active = useActiveClient();
+  const skus = useSkus(active.filter);
   // Story 11-6 — kit-ness is DERIVED, never a flag on the SKU: the marker and
   // the edit-kit affordance come from this kits-list join.
   const kits = useKits();
@@ -133,7 +138,7 @@ function SkuTableCardSessioned() {
   const [outcome, setOutcome] = useState<Outcome>(null);
   // Story 21-2b — the client column appears only once the tenant holds more
   // than its own client (the D2C case shows nothing new).
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const tenantName = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.name ?? null,
@@ -289,7 +294,10 @@ function SkuTableCardSessioned() {
         </div>
       ) : null}
 
+      <ClientFilterChip active={active} tenantName={active.tenantName} />
+
       <DataTable<SkuResponse>
+        key={clientFilterKey(active.filter)}
         columns={columns}
         rows={skus?.items ?? []}
         nextCursor={skus?.nextCursor ?? null}

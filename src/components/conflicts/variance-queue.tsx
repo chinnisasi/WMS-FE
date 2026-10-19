@@ -13,7 +13,9 @@ import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useSkuMap, useUserMap } from '@/lib/use-inbound';
 import { skuDisplayLabel } from '@/lib/clients';
-import { readyClients, useClients } from '@/lib/use-clients';
+import { readyClients } from '@/lib/use-clients';
+import { useActiveClient } from '@/lib/use-active-client';
+import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { binCodeLabel, useBinCodeMaps } from '@/lib/use-bin-code-maps';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import {
@@ -80,10 +82,12 @@ export function VarianceQueue() {
 
 function VarianceQueueSessioned() {
   const [tab, setTab] = useState<VarianceStatus>('open');
-  const queue = useVarianceQueue(tab);
+  // Story 1-5a — the queue's one active-client read (its clients reused for labels).
+  const active = useActiveClient();
+  const queue = useVarianceQueue(tab, active.filter);
   const skus = useSkuMap();
   // Story 1-1 — a SKU is named with its client once the tenant has several.
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const users = useUserMap();
   const warehouseRead = useTenantWarehouses();
   const warehouses = warehouseRead.state === 'ready' ? warehouseRead.data.items : [];
@@ -196,6 +200,7 @@ function VarianceQueueSessioned() {
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Variances</h2>
+        <ClientFilterChip active={active} tenantName={active.tenantName} />
         <div className="text-(--muted-foreground)">
           Counts that disagreed with the bin&apos;s expectation at task start. Approve-adjust
           corrects the bin with one ledger event and the consulted seqs you check under the

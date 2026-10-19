@@ -128,6 +128,14 @@ import {
   fetchApiPortalPurchaseOrder,
   fetchApiPortalPurchaseOrders,
   fetchApiPortalStock,
+  fetchApiListPurchaseOrders,
+  fetchApiListGoodsReceipts,
+  fetchApiListOverReceipts,
+  fetchApiListManifests,
+  fetchApiListReorderPolicies,
+  fetchApiListBreaches,
+  fetchApiListSuggestedPos,
+  fetchApiListBatchAlerts,
 } from './client';
 import { SESSION_STORAGE_KEY, writeSession, clearSession, PORTAL_SUSPENDED_EVENT } from '../auth';
 import type { StoredSession } from '../auth';
@@ -2585,4 +2593,50 @@ describe('business partner wrappers (story 1-3)', () => {
     await expect(fetchApiCreatePartner(SESSION.tenant.id, { code: 'V-1', name: 'P', roles: ['vendor'] }, PKEY)).rejects.toMatchObject({ code: 'partner-gstin-taken', status: 409 });
     clearSession();
   });
+});
+
+describe('client filter on the list wrappers (story 1-5a)', () => {
+  const T = SESSION.tenant.id;
+  const W = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const C = '0198f7a2-1b3c-7d4e-8f90-0000000000c2';
+  const base = `/api/v1/tenants/${T}`;
+  /** Each wrapper, its path, and a call that takes the optional `clientId`. */
+  const CASES: readonly [string, string, (clientId?: string) => Promise<unknown>][] = [
+    ['SKUs', `${base}/catalog/skus`, (clientId) => fetchApiListSkus(T, { clientId })],
+    ['products', `${base}/catalog/products`, (clientId) => fetchApiListProducts(T, { clientId })],
+    ['kits', `${base}/catalog/kits`, (clientId) => fetchApiListKits(T, { clientId })],
+    ['POs', `${base}/warehouses/${W}/inbound/purchase-orders`, (clientId) => fetchApiListPurchaseOrders(T, W, { clientId })],
+    ['GRNs', `${base}/receiving/goods-receipts`, (clientId) => fetchApiListGoodsReceipts(T, { clientId })],
+    ['over-receipts', `${base}/receiving/over-receipts`, (clientId) => fetchApiListOverReceipts(T, { clientId })],
+    ['QC holds', `${base}/receiving/qc-holds`, (clientId) => fetchApiListQcHolds(T, { clientId })],
+    ['putaway tasks', `${base}/putaway/tasks`, (clientId) => fetchApiListPutawayTasks(T, W, { clientId })],
+    ['stock', `${base}/warehouses/${W}/inventory/stock`, (clientId) => fetchApiListStock(T, W, { clientId })],
+    ['ledger', `${base}/warehouses/${W}/inventory/events`, (clientId) => fetchApiListLedgerEvents(T, W, { clientId })],
+    ['adjustment pendings', `${base}/inventory/adjustment-pendings`, (clientId) => fetchApiListAdjustmentPendings(T, { clientId })],
+    ['variances', `${base}/movements/variances`, (clientId) => fetchApiListVariances(T, { clientId })],
+    ['orders', `${base}/warehouses/${W}/outbound/orders`, (clientId) => fetchApiListOrders(T, W, { clientId })],
+    ['waves', `${base}/warehouses/${W}/outbound/waves`, (clientId) => fetchApiListWaves(T, W, { clientId })],
+    ['manifests', `${base}/warehouses/${W}/outbound/manifests`, (clientId) => fetchApiListManifests(T, W, { clientId })],
+    ['returns', `${base}/returns`, (clientId) => fetchApiListReturns(T, { clientId })],
+    ['invoices', `${base}/invoices`, (clientId) => fetchApiListInvoices(T, { clientId })],
+    ['e-way bills', `${base}/eway/bills`, (clientId) => fetchApiListEwayBills(T, { clientId })],
+    ['reorder policies', `${base}/replenishment/policies`, (clientId) => fetchApiListReorderPolicies(T, { clientId })],
+    ['breaches', `${base}/replenishment/breaches`, (clientId) => fetchApiListBreaches(T, { clientId })],
+    ['suggested POs', `${base}/replenishment/suggested-pos`, (clientId) => fetchApiListSuggestedPos(T, { clientId })],
+    ['batch alerts', `${base}/replenishment/batch-alerts`, (clientId) => fetchApiListBatchAlerts(T, { clientId })],
+  ];
+
+  for (const [name, path, call] of CASES) {
+    test(`${name}: clientId rides the query only when set`, async () => {
+      writeSession(SESSION);
+      stubFetch(200, { items: [], nextCursor: null });
+      await call(undefined);
+      expect(new URL(lastRequest!.url).pathname).toBe(path);
+      expect(new URL(lastRequest!.url).searchParams.has('clientId')).toBe(false);
+      await call(C);
+      expect(new URL(lastRequest!.url).pathname).toBe(path);
+      expect(new URL(lastRequest!.url).searchParams.get('clientId')).toBe(C);
+      clearSession();
+    });
+  }
 });

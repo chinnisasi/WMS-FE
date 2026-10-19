@@ -29,6 +29,8 @@ import {
   type ReturnStatus,
 } from '@/lib/returns';
 import { useOutboundSkus } from '@/lib/use-outbound-orders';
+import { clientFilterKey } from '@/lib/active-client';
+import { useActiveClient } from '@/lib/use-active-client';
 import { useReturns } from '@/lib/use-returns';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { roleHasCapability } from '@/lib/users';
@@ -36,6 +38,7 @@ import { ulid } from '@/lib/ulid';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import {
   buttonClass,
@@ -172,7 +175,9 @@ export function ReturnsList({
   canManage: boolean;
 }) {
   const [status, setStatus] = useState<ReturnStatus | null>(null);
-  const returns = useReturns(warehouseId, status);
+  // Story 1-5a — the screen's one active-client read filters the list.
+  const active = useActiveClient();
+  const returns = useReturns(warehouseId, status, active.filter);
   const skus = useOutboundSkus();
   const skuMap = skus.state === 'ready' ? skus.data : null;
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -298,6 +303,7 @@ export function ReturnsList({
       <div className="text-(--muted-foreground)">
         {warehouseLabel === null ? 'Return authorizations' : `${warehouseLabel} — return authorizations, newest first.`}
       </div>
+      <ClientFilterChip active={active} tenantName={active.tenantName} />
       <label className="flex w-fit flex-col gap-1">
         <span className="text-xs text-(--muted-foreground)">Status</span>
         <select
@@ -353,7 +359,7 @@ export function ReturnsList({
         <ReadFailure word="Returns unavailable" reason={returns.reason} onRetry={returns.reload} />
       ) : (
         <DataTable<ReturnAuthorizationDto>
-          key={`${status ?? 'all'}#${pageEpoch}`}
+          key={`${status ?? 'all'}#${pageEpoch}|${clientFilterKey(active.filter)}`}
           columns={columns}
           rows={rows}
           nextCursor={returns.state === 'ready' ? returns.data.nextCursor : null}

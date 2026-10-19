@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { OUTBOUND_CHANGED_EVENT } from '../../lib/outbound';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
@@ -143,6 +144,10 @@ let requests: Recorded[] = [];
 let waveRows: unknown[] = [];
 let waveNextCursor: string | null = null;
 let policyRows: unknown[] = [POLICY];
+/** Story 1-5a: the tenant's clients (null → the read 404s) and the wave detail served. */
+let clientsBody: unknown[] | null = null;
+let waveDetail: unknown = WAVE_DETAIL;
+let skuClients: Record<string, string> = {};
 /** Answers the release POST; swapped to make the first attempt refuse. */
 let releaseResponder: () => { status: number; body: unknown } = () => ({
   status: 200,
@@ -202,7 +207,10 @@ function stubRouter(): void {
       return json(200, { items: waveRows, nextCursor: waveNextCursor });
     }
     if (method === 'GET' && /\/outbound\/waves\/[^/]+$/.test(pathname)) {
-      return json(200, { wave: WAVE_DETAIL });
+      return json(200, { wave: waveDetail });
+    }
+    if (method === 'GET' && pathname.endsWith(`/tenants/${TENANT_ID}/clients`) && clientsBody !== null) {
+      return json(200, { items: clientsBody });
     }
     if (method === 'GET' && pathname.endsWith('/outbound/orders')) {
       return json(200, { items: [], nextCursor: null });
@@ -214,8 +222,8 @@ function stubRouter(): void {
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       return json(200, {
         items: [
-          { id: 'sku-1', code: 'SPICE-01', name: 'Turmeric', uom: 'kg', uomPrecision: 3 },
-          { id: 'sku-2', code: 'FLOUR-01', name: 'Flour', uom: 'kg', uomPrecision: 3 },
+          { id: 'sku-1', code: 'SPICE-01', name: 'Turmeric', uom: 'kg', uomPrecision: 3, clientId: skuClients['sku-1'] ?? null },
+          { id: 'sku-2', code: 'FLOUR-01', name: 'Flour', uom: 'kg', uomPrecision: 3, clientId: skuClients['sku-2'] ?? null },
         ],
         nextCursor: null,
       });
@@ -231,6 +239,9 @@ beforeEach(() => {
   waveRows = [];
   waveNextCursor = null;
   policyRows = [POLICY];
+  clientsBody = null;
+  waveDetail = WAVE_DETAIL;
+  skuClients = {};
   releaseResponder = () => ({
     status: 200,
     body: { wave: { ...wave({ status: 'released' }), picklists: [picklist({ status: 'ready' })] } },
@@ -246,6 +257,11 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  try {
+    localStorage.clear();
+  } catch {
+    // no storage to clear
+  }
   restoreGlobals();
 });
 
@@ -615,5 +631,94 @@ describe('the honest empty and failed states', () => {
     expect(text(view)).toContain('The API is unreachable');
     expect(text(view)).not.toContain('Loading waves…');
     expect(buttonLabels(view)).toContain('Retry');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Story 1-5a: the client filter                                       */
+/* ------------------------------------------------------------------ */
+
+function clientRow(id: string, code: string, name: string, systemOwned = false) {
+  return {
+    id,
+    tenantId: TENANT_ID,
+    code,
+    name,
+    status: 'active',
+    systemOwned,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    taxDetails: {},
+  };
+}
+
+describe('Waves: the client filter (story 1-5a)', () => {
+  beforeEach(() => {
+    clientsBody = [clientRow('c-self', 'self', 'Priya Spices', true), clientRow('c-glow', 'GLOWCO', 'GlowCo')];
+  });
+
+  test('under a stored client the wave list carries clientId and the chip renders', async () => {
+    waveRows = [wave()];
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-glow');
+    view = await mount('ops_manager');
+    const reads = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/waves'));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((r) => new URLSearchParams(r.search).get('clientId') === 'c-glow')).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')!.textContent).toContain(
+      'Client: GLOWCO — GlowCo',
+    );
+    // Wave generation is write-side: labelled "All clients", never filtered.
+    expect(view.container.querySelector('form [data-testid="all-clients-note"]')!.textContent).toBe('All clients');
+  });
+
+  test('the generate picker reads every client’s orders even under a stored client', async () => {
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-glow');
+    view = await mount('ops_manager');
+    const choose = [...view.container.querySelectorAll('label')].find((l) => l.textContent === 'Choose orders')!;
+    await act(async () => {
+      choose.querySelector('input')!.click();
+    });
+    await settle();
+    const orderReads = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/orders'));
+    expect(orderReads.length).toBeGreaterThan(0);
+    expect(orderReads.every((r) => !new URLSearchParams(r.search).has('clientId'))).toBe(true);
+  });
+
+  test('a mixed wave’s detail names each order’s client', async () => {
+    waveRows = [wave()];
+    skuClients = { 'sku-1': 'c-glow', 'sku-2': 'c-self' };
+    const base = picklist();
+    waveDetail = {
+      ...wave(),
+      picklists: [
+        { ...base, lines: [base.lines[0]] },
+        { ...base, id: 'pl-2', orderId: 'order-2', lines: [{ ...base.lines[1], picklistId: 'pl-2', orderId: 'order-2' }] },
+      ],
+    };
+    view = await mount('operator');
+    const toggle = buttons(view).find((b) => b.textContent?.includes('wave-planned'))!;
+    await act(async () => {
+      toggle.click();
+    });
+    await settle();
+    const list = view.container.querySelector('[data-testid="wave-order-clients"]')!;
+    expect(list.textContent).toContain('Order order-1 · GLOWCO');
+    expect(list.textContent).toContain('Order order-2 · Priya Spices');
+  });
+
+  test('a single-client tenant: no chip, no clientId, no order-client list', async () => {
+    clientsBody = [clientRow('c-self', 'self', 'Priya Spices', true)];
+    waveRows = [wave()];
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-self');
+    view = await mount('operator');
+    const reads = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/waves'));
+    expect(reads.every((r) => !new URLSearchParams(r.search).has('clientId'))).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+    const toggle = buttons(view).find((b) => b.textContent?.includes('wave-planned'))!;
+    await act(async () => {
+      toggle.click();
+    });
+    await settle();
+    expect(view.container.querySelector('[data-testid="wave-order-clients"]')).toBeNull();
   });
 });

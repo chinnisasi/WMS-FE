@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiGetClientInvoice, fetchApiListClientInvoices } from '@/lib/api/client';
 import type { ClientInvoiceDto, ClientInvoiceEntryDto } from '@/lib/api/generated';
+import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
+import { useClientEpoch } from '@/lib/use-client-epoch';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CLIENT_INVOICES_CHANGED_EVENT, clientInvoiceReadReason } from '@/lib/client-invoices';
 import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
@@ -28,7 +30,11 @@ export interface ClientInvoicesPage {
  * usage preview asks for a whole client's recent set at 100).
  */
 export function useClientInvoices(
-  clientId: string | null = null,
+  /**
+   * One client's invoices (the usage card passes its own client's id), or the
+   * Compliance list's active-client filter (story 1-5a); pending sends nothing.
+   */
+  clientFilter: ClientFilter,
   limit?: number,
 ): ResourceState<ClientInvoicesPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   const tenantId = useSyncExternalStore(
@@ -36,7 +42,10 @@ export function useClientInvoices(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
-  const scope = `${tenantId ?? ''}|${clientId ?? ''}`;
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
+  const scope = `${tenantId ?? ''}|${clientId ?? ''}#${clientEpoch}`;
   const [requested, setRequested] = useState<{ scope: string; cursor: string | null } | null>(null);
   const activeCursor = requested !== null && requested.scope === scope ? requested.cursor : null;
   const [revision, setRevision] = useState(0);
@@ -49,7 +58,7 @@ export function useClientInvoices(
   }, []);
 
   useEffect(() => {
-    if (tenantId === null) return;
+    if (tenantId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
@@ -70,7 +79,7 @@ export function useClientInvoices(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, clientId, scope, activeCursor, limit, revision]);
+  }, [tenantId, clientId, pending, scope, activeCursor, limit, revision]);
 
   const onCursor = useCallback((cursor: string | null) => setRequested({ scope, cursor }), [scope]);
   const reload = useCallback(() => {
@@ -79,7 +88,7 @@ export function useClientInvoices(
     setRevision((r) => r + 1);
   }, []);
 
-  const stale = tenantId === null || result === null || result.scope !== scope || result.requested !== activeCursor;
+  const stale = tenantId === null || pending || result === null || result.scope !== scope || result.requested !== activeCursor;
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
 }
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { invoiceMonthOptions } from '../../lib/client-invoices';
 import type { UserRole } from '../../lib/users';
@@ -37,6 +38,7 @@ function session(role: UserRole): StoredSession {
 const NO_TAX = { legalName: null, gstin: null, billingLine1: null, billingLine2: null, billingCity: null, billingStateCode: null, billingPincode: null };
 const SELF = { id: 'c-self', tenantId: TENANT_ID, code: 'self', name: 'Three PL Co', status: 'active', systemOwned: true, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', taxDetails: NO_TAX };
 const ACME = { ...SELF, id: 'c-acme', code: 'ACME', name: 'Acme Foods', systemOwned: false, createdAt: '2026-03-10T00:00:00.000Z' };
+const BETA = { ...ACME, id: 'c-beta', code: 'BETA', name: 'Beta Brands' };
 
 const PARTY = {
   supplier: {
@@ -112,6 +114,7 @@ function entryOf(invoice: Record<string, unknown>): Record<string, unknown> {
 interface Recorded {
   readonly method: string;
   readonly pathname: string;
+  readonly search: URLSearchParams;
   readonly body: unknown;
   readonly key: string | null;
 }
@@ -120,6 +123,8 @@ let invoices: Record<string, Record<string, unknown>> = {};
 let issueAnswer: 'issued' | 'stale' = 'issued';
 /** The first prepare answers 503 (to prove a retry reuses its key and an edit does not). */
 let prepareFailsOnce = false;
+/** The clients read's rows (story 1-5a adds a second priced client in one case). */
+let clientRows: readonly unknown[] = [];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -136,8 +141,8 @@ function stubRouter(): void {
     } catch {
       body = null;
     }
-    requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key') });
-    if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: [SELF, ACME] });
+    requests.push({ method, pathname, search: new URL(request.url).searchParams, body, key: request.headers.get('Idempotency-Key') });
+    if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: clientRows });
     if (method === 'GET' && pathname.endsWith('/client-invoices')) {
       return json(200, { items: Object.values(invoices).map(entryOf), nextCursor: null });
     }
@@ -152,11 +157,11 @@ function stubRouter(): void {
       if (method === 'POST' && one[2] === 'void') return json(200, { invoice: { ...invoice, status: 'void', statusNote: (body as { note: string }).note } });
       if (method === 'POST' && one[2] === 'refresh') return json(200, { invoice });
     }
-    if (method === 'POST' && pathname.endsWith(`/clients/${ACME.id}/invoices`) && prepareFailsOnce) {
+    if (method === 'POST' && /\/clients\/[^/]+\/invoices$/.test(pathname) && prepareFailsOnce) {
       prepareFailsOnce = false;
       return json(503, { code: 'unavailable', title: 'Down', status: 503, detail: 'Try again.' });
     }
-    if (method === 'POST' && pathname.endsWith(`/clients/${ACME.id}/invoices`)) {
+    if (method === 'POST' && /\/clients\/[^/]+\/invoices$/.test(pathname)) {
       return json(201, { created: [fullInvoice('i-new', 'draft')], existing: [] });
     }
     return json(404, { code: 'not-found', title: 'Unrouted in this test', status: 404 });
@@ -169,6 +174,7 @@ beforeEach(() => {
   requests = [];
   issueAnswer = 'issued';
   prepareFailsOnce = false;
+  clientRows = [SELF, ACME];
   invoices = { 'i-draft': fullInvoice('i-draft', 'draft', { createdAt: '2026-10-07T05:00:00.000Z' }), 'i-issued': fullInvoice('i-issued', 'issued') };
   stubRouter();
 });
@@ -177,6 +183,11 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  try {
+    localStorage.clear();
+  } catch {
+    // ignore
+  }
   restoreGlobals();
 });
 
@@ -417,5 +428,47 @@ describe('ClientInvoices', () => {
     const voided = requests.find((r) => r.method === 'POST' && r.pathname.endsWith('/client-invoices/i-issued/void'))!;
     expect(voided.body).toEqual({ note: 'Wrong legal name' });
     expect(voided.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+  });
+});
+
+describe('ClientInvoices: the client filter (story 1-5a)', () => {
+  const listReads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/client-invoices'));
+
+  test('under a stored client the list read carries clientId and the chip renders', async () => {
+    writeSession(session('owner'));
+    writeActiveClientId(TENANT_ID, 'u-1', ACME.id);
+    view = render(<ClientInvoices />);
+    await settle();
+    expect(listReads().length).toBeGreaterThan(0);
+    expect(listReads().every((r) => r.search.get('clientId') === ACME.id)).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')?.textContent).toContain('Client: ACME — Acme Foods');
+  });
+
+  test('all clients: no clientId and no chip', async () => {
+    writeSession(session('owner'));
+    view = render(<ClientInvoices />);
+    await settle();
+    expect(listReads().length).toBeGreaterThan(0);
+    expect(listReads().every((r) => r.search.get('clientId') === null)).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+  });
+
+  test('Prepare follows the active client (the second of two priced clients), and a switch after a failed Prepare mints a fresh key', async () => {
+    clientRows = [SELF, ACME, BETA];
+    writeSession(session('accountant'));
+    writeActiveClientId(TENANT_ID, 'u-1', BETA.id);
+    view = render(<ClientInvoices />);
+    await settle();
+    expect((view.container.querySelector('select[aria-label="Invoice client"]') as HTMLSelectElement).value).toBe(BETA.id);
+    prepareFailsOnce = true;
+    await press(buttons(view.container, 'Prepare')[0]);
+    expect(view.container.textContent).toContain('Not prepared');
+    // The switcher moves the derived client — no edit in the form.
+    act(() => writeActiveClientId(TENANT_ID, 'u-1', ACME.id));
+    await settle();
+    await press(buttons(view.container, 'Prepare')[0]);
+    const posts = requests.filter((r) => r.method === 'POST' && /\/clients\/[^/]+\/invoices$/.test(r.pathname));
+    expect(posts.map((r) => r.pathname.split('/').at(-2))).toEqual([BETA.id, ACME.id]);
+    expect(posts[1]!.key).not.toBe(posts[0]!.key);
   });
 });

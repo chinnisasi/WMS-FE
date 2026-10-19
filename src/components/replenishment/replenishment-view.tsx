@@ -20,6 +20,7 @@ import type {
   SuggestedPoDto,
   PartnerDto,
 } from '@/lib/api/generated';
+import { clientFilterKey } from '@/lib/active-client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { quantityLabel } from '@/lib/format-quantity';
 import {
@@ -56,8 +57,9 @@ import { drillFor, warehouseDisplayLabel, type BatchAlertsDrill, type ParsedDril
 import { REPLENISHMENT_PAGE_TABS, type ReplenishmentTab } from '@/lib/page-tabs';
 import { useSkuMap, useUserMap, useVendorMap } from '@/lib/use-inbound';
 import { unlinkedVendorLabel, vendorsLinkedTo } from '@/lib/partners';
-import { skuDisplayLabel, sortSkusForPicker } from '@/lib/clients';
-import { readyClients, useClients } from '@/lib/use-clients';
+import { narrowToClient, skuDisplayLabel, sortSkusForPicker } from '@/lib/clients';
+import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
+import { readyClients } from '@/lib/use-clients';
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import {
   useBatchAlerts,
@@ -73,6 +75,7 @@ import {
   writeActiveWarehouseId,
 } from '@/lib/warehouses';
 
+import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -167,6 +170,10 @@ function ReplenishmentSessioned({ drill, initialTab }: { drill: ParsedDrill; ini
     REPLENISHMENT_PAGE_TABS.initial(drill, initialTab),
     alertsDrill !== null,
   );
+  // Story 1-5a — one clients read for the page; every section filters by it
+  // except a drilled alert queue (decision 11).
+  const active = useActiveClient();
+  const clientKey = clientFilterKey(active.filter);
   const warehouses = useOutboundWarehouses();
   const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
   const items = warehouses.state === 'ready' ? warehouses.data.items : [];
@@ -244,11 +251,17 @@ function ReplenishmentSessioned({ drill, initialTab }: { drill: ParsedDrill; ini
           </label>
         </div>
       )}
+      {alertsDrill === null ? (
+        <ClientFilterChip active={active} tenantName={active.tenantName} />
+      ) : (
+        <AllClientsNote active={active} />
+      )}
       <PageTabStrip def={REPLENISHMENT_PAGE_TABS} active={tab} drilled={alertsDrill !== null} onSelect={selectTab} />
       <PageTabPanel def={REPLENISHMENT_PAGE_TABS} active={tab}>
         {tab === 'breaches' && (
           <BreachQueue
-            key={`breaches-${warehouseId}`}
+            key={`breaches-${warehouseId}|${clientKey}`}
+            active={active}
             tenantId={tenantId}
             warehouseId={warehouseId}
             warehouseLabel={warehouseLabel}
@@ -258,7 +271,8 @@ function ReplenishmentSessioned({ drill, initialTab }: { drill: ParsedDrill; ini
         {tab === 'batch-alerts' &&
           (alertsDrill === null ? (
             <BatchAlertQueue
-              key={`batch-alerts-${warehouseId}`}
+              key={`batch-alerts-${warehouseId}|${clientKey}`}
+              active={active}
               tenantId={tenantId}
               warehouseId={warehouseId}
               warehouseLabel={warehouseLabel}
@@ -267,6 +281,7 @@ function ReplenishmentSessioned({ drill, initialTab }: { drill: ParsedDrill; ini
           ) : (
             <BatchAlertQueue
               key="batch-alerts-drilled"
+              active={active}
               tenantId={tenantId}
               warehouseId={alertsDrill.warehouseId ?? null}
               warehouseLabel={
@@ -279,7 +294,8 @@ function ReplenishmentSessioned({ drill, initialTab }: { drill: ParsedDrill; ini
           ))}
         {tab === 'suggested-pos' && (
           <SuggestedPoQueue
-            key={`drafts-${warehouseId}`}
+            key={`drafts-${warehouseId}|${clientKey}`}
+            active={active}
             tenantId={tenantId}
             warehouseId={warehouseId}
             warehouseLabel={warehouseLabel}
@@ -288,7 +304,8 @@ function ReplenishmentSessioned({ drill, initialTab }: { drill: ParsedDrill; ini
         )}
         {tab === 'policies' && (
           <PolicyTable
-            key={`policies-${warehouseId}`}
+            key={`policies-${warehouseId}|${clientKey}`}
+            active={active}
             tenantId={tenantId}
             warehouseId={warehouseId}
             canManage={canManage}
@@ -336,21 +353,24 @@ function StatusTabs<T extends string>({
 /* ── section 1: the breach alert queue ────────────────────────────────── */
 
 function BreachQueue({
+  active,
   tenantId,
   warehouseId,
   warehouseLabel,
   canManage,
 }: {
+  /** Story 1-5a — the page's active client (`active.filter` reaches the list; `active.clients` is reused). */
+  active: ActiveClientState;
   tenantId: string;
   warehouseId: string;
   warehouseLabel: string | null;
   canManage: boolean;
 }) {
   const [tab, setTab] = useState<BreachStatus>('open');
-  const queue = useReplenishmentBreaches(warehouseId, tab);
+  const queue = useReplenishmentBreaches(warehouseId, tab, active.filter);
   const skus = useSkuMap();
   // Story 1-1 — a SKU is named with its client once the tenant has several.
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const users = useUserMap();
   // The outcome banner belongs to the tab it spoke about (keyed state, not a
   // reset effect): a tab switch shows DIFFERENT rows, and a stale
@@ -548,6 +568,7 @@ function BreachCard({
  * own editor is an outside-story concern (no FE editor in 6-2's scope).
  */
 function BatchAlertQueue({
+  active,
   tenantId,
   warehouseId,
   warehouseLabel,
@@ -555,6 +576,8 @@ function BatchAlertQueue({
   drill = null,
   clearHref,
 }: {
+  /** Story 1-5a — the page's active client; a drill ignores its filter (decision 11). */
+  active: ActiveClientState;
   tenantId: string;
   /** Null only for a drill that names no warehouse (tenant-wide). */
   warehouseId: string | null;
@@ -567,11 +590,11 @@ function BatchAlertQueue({
 }) {
   const [kind, setKind] = useState<BatchAlertKindFilter>('all');
   const [tab, setTab] = useState<BatchAlertStatus>('open');
-  const queue = useBatchAlerts(warehouseId, kind, tab, drill);
+  const queue = useBatchAlerts(warehouseId, kind, tab, active.filter, drill);
   const policy = useExpiryPolicy();
   const skus = useSkuMap();
   // Story 1-1 — a SKU is named with its client once the tenant has several.
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const users = useUserMap();
   // The outcome banner belongs to the tab it spoke about (the breach
   // queue's keyed-state pattern).
@@ -880,21 +903,24 @@ function BatchDetailBlock({ batchId, sku }: { batchId: string; sku: SkuResponse 
 /* ── section 4: the suggested-PO draft queue ───────────────────────────── */
 
 function SuggestedPoQueue({
+  active,
   tenantId,
   warehouseId,
   warehouseLabel,
   canManage,
 }: {
+  /** Story 1-5a — the page's active client (`active.filter` reaches the list; `active.clients` is reused). */
+  active: ActiveClientState;
   tenantId: string;
   warehouseId: string;
   warehouseLabel: string | null;
   canManage: boolean;
 }) {
   const [tab, setTab] = useState<SuggestedPoStatus>('draft');
-  const queue = useReplenishmentSuggestedPos(warehouseId, tab);
+  const queue = useReplenishmentSuggestedPos(warehouseId, tab, active.filter);
   const skus = useSkuMap();
   // Story 1-1 — a SKU is named with its client once the tenant has several.
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const vendors = useVendorMap();
   const [outcomeFor, setOutcomeFor] = useState<{
     tab: SuggestedPoStatus;
@@ -1170,18 +1196,21 @@ function quantityHint(precision: number | null): string {
 /* ── section 5: the reorder-override table ─────────────────────────────── */
 
 function PolicyTable({
+  active,
   tenantId,
   warehouseId,
   canManage,
 }: {
+  /** Story 1-5a — the page's active client (`active.filter` reaches the list; `active.clients` is reused). */
+  active: ActiveClientState;
   tenantId: string;
   warehouseId: string;
   canManage: boolean;
 }) {
-  const policies = useReorderPolicies(warehouseId);
+  const policies = useReorderPolicies(warehouseId, active.filter);
   const skus = useSkuMap();
   // Story 1-1 — a SKU is named with its client once the tenant has several.
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const [outcome, setOutcome] = useState<Outcome>(null);
   // One re-entry guard for the table's own edits, keyed by SKU (the
   // Set-of-in-flight shape, checked in both arms).
@@ -1189,7 +1218,13 @@ function PolicyTable({
   const [editingSku, setEditingSku] = useState<string | null>(null);
   const [busySku, setBusySku] = useState<string | null>(null);
 
-  const skuList = skus === null ? [] : sortSkusForPicker(Object.values(skus), clients);
+  // Story 1-5a — under an active client the rows are that client's SKUs, the
+  // same narrowing the override read applies server-side (an override of a
+  // SKU outside the filter would otherwise read as absent).
+  const skuList =
+    skus === null
+      ? []
+      : sortSkusForPicker(narrowToClient(Object.values(skus), active.state === 'client' ? active.client.id : null), clients);
   const overrideOf = (skuId: string): ReorderPolicyDto | undefined =>
     policies.state === 'ready' ? policies.data.items.find((p) => p.skuId === skuId) : undefined;
 

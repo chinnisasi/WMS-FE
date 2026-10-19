@@ -10350,6 +10350,10 @@ export type CatalogControllerListSkusData = {
     };
     query?: {
         /**
+         * Story 1-5a — only one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -10535,6 +10539,10 @@ export type CatalogControllerListProductsData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only one client's products. An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Opaque keyset cursor from the previous page
          */
@@ -10911,6 +10919,10 @@ export type CatalogControllerListKitsData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only one client's kits. An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Opaque keyset cursor from the previous page
          */
@@ -11770,6 +11782,10 @@ export type InventoryControllerListAdjustmentPendingsData = {
     };
     query?: {
         /**
+         * Story 1-5a — only pendings of one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Filter by decision state — omitted means every status
          */
         status?: string;
@@ -11926,6 +11942,10 @@ export type InventoryControllerListEventsData = {
         warehouseId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only events of one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Only events of one SKU
          */
@@ -12200,6 +12220,10 @@ export type InventoryControllerListStockData = {
     };
     query?: {
         /**
+         * Story 1-5a — only stock of one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Only rows of one SKU
          */
         skuId?: string;
@@ -12450,6 +12474,10 @@ export type InboundControllerListPurchaseOrdersData = {
         warehouseId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only one client's purchase orders. An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Only POs of one status
          */
@@ -13496,6 +13524,10 @@ export type OutboundControllerListOrdersData = {
     };
     query?: {
         /**
+         * Story 1-5a — only one client's orders (manifests and waves: any order of the client). An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Story 9-1 — only orders in this status
          */
         status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
@@ -13565,6 +13597,10 @@ export type OutboundControllerListPicklistLinesData = {
     };
     query?: {
         /**
+         * Story 1-5a — only lines of one client's orders. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Only lines in this status
          */
         status?: 'planned' | 'unfulfillable' | 'picked' | 'short' | 'cancelled';
@@ -13623,6 +13659,10 @@ export type OutboundControllerListPackFailuresData = {
     };
     query?: {
         /**
+         * Story 1-5a — only rows of one client's orders or SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Story 9-1 — only rows whose `created_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
          */
         from?: string;
@@ -13677,6 +13717,10 @@ export type OutboundControllerListBackorderRefusalsData = {
     };
     query?: {
         /**
+         * Story 1-5a — only rows of one client's orders or SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Story 9-1 — only rows whose `created_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
          */
         from?: string;
@@ -13730,6 +13774,10 @@ export type OutboundControllerListManifestsData = {
         warehouseId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only one client's orders (manifests and waves: any order of the client). An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Story 9-1 — only orders in this status
          */
@@ -14307,6 +14355,10 @@ export type OutboundControllerListWavesData = {
     };
     query?: {
         /**
+         * Story 1-5a — only one client's orders (manifests and waves: any order of the client). An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Story 9-1 — only orders in this status
          */
         status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
@@ -14374,6 +14426,10 @@ export type ReceivingControllerListGoodsReceiptsData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only one client's goods receipts (a legacy receipt with no client matches through its lines' SKUs). An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Narrow to one warehouse
          */
@@ -14547,6 +14603,10 @@ export type ReceivingControllerListOverReceiptsData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only over-receipts of one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
         status?: 'pending' | 'approved' | 'rejected';
         /**
          * Story 9-1 — narrow to one warehouse (404 when it is not this tenant's)
@@ -14713,6 +14773,10 @@ export type ReceivingControllerListQcHoldsData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only holds on one client's SKUs (manual holds included). An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Filter by warehouse
          */
@@ -14940,6 +15004,10 @@ export type PutawayControllerListPlacementsData = {
     };
     query?: {
         /**
+         * Story 1-5a — only placements of one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Narrow to one warehouse
          */
         warehouseId?: string;
@@ -15047,6 +15115,10 @@ export type PutawayControllerListPutawayTasksData = {
         tenantId: string;
     };
     query: {
+        /**
+         * Story 1-5a — only tasks of one client's SKUs. An unknown id is an empty list
+         */
+        clientId?: string;
         /**
          * Warehouse the tasks are derived for
          */
@@ -15548,6 +15620,10 @@ export type MovementsControllerListTransfersData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only transfers with at least one line of one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
         status?: 'draft' | 'in_transit' | 'completed' | 'cancelled';
         sourceWarehouseId?: string;
         destWarehouseId?: string;
@@ -16086,6 +16162,10 @@ export type MovementsControllerListCountVariancesData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only variances of one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
         status?: 'open' | 'adjusted' | 'recounted';
         /**
          * Narrow to one warehouse
@@ -16235,6 +16315,10 @@ export type ReplenishmentControllerListReorderPoliciesData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only policies of one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Only one warehouse's policies
          */
@@ -16402,6 +16486,10 @@ export type ReplenishmentControllerListBreachesData = {
     };
     query?: {
         /**
+         * Story 1-5a — only breaches of one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Only breaches of one status (the queue tabs)
          */
         status?: 'open' | 'recovered' | 'actioned' | 'dismissed';
@@ -16511,6 +16599,10 @@ export type ReplenishmentControllerListSuggestedPosData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only suggestions for one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Only suggested POs of one status (the queue tabs)
          */
@@ -16708,6 +16800,10 @@ export type ReplenishmentControllerListBatchAlertsData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only alerts on one client's SKUs. An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Only alerts of one kind (the queue's kind filter — a batch can carry both)
          */
@@ -17294,6 +17390,10 @@ export type InvoicingControllerListInvoicesData = {
     };
     query?: {
         /**
+         * Story 1-5a — only invoices of one client's orders. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
          * Story 9-1 — only this warehouse's invoices. 404 when the warehouse is not this tenant's
          */
         warehouseId?: string;
@@ -17533,6 +17633,10 @@ export type EwayControllerListBillsData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only e-way bills of one client's orders (through the invoice). An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Only bills in this status
          */
@@ -20999,6 +21103,10 @@ export type ReturnsControllerListData = {
         tenantId: string;
     };
     query?: {
+        /**
+         * Story 1-5a — only one client's return authorizations. An unknown id is an empty page
+         */
+        clientId?: string;
         /**
          * Only one warehouse's authorizations (tenant-wide when absent)
          */

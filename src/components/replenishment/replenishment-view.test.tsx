@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { ACTIVE_CLIENT_STORAGE_KEY, writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -400,6 +401,11 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  try {
+    localStorage.clear();
+  } catch {
+    // ignore
+  }
   restoreGlobals();
 });
 
@@ -954,5 +960,68 @@ describe('ReplenishmentView: a SKU named with its client (story 1-1)', () => {
     view = await mount(OWNER_SESSION, 'breaches');
     expect(view.container.textContent).toContain('SPICE-01');
     expect(view.container.textContent).not.toContain('SPICE-01 ·');
+  });
+});
+
+/**
+ * Story 1-5a — the client switcher filters every Replenishment section:
+ * each read carries the active client, the page shows the chip, the
+ * override table lists only that client's SKUs, and a stale or
+ * single-client pick sends nothing (and stays stored).
+ */
+describe('ReplenishmentView: the client filter (story 1-5a)', () => {
+  const SELF = 'c-self';
+  const ACME = 'c-acme';
+  const TWO = [
+    { id: SELF, code: 'self', name: 'Priya Spices', status: 'active', systemOwned: true },
+    { id: ACME, code: 'ACME', name: 'Acme Foods', status: 'active', systemOwned: false },
+  ];
+  const chip = () => view!.container.querySelector('[data-testid="client-filter-chip"]');
+  const clientOf = (r: (typeof requests)[number]) => new URLSearchParams(r.query).get('clientId');
+
+  const CASES: readonly [ReplenishmentTab, string][] = [
+    ['breaches', '/replenishment/breaches'],
+    ['batch-alerts', '/replenishment/batch-alerts'],
+    ['suggested-pos', '/replenishment/suggested-pos'],
+    ['policies', '/replenishment/policies'],
+  ];
+  for (const [tab, route] of CASES) {
+    test(`${tab}: under a stored client the read carries clientId and the chip renders`, async () => {
+      clientsBody = TWO;
+      writeActiveClientId(TENANT_ID, 'u-1', ACME);
+      view = await mount(OWNER_SESSION, tab);
+      const reads = readsEndingWith(route);
+      expect(reads.length).toBeGreaterThan(0);
+      expect(reads.every((r) => clientOf(r) === ACME)).toBe(true);
+      expect(chip()?.textContent).toContain('Client: ACME — Acme Foods');
+    });
+  }
+
+  test('the override table lists only the active client\'s SKUs', async () => {
+    clientsBody = TWO;
+    writeActiveClientId(TENANT_ID, 'u-1', SELF);
+    view = await mount(OWNER_SESSION, 'policies');
+    expect(view.container.textContent).not.toContain('SPICE-01');
+  });
+
+  test('a stale stored client reads unfiltered, no chip, and stays stored', async () => {
+    clientsBody = TWO;
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-gone');
+    view = await mount(OWNER_SESSION, 'breaches');
+    const reads = readsEndingWith('/replenishment/breaches');
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((r) => clientOf(r) === null)).toBe(true);
+    expect(chip()).toBeNull();
+    expect(localStorage.getItem(`${ACTIVE_CLIENT_STORAGE_KEY}:${TENANT_ID}:u-1`)).toBe('c-gone');
+  });
+
+  test('a single-client tenant never sends clientId, even with a stored id', async () => {
+    clientsBody = [TWO[1]!];
+    writeActiveClientId(TENANT_ID, 'u-1', ACME);
+    view = await mount(OWNER_SESSION, 'suggested-pos');
+    const reads = readsEndingWith('/replenishment/suggested-pos');
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((r) => clientOf(r) === null)).toBe(true);
+    expect(chip()).toBeNull();
   });
 });

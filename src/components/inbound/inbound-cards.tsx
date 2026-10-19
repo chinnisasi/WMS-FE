@@ -35,7 +35,9 @@ import type {
 } from '@/lib/api/generated';
 import { roleHasCapability } from '@/lib/users';
 import { clientCell, showClients, skuDisplayLabel } from '@/lib/clients';
-import { readyClients, useClients } from '@/lib/use-clients';
+import { readyClients } from '@/lib/use-clients';
+import { clientFilterForDrill, clientFilterKey } from '@/lib/active-client';
+import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { ulid } from '@/lib/ulid';
 import { grnDocument, notifyInboundChanged } from '@/lib/asns';
 import {
@@ -59,6 +61,7 @@ import { useInboundTabCounts, type InboundTabCounts } from '@/lib/use-inbound-ta
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { DrillBanner } from '@/components/shared/drill-banner';
+import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
@@ -144,7 +147,10 @@ function InboundCardsSessioned({
   const warehouse = warehouses.find((w) => w.id === warehouseId);
   // inbound-tabs — counts follow the active warehouse (a drill's own
   // warehouse scopes only its card).
-  const tabCounts = useInboundTabCounts(warehouseId);
+  // Story 1-5a — the screen's one active-client read; every list (and the
+  // tab counts, so a count matches its list) takes its filter.
+  const active = useActiveClient();
+  const tabCounts = useInboundTabCounts(warehouseId, active.filter);
   // A drilled card names the drill's warehouse with the one shared label
   // (its short id while the list is not in hand — never "Pick a warehouse").
   const drillLabel = (id: string) => warehouseDisplayLabel(warehouses, id);
@@ -172,16 +178,17 @@ function InboundCardsSessioned({
         badge={(id) => <InboundTabCount tab={id} counts={tabCounts} />}
       />
       <PageTabPanel def={INBOUND_PAGE_TABS} active={tab}>
-        {tab === 'pos' && <PurchaseOrdersCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
+        {tab === 'pos' && <PurchaseOrdersCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
         {tab === 'asns' && (
-          <AsnsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} warehouseCode={warehouse?.code ?? null} />
+          <AsnsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} warehouseCode={warehouse?.code ?? null} />
         )}
         {tab === 'grns' &&
           (grnsDrill === null ? (
-            <GoodsReceiptsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+            <GoodsReceiptsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
           ) : (
             // The drill's warehouse (or every warehouse, when the drill names none).
             <GoodsReceiptsCard
+              active={active}
               warehouseId={grnsDrill.warehouseId ?? null}
               warehouseLabel={grnsDrill.warehouseId === undefined ? 'All warehouses' : drillLabel(grnsDrill.warehouseId)}
               drill={grnsDrill}
@@ -190,9 +197,10 @@ function InboundCardsSessioned({
           ))}
         {tab === 'putaway' &&
           (putawayDrill === null ? (
-            <PutawayCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+            <PutawayCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
           ) : (
             <PutawayCard
+              active={active}
               warehouseId={putawayDrill.warehouseId}
               warehouseLabel={drillLabel(putawayDrill.warehouseId)}
               drill={putawayDrill}
@@ -200,7 +208,7 @@ function InboundCardsSessioned({
             />
           ))}
         {tab === 'qc-holds' && (
-          <QcHoldsCard warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} initialGrnId={qcGrnId} />
+          <QcHoldsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} initialGrnId={qcGrnId} />
         )}
       </PageTabPanel>
     </div>
@@ -224,18 +232,20 @@ function InboundTabCount({ tab, counts }: { tab: InboundTab; counts: InboundTabC
 
 /** The active warehouse's purchase orders, headers plus per-line quantities. */
 function PurchaseOrdersCard({
+  active,
   warehouseId,
   warehouseLabel,
 }: {
+  active: ActiveClientState;
   warehouseId: string | null;
   warehouseLabel: string | null;
 }) {
-  const pos = usePurchaseOrders(warehouseId);
+  const pos = usePurchaseOrders(warehouseId, active.filter);
   const skus = useSkuMap();
   // Story 21-2b — the PO's client (derived from its lines' SKUs), shown once
   // the tenant holds more than its own client. The row carries its lines
   // too, so this one column is both the list's and the detail's.
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const tenantName = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.name ?? null,
@@ -317,6 +327,7 @@ function PurchaseOrdersCard({
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Purchase orders</h2>
+        <ClientFilterChip active={active} tenantName={active.tenantName} />
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its purchase orders.'
@@ -325,6 +336,8 @@ function PurchaseOrdersCard({
       </div>
 
       <DataTable<PurchaseOrderHeader>
+        // Story 1-5a — a client switch remounts the table: no Prev/Next stack survives it.
+        key={clientFilterKey(active.filter)}
         columns={columns}
         rows={pos?.items ?? []}
         nextCursor={pos?.nextCursor ?? null}
@@ -354,11 +367,13 @@ function PoLineRow({ line, sku }: { line: PurchaseOrderLineDto; sku: SkuResponse
 
 /** The warehouse's goods receipt notes, blind receipts flagged for PO-matching. */
 function GoodsReceiptsCard({
+  active,
   warehouseId,
   warehouseLabel,
   drill = null,
   clearHref,
 }: {
+  active: ActiveClientState;
   warehouseId: string | null;
   warehouseLabel: string | null;
   /** Story 9-1b — the drill's rows, server-filtered, under the banner. */
@@ -366,11 +381,11 @@ function GoodsReceiptsCard({
   /** inbound-tabs — where the banner's Clear lands (this list's tab). */
   clearHref?: string;
 }) {
-  const grns = useGoodsReceipts(warehouseId, drill);
+  const grns = useGoodsReceipts(warehouseId, active.filter, drill);
   // Story 1-1 — the receipt's client (the PO's, the ASN's, or a blind
   // receipt's chosen one), shown once the tenant holds more than its own
   // client. An older receipt the backfill could not attribute reads "—".
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const tenantName = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.name ?? null,
@@ -446,6 +461,8 @@ function GoodsReceiptsCard({
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Goods receipt notes</h2>
         {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
+        {/* Story 1-5a — a drill ignores the client switcher (decision 11). */}
+        {drill === null ? <ClientFilterChip active={active} tenantName={active.tenantName} /> : <AllClientsNote active={active} />}
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its receipts.'
@@ -458,6 +475,7 @@ function GoodsReceiptsCard({
       ) : (
         // Mounted while a page loads: its Prev/Next cursor is internal state.
         <DataTable<GoodsReceiptEntryDto>
+          key={clientFilterKey(clientFilterForDrill(active.filter, drill !== null))}
           columns={columns}
           rows={grns.state === 'ready' ? grns.data.items : []}
           nextCursor={grns.state === 'ready' ? grns.data.nextCursor : null}
@@ -488,22 +506,25 @@ function GoodsReceiptsCard({
  * drill's warehouse under the banner.
  */
 function PutawayCard({
+  active,
   warehouseId,
   warehouseLabel,
   drill = null,
   clearHref,
 }: {
+  active: ActiveClientState;
   warehouseId: string | null;
   warehouseLabel: string | null;
   drill?: PutawayDrill | null;
   /** inbound-tabs — where the banner's Clear lands (this list's tab). */
   clearHref?: string;
 }) {
-  const tasks = usePutawayTasks(warehouseId);
+  // Story 1-5a — a drill reads every client's tasks (decision 11).
+  const tasks = usePutawayTasks(warehouseId, clientFilterForDrill(active.filter, drill !== null));
   const skus = useSkuMap();
   // Story 1-1 — two clients may share a code: the SKU is named with its
   // client once the tenant has several (the task's own code otherwise).
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
 
   const columns: readonly DataTableColumn<PutawayTaskDto & { id: string }>[] = [
     { key: 'grnCode', header: 'GRN', render: (task) => <span className="font-mono text-xs">{task.grnCode}</span> },
@@ -542,6 +563,7 @@ function PutawayCard({
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Awaiting putaway</h2>
         {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
+        {drill === null ? <ClientFilterChip active={active} tenantName={active.tenantName} /> : <AllClientsNote active={active} />}
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Received stock still in the Receiving bin, oldest receipt first.'
@@ -579,10 +601,12 @@ type HoldTab = (typeof holdTabs)[number];
 type HoldOutcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
 
 function QcHoldsCard({
+  active,
   warehouseId,
   warehouseLabel,
   initialGrnId = null,
 }: {
+  active: ActiveClientState;
   warehouseId: string | null;
   warehouseLabel: string | null;
   /** Story 1-2b — open narrowed to one receipt's holds (the `qc-receipt` notification's link). */
@@ -594,12 +618,12 @@ function QcHoldsCard({
   const [grnFilter, setGrnFilter] = useState<{ grnId: string; grnCode: string | null } | null>(
     initialGrnId === null ? null : { grnId: initialGrnId, grnCode: null },
   );
-  const holds = useQcHolds(warehouseId, tab, grnFilter?.grnId ?? null);
+  const holds = useQcHolds(warehouseId, tab, active.filter, grnFilter?.grnId ?? null);
   const skus = useSkuMap();
   const users = useUserMap();
   const bins = useBinCodeMap(warehouseId);
   // Story 1-2b — a receipt hold names its client (the self client reads as the company).
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const tenantName = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.name ?? null,
@@ -802,6 +826,7 @@ function QcHoldsCard({
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">QC holds</h2>
+        <ClientFilterChip active={active} tenantName={active.tenantName} />
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its QC holds.'
@@ -835,12 +860,12 @@ function QcHoldsCard({
         </div>
       )}
 
-      {canManage && grnFilter === null && <PlaceQcHoldForm warehouseId={warehouseId} onPlaced={() => holds?.reload()} />}
+      {canManage && grnFilter === null && <PlaceQcHoldForm active={active} warehouseId={warehouseId} onPlaced={() => holds?.reload()} />}
 
       <DataTable<QcHoldEntryDto>
         // The filter is part of the table's identity: its Prev/Next stack
         // belongs to one query (guide §1.11).
-        key={grnFilter?.grnId ?? 'all'}
+        key={`${grnFilter?.grnId ?? 'all'}|${clientFilterKey(active.filter)}`}
         columns={columns}
         rows={holds?.items ?? []}
         nextCursor={holds?.nextCursor ?? null}
@@ -857,14 +882,18 @@ function QcHoldsCard({
 
 /** The place-hold form: pick an on-hand (sku, bin) scope, name the reason. */
 function PlaceQcHoldForm({
+  active,
   warehouseId,
   onPlaced,
 }: {
+  active: ActiveClientState;
   warehouseId: string | null;
   onPlaced: () => void;
 }) {
   const scopesData = useStockScopes(warehouseId);
-  const openHolds = useQcHolds(warehouseId, 'open');
+  // Story 1-5a — a write-side form is never client-filtered (decision 10):
+  // its open-holds read is every client's, so the scope picker stays honest.
+  const openHolds = useQcHolds(warehouseId, 'open', null);
   const skus = useSkuMap();
   const bins = useBinCodeMap(warehouseId);
   const [picked, setPicked] = useState<string>('');
@@ -947,7 +976,9 @@ function PlaceQcHoldForm({
         void submit();
       }}
     >
-      <div className="text-xs font-medium">Place a hold</div>
+      <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
+        Place a hold <AllClientsNote active={active} />
+      </div>
       <div className="flex flex-wrap gap-2">
         <select
           aria-label="Stock scope (SKU at bin)"

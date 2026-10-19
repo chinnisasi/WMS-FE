@@ -5,12 +5,14 @@ import { useSyncExternalStore } from 'react';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { drillFor, drillKey, type ParsedDrill } from '@/lib/drill';
 import { COMPLIANCE_PAGE_TABS, type ComplianceTab } from '@/lib/page-tabs';
+import { useActiveClient } from '@/lib/use-active-client';
 
 import { ClientInvoices } from '@/components/compliance/client-invoices';
 import { ColdChainTrace } from '@/components/compliance/cold-chain-trace';
 import { EwayBills } from '@/components/compliance/eway-bills';
 import { HsnSummary } from '@/components/compliance/hsn-summary';
 import { Invoices } from '@/components/compliance/invoices';
+import { AllClientsNote } from '@/components/shared/client-filter-chip';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 
 /**
@@ -55,9 +57,29 @@ function ComplianceTabsKnown({ drill, initialTab }: { drill: ParsedDrill; initia
         {/* Story 21-5 — the 3PL's services invoices to its client brands. */}
         {tab === 'client-invoices' && <ClientInvoices />}
         {tab === 'eway' && <EwayBills key={`eway-${key}`} drill={drill} clearHref={COMPLIANCE_PAGE_TABS.href('eway')} />}
-        {tab === 'hsn' && <HsnSummary />}
-        {tab === 'cold-chain' && <ColdChainTrace />}
+        {tab === 'hsn' && (
+          <>
+            <UnfilteredNote />
+            <HsnSummary />
+          </>
+        )}
+        {tab === 'cold-chain' && (
+          <>
+            <UnfilteredNote />
+            <ColdChainTrace />
+          </>
+        )}
       </PageTabPanel>
     </div>
   );
+}
+
+/**
+ * Story 1-5a — the HSN summary and the cold-chain trace are never filtered
+ * by client (spec "Never"): under an active client they say "All clients".
+ * Mounted only on those tabs, so the filtered sections keep one clients read.
+ */
+function UnfilteredNote() {
+  const active = useActiveClient();
+  return <AllClientsNote active={active} />;
 }

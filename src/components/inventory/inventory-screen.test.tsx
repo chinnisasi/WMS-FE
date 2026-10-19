@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
 import InventoryPage from '../../app/(app)/inventory/page';
+import { ACTIVE_CLIENT_STORAGE_KEY, writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -629,5 +630,133 @@ describe('the Inventory screen — Ledger and the page', () => {
 
     const bare = await InventoryPage({ searchParams: Promise.resolve({ tab: 'nope' }) });
     expect(bare.key).toBe('none|default');
+  });
+});
+
+/**
+ * Story 1-5a — the client switcher on Inventory: Stock and the Ledger tab
+ * send the active client (server-side filter), show the chip, wait while the
+ * clients load, ignore a stale or single-client pick without erasing it, and
+ * narrow the Stock search's SKU codes to the active client. Batches is not
+ * filtered and says "All clients".
+ */
+describe('story 1-5a — the client filter', () => {
+  const GLOW = '0198f7a2-1b3c-7d4e-8f90-0000000a1001';
+  const SKU_LIP = '0198f7a2-1b3c-7d4e-8f90-00000000c0a1';
+  const storedKey = `${ACTIVE_CLIENT_STORAGE_KEY}:${T}:u-1`;
+  const chip = () => view!.container.querySelector('[data-testid="client-filter-chip"]');
+  beforeEach(() => {
+    clients = [...clients, { id: GLOW, code: 'GLOW', name: 'GlowCo', systemOwned: false, status: 'active' }];
+    SKUS.push({ ...sku(SKU_LIP, 'GC-LIP', 'GlowCo Lip Tint', false), clientId: GLOW });
+  });
+  afterEach(() => {
+    SKUS.pop();
+  });
+
+  test('Stock under a stored client: the read carries clientId and the chip names the client', async () => {
+    writeActiveClientId(T, 'u-1', GLOW);
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(stockReads().length).toBeGreaterThan(0);
+    expect(stockReads().every((r) => r.params.clientId === GLOW)).toBe(true);
+    expect(chip()?.textContent).toContain('Client: GLOW — GlowCo');
+  });
+
+  test('Stock search narrows the SKU codes to the active client', async () => {
+    writeActiveClientId(T, 'u-1', GLOW);
+    view = render(<InventoryScreen />);
+    await settle();
+    // The tenant's own SKU is not offered under GlowCo.
+    await search('GLOW-SPF50-50');
+    expect(panel().querySelector('[data-testid="search-miss"]')).not.toBeNull();
+    await search('GC-LIP');
+    expect(panel().querySelector('[data-testid="search-miss"]')).toBeNull();
+    expect(stockReads().at(-1)!.params).toMatchObject({ skuId: SKU_LIP, clientId: GLOW });
+  });
+
+  test('a switch restarts the read for the new client; "Show all clients" drops clientId', async () => {
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(stockReads().at(-1)!.params.clientId).toBeUndefined();
+    expect(chip()).toBeNull();
+    await act(async () => {
+      writeActiveClientId(T, 'u-1', GLOW);
+    });
+    await settle();
+    expect(stockReads().at(-1)!.params.clientId).toBe(GLOW);
+    await click(button('Show all clients'));
+    expect(stockReads().at(-1)!.params.clientId).toBeUndefined();
+    expect(localStorage.getItem(storedKey)).toBeNull();
+  });
+
+  test('while the clients load no stock read is sent; it goes out filtered once they arrive', async () => {
+    writeActiveClientId(T, 'u-1', GLOW);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    overrides.push({
+      match: (p) => p === `/api/v1/tenants/${T}/clients`,
+      respond: async () => {
+        await gate;
+        return json(200, { items: clients });
+      },
+    });
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(stockReads()).toHaveLength(0);
+    release();
+    await settle();
+    expect(stockReads().length).toBeGreaterThan(0);
+    expect(stockReads().every((r) => r.params.clientId === GLOW)).toBe(true);
+  });
+
+  test('a failed clients read lists all clients and keeps the stored pick', async () => {
+    writeActiveClientId(T, 'u-1', GLOW);
+    overrides.push({ match: (p) => p === `/api/v1/tenants/${T}/clients`, respond: () => problem(500, 'boom') });
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(stockReads().length).toBeGreaterThan(0);
+    expect(stockReads().every((r) => r.params.clientId === undefined)).toBe(true);
+    expect(chip()).toBeNull();
+    expect(localStorage.getItem(storedKey)).toBe(GLOW);
+  });
+
+  test('a stale stored client (not in the list) reads unfiltered and stays stored', async () => {
+    const GONE = '0198f7a2-1b3c-7d4e-8f90-0000000a9999';
+    writeActiveClientId(T, 'u-1', GONE);
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(stockReads().length).toBeGreaterThan(0);
+    expect(stockReads().every((r) => r.params.clientId === undefined)).toBe(true);
+    expect(chip()).toBeNull();
+    expect(localStorage.getItem(storedKey)).toBe(GONE);
+  });
+
+  test('a single-client tenant never filters, even with a stored id', async () => {
+    clients = clients.filter((c) => c.systemOwned);
+    writeActiveClientId(T, 'u-1', GLOW);
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(stockReads().every((r) => r.params.clientId === undefined)).toBe(true);
+    expect(chip()).toBeNull();
+  });
+
+  test('the Ledger tab sends the active client and shows the chip', async () => {
+    writeActiveClientId(T, 'u-1', GLOW);
+    view = render(<InventoryScreen initialTab="ledger" />);
+    await settle();
+    const events = requests.filter((r) => r.pathname.endsWith('/inventory/events'));
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((r) => r.params.clientId === GLOW)).toBe(true);
+    expect(chip()?.textContent).toContain('Client: GLOW — GlowCo');
+  });
+
+  test('Batches is not filtered and says "All clients"', async () => {
+    writeActiveClientId(T, 'u-1', GLOW);
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    expect(view.container.querySelector('[data-testid="all-clients-note"]')?.textContent).toBe('All clients');
+    expect(chip()).toBeNull();
   });
 });

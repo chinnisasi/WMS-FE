@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -31,9 +32,13 @@ const ACME = { id: 'c-acme', code: 'ACME', name: 'Acme Foods', status: 'active',
 const BETA = { id: 'c-beta', code: 'BETA', name: 'Beta Brands', status: 'active', systemOwned: false };
 
 let clients: Record<string, unknown>[] = [SELF];
+/** Story 1-5a — the clients read: answered, never answered (pending), or failed. */
+let clientsMode: 'ok' | 'hang' | 'fail' = 'ok';
 /** Story 1-2b — every request the surface sent (method, path + query, body, key). */
 let requests: { method: string; url: URL; body: unknown; key: string | null }[] = [];
 let qcHolds: Record<string, unknown>[] = [];
+/** Story 1-5a — the GRN list's first page offers this next page (the switch test holds a real cursor). */
+let grnNextCursor: string | null = null;
 function purchaseOrder(id: string, code: string, vendorSnapshot: Record<string, unknown> | null): Record<string, unknown> {
   return {
     id, tenantId: T, warehouseId: WH, vendorId: 'v-1', code, status: 'open', carriedFromPoId: null, clientId: 'c-self',
@@ -146,7 +151,13 @@ function stubRouter(): void {
     if (pathname === `${base}/warehouses`) {
       return json(200, { items: [{ id: WH, code: 'BLR', name: 'Bengaluru DC' }], nextCursor: null });
     }
-    if (pathname === `${base}/clients`) return json(200, { items: clients });
+    if (pathname === `${base}/clients`) {
+      if (clientsMode === 'hang') return new Promise<Response>(() => undefined);
+      if (clientsMode === 'fail') return json(500, { code: 'internal', title: 'Boom', status: 500 });
+      return json(200, { items: clients });
+    }
+    if (pathname === `${base}/warehouses/${WH}/inbound/asns`) return json(200, { items: [], nextCursor: null });
+    if (pathname === `${base}/warehouses/${WH}/inventory/stock`) return json(200, { items: [], nextCursor: null });
     // Story 1-3 — the PO list (headers) and detail (lines), and a partner list
     // whose LIVE name differs from the PO's frozen vendor snapshot.
     if (pathname === `${base}/warehouses/${WH}/inbound/purchase-orders`) return json(200, { items: purchaseOrders, nextCursor: null });
@@ -160,7 +171,7 @@ function stubRouter(): void {
     if (pathname === `${base}/receiving/goods-receipts`) {
       return json(200, {
         items: [grn('g-1', 'GRN-0001', 'c-acme'), grn('g-2', 'GRN-0002', 'c-self'), grn('g-3', 'GRN-0003')],
-        nextCursor: null,
+        nextCursor: url.searchParams.has('cursor') ? null : grnNextCursor,
       });
     }
     if (pathname === `${base}/catalog/skus`) {
@@ -179,7 +190,9 @@ function stubRouter(): void {
 let view: Rendered | undefined;
 
 beforeEach(() => {
+  grnNextCursor = null;
   clients = [SELF];
+  clientsMode = 'ok';
   requests = [];
   qcHolds = [];
   role = 'owner';
@@ -369,4 +382,151 @@ describe('QC holds — receipt holds (story 1-2b)', () => {
     expect(listReads().every((r) => r.url.searchParams.get('grnId') === GRN_ID)).toBe(true);
     expect(panel().textContent).toContain('Showing the QC holds of GRN-0042');
   });
+});
+
+/**
+ * Story 1-5a — the client switcher on the Inbound page: every list (and the
+ * tab counts) carries the stored client's id and shows the chip; the QC-hold
+ * FORM's open-holds read never does (decision 10); a pending clients read
+ * sends no list request; a failed one reads every client.
+ */
+describe('the client filter (story 1-5a)', () => {
+  const reads = (suffix: string) => requests.filter((r) => r.method === 'GET' && r.url.pathname.endsWith(suffix));
+  const chip = () => view!.container.querySelector('[data-testid="client-filter-chip"]');
+  const LISTS: readonly { tab: 'pos' | 'asns' | 'grns' | 'putaway' | 'qc-holds'; path: string }[] = [
+    { tab: 'pos', path: '/inbound/purchase-orders' },
+    { tab: 'asns', path: '/inbound/asns' },
+    { tab: 'grns', path: '/receiving/goods-receipts' },
+    { tab: 'putaway', path: '/putaway/tasks' },
+    { tab: 'qc-holds', path: '/receiving/qc-holds' },
+  ];
+
+  for (const { tab, path } of LISTS) {
+    test(`${tab}: under a stored client the list request carries clientId and the chip renders`, async () => {
+      clients = [SELF, ACME];
+      writeActiveClientId(T, 'u-1', ACME.id);
+      view = render(<InboundCards initialTab={tab} />);
+      await settle();
+      // The tab's own list read (a count read carries a `limit`) carries the client.
+      const listed = reads(path).filter((r) => r.url.searchParams.get('limit') === null);
+      expect(listed.some((r) => r.url.searchParams.get('clientId') === ACME.id)).toBe(true);
+      // Every read of this route carries it too (tab counts included) — except the
+      // QC-hold form's own open-holds read, which is never filtered (decision 10).
+      if (tab !== 'qc-holds') expect(reads(path).every((r) => r.url.searchParams.get('clientId') === ACME.id)).toBe(true);
+      expect(chip()?.textContent).toContain('Client: ACME — Acme Foods');
+    });
+  }
+
+  test('the tab counts carry the same clientId as the lists', async () => {
+    clients = [SELF, ACME];
+    writeActiveClientId(T, 'u-1', ACME.id);
+    view = render(<InboundCards initialTab="grns" />);
+    await settle();
+    const counts = [
+      ...reads('/inbound/purchase-orders').filter((r) => r.url.searchParams.get('status') === 'open'),
+      ...reads('/inbound/asns'),
+      ...reads('/putaway/tasks'),
+      ...reads('/receiving/qc-holds'),
+    ];
+    expect(counts.length).toBeGreaterThanOrEqual(4);
+    expect(counts.every((r) => r.url.searchParams.get('clientId') === ACME.id)).toBe(true);
+  });
+
+  test('the QC-hold form reads every client\'s open holds and says "All clients"; the list stays filtered', async () => {
+    clients = [SELF, ACME];
+    writeActiveClientId(T, 'u-1', ACME.id);
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    const holds = reads('/receiving/qc-holds').filter((r) => r.url.searchParams.get('limit') === null);
+    // Two reads of the open holds: the list's (filtered) and the form's (never).
+    expect(holds.some((r) => r.url.searchParams.get('clientId') === ACME.id)).toBe(true);
+    expect(holds.some((r) => !r.url.searchParams.has('clientId'))).toBe(true);
+    const form = view.container.querySelector('form')!;
+    expect(form.querySelector('[data-testid="all-clients-note"]')?.textContent).toBe('All clients');
+  });
+
+  test('no stored client: no clientId anywhere, no chip, no "All clients" note', async () => {
+    clients = [SELF, ACME];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    expect(requests.filter((r) => r.url.searchParams.has('clientId'))).toEqual([]);
+    expect(chip()).toBeNull();
+    expect(view.container.querySelector('[data-testid="all-clients-note"]')).toBeNull();
+  });
+
+  test('single-client tenant: a stored id is ignored — no clientId, no chip', async () => {
+    clients = [SELF];
+    writeActiveClientId(T, 'u-1', SELF.id);
+    view = render(<InboundCards initialTab="pos" />);
+    await settle();
+    expect(reads('/inbound/purchase-orders').length).toBeGreaterThan(0);
+    expect(requests.filter((r) => r.url.searchParams.has('clientId'))).toEqual([]);
+    expect(chip()).toBeNull();
+  });
+
+  test('a stored client absent from the loaded list reads all clients and stays stored', async () => {
+    clients = [SELF, ACME];
+    writeActiveClientId(T, 'u-1', 'c-gone');
+    view = render(<InboundCards initialTab="pos" />);
+    await settle();
+    expect(reads('/inbound/purchase-orders').length).toBeGreaterThan(0);
+    expect(requests.filter((r) => r.url.searchParams.has('clientId'))).toEqual([]);
+    expect(chip()).toBeNull();
+    expect(localStorage.getItem(`wms-active-client:${T}:u-1`)).toBe('c-gone');
+  });
+
+  test('pending: while the clients load, a stored client holds every list request back', async () => {
+    clientsMode = 'hang';
+    writeActiveClientId(T, 'u-1', ACME.id);
+    view = render(<InboundCards initialTab="pos" />);
+    await settle();
+    for (const { path } of LISTS) expect(reads(path)).toEqual([]);
+    expect(reads('/receiving/goods-receipts')).toEqual([]);
+  });
+
+  test('failed clients read: the lists read every client (no clientId) and the pick stays stored', async () => {
+    clientsMode = 'fail';
+    writeActiveClientId(T, 'u-1', ACME.id);
+    view = render(<InboundCards initialTab="pos" />);
+    await settle();
+    expect(reads('/inbound/purchase-orders').length).toBeGreaterThan(0);
+    expect(requests.filter((r) => r.url.searchParams.has('clientId'))).toEqual([]);
+    expect(chip()).toBeNull();
+    expect(localStorage.getItem(`wms-active-client:${T}:u-1`)).toBe(ACME.id);
+  });
+
+  test('switching the client restarts the list from page one under the new client — and so does switching back', async () => {
+    clients = [SELF, ACME];
+    grnNextCursor = 'p2';
+    view = render(<InboundCards initialTab="grns" />);
+    await settle();
+    expect(reads('/receiving/goods-receipts').every((r) => !r.url.searchParams.has('clientId'))).toBe(true);
+    // Page 2 under All clients.
+    const next = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Next')!;
+    await act(async () => {
+      next.click();
+    });
+    await settle();
+    expect(reads('/receiving/goods-receipts').at(-1)!.url.searchParams.get('cursor')).toBe('p2');
+    requests = [];
+    await act(async () => {
+      writeActiveClientId(T, 'u-1', ACME.id);
+    });
+    await settle();
+    const after = reads('/receiving/goods-receipts');
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((r) => r.url.searchParams.get('clientId') === ACME.id && !r.url.searchParams.has('cursor'))).toBe(true);
+    expect(chip()?.textContent).toContain('Client: ACME — Acme Foods');
+    // "Show all clients" clears the filter — and never replays All's page-2 cursor.
+    requests = [];
+    const showAll = [...chip()!.querySelectorAll('button')].find((b) => b.textContent === 'Show all clients')!;
+    await act(async () => {
+      showAll.click();
+    });
+    await settle();
+    expect(reads('/receiving/goods-receipts').length).toBeGreaterThan(0);
+    expect(reads('/receiving/goods-receipts').every((r) => !r.url.searchParams.has('clientId') && !r.url.searchParams.has('cursor'))).toBe(true);
+    expect(chip()).toBeNull();
+  });
+
 });

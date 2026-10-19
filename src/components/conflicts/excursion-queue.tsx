@@ -11,7 +11,9 @@ import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useBinCodeMap, useSkuMap, useUserMap } from '@/lib/use-inbound';
 import { skuDisplayLabel } from '@/lib/clients';
-import { readyClients, useClients } from '@/lib/use-clients';
+import { readyClients } from '@/lib/use-clients';
+import { useActiveClient } from '@/lib/use-active-client';
+import { AllClientsNote } from '@/components/shared/client-filter-chip';
 import { useExcursions, type ExcursionHolds } from '@/lib/use-excursions';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 
@@ -88,7 +90,9 @@ function ExcursionQueueSessioned() {
   const queue = useExcursions(warehouseId, tab);
   const skus = useSkuMap();
   // Story 1-1 — a SKU is named with its client once the tenant has several.
-  const clients = readyClients(useClients());
+  // Story 1-5a — the queue's one active-client read (its clients reused for labels).
+  const active = useActiveClient();
+  const clients = readyClients(active.clients);
   const users = useUserMap();
   const binCodes = useBinCodeMap(warehouseId);
   // Story 1.5 gating pattern: subscribed (not a bare readSession() at
@@ -168,6 +172,8 @@ function ExcursionQueueSessioned() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-col gap-0.5">
           <h2 className="font-medium">Excursions</h2>
+          {/* Story 1-5a — never client-filtered: say so while a client is active. */}
+          <AllClientsNote active={active} />
           <div className="text-(--muted-foreground)">
             Out-of-range temperature readings recorded from the floor. Each open excursion&apos;s
             affected units are the QC holds recording created; resolve flips the review status —

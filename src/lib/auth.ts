@@ -10,6 +10,7 @@
  * An expired access token is therefore NOT signed-out: it is refreshable. A
  * session past `refreshUntil` (or one the server ended) reads as signed-out.
  */
+import { clearActiveClientId } from '@/lib/active-client';
 import type { SessionClientResponse, TenantResponse, UserResponse } from '@/lib/api/generated';
 
 export const SESSION_STORAGE_KEY = 'wms-session';
@@ -235,6 +236,17 @@ export function clearSession(reason?: string): void {
   if (expiryTimer !== undefined) {
     clearTimeout(expiryTimer);
     expiryTimer = undefined;
+  }
+  try {
+    // Story 1-5a — the logout forgets this user's client filter (read off the
+    // raw row: an ended session no longer reads through `readSession`).
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    const stored = raw === null ? null : (JSON.parse(raw) as Partial<StoredSession> | null);
+    const tenantId = stored?.tenant?.id;
+    const userId = stored?.user?.id;
+    if (typeof tenantId === 'string' && typeof userId === 'string') clearActiveClientId(tenantId, userId);
+  } catch {
+    // an unreadable row has no pick to forget
   }
   try {
     localStorage.removeItem(SESSION_STORAGE_KEY);

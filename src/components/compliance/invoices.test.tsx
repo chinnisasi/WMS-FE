@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -234,6 +235,11 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  try {
+    localStorage.clear();
+  } catch {
+    // ignore
+  }
   restoreGlobals();
 });
 
@@ -568,5 +574,29 @@ describe('Invoices: a line\'s SKU is its order line\'s (story 1-1)', () => {
     expect(rateInputs.map((input) => input.getAttribute('aria-label'))).toEqual(['Rate for SPICE-01 · Priya Spices — Turmeric']);
     // The order is read once for the whole detail (print and panel).
     expect(requests.filter((r) => r.pathname.endsWith(`/outbound/orders/${ORDER_ID}`))).toHaveLength(1);
+  });
+});
+
+describe('Invoices: the client filter (story 1-5a)', () => {
+  const TWO = [
+    { id: 'c-self', code: 'self', name: 'Priya Spices', status: 'active', systemOwned: true },
+    { id: 'c-acme', code: 'ACME', name: 'Acme Foods', status: 'active', systemOwned: false },
+  ];
+  const listReads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/invoices'));
+
+  test('under a stored client the list read carries clientId and the chip renders', async () => {
+    clientsBody = TWO;
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    view = await mountAs('owner');
+    expect(listReads().length).toBeGreaterThan(0);
+    expect(listReads().every((r) => new URLSearchParams(r.query).get('clientId') === 'c-acme')).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')?.textContent).toContain('Client: ACME — Acme Foods');
+  });
+
+  test('no stored client: no clientId and no chip', async () => {
+    clientsBody = TWO;
+    view = await mountAs('owner');
+    expect(listReads().every((r) => new URLSearchParams(r.query).get('clientId') === null)).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
   });
 });

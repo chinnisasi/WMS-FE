@@ -40,6 +40,8 @@ import {
   type InvoiceDocument,
   type Outcome,
 } from '@/lib/invoices';
+import { clientFilterKey } from '@/lib/active-client';
+import { useActiveClient } from '@/lib/use-active-client';
 import { useInvoiceDetail, useInvoices } from '@/lib/use-invoices';
 import { drillFor, type InvoicesDrill, type ParsedDrill } from '@/lib/drill';
 import { useSkuMap } from '@/lib/use-inbound';
@@ -47,6 +49,7 @@ import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass } from '@/components/outbound/shell';
@@ -99,7 +102,9 @@ function InvoicesSessioned({ drill, clearHref }: { drill: InvoicesDrill | null; 
     () => undefined,
   );
   const canGenerate = roleHasCapability(role, 'invoice.generate');
-  const list = useInvoices(drill);
+  // Story 1-5a — the client switcher filters the list; a drill ignores it (decision 11).
+  const active = useActiveClient();
+  const list = useInvoices(active.filter, drill);
   const skus = useSkuMap();
   const [openId, setOpenId] = useState<string | null>(null);
   // A generate can insert a NEW row at the top of the newest-first keyset:
@@ -174,6 +179,11 @@ function InvoicesSessioned({ drill, clearHref }: { drill: InvoicesDrill | null; 
       </div>
 
       {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
+      {drill !== null ? (
+        <AllClientsNote active={active} />
+      ) : (
+        <ClientFilterChip active={active} tenantName={active.tenantName} />
+      )}
 
       {canGenerate && drill === null && <GenerateForOrder onGenerated={() => onGenerated()} />}
 
@@ -189,7 +199,7 @@ function InvoicesSessioned({ drill, clearHref }: { drill: InvoicesDrill | null; 
         // for a loading line on every page change would remount it onto
         // "page one" — Prev would never enable.
         <DataTable
-          key={pageEpoch}
+          key={`${pageEpoch}|${clientFilterKey(drill === null ? active.filter : null)}`}
           columns={columns}
           rows={list.state === 'ready' ? list.data.items : []}
           nextCursor={list.state === 'ready' ? list.data.nextCursor : null}

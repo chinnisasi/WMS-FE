@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useSyncExternalStore } from 'react';
 
 import { SignOutButton } from '@/components/auth/sign-out';
+import { ClientSwitcher } from '@/components/shell/client-switcher';
 import { WarehouseSwitcher } from '@/components/shell/warehouse-switcher';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { visibleNavItems } from '@/lib/navigation';
@@ -35,6 +36,8 @@ export function Sidebar() {
         <span className="text-sm font-semibold lg:hidden">W</span>
       </div>
       <WarehouseSwitcher className="hidden lg:block" />
+      {/* Story 1-5a — the client filter, beside the warehouse. */}
+      <ClientSwitcher className="hidden lg:block" />
       <nav aria-label="Primary" className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         {navItems.map((item) => {
           // Nested child routes (e.g. /inventory/xyz) keep the surface

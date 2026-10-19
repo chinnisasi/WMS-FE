@@ -5,6 +5,7 @@ import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { writeActiveWarehouseId } from '../../lib/warehouses';
+import { writeActiveClientId } from '../../lib/active-client';
 import { OverviewDashboard } from './overview-dashboard';
 
 /**
@@ -136,6 +137,10 @@ function overview(warehouseId: string, overrides: { stale?: boolean; asOf?: stri
 }
 
 let requests: string[] = [];
+/** Story 1-5a — every request's full URL (path and query). */
+let urls: URL[] = [];
+/** Story 1-5a — the tenant's clients (null: the read is unrouted). */
+let clientRows: unknown[] | null = null;
 let warehouseRows: unknown[] = [];
 let overviewFor: (warehouseId: string) => unknown = (w) => overview(w);
 /** The next N overview reads answer this status instead of 200. */
@@ -154,6 +159,10 @@ function stubRouter(): void {
     const request = input instanceof Request ? input : new Request(input.toString());
     const { pathname } = new URL(request.url);
     requests.push(`${request.method} ${pathname}`);
+    urls.push(new URL(request.url));
+    if (request.method === 'GET' && pathname.endsWith(`/tenants/${TENANT_ID}/clients`) && clientRows !== null) {
+      return json(200, { items: clientRows });
+    }
     const match = /\/warehouses\/([^/]+)\/reporting\/overview$/.exec(pathname);
     if (request.method === 'GET' && match !== null) {
       if (failNextOverviews > 0) {
@@ -194,6 +203,8 @@ let view: Rendered | undefined;
 
 beforeEach(() => {
   requests = [];
+  urls = [];
+  clientRows = null;
   warehouseRows = [
     { id: W1, code: 'MAIN', name: 'Chennai DC' },
     { id: W2, code: 'NORTH', name: 'Delhi DC' },
@@ -334,6 +345,30 @@ describe('the tiles', () => {
     expect(pick).not.toBeNull();
     expect(pick.textContent).toContain('Unavailable');
     expect(pick.textContent).not.toContain('Last hour');
+  });
+});
+
+describe('story 1-5a — the overview is never client-filtered', () => {
+  const GLOW = '0198f7a2-1b3c-7d4e-8f90-0000000c1002';
+  const CLIENTS = [
+    { id: '0198f7a2-1b3c-7d4e-8f90-0000000c1001', tenantId: TENANT_ID, code: 'self', name: 'Priya Spices', status: 'active', systemOwned: true },
+    { id: GLOW, tenantId: TENANT_ID, code: 'GLOWCO', name: 'GlowCo', status: 'active', systemOwned: false },
+  ];
+
+  test('GlowCo stored: "All clients", no chip, and no read carries a clientId', async () => {
+    clientRows = CLIENTS;
+    writeActiveClientId(TENANT_ID, SESSION.user.id, GLOW);
+    view = await mount();
+    expect(view.container.querySelector('[data-testid="all-clients-note"]')?.textContent).toBe('All clients');
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+    expect(overviewReads().length).toBeGreaterThan(0);
+    expect(urls.some((url) => url.searchParams.has('clientId'))).toBe(false);
+  });
+
+  test('no client stored: no note', async () => {
+    clientRows = CLIENTS;
+    view = await mount();
+    expect(view.container.querySelector('[data-testid="all-clients-note"]')).toBeNull();
   });
 });
 

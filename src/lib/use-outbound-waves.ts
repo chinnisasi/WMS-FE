@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
+import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
+import { useClientEpoch } from '@/lib/use-client-epoch';
 import { fetchApiGetWave, fetchApiListWavePolicies, fetchApiListWaves } from '@/lib/api/client';
 import type { WaveDto, WaveEntryDto, WavePolicyDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -39,6 +41,8 @@ export interface OutboundWavesPage {
  */
 export function useOutboundWaves(
   warehouseId: string | null,
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
 ): ResourceState<OutboundWavesPage> &
   Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   const tenantId = useSyncExternalStore(
@@ -46,22 +50,27 @@ export function useOutboundWaves(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
   // The cursor the viewer asked for, scoped to the (tenant, warehouse) it was
   // asked for — a cursor left over from another scope is treated as a
   // first-page request, never replayed against the wrong warehouse.
   const [requested, setRequested] = useState<{
     tenantId: string;
     warehouseId: string;
+    clientId: string | null; clientEpoch: number;
     cursor: string | null;
   } | null>(null);
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId && requested.warehouseId === warehouseId
+    requested !== null && requested.tenantId === tenantId && requested.warehouseId === warehouseId && requested.clientId === clientId && requested.clientEpoch === clientEpoch
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{
     tenantId: string;
     warehouseId: string;
+    clientId: string | null;
     requested: string | null;
     state: ResourceState<OutboundWavesPage>;
   } | null>(null);
@@ -73,19 +82,20 @@ export function useOutboundWaves(
   }, []);
 
   useEffect(() => {
-    if (tenantId === null || warehouseId === null) return;
+    if (tenantId === null || warehouseId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
         const page = await fetchApiListWaves(
           tenantId,
           warehouseId,
-          activeCursor === null ? undefined : { cursor: activeCursor },
+          { ...(clientId === null ? {} : { clientId }), ...(activeCursor === null ? {} : { cursor: activeCursor }) },
         );
         if (!cancelled) {
           setResult({
             tenantId,
             warehouseId,
+            clientId,
             requested: activeCursor,
             state: {
               state: 'ready',
@@ -98,6 +108,7 @@ export function useOutboundWaves(
           setResult({
             tenantId,
             warehouseId,
+            clientId,
             requested: activeCursor,
             state: { state: 'failed', reason: readReason(error, 'waves') },
           });
@@ -107,14 +118,14 @@ export function useOutboundWaves(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, activeCursor, revision]);
+  }, [tenantId, warehouseId, clientId, pending, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null || warehouseId === null) return;
-      setRequested({ tenantId, warehouseId, cursor });
+      setRequested({ tenantId, warehouseId, clientId, clientEpoch, cursor });
     },
-    [tenantId, warehouseId],
+    [tenantId, warehouseId, clientId, clientEpoch],
   );
   // Clearing the result first is what makes Retry visible: leaving the old
   // `failed` state in place while the refetch is in flight renders a second
@@ -127,9 +138,11 @@ export function useOutboundWaves(
   const stale =
     tenantId === null ||
     warehouseId === null ||
+    pending ||
     result === null ||
     result.tenantId !== tenantId ||
     result.warehouseId !== warehouseId ||
+    result.clientId !== clientId ||
     result.requested !== activeCursor;
 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };

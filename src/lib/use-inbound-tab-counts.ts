@@ -8,6 +8,7 @@ import {
   fetchApiListPutawayTasks,
   fetchApiListQcHolds,
 } from '@/lib/api/client';
+import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
 import { INBOUND_CHANGED_EVENT } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { sumTabCounts, type CountedInboundTab, type TabCount } from '@/lib/inbound-tabs';
@@ -30,15 +31,22 @@ const page = (items: readonly unknown[], nextCursor: string | null | undefined):
  * (never a wrong "0"), and nothing blocks the cards. Re-read on a warehouse
  * switch and on every inbound change event (ASN, QC hold writes).
  */
-export function useInboundTabCounts(warehouseId: string | null): InboundTabCounts {
+export function useInboundTabCounts(
+  warehouseId: string | null,
+  /** Story 1-5a — the same active-client filter the tabs' lists take, so a count matches its list. */
+  clientFilter: ClientFilter,
+): InboundTabCounts {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{ scope: string; counts: InboundTabCounts } | null>(null);
-  const scope = tenantId === null || warehouseId === null ? null : `${tenantId}|${warehouseId}|${revision}`;
+  const scope =
+    tenantId === null || warehouseId === null || pending ? null : `${tenantId}|${warehouseId}|${clientId ?? '*'}|${revision}`;
 
   useEffect(() => {
     const onChange = () => setRevision((r) => r + 1);
@@ -50,6 +58,7 @@ export function useInboundTabCounts(warehouseId: string | null): InboundTabCount
     if (tenantId === null || warehouseId === null || scope === null) return;
     let cancelled = false;
     const counts: { [K in CountedInboundTab]?: TabCount } = {};
+    const client = clientId === null ? {} : { clientId };
     const settle = (tab: CountedInboundTab, read: Promise<TabCount>) =>
       read.then(
         (count) => {
@@ -60,7 +69,7 @@ export function useInboundTabCounts(warehouseId: string | null): InboundTabCount
       );
     void settle(
       'pos',
-      fetchApiListPurchaseOrders(tenantId, warehouseId, { status: 'open', limit: PO_PAGE }).then((r) =>
+      fetchApiListPurchaseOrders(tenantId, warehouseId, { status: 'open', limit: PO_PAGE, ...client }).then((r) =>
         page(r.items, r.nextCursor),
       ),
     );
@@ -68,24 +77,24 @@ export function useInboundTabCounts(warehouseId: string | null): InboundTabCount
       'asns',
       Promise.all(
         (['announced', 'partially_received'] as const).map((status) =>
-          fetchApiListAsns(tenantId, warehouseId, { status, limit: ASN_PAGE }).then((r) => page(r.items, r.nextCursor)),
+          fetchApiListAsns(tenantId, warehouseId, { status, limit: ASN_PAGE, ...client }).then((r) => page(r.items, r.nextCursor)),
         ),
       ).then(sumTabCounts),
     );
     void settle(
       'putaway',
-      fetchApiListPutawayTasks(tenantId, warehouseId).then((r) => ({ count: r.items.length, more: false })),
+      fetchApiListPutawayTasks(tenantId, warehouseId, client).then((r) => ({ count: r.items.length, more: false })),
     );
     void settle(
       'qc-holds',
-      fetchApiListQcHolds(tenantId, { warehouseId, status: 'open', limit: QC_PAGE }).then((r) =>
+      fetchApiListQcHolds(tenantId, { warehouseId, status: 'open', limit: QC_PAGE, ...client }).then((r) =>
         page(r.items, r.nextCursor),
       ),
     );
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, scope]);
+  }, [tenantId, warehouseId, clientId, scope]);
 
   return result !== null && result.scope === scope ? result.counts : {};
 }

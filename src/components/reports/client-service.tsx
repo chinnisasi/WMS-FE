@@ -4,7 +4,7 @@ import { useState, useSyncExternalStore } from 'react';
 
 import { readSession, subscribeSession } from '@/lib/auth';
 import { defaultServicePeriod, parseServicePeriod, serviceClientOption } from '@/lib/service-report';
-import { useClients } from '@/lib/use-clients';
+import { useActiveClient } from '@/lib/use-active-client';
 import { useServiceReport } from '@/lib/use-service-report';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 
@@ -30,7 +30,9 @@ const ALL_WAREHOUSES = '';
  * instead. Member-open. No polling — Refresh reads again.
  */
 export function ClientService() {
-  const clients = useClients();
+  // Story 1-5a — one clients read, shared with the active client.
+  const active = useActiveClient();
+  const clients = active.clients;
   const warehouses = useTenantWarehouses();
   const tenantName = useSyncExternalStore(
     subscribeSession,
@@ -44,8 +46,15 @@ export function ClientService() {
   const [warehouseId, setWarehouseId] = useState<string>(ALL_WAREHOUSES);
 
   const list = clients.state === 'ready' ? clients.data : [];
-  // The chosen client while it is still listed, else the first (keyed derivation, no reset effect).
-  const clientId = list.find((client) => client.id === chosenClient)?.id ?? list[0]?.id ?? null;
+  // The chosen client while it is still listed, else the switcher's active
+  // client (story 1-5a — a local pick wins), else the first (keyed
+  // derivation, no reset effect).
+  const activeClientId = active.state === 'client' ? active.client.id : null;
+  const clientId =
+    list.find((client) => client.id === chosenClient)?.id ??
+    list.find((client) => client.id === activeClientId)?.id ??
+    list[0]?.id ??
+    null;
   const warehouseItems = warehouses.state === 'ready' ? warehouses.data.items : [];
   // A warehouse that left the list falls back to every warehouse.
   const activeWarehouse = warehouseItems.some((w) => w.id === warehouseId) ? warehouseId : ALL_WAREHOUSES;
