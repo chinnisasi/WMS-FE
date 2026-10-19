@@ -950,17 +950,11 @@ export async function fetchApiImportCatalog(
 
 export async function fetchApiListSkus(
   tenantId: string,
-  options?: { cursor?: string; productId?: string; signal?: AbortSignal },
+  options?: { cursor?: string; productId?: string; /** Story 1-5a — one client's SKUs; sent only when set. */ clientId?: string; signal?: AbortSignal },
 ): Promise<SkuListResponse> {
   const { data, error } = await catalogControllerListSkus({
     path: { tenantId },
-    query:
-      options?.cursor === undefined && options?.productId === undefined
-        ? undefined
-        : {
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-            ...(options.productId === undefined ? {} : { productId: options.productId }),
-          },
+    query: definedQuery({ cursor: options?.cursor, productId: options?.productId, clientId: options?.clientId }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -1789,11 +1783,11 @@ export async function fetchApiDiscardRateCard(
 /** The tenant's products — a read, open to any tenant member (11-3). */
 export async function fetchApiListProducts(
   tenantId: string,
-  options?: { cursor?: string; signal?: AbortSignal },
+  options?: { cursor?: string; /** Story 1-5a — one client's rows; sent only when set. */ clientId?: string; signal?: AbortSignal },
 ): Promise<ProductListResponse> {
   const { data, error } = await catalogControllerListProducts({
     path: { tenantId },
-    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    query: definedQuery({ cursor: options?.cursor, clientId: options?.clientId }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -1843,11 +1837,11 @@ export async function fetchApiEditProduct(
 /** The tenant's kits — SKUs carrying composition rows, with their BOMs (11-4). */
 export async function fetchApiListKits(
   tenantId: string,
-  options?: { cursor?: string; signal?: AbortSignal },
+  options?: { cursor?: string; /** Story 1-5a — one client's rows; sent only when set. */ clientId?: string; signal?: AbortSignal },
 ): Promise<KitListResponse> {
   const { data, error } = await catalogControllerListKits({
     path: { tenantId },
-    query: options?.cursor === undefined ? undefined : { cursor: options.cursor },
+    query: definedQuery({ cursor: options?.cursor, clientId: options?.clientId }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -2234,12 +2228,13 @@ export async function fetchApiUpdatePartnerLink(
 export async function fetchApiListPurchaseOrders(
   tenantId: string,
   warehouseId: string,
-  options?: { cursor?: string; status?: 'open' | 'closed'; limit?: number; signal?: AbortSignal },
+  options?: { cursor?: string; status?: 'open' | 'closed'; limit?: number; /** Story 1-5a — one client's POs; sent only when set. */ clientId?: string; signal?: AbortSignal },
 ): Promise<PurchaseOrderListResponse> {
   const query = {
     ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
     ...(options?.status === undefined ? {} : { status: options.status }),
     ...(options?.limit === undefined ? {} : { limit: options.limit }),
+    ...(options?.clientId === undefined ? {} : { clientId: options.clientId }),
   };
   const { data, error } = await inboundControllerListPurchaseOrders({
     path: { tenantId, warehouseId },
@@ -2402,6 +2397,8 @@ export async function fetchApiListGoodsReceipts(
     blind?: boolean;
     from?: string;
     to?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
@@ -2412,6 +2409,7 @@ export async function fetchApiListGoodsReceipts(
     from: options?.from,
     to: options?.to,
     cursor: options?.cursor,
+    clientId: options?.clientId,
   });
   const { data, error } = await receivingControllerListGoodsReceipts({
     path: { tenantId },
@@ -2433,11 +2431,11 @@ export async function fetchApiListGoodsReceipts(
 export async function fetchApiListPutawayTasks(
   tenantId: string,
   warehouseId: string,
-  options?: { signal?: AbortSignal },
+  options?: { /** Story 1-5a — one client's tasks; sent only when set. */ clientId?: string; signal?: AbortSignal },
 ): Promise<PutawayTaskListResponse> {
   const { data, error } = await putawayControllerListPutawayTasks({
     path: { tenantId },
-    query: { warehouseId },
+    query: { warehouseId, ...(options?.clientId === undefined ? {} : { clientId: options.clientId }) },
     signal: options?.signal,
   });
   if (error || !data) {
@@ -2455,6 +2453,8 @@ export async function fetchApiListOverReceipts(
     warehouseId?: string;
     from?: string;
     to?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
@@ -2465,6 +2465,7 @@ export async function fetchApiListOverReceipts(
     from: options?.from,
     to: options?.to,
     cursor: options?.cursor,
+    clientId: options?.clientId,
   });
   const { data, error } = await receivingControllerListOverReceipts({
     path: { tenantId },
@@ -2517,6 +2518,8 @@ export async function fetchApiListQcHolds(
     status?: 'open' | 'released';
     /** Story 1-2b — only one goods receipt's QC-on-receipt holds. */
     grnId?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     limit?: number;
     signal?: AbortSignal;
@@ -2528,6 +2531,7 @@ export async function fetchApiListQcHolds(
     ...(options?.grnId === undefined ? {} : { grnId: options.grnId }),
     ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
     ...(options?.limit === undefined ? {} : { limit: options.limit }),
+    ...(options?.clientId === undefined ? {} : { clientId: options.clientId }),
   };
   const { data, error } = await receivingControllerListQcHolds({
     path: { tenantId },
@@ -2614,6 +2618,8 @@ export async function fetchApiListStock(
     limit?: number;
     order?: 'location';
     nonZero?: boolean;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     signal?: AbortSignal;
   },
 ): Promise<StockListResponse> {
@@ -2624,6 +2630,7 @@ export async function fetchApiListStock(
     ...(options?.limit === undefined ? {} : { limit: options.limit }),
     ...(options?.order === undefined ? {} : { order: options.order }),
     ...(options?.nonZero === undefined ? {} : { nonZero: options.nonZero }),
+    ...(options?.clientId === undefined ? {} : { clientId: options.clientId }),
   };
   const { data, error } = await inventoryControllerListStock({
     path: { tenantId, warehouseId },
@@ -2675,6 +2682,8 @@ export async function fetchApiListOrders(
     backordered?: boolean;
     from?: string;
     to?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     limit?: number;
     signal?: AbortSignal;
@@ -2687,6 +2696,7 @@ export async function fetchApiListOrders(
     from: options?.from,
     to: options?.to,
     cursor: options?.cursor,
+    clientId: options?.clientId,
     limit: options?.limit,
   });
   const { data, error } = await outboundControllerListOrders({
@@ -2948,17 +2958,11 @@ export async function fetchApiGetOrderRates(
 export async function fetchApiListManifests(
   tenantId: string,
   warehouseId: string,
-  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+  options?: { cursor?: string; limit?: number; /** Story 1-5a — one client's rows (any-match); sent only when set. */ clientId?: string; signal?: AbortSignal },
 ): Promise<ManifestListResponse> {
   const { data, error } = await outboundControllerListManifests({
     path: { tenantId, warehouseId },
-    query:
-      options?.cursor === undefined && options?.limit === undefined
-        ? undefined
-        : {
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-            ...(options.limit === undefined ? {} : { limit: options.limit }),
-          },
+    query: definedQuery({ cursor: options?.cursor, limit: options?.limit, clientId: options?.clientId }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -3028,17 +3032,11 @@ export async function fetchApiCreateWavePolicy(
 export async function fetchApiListWaves(
   tenantId: string,
   warehouseId: string,
-  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+  options?: { cursor?: string; limit?: number; /** Story 1-5a — one client's rows (any-match); sent only when set. */ clientId?: string; signal?: AbortSignal },
 ): Promise<WaveListResponse> {
   const { data, error } = await outboundControllerListWaves({
     path: { tenantId, warehouseId },
-    query:
-      options?.cursor === undefined && options?.limit === undefined
-        ? undefined
-        : {
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-            ...(options.limit === undefined ? {} : { limit: options.limit }),
-          },
+    query: definedQuery({ cursor: options?.cursor, limit: options?.limit, clientId: options?.clientId }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -3194,6 +3192,8 @@ export async function fetchApiListInvoices(
     warehouseId?: string;
     from?: string;
     to?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
@@ -3205,6 +3205,7 @@ export async function fetchApiListInvoices(
       from: options?.from,
       to: options?.to,
       cursor: options?.cursor,
+      clientId: options?.clientId,
     }),
     signal: options?.signal,
   });
@@ -3300,6 +3301,8 @@ export interface EwayBillListOptions {
   to?: string;
   cursor?: string;
   limit?: number;
+  /** Story 1-5a — one client's bills (through the invoice's order); sent only when set. */
+  clientId?: string;
   signal?: AbortSignal;
 }
 
@@ -3318,6 +3321,7 @@ export async function fetchApiListEwayBills(tenantId: string, options: EwayBillL
   if (options.to !== undefined) query.to = options.to;
   if (options.cursor !== undefined) query.cursor = options.cursor;
   if (options.limit !== undefined) query.limit = options.limit;
+  if (options.clientId !== undefined) query.clientId = options.clientId;
   const { data, error } = await ewayControllerListBills({
     path: { tenantId },
     query: Object.keys(query).length === 0 ? undefined : query,
@@ -3483,22 +3487,20 @@ export async function fetchApiListVariances(
   options?: {
     status?: 'open' | 'adjusted' | 'recounted';
     warehouseId?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
 ): Promise<CountVarianceListResponse> {
   const { data, error } = await movementsControllerListCountVariances({
     path: { tenantId },
-    query:
-      options?.status === undefined &&
-      options?.warehouseId === undefined &&
-      options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.status === undefined ? {} : { status: options.status }),
-            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query: definedQuery({
+      status: options?.status,
+      warehouseId: options?.warehouseId,
+      clientId: options?.clientId,
+      cursor: options?.cursor,
+    }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -3600,19 +3602,15 @@ export async function fetchApiListAdjustmentPendings(
   tenantId: string,
   options?: {
     status?: 'pending' | 'approved' | 'rejected';
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
 ): Promise<AdjustmentPendingListResponse> {
   const { data, error } = await inventoryControllerListAdjustmentPendings({
     path: { tenantId },
-    query:
-      options?.status === undefined && options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.status === undefined ? {} : { status: options.status }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query: definedQuery({ status: options?.status, clientId: options?.clientId, cursor: options?.cursor }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -3683,6 +3681,8 @@ export async function fetchApiListLedgerEvents(
     poId?: string;
     adjustmentPendingId?: string;
     countVarianceId?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
@@ -3702,6 +3702,7 @@ export async function fetchApiListLedgerEvents(
       adjustmentPendingId: options?.adjustmentPendingId,
       countVarianceId: options?.countVarianceId,
       cursor: options?.cursor,
+      clientId: options?.clientId,
     }),
     signal: options?.signal,
   });
@@ -3725,22 +3726,20 @@ export async function fetchApiListReorderPolicies(
   options?: {
     warehouseId?: string;
     skuId?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
 ): Promise<ReorderPolicyListResponse> {
   const { data, error } = await replenishmentControllerListReorderPolicies({
     path: { tenantId },
-    query:
-      options?.warehouseId === undefined &&
-      options?.skuId === undefined &&
-      options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
-            ...(options.skuId === undefined ? {} : { skuId: options.skuId }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query: definedQuery({
+      warehouseId: options?.warehouseId,
+      skuId: options?.skuId,
+      clientId: options?.clientId,
+      cursor: options?.cursor,
+    }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -3806,22 +3805,20 @@ export async function fetchApiListBreaches(
   options?: {
     status?: 'open' | 'recovered' | 'actioned' | 'dismissed';
     warehouseId?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
 ): Promise<BreachListResponse> {
   const { data, error } = await replenishmentControllerListBreaches({
     path: { tenantId },
-    query:
-      options?.status === undefined &&
-      options?.warehouseId === undefined &&
-      options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.status === undefined ? {} : { status: options.status }),
-            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query: definedQuery({
+      status: options?.status,
+      warehouseId: options?.warehouseId,
+      clientId: options?.clientId,
+      cursor: options?.cursor,
+    }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -3862,22 +3859,20 @@ export async function fetchApiListSuggestedPos(
   options?: {
     status?: 'draft' | 'submitted' | 'dismissed';
     warehouseId?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
 ): Promise<SuggestedPoListResponse> {
   const { data, error } = await replenishmentControllerListSuggestedPos({
     path: { tenantId },
-    query:
-      options?.status === undefined &&
-      options?.warehouseId === undefined &&
-      options?.cursor === undefined
-        ? undefined
-        : {
-            ...(options.status === undefined ? {} : { status: options.status }),
-            ...(options.warehouseId === undefined ? {} : { warehouseId: options.warehouseId }),
-            ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
-          },
+    query: definedQuery({
+      status: options?.status,
+      warehouseId: options?.warehouseId,
+      clientId: options?.clientId,
+      cursor: options?.cursor,
+    }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -3965,6 +3960,8 @@ export async function fetchApiListBatchAlerts(
     /** Story 9-1b — the drill's window (9-1). */
     from?: string;
     to?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
@@ -3978,6 +3975,7 @@ export async function fetchApiListBatchAlerts(
       from: options?.from,
       to: options?.to,
       cursor: options?.cursor,
+      clientId: options?.clientId,
     }),
     signal: options?.signal,
   });
@@ -4494,6 +4492,8 @@ export async function fetchApiListReturns(
     warehouseId?: string;
     status?: ReturnAuthorizationDto['status'];
     orderId?: string;
+    /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
+    clientId?: string;
     cursor?: string;
     signal?: AbortSignal;
   },
@@ -4505,6 +4505,7 @@ export async function fetchApiListReturns(
       status: options?.status,
       orderId: options?.orderId,
       cursor: options?.cursor,
+      clientId: options?.clientId,
     }),
     signal: options?.signal,
   });

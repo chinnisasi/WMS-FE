@@ -48,11 +48,16 @@ import {
 } from '@/lib/outbound-waves';
 import { useOutboundOrders, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { useOutboundWaves, useWaveDetail, useWavePolicies } from '@/lib/use-outbound-waves';
+import { clientFilterKey, type ActiveClient, type ClientFilter } from '@/lib/active-client';
+import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
+import { readyClients } from '@/lib/use-clients';
 import { roleHasCapability } from '@/lib/users';
+import { WAVE_ORDER_CLIENTS_HEADING, waveOrderClientLabel, waveOrderClients } from '@/lib/wave-clients';
 import { ulid } from '@/lib/ulid';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
 import {
   buttonClass,
@@ -94,6 +99,9 @@ const CLOCK_TICK_MS = 30_000;
  */
 export function OutboundWaves({ tenantId, warehouseId, warehouseLabel, role }: OutboundSurfaceProps) {
   const canManageWaves = roleHasCapability(role, 'waves.manage');
+  // Story 1-5a — the screen's one active-client read: the wave list is
+  // filtered (any-match); generation is write-side and never is (decision 10).
+  const active = useActiveClient();
   const policies = useWavePolicies(warehouseId);
   const policyList = policies.state === 'ready' ? policies.data.items : [];
   // Rebuilt each render rather than memoised: a warehouse holds tens of
@@ -110,6 +118,7 @@ export function OutboundWaves({ tenantId, warehouseId, warehouseLabel, role }: O
           ? 'Outbound waves'
           : `${warehouseLabel} — newest first. A wave groups accepted orders into picklists; releasing it sends the walk to the floor.`}
       </div>
+      <ClientFilterChip active={active} tenantName={active.tenantName} />
       {/* Reported, never swallowed: without policies a row cannot show its
           cutoff and the generate form has nothing honest to offer. The wave
           list below still renders — it is the read this surface exists for. */}
@@ -137,6 +146,7 @@ export function OutboundWaves({ tenantId, warehouseId, warehouseLabel, role }: O
             policies={policyList}
             policiesLoading={policies.state === 'loading'}
             policiesFailed={policies.state === 'failed'}
+            active={active}
           />
         </>
       )}
@@ -145,6 +155,7 @@ export function OutboundWaves({ tenantId, warehouseId, warehouseLabel, role }: O
         warehouseId={warehouseId}
         canManageWaves={canManageWaves}
         policyMap={policyMap}
+        active={active}
       />
     </Section>
   );
@@ -339,12 +350,15 @@ function WaveGenerateForm({
   policies,
   policiesLoading,
   policiesFailed,
+  active,
 }: {
   tenantId: string;
   warehouseId: string;
   policies: readonly WavePolicyDto[];
   policiesLoading: boolean;
   policiesFailed: boolean;
+  /** Story 1-5a — only to say "All clients": the picker is never filtered. */
+  active: ActiveClient;
 }) {
   const [policyId, setPolicyId] = useState('');
   const [explicit, setExplicit] = useState(false);
@@ -353,7 +367,8 @@ function WaveGenerateForm({
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
-  const orders = useOutboundOrders(explicit ? warehouseId : null);
+  // Story 1-5a — never client-filtered: generation sweeps every client (decision 10).
+  const orders = useOutboundOrders(explicit ? warehouseId : null, null);
   const acceptedOnPage: readonly OrderEntryDto[] =
     orders.state === 'ready' ? orders.data.items.filter((order) => order.status === 'accepted') : [];
 
@@ -445,6 +460,7 @@ function WaveGenerateForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-sm border border-(--border) p-3">
+      <AllClientsNote active={active} />
       <div className="text-xs text-(--muted-foreground)">
         Generating gathers accepted orders into picklists with the pick path in bin order. It does
         not send anything to the floor — releasing does.
@@ -593,13 +609,16 @@ function WavesTable({
   warehouseId,
   canManageWaves,
   policyMap,
+  active,
 }: {
   tenantId: string;
   warehouseId: string;
   canManageWaves: boolean;
   policyMap: Readonly<Record<string, WavePolicyDto>>;
+  active: ActiveClientState;
 }) {
-  const waves = useOutboundWaves(warehouseId);
+  const clientFilter: ClientFilter = active.filter;
+  const waves = useOutboundWaves(warehouseId, clientFilter);
   const [statusFilter, setStatusFilter] = useState<WaveStatus | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   /**
@@ -930,13 +949,16 @@ function WavesTable({
         <ReadFailure word="Waves unavailable" reason={waves.reason} onRetry={waves.reload} />
       ) : (
         <DataTable<WaveEntryDto>
-          key={pageEpoch}
+          // Story 1-5a — a client switch remounts the table (no Prev onto another client's cursor).
+          key={`${pageEpoch}|${clientFilterKey(clientFilter)}`}
           columns={columns}
           rows={rows}
           nextCursor={waves.state === 'ready' ? waves.data.nextCursor : null}
           onCursor={waves.onCursor}
           renderExpanded={(wave) =>
-            expandedId === wave.id ? <WaveDetailPanel waveId={wave.id} /> : null
+            expandedId === wave.id ? (
+              <WaveDetailPanel waveId={wave.id} clientsState={active.clients} tenantName={active.tenantName} />
+            ) : null
           }
           emptyMessage={
             waves.state === 'loading'
@@ -964,7 +986,16 @@ function WavesTable({
  * an empty picklist list would read as "this wave has no walk", which is
  * never true.
  */
-function WaveDetailPanel({ waveId }: { waveId: string }) {
+function WaveDetailPanel({
+  waveId,
+  clientsState,
+  tenantName,
+}: {
+  waveId: string;
+  /** Story 1-5a — the screen's clients read: each order's client is named once there is more than one. */
+  clientsState: ActiveClientState['clients'];
+  tenantName: string | null;
+}) {
   const detail = useWaveDetail(waveId);
   // The SKU map only decorates: it names each stop's unit and precision, and
   // a stop falls back to the raw quantity when its SKU cannot be resolved —
@@ -989,6 +1020,12 @@ function WaveDetailPanel({ waveId }: { waveId: string }) {
   }
 
   const picklists = detail.data.picklists;
+  const orderClients = waveOrderClients(
+    picklists,
+    (skuId) => (skus.state === 'ready' ? skus.data[skuId]?.clientId : undefined),
+    readyClients(clientsState),
+    tenantName,
+  );
   return (
     <div className="flex flex-col gap-3">
       <div className="text-xs text-(--muted-foreground)">
@@ -997,6 +1034,14 @@ function WaveDetailPanel({ waveId }: { waveId: string }) {
           sharedQuantityUom(picklists.flatMap((picklist) => picklist.lines), skuOf),
         )}
       </div>
+      {orderClients !== null && orderClients.length > 0 && (
+        <div data-testid="wave-order-clients" className="flex flex-col gap-0.5 text-xs">
+          <span className="font-medium">{WAVE_ORDER_CLIENTS_HEADING}</span>
+          {orderClients.map((entry) => (
+            <span key={entry.orderId}>{waveOrderClientLabel(entry)}</span>
+          ))}
+        </div>
+      )}
       {picklists.length === 0 ? (
         <div className="text-xs text-(--muted-foreground)">This wave has no picklists.</div>
       ) : (

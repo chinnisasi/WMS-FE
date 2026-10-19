@@ -18,6 +18,7 @@ import type {
   CreateClientContactDto,
   UpdateClientTaxDetailsDto,
 } from '@/lib/api/generated';
+import { activeClientLabel, showClients } from '@/lib/active-client';
 import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 import { GST_STATE_NAMES, GSTIN_STATE_CODES } from '@/lib/gst-states';
 import { parseGstinField } from '@/lib/gstin';
@@ -35,13 +36,8 @@ export const CLIENT_CODE_RE = /^[A-Z0-9][A-Z0-9-]{1,31}$/;
 /** The backend's `@Length(1, 200)` on a client name (the tenant name's cap). */
 export const MAX_CLIENT_NAME_LENGTH = 200;
 
-/**
- * Whether the client dimension is visible at all: a tenant holding only its
- * own `self` client is the D2C case and sees no client column, no picker.
- */
-export function showClients(clients: readonly ClientDto[] | null): boolean {
-  return clients !== null && clients.length > 1;
-}
+/** `showClients` — the one-client rule, shared with the client switcher (story 1-5a: it lives in `active-client.ts`). */
+export { showClients };
 
 /**
  * Story 1-2a — whether a client takes NEW work: every status but `departed`.
@@ -93,10 +89,8 @@ export { CLIENT_DEPARTED_REASON };
 
 /** How a client is named on screen — the tenant's own client reads as the company. */
 export function clientLabel(client: ClientDto, tenantName: string | null): string {
-  if (client.systemOwned) {
-    return tenantName === null || tenantName === '' ? 'Your company' : `${tenantName} (your company)`;
-  }
-  return `${client.code} — ${client.name}`;
+  // One copy: `active-client.ts` holds it (it cannot import this module — `auth.ts` imports it).
+  return activeClientLabel(client, tenantName);
 }
 
 /** The short form for a table cell: the code, or the company for `self`. */

@@ -17,7 +17,9 @@ import {
 } from '@/lib/review-queue';
 import { useOutboundSkus } from '@/lib/use-outbound-orders';
 import { skuDisplayLabel } from '@/lib/clients';
-import { readyClients, useClients } from '@/lib/use-clients';
+import { readyClients } from '@/lib/use-clients';
+import { useActiveClient } from '@/lib/use-active-client';
+import { AllClientsNote } from '@/components/shared/client-filter-chip';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useUserMap } from '@/lib/use-inbound';
@@ -106,7 +108,9 @@ function RejectedOpsQueueSessioned() {
   const skus = useOutboundSkus();
   const skuMap = skus.state === 'ready' ? skus.data : null;
   // Story 1-1 — named with its client once the tenant has several.
-  const clients = readyClients(useClients());
+  // Story 1-5a — the queue's one active-client read (its clients reused for labels).
+  const active = useActiveClient();
+  const clients = readyClients(active.clients);
   const skuCode = (skuId: string): string | null => {
     const sku = skuMap?.[skuId];
     return sku === undefined ? null : skuDisplayLabel(sku, clients);
@@ -201,6 +205,8 @@ function RejectedOpsQueueSessioned() {
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Rejected ops</h2>
+        {/* Story 1-5a — never client-filtered: say so while a client is active. */}
+        <AllClientsNote active={active} />
         <div className="text-(--muted-foreground)">
           Terminal ops a device&apos;s replay ended on without landing — refused outright, or held
           as an AD-14 quarantine resident and uploaded by its sync report. Apply re-executes the

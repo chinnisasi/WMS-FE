@@ -54,10 +54,12 @@ import { filterPage, lineQuantityLabel, orderStatusLabel, pageFilterCount, readR
 import { useCarrierConnections, useManifests, useOrderRates, useOrderShipment } from '@/lib/use-outbound-labels';
 import { useOrderDetail, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { usePipelineOrders } from '@/lib/use-outbound-pack-dispatch';
+import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
 import {
@@ -103,6 +105,10 @@ export function OutboundPackDispatch({
   // surface, gated on `labels.execute` (the same Owner + Ops Manager +
   // Operator grant as pack and dispatch).
   const canLabel = roleHasCapability(role, 'labels.execute');
+  // Story 1-5a — the screen's one active-client read. The pipeline and the
+  // manifest builder act on every client (a carrier pickup is never split,
+  // decision 10); only the manifests LIST is filtered.
+  const active = useActiveClient();
   return (
     <Section title="Pack & Dispatch">
       <div className="text-(--muted-foreground)">
@@ -116,6 +122,7 @@ export function OutboundPackDispatch({
         canPack={canPack}
         canDispatch={canDispatch}
         canLabel={canLabel}
+        active={active}
       />
     </Section>
   );
@@ -131,12 +138,14 @@ function PackDispatchTable({
   canPack,
   canDispatch,
   canLabel,
+  active,
 }: {
   tenantId: string;
   warehouseId: string;
   canPack: boolean;
   canDispatch: boolean;
   canLabel: boolean;
+  active: ActiveClientState;
 }) {
   const orders = usePipelineOrders(warehouseId);
   const [statusFilter, setStatusFilter] = useState<PipelineStatus | null>(null);
@@ -190,6 +199,7 @@ function PackDispatchTable({
 
   return (
     <div className="flex flex-col gap-2">
+      <AllClientsNote active={active} />
       <div className="flex flex-wrap items-end justify-between gap-2">
         <label className="flex flex-col gap-1">
           <span className="text-xs text-(--muted-foreground)">Filter this page</span>
@@ -242,7 +252,13 @@ function PackDispatchTable({
         />
       )}
 
-      <ManifestSection tenantId={tenantId} warehouseId={warehouseId} pageOrders={pipeline} canLabel={canLabel} />
+      <ManifestSection
+        tenantId={tenantId}
+        warehouseId={warehouseId}
+        pageOrders={pipeline}
+        canLabel={canLabel}
+        active={active}
+      />
     </div>
   );
 }
@@ -1078,14 +1094,17 @@ function ManifestSection({
   warehouseId,
   pageOrders,
   canLabel,
+  active,
 }: {
   tenantId: string;
   warehouseId: string;
   /** The page's pipeline rows (unfiltered by the status control). */
   pageOrders: readonly OrderEntryDto[];
   canLabel: boolean;
+  /** Story 1-5a — filters the manifests list only; the builder is all clients. */
+  active: ActiveClientState;
 }) {
-  const manifests = useManifests(warehouseId);
+  const manifests = useManifests(warehouseId, active.filter);
   const readyOrderIds = pageOrders
     .filter((order) => canLabelOrder(order.status))
     .map((order) => order.id);
@@ -1251,6 +1270,7 @@ function ManifestSection({
         </div>
       )}
 
+      <ClientFilterChip active={active} tenantName={active.tenantName} />
       {manifests.state === 'loading' ? (
         <div className="text-xs text-(--muted-foreground)">Loading manifests…</div>
       ) : manifests.state === 'failed' ? (

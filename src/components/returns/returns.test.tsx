@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { RETURNS_CHANGED_EVENT } from '../../lib/returns';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
@@ -260,6 +261,11 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  try {
+    localStorage.clear();
+  } catch {
+    // no storage to clear
+  }
   restoreGlobals();
 });
 
@@ -682,3 +688,39 @@ describe('the Returns list — receipts (story 13-2)', () => {
   });
 });
 
+
+describe('the Returns list: the client filter (story 1-5a)', () => {
+  const client = (id: string, code: string, name: string, systemOwned = false) => ({
+    id,
+    tenantId: TENANT_ID,
+    code,
+    name,
+    status: 'active',
+    systemOwned,
+    createdAt: '',
+    updatedAt: '',
+  });
+  const listGets = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith(`/tenants/${TENANT_ID}/returns`));
+
+  test('under a stored client the list request carries clientId and the chip renders', async () => {
+    clientItems = [client('c-self', 'self', 'Peenya Foods', true), client('c-glow', 'GLOWCO', 'GlowCo')];
+    writeSession(session('ops_manager'));
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-glow');
+    view = render(<ReturnsList tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH-1 Peenya" canManage />);
+    await settle();
+    expect(listGets().length).toBeGreaterThan(0);
+    expect(listGets().every((r) => new URLSearchParams(r.search).get('clientId') === 'c-glow')).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')!.textContent).toContain(
+      'Client: GLOWCO — GlowCo',
+    );
+  });
+
+  test('no stored client: no clientId and no chip', async () => {
+    clientItems = [client('c-self', 'self', 'Peenya Foods', true), client('c-glow', 'GLOWCO', 'GlowCo')];
+    writeSession(session('ops_manager'));
+    view = render(<ReturnsList tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH-1 Peenya" canManage />);
+    await settle();
+    expect(listGets().every((r) => !new URLSearchParams(r.search).has('clientId'))).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+  });
+});

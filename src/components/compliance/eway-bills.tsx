@@ -51,12 +51,15 @@ import {
   type TransportDraft,
 } from '@/lib/eway';
 import { GST_STATE_NAMES, formatRupees, invoiceDateLabel, placeOfSupplyLabel, type Outcome } from '@/lib/invoices';
+import { clientFilterKey } from '@/lib/active-client';
+import { useActiveClient } from '@/lib/use-active-client';
 import { useEwayBills, useEwayGstinSettings, useEwayStateThresholds } from '@/lib/use-eway';
 import { drillFor, type EwayDrill, type ParsedDrill } from '@/lib/drill';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import {
@@ -127,12 +130,14 @@ function EwayBillsSessioned({ drill, clearHref }: { drill: EwayDrill | null; cle
   const [tab, setTab] = useState<EwayTab>('pending');
   const [gstinFilter, setGstinFilter] = useState('');
   const settings = useEwayGstinSettings();
-  const list = useEwayBills(tab, gstinFilter === '' ? null : gstinFilter, drill);
+  // Story 1-5a — the client switcher filters the list; a drill ignores it (decision 11).
+  const active = useActiveClient();
+  const list = useEwayBills(tab, gstinFilter === '' ? null : gstinFilter, active.filter, drill);
   const [pageEpoch, setPageEpoch] = useState(0);
 
-  // The selection belongs to ONE scope (tab + filter): a switch invalidates it
-  // in the same render (keyed derivation — guide §1.5).
-  const scope = `${tab}|${gstinFilter}`;
+  // The selection belongs to ONE scope (tab + filter + client): a switch
+  // invalidates it in the same render (keyed derivation — guide §1.5).
+  const scope = `${tab}|${gstinFilter}|${clientFilterKey(drill === null ? active.filter : null)}`;
   const [selection, setSelection] = useState<{ scope: string; ids: ReadonlySet<string> }>({ scope, ids: new Set() });
   const selectedIds = selection.scope === scope ? selection.ids : new Set<string>();
   const rows = list.state === 'ready' ? list.data.items : [];
@@ -313,6 +318,11 @@ function EwayBillsSessioned({ drill, clearHref }: { drill: EwayDrill | null; cle
       <div className="text-(--muted-foreground)">{QUEUE_COPY}</div>
 
       {drill !== null && <DrillBanner drill={drill} clearHref={clearHref} />}
+      {drill !== null ? (
+        <AllClientsNote active={active} />
+      ) : (
+        <ClientFilterChip active={active} tenantName={active.tenantName} />
+      )}
 
       {drill === null && (
         <div className="flex flex-wrap items-end gap-3">

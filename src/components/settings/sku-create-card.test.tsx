@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -44,6 +45,8 @@ let requests: Recorded[] = [];
 let createRefusals = 0;
 /** When set, the clients GET waits for it (the loading arm). */
 let clientsGate: Promise<void> | null = null;
+/** Story 1-5a — the clients the GET answers (one, self, by default). */
+let clientItems: unknown[] = [SELF];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -63,15 +66,17 @@ function stubRouter(): void {
     requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key') });
     if (method === 'GET' && pathname.endsWith('/clients')) {
       if (clientsGate !== null) await clientsGate;
-      return json(200, { items: [SELF] });
+      return json(200, { items: clientItems });
     }
     if (method === 'POST' && pathname.endsWith('/catalog/skus')) {
       if (createRefusals > 0) {
         createRefusals -= 1;
         return json(409, { code: 'duplicate-sku-code', status: 409, title: 'SKU code already in use', detail: 'Taken.' });
       }
-      const sent = body as { code: string };
-      return json(201, { sku: { id: 'sku-new', code: sent.code, uomConversions: [], barcodes: [] } });
+      const sent = body as { code: string; clientId?: string };
+      return json(201, {
+        sku: { id: 'sku-new', code: sent.code, uomConversions: [], barcodes: [], clientId: sent.clientId ?? SELF.id },
+      });
     }
     return json(404, { code: 'not-found', title: 'Unrouted', status: 404 });
   }) as unknown as typeof fetch);
@@ -122,6 +127,7 @@ beforeEach(() => {
   requests = [];
   createRefusals = 0;
   clientsGate = null;
+  clientItems = [SELF];
   writeSession(SESSION);
   stubRouter();
 });
@@ -130,6 +136,7 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  localStorage.clear();
   restoreGlobals();
 });
 
@@ -229,5 +236,53 @@ describe('story 1-4: a base-unit change', () => {
         { id: 'b3', barcode: 'C', uom: 'box' },
       ],
     });
+  });
+});
+
+describe('story 1-5a: the active client and the SKU create card', () => {
+  const GLOW = { ...SELF, id: 'c-glow', code: 'GLOWCO', name: 'GlowCo', systemOwned: false };
+  beforeEach(() => {
+    clientItems = [SELF, GLOW];
+    writeActiveClientId(TENANT_ID, SESSION.user.id, 'c-glow');
+  });
+  const clientSelect = (container: HTMLElement) =>
+    [...container.querySelectorAll('label')]
+      .find((node) => node.querySelector('span')?.textContent === 'Client')!
+      .querySelector<HTMLSelectElement>('select')!;
+  function fill(container: HTMLElement, code: string): void {
+    setInput(field(container, 'Code'), code);
+    setInput(field(container, 'Name'), 'A SKU');
+    setInput(field(container, 'GST %'), '5');
+  }
+
+  test('the client defaults to the active one, and a create for it says nothing about the filter', async () => {
+    view = await openForm();
+    expect(clientSelect(view.container).value).toBe('c-glow');
+    fill(view.container, 'GLOW-1');
+    submit(view.container);
+    await settle();
+    const post = requests.find((r) => r.method === 'POST')!;
+    expect((post.body as { clientId?: string }).clientId).toBe('c-glow');
+    expect(view.container.textContent).toContain('GLOW-1 created');
+    expect(view.container.textContent).not.toContain('hidden by the client filter');
+  });
+
+  test('a create for another client says it is hidden by the filter', async () => {
+    view = await openForm();
+    const select = clientSelect(view.container);
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'c-self');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    fill(view.container, 'SELF-1');
+    submit(view.container);
+    await settle();
+    expect(view.container.textContent).toContain('Created for Priya Spices (your company) — hidden by the client filter');
+  });
+
+  test('no client stored: no default — the picker asks for one', async () => {
+    writeActiveClientId(TENANT_ID, SESSION.user.id, null);
+    view = await openForm();
+    expect(clientSelect(view.container).value).toBe('');
   });
 });

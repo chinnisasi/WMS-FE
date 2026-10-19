@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { Fragment, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react';
 
 import type { BatchListItemDto, BinResponse, ClientDto, SkuResponse, StockEntryDto } from '@/lib/api/generated';
+import { clientFilterKey } from '@/lib/active-client';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { clientCell, showClients, skuDisplayLabel, withSkuClient } from '@/lib/clients';
+import { clientCell, showClients, skuDisplayLabel, skusOfClient, withSkuClient } from '@/lib/clients';
 import { ledgerTypeLabel, warehouseDisplayLabel, type DrillWarehouse } from '@/lib/drill';
 import { quantityLabel } from '@/lib/format-quantity';
 import {
@@ -33,13 +34,15 @@ import {
 import { istDateLabel } from '@/lib/audit-exports';
 import { ledgerBinsLabel, ledgerQuantityLabel, ledgerRecordedLabel } from '@/lib/ledger';
 import { INVENTORY_PAGE_TABS, type InventoryTab } from '@/lib/page-tabs';
-import { readyClients, useClients } from '@/lib/use-clients';
+import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
+import { readyClients } from '@/lib/use-clients';
 import { useBatchList, useSkuCatalog, useStockList, useWarehouseBins } from '@/lib/use-inventory';
 import { useBatchDetail } from '@/lib/use-replenishment';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { Ledger } from '@/components/inventory/ledger';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { buttonClass, inputClass, ReadFailure, rowButtonClass, Section } from '@/components/shared/surface';
@@ -96,6 +99,9 @@ const SECTION_TITLE: Record<Exclude<InventoryTab, 'ledger'>, string> = { stock: 
 
 function WarehouseGate({ tab }: { tab: Exclude<InventoryTab, 'ledger'> }) {
   const title = SECTION_TITLE[tab];
+  // Story 1-5a — one clients read for the section: the switcher filters
+  // Stock; Batches (per SKU) is not filtered and says "All clients".
+  const active = useActiveClient();
   const warehouses = useTenantWarehouses();
   const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
   const items = warehouses.state === 'ready' ? warehouses.data.items : [];
@@ -132,12 +138,19 @@ function WarehouseGate({ tab }: { tab: Exclude<InventoryTab, 'ledger'> }) {
     warehouses.data.refreshFailed !== null ? (
       <WarehousesRefreshNote reason={warehouses.data.refreshFailed} onRetry={warehouses.reload} />
     ) : null;
-  // Keyed on the warehouse: a switch remounts the section, so the search
-  // and every loaded page go with it (frontend guide §1.5).
+  // Keyed on the warehouse (and, for Stock, the active client): a switch
+  // remounts the section, so the search and every loaded page go with it
+  // (frontend guide §1.5).
   return tab === 'stock' ? (
-    <StockSection key={warehouseId} warehouseId={warehouseId} warehouses={items} refreshNote={refreshNote} />
+    <StockSection
+      key={`${warehouseId}|${clientFilterKey(active.filter)}`}
+      warehouseId={warehouseId}
+      warehouses={items}
+      refreshNote={refreshNote}
+      active={active}
+    />
   ) : (
-    <BatchesSection key={warehouseId} warehouseId={warehouseId} warehouses={items} refreshNote={refreshNote} />
+    <BatchesSection key={warehouseId} warehouseId={warehouseId} warehouses={items} refreshNote={refreshNote} active={active} />
   );
 }
 
@@ -149,6 +162,8 @@ interface SectionProps {
   readonly warehouseId: string;
   readonly warehouses: readonly DrillWarehouse[];
   readonly refreshNote: ReactNode;
+  /** Story 1-5a — the screen's active client (one clients read; `active.clients` is reused). */
+  readonly active: ActiveClientState;
 }
 
 /**
@@ -193,6 +208,15 @@ function SkuChooser({
 function binCodes(state: ReturnType<typeof useWarehouseBins>): CodeMap {
   if (state.state !== 'ready') return state.state === 'failed' ? { state: 'failed', reason: state.reason } : { state: 'loading' };
   return { state: 'ready', data: state.data.map((bin) => ({ id: bin.id, code: bin.code })) };
+}
+
+/** The SKUs the Stock search resolves: the active client's only, when one is chosen. */
+function stockSearchSkus(
+  state: ReturnType<typeof useSkuCatalog>,
+  active: ActiveClientState,
+): ReturnType<typeof useSkuCatalog> {
+  if (state.state !== 'ready' || active.state !== 'client') return state;
+  return { ...state, data: skusOfClient(state.data, active.client.id) };
 }
 
 function skuIndex(state: ReturnType<typeof useSkuCatalog>): Readonly<Record<string, SkuResponse>> | null {
@@ -296,10 +320,10 @@ function ListTable<T extends { id: string }>({
 
 type AppliedSearch = Extract<SearchResolution, { kind: 'bin' | 'sku' | 'choice' | 'miss' | 'ambiguous' }>;
 
-function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
+function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionProps) {
   const skus = useSkuCatalog();
   const bins = useWarehouseBins(warehouseId);
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const tenantName = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.name ?? null,
@@ -308,7 +332,9 @@ function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
   const [draft, setDraft] = useState('');
   const [applied, setApplied] = useState<AppliedSearch | null>(null);
 
-  const skuMap = skuCodes(skus, clients);
+  // Story 1-5a — under an active client the search resolves only that
+  // client's SKU codes (the catalog read itself stays unfiltered).
+  const skuMap = skuCodes(stockSearchSkus(skus, active), clients);
   const binMap = binCodes(bins);
   const availability = searchAvailability(binMap, skuMap);
   const skuById = skuIndex(skus);
@@ -322,7 +348,7 @@ function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
   // A miss reads nothing: the message stands in for the list; a choice
   // reads nothing until one SKU is picked.
   const unresolved = applied?.kind === 'miss' || applied?.kind === 'ambiguous' || applied?.kind === 'choice';
-  const stock = useStockList(unresolved ? null : warehouseId, filter, applied?.kind === 'sku');
+  const stock = useStockList(unresolved ? null : warehouseId, filter, applied?.kind === 'sku', active.filter);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -370,6 +396,7 @@ function StockSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
   return (
     <Section title="Stock">
       {refreshNote}
+      <ClientFilterChip active={active} tenantName={active.tenantName} />
       <div className="text-(--muted-foreground)">
         {warehouseLabel} — on hand per bin and SKU, bin by bin. Empty bins are not listed.
       </div>
@@ -505,10 +532,10 @@ type BatchPick =
 
 const BATCH_SKU_LIST_ID = 'inventory-batch-skus';
 
-function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) {
+function BatchesSection({ warehouseId, warehouses, refreshNote, active }: SectionProps) {
   const skus = useSkuCatalog();
   const bins = useWarehouseBins(warehouseId);
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const [draft, setDraft] = useState('');
   const [pick, setPick] = useState<BatchPick | null>(null);
   const [openBatch, setOpenBatch] = useState<string | null>(null);
@@ -550,6 +577,7 @@ function BatchesSection({ warehouseId, warehouses, refreshNote }: SectionProps) 
   return (
     <Section title="Batches">
       {refreshNote}
+      <AllClientsNote active={active} />
       <div className="text-(--muted-foreground)">
         {warehouseDisplayLabel(warehouses, warehouseId)} — a SKU&apos;s batches by expiry (first to expire first).
       </div>

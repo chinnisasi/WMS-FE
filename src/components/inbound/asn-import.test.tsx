@@ -5,7 +5,14 @@ import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import type { UserRole } from '../../lib/users';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
+import { useActiveClient } from '../../lib/use-active-client';
 import { AsnsCard } from './asn-card';
+
+/** Story 1-5a — the Inbound root reads the active client once and hands it down. */
+function Card(props: Omit<Parameters<typeof AsnsCard>[0], 'active'>) {
+  const active = useActiveClient();
+  return <AsnsCard active={active} {...props} />;
+}
 
 /**
  * The ASN import (2026-10-17) — the claims `asn-import.test.ts` cannot make:
@@ -141,6 +148,7 @@ afterEach(() => {
   URL.revokeObjectURL = originalRevoke;
   HTMLAnchorElement.prototype.click = originalClick;
   clearSession();
+  localStorage.clear();
   restoreGlobals();
 });
 
@@ -178,7 +186,7 @@ function csv(name: string): File {
 
 async function mount(role: UserRole): Promise<Rendered> {
   writeSession(session(role));
-  const rendered = render(<AsnsCard warehouseId={WAREHOUSE_ID} warehouseLabel="Peenya" warehouseCode="BLR-DC" />);
+  const rendered = render(<Card warehouseId={WAREHOUSE_ID} warehouseLabel="Peenya" warehouseCode="BLR-DC" />);
   await settle();
   return rendered;
 }

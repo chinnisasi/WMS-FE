@@ -28,8 +28,16 @@ import {
   workingClients,
 } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
+import {
+  clientFilterKey,
+  defaultFormClientId,
+  hiddenByClientFilterNote,
+  type ActiveClient,
+} from '@/lib/active-client';
+import { useActiveClient } from '@/lib/use-active-client';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 
 const inputClass =
@@ -71,7 +79,9 @@ export function ProductsCard() {
 }
 
 function ProductsCardSessioned() {
-  const products = useProducts();
+  // Story 1-5a — the client switcher filters this list (one clients read: reused below).
+  const active = useActiveClient();
+  const products = useProducts(active.filter);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   // The form below the table: a product to edit, or `creating` for a new one.
   const [editing, setEditing] = useState<ProductResponse | null>(null);
@@ -103,7 +113,7 @@ function ProductsCardSessioned() {
   const canEditSku = roleHasCapability(role, 'sku.edit');
   // Story 1-4 — a product belongs to one client: the Client column (and the
   // form's client field) appear once the tenant holds more than its own.
-  const clientsState = useClients();
+  const clientsState = active.clients;
   const clients = readyClients(clientsState);
   const clientsNote = clientsUnavailableNote(clientsState);
   const multiClient = showClients(clients);
@@ -201,8 +211,10 @@ function ProductsCardSessioned() {
         </div>
       ) : null}
 
+      <ClientFilterChip active={active} tenantName={active.tenantName} />
+
       <DataTable<ProductResponse>
-        key={pageEpoch}
+        key={`${pageEpoch}|${clientFilterKey(active.filter)}`}
         columns={columns}
         rows={products.state === 'ready' ? products.data.items : []}
         nextCursor={products.state === 'ready' ? products.data.nextCursor : null}
@@ -222,6 +234,7 @@ function ProductsCardSessioned() {
           key={editing?.id ?? 'create'}
           product={editing}
           clients={multiClient ? clients : null}
+          active={active}
           clientsNote={clientsNote}
           tenantName={tenantName}
           onClose={() => {
@@ -235,7 +248,9 @@ function ProductsCardSessioned() {
               tone: 'accepted',
               word: created ? `${saved.name} created` : `${saved.name} updated`,
               reason: created
-                ? 'Attach SKUs to it from its variant matrix.'
+                ? // Story 1-5a — a product created for another client than the active one is hidden by the filter; say so.
+                  (hiddenByClientFilterNote(active, saved.clientId, clients, tenantName) ??
+                  'Attach SKUs to it from its variant matrix.')
                 : 'The change is live across the catalog.',
             });
             notifyCatalogChanged();
@@ -545,6 +560,7 @@ function AttachVariantForm({
 function ProductForm({
   product,
   clients,
+  active,
   clientsNote,
   tenantName,
   onClose,
@@ -554,6 +570,8 @@ function ProductForm({
   product: ProductResponse | null;
   /** Story 1-4 — the tenant's clients when it holds more than one (null: no client field). */
   clients: readonly ClientDto[] | null;
+  /** Story 1-5a — the active client: a new product's client defaults to it. */
+  active: ActiveClient;
   /** Story 1-4 — non-null while the client list is loading or failed: submit waits for it. */
   clientsNote: string | null;
   tenantName: string | null;
@@ -574,8 +592,14 @@ function ProductForm({
   // Story 1-4 — the client: required on create in a multi-client tenant; on
   // edit offered only while no SKU is attached (otherwise a guaranteed 409
   // `product-has-skus` — the field is hidden and a note says why).
-  const [clientId, setClientId] = useState(product?.clientId ?? '');
   const clientOptions = workingClients(clients) ?? [];
+  // Story 1-5a — until the viewer picks, a NEW product's client is the active
+  // one, derived at render: a form mounted while the clients load still
+  // lands on it once they arrive.
+  const [pickedClientId, setClientId] = useState<string | null>(
+    product === null ? null : (product.clientId ?? ''),
+  );
+  const clientId = pickedClientId ?? (clients === null ? '' : defaultFormClientId(active, clientOptions, ''));
   const showClientField = clients !== null && (created || !axesLocked);
 
   async function onSubmit(event: React.FormEvent) {

@@ -33,7 +33,10 @@ import { quantityLabel } from '@/lib/format-quantity';
 import { readReason } from '@/lib/outbound-orders';
 import { openQtyLabel } from '@/lib/over-receipt';
 import { useAsns } from '@/lib/use-asns';
-import { readyClients, useClients } from '@/lib/use-clients';
+import { readyClients } from '@/lib/use-clients';
+import { clientFilterKey, defaultFormClientId, hiddenByClientFilterNote, type ActiveClient } from '@/lib/active-client';
+import type { ActiveClientState } from '@/lib/use-active-client';
+import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { useSkuMap } from '@/lib/use-inbound';
 import { useKits } from '@/lib/use-catalog';
 import { roleHasCapability } from '@/lib/users';
@@ -68,16 +71,19 @@ const primaryClass =
   'rounded-sm bg-(--primary) px-3 py-1 text-xs font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60';
 
 export function AsnsCard({
+  active,
   warehouseId,
   warehouseLabel,
   warehouseCode = null,
 }: {
+  /** Story 1-5a — the screen's active client (the Inbound root reads it once). */
+  active: ActiveClientState;
   warehouseId: string | null;
   warehouseLabel: string | null;
   /** The ASN import's template pre-fills it (the `warehouse` column must equal it or stay blank). */
   warehouseCode?: string | null;
 }) {
-  const asns = useAsns(warehouseId);
+  const asns = useAsns(warehouseId, active.filter);
   const skus = useSkuMap();
   // A kit can never hold stock, so receiving refuses a kit line (409
   // kit-cannot-hold-stock): the pickers never offer one, as the portal's
@@ -85,7 +91,7 @@ export function AsnsCard({
   // hidden — the server's refusal (worded by `asnReason`) still stands.
   const kits = useKits();
   const kitIds: ReadonlySet<string> = kits.state === 'ready' ? new Set(Object.keys(kits.data)) : NO_KITS;
-  const clients = readyClients(useClients());
+  const clients = readyClients(active.clients);
   const tenantName = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.name ?? null,
@@ -104,16 +110,18 @@ export function AsnsCard({
   // a reset effect): a switch invalidates it in the same render.
   const [opened, setOpened] = useState<{ warehouseId: string; asnId: string } | null>(null);
   const openId = opened !== null && opened.warehouseId === warehouseId ? opened.asnId : null;
-  const [banner, setBanner] = useState<{ warehouseId: string; outcome: Outcome } | null>(null);
+  const [banner, setBanner] = useState<{ warehouseId: string; outcome: Outcome; hidden?: string | null } | null>(null);
   const outcome = banner !== null && banner.warehouseId === warehouseId ? banner.outcome : null;
+  // Story 1-5a — a create for another client than the active one is hidden by the filter; say so.
+  const hiddenNote = banner !== null && banner.warehouseId === warehouseId ? (banner.hidden ?? null) : null;
   const [creating, setCreating] = useState(false);
   // The ASN import (2026-10-17): open for ONE warehouse (keyed derivation).
   const [importingFor, setImportingFor] = useState<string | null>(null);
   const importing = importingFor !== null && importingFor === warehouseId;
   const [pageEpoch, setPageEpoch] = useState(0);
 
-  function report(next: Outcome) {
-    if (warehouseId !== null) setBanner({ warehouseId, outcome: next });
+  function report(next: Outcome, hidden: string | null = null) {
+    if (warehouseId !== null) setBanner({ warehouseId, outcome: next, hidden });
   }
 
   const columns: readonly DataTableColumn<AsnEntryDto>[] = [
@@ -164,6 +172,7 @@ export function AsnsCard({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-col gap-0.5">
           <h2 className="font-medium">Advance shipment notices</h2>
+          <ClientFilterChip active={active} tenantName={active.tenantName} />
           <div className="text-(--muted-foreground)">
             {warehouseLabel === null
               ? 'Pick a warehouse to review its announced shipments.'
@@ -208,10 +217,14 @@ export function AsnsCard({
           skus={skus}
           kitIds={kitIds}
           tenantName={tenantName}
+          active={active}
           onCancel={() => setCreating(false)}
           onCreated={(asn) => {
             setCreating(false);
-            report({ tone: 'accepted', word: `ASN ${asn.code} announced`, reason: `${asn.lineCount} line(s), ${asn.announcedTotal} unit(s) announced.` });
+            report(
+              { tone: 'accepted', word: `ASN ${asn.code} announced`, reason: `${asn.lineCount} line(s), ${asn.announcedTotal} unit(s) announced.` },
+              hiddenByClientFilterNote(active, asn.clientId, clients, tenantName),
+            );
             // Back to page one, remounting the table's Prev/Next state.
             asns.onCursor(null);
             setPageEpoch((epoch) => epoch + 1);
@@ -224,7 +237,8 @@ export function AsnsCard({
         <ReadFailure word="Advance shipment notices unavailable" reason={asns.reason} onRetry={asns.reload} />
       ) : (
         <DataTable<AsnEntryDto>
-          key={pageEpoch}
+          // Story 1-5a — a client switch remounts the table, as a create does.
+          key={`${pageEpoch}|${clientFilterKey(active.filter)}`}
           columns={columns}
           rows={asns.state === 'ready' ? asns.data.items : []}
           nextCursor={asns.state === 'ready' ? asns.data.nextCursor : null}
@@ -245,6 +259,11 @@ export function AsnsCard({
       )}
 
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
+      {hiddenNote !== null && (
+        <p role="status" data-testid="hidden-by-client-filter" className="text-xs text-(--muted-foreground)">
+          {hiddenNote}
+        </p>
+      )}
     </section>
   );
 }
@@ -255,10 +274,13 @@ function AsnCreateForm({
   skus,
   kitIds,
   tenantName,
+  active,
   onCancel,
   onCreated,
 }: {
   warehouseId: string;
+  /** Story 1-5a — the picker defaults to the active client (decision 10). */
+  active: ActiveClient;
   clients: readonly ClientDto[] | null;
   skus: Readonly<Record<string, SkuResponse>> | null;
   kitIds: ReadonlySet<string>;
@@ -271,8 +293,12 @@ function AsnCreateForm({
   // still shows a picker, never a forced client); only the OPTIONS drop a
   // departed client.
   const soleClient = clients !== null && !showClients(clients) ? (clients[0]?.id ?? '') : '';
-  const [pickedClient, setPickedClient] = useState('');
-  const clientId = soleClient !== '' ? soleClient : pickedClient;
+  // Story 1-5a — until the viewer picks (or edits the draft, which pins it),
+  // the client is the active one: derived at render, so a form mounted while
+  // the clients load still lands on it once they arrive.
+  const [pickedClient, setPickedClient] = useState<string | null>(null);
+  const formClient = pickedClient ?? defaultFormClientId(active, workingClients(clients), '');
+  const clientId = soleClient !== '' ? soleClient : formClient;
   const [asnCode, setAsnCode] = useState('');
   const [expectedAt, setExpectedAt] = useState('');
   const [lines, setLines] = useState<AsnDraftLine[]>([{ skuId: '', qty: '' }]);
@@ -288,6 +314,10 @@ function AsnCreateForm({
 
   function edit<T>(setter: (value: T) => void): (value: T) => void {
     return (value) => {
+      // The first edit pins the client the draft was started for: a later
+      // switcher change must not move it under drafted lines. Functional, so
+      // an explicit pick in the same edit wins.
+      if (formClient !== '') setPickedClient((picked) => picked ?? formClient);
       setter(value);
       setIdempotencyKey(null);
       setProblem(null);
@@ -333,7 +363,7 @@ function AsnCreateForm({
         {soleClient === '' && (
           <select
             aria-label="Client"
-            value={pickedClient}
+            value={formClient}
             onChange={(event) => {
               edit(setPickedClient)(event.target.value);
               // Another client's SKUs never fit: the lines start over.

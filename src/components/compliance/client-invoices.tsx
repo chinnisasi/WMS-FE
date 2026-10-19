@@ -49,10 +49,12 @@ import { pricedClients } from '@/lib/rate-cards';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useClientInvoiceDetail, useClientInvoices } from '@/lib/use-client-invoices';
-import { useClients } from '@/lib/use-clients';
+import { clientFilterKey, defaultFormClientId, type ActiveClient } from '@/lib/active-client';
+import { useActiveClient } from '@/lib/use-active-client';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass } from '@/components/outbound/shell';
 
 import { LineRecordsPanel } from './line-records';
@@ -94,10 +96,13 @@ function ClientInvoicesSessioned() {
     () => undefined,
   );
   const canInvoice = roleHasCapability(role, 'billing.invoice');
-  const clients = useClients();
+  // Story 1-5a — the screen's one clients read: the switcher filters the list
+  // (there is no local client filter here), and the prepare form defaults to it.
+  const active = useActiveClient();
+  const clients = active.clients;
   const brands = clients.state === 'ready' ? pricedClients(clients.data) : [];
   const codeOf = (clientId: string): string => brands.find((client) => client.id === clientId)?.code ?? `${clientId.slice(0, 8)}…`;
-  const list = useClientInvoices();
+  const list = useClientInvoices(active.filter);
   const [openId, setOpenId] = useState<string | null>(null);
   // A prepare inserts rows at the top of the newest-first keyset: the table
   // returns to page one and remounts (frontend guide §1.4).
@@ -149,7 +154,9 @@ function ClientInvoicesSessioned() {
         Prepare a month once it has ended, clear the gaps, and issue; an issued invoice never changes.
       </div>
 
-      {canInvoice && clients.state === 'ready' && brands.length > 0 ? <PrepareForm brands={brands} onPrepared={onPrepared} /> : null}
+      {canInvoice && clients.state === 'ready' && brands.length > 0 ? <PrepareForm brands={brands} active={active} onPrepared={onPrepared} /> : null}
+
+      <ClientFilterChip active={active} tenantName={active.tenantName} />
 
       {outcome !== null ? <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} /> : null}
 
@@ -157,7 +164,7 @@ function ClientInvoicesSessioned() {
         <ReadFailure word="Client invoices unavailable" reason={list.reason} onRetry={list.reload} />
       ) : (
         <DataTable
-          key={pageEpoch}
+          key={`${pageEpoch}|${clientFilterKey(active.filter)}`}
           columns={columns}
           rows={list.state === 'ready' ? list.data.items : []}
           nextCursor={list.state === 'ready' ? list.data.nextCursor : null}
@@ -185,18 +192,34 @@ function ClientInvoicesSessioned() {
  * out after the server committed must replay), cleared when the client or the
  * month changes and on success.
  */
-function PrepareForm({ brands, onPrepared }: { brands: readonly ClientDto[]; onPrepared: (outcome: ClientInvoiceOutcome) => void }) {
+function PrepareForm({
+  brands,
+  active,
+  onPrepared,
+}: {
+  brands: readonly ClientDto[];
+  /** Story 1-5a — the active client is the default choice; a local pick wins. */
+  active: ActiveClient;
+  onPrepared: (outcome: ClientInvoiceOutcome) => void;
+}) {
   const [pickedClient, setPickedClient] = useState<string | null>(null);
   // The month list's "now", read once at mount (a render must stay pure);
   // the server still decides — an unended month answers period-not-ended.
   const [nowMs] = useState(() => Date.now());
-  const client = brands.find((entry) => entry.id === pickedClient) ?? brands[0]!;
+  const client =
+    brands.find((entry) => entry.id === pickedClient) ??
+    brands.find((entry) => entry.id === defaultFormClientId(active, brands, '')) ??
+    brands[0]!;
   const months = invoiceMonthOptions(client.createdAt, nowMs);
   const [pickedMonth, setPickedMonth] = useState<string | null>(null);
   const month = months.find((option) => option.value === pickedMonth) ?? months[0] ?? null;
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  const keyRef = useRef<string | null>(null);
+  // The key is stamped with the (client, month) it was minted for: the client
+  // can change without an edit here (story 1-5a — the switcher moves the
+  // default), and a key minted for one client must never ride another's
+  // prepare (422 idempotency-key-reuse, or a replay of the wrong answer).
+  const keyRef = useRef<{ key: string; clientId: string; month: string } | null>(null);
   const inFlight = useRef(false);
 
   async function submit(event: React.FormEvent) {
@@ -206,9 +229,11 @@ function PrepareForm({ brands, onPrepared }: { brands: readonly ClientDto[]; onP
     inFlight.current = true;
     setBusy(true);
     setRefusal(null);
-    keyRef.current ??= ulid();
+    if (keyRef.current === null || keyRef.current.clientId !== client.id || keyRef.current.month !== month.value) {
+      keyRef.current = { key: ulid(), clientId: client.id, month: month.value };
+    }
     try {
-      const result = await fetchApiPrepareClientInvoices(session.tenant.id, client.id, month.value, keyRef.current);
+      const result = await fetchApiPrepareClientInvoices(session.tenant.id, client.id, month.value, keyRef.current.key);
       keyRef.current = null;
       onPrepared(prepareOutcome(result));
     } catch (error) {

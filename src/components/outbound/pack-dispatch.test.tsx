@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { OUTBOUND_CHANGED_EVENT } from '../../lib/outbound';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
@@ -324,6 +325,8 @@ let ratesByOrder: Record<string, unknown> = {};
 let manifestRows: unknown[] = [];
 /** The keyset cursor the manifests list advertises, for the pager test. */
 let manifestsNextCursor: string | null = null;
+/** Story 1-5a: the tenant's clients (null → the read 404s). */
+let clientsBody: unknown[] | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -412,6 +415,9 @@ function stubRouter(): void {
       }
       return json(200, rates);
     }
+    if (method === 'GET' && pathname.endsWith(`/tenants/${TENANT_ID}/clients`) && clientsBody !== null) {
+      return json(200, { items: clientsBody });
+    }
     if (method === 'GET' && pathname.endsWith('/outbound/manifests')) {
       if (failManifests) {
         return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The manifests are down.' });
@@ -455,6 +461,7 @@ beforeEach(() => {
   failRates = false;
   ordersNextCursor = null;
   manifestsNextCursor = null;
+  clientsBody = null;
   packResponder = () => {
     orderStatuses['order-1'] = 'ready_to_dispatch';
     return { status: 201, body: { pack: packedFixture('order-1') } };
@@ -485,6 +492,11 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  try {
+    localStorage.clear();
+  } catch {
+    // no storage to clear
+  }
   restoreGlobals();
 });
 
@@ -1616,5 +1628,57 @@ describe('the rates strip (4.6d)', () => {
     expect(rateReads()).toHaveLength(2);
     expect(text(view)).toContain('₹6,543.21');
     expect(text(view)).not.toContain('₹1,234.56');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Story 1-5a: the client filter                                       */
+/* ------------------------------------------------------------------ */
+
+describe('Pack & Dispatch: the client filter (story 1-5a)', () => {
+  const clientRow = (id: string, code: string, name: string, systemOwned = false) => ({
+    id,
+    tenantId: TENANT_ID,
+    code,
+    name,
+    status: 'active',
+    systemOwned,
+    createdAt: NOW_ISO,
+    updatedAt: NOW_ISO,
+    taxDetails: {},
+  });
+
+  test('under a stored client only the manifests list is filtered; the pipeline and the builder read all clients', async () => {
+    clientsBody = [clientRow('c-self', 'self', 'Priya Spices', true), clientRow('c-glow', 'GLOWCO', 'GlowCo')];
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-glow');
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+
+    const lists = manifestListReads();
+    expect(lists.length).toBeGreaterThan(0);
+    expect(lists.every((r) => new URLSearchParams(r.search).get('clientId') === 'c-glow')).toBe(true);
+    const pipeline = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/orders'));
+    expect(pipeline.length).toBeGreaterThan(0);
+    expect(pipeline.every((r) => !new URLSearchParams(r.search).has('clientId'))).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')!.textContent).toContain(
+      'Client: GLOWCO — GlowCo',
+    );
+    expect(view.container.querySelector('[data-testid="all-clients-note"]')!.textContent).toBe('All clients');
+
+    // The builder is unchanged: the same closure posts.
+    await selectOption(view, 'Manifest onto', 'conn-1');
+    await settle();
+    await pressButton(view, 'Create manifest');
+    await settle();
+    expect(mutations()[0]!.body).toEqual({ shipmentIds: ['sh-1'] });
+  });
+
+  test('no stored client: no clientId, no chip, no note', async () => {
+    clientsBody = [clientRow('c-self', 'self', 'Priya Spices', true), clientRow('c-glow', 'GLOWCO', 'GlowCo')];
+    view = await mount('operator');
+    expect(manifestListReads().every((r) => !new URLSearchParams(r.search).has('clientId'))).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+    expect(view.container.querySelector('[data-testid="all-clients-note"]')).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -166,6 +167,11 @@ afterEach(() => {
   URL.revokeObjectURL = originalRevoke;
   HTMLAnchorElement.prototype.click = originalClick;
   clearSession();
+  try {
+    localStorage.clear();
+  } catch {
+    // ignore
+  }
   restoreGlobals();
 });
 
@@ -429,5 +435,41 @@ describe('8-1d: invoice events re-read the bills on a trailing debounce; the set
     const afterSwitch = gets('/eway/bills'); // the new tenant's own first read
     await advance(20_000);
     expect(gets('/eway/bills')).toBe(afterSwitch);
+  });
+});
+
+describe('EwayBills: the client filter (story 1-5a)', () => {
+  const TWO = [
+    { id: 'c-self', code: 'self', name: 'Priya Spices', status: 'active', systemOwned: true },
+    { id: 'c-acme', code: 'ACME', name: 'Acme Foods', status: 'active', systemOwned: false },
+  ];
+  function routeClients(items: readonly unknown[]): void {
+    const inner = globalThis.fetch;
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      const request = input instanceof Request ? input : new Request(input.toString());
+      if (request.method.toUpperCase() === 'GET' && new URL(request.url).pathname.endsWith('/clients')) {
+        return json(200, { items });
+      }
+      return inner(request);
+    }) as unknown as typeof fetch);
+  }
+  const listReads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/eway/bills'));
+
+  test('under a stored client the list read carries clientId and the chip renders', async () => {
+    routeClients(TWO);
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    view = await mountAs('owner');
+    expect(listReads().length).toBeGreaterThan(0);
+    expect(listReads().every((r) => r.search.get('clientId') === 'c-acme')).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')?.textContent).toContain('Client: ACME — Acme Foods');
+  });
+
+  test('a single-client tenant with a stored id sends no clientId and shows no chip', async () => {
+    routeClients([TWO[0]]);
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    view = await mountAs('owner');
+    expect(listReads().length).toBeGreaterThan(0);
+    expect(listReads().every((r) => r.search.get('clientId') === null)).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
   });
 });

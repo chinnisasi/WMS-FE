@@ -13,6 +13,7 @@ import { SignOutButton } from '@/components/auth/sign-out';
 import { CommandPalette } from './command-palette';
 import { NotificationBell } from './notification-bell';
 import { Sidebar, ThemeToggle } from './sidebar';
+import { ClientSwitcher } from './client-switcher';
 import { WarehouseSwitcher } from './warehouse-switcher';
 
 /**
@@ -114,6 +115,10 @@ function OperatorShell({ children }: { children: React.ReactNode }) {
                   warehouse display/picker on small viewports. */}
               <div className="border-t border-(--border) px-2 pt-2">
                 <WarehouseSwitcher
+                  className="border-b-0 px-0 py-1"
+                  onPicked={() => menuRef.current && (menuRef.current.open = false)}
+                />
+                <ClientSwitcher
                   className="border-b-0 px-0 py-1"
                   onPicked={() => menuRef.current && (menuRef.current.open = false)}
                 />

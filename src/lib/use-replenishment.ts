@@ -11,6 +11,8 @@ import {
   fetchApiListReorderPolicies,
   fetchApiListSuggestedPos,
 } from '@/lib/api/client';
+import { CLIENT_PENDING, clientFilterForDrill, type ClientFilter } from '@/lib/active-client';
+import { useClientEpoch } from '@/lib/use-client-epoch';
 import { useKeyedDrill } from '@/lib/use-drill';
 import type {
   BatchAlertDto,
@@ -68,25 +70,32 @@ export interface SuggestedPosPage {
 export function useReplenishmentBreaches(
   warehouseId: string | null,
   status: BreachStatus,
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
 ): ResourceState<BreachesPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
   // The requested cursor, STAMPED with the (tenant, warehouse, status) it
   // was asked for (the use-excursions pattern).
   const [requested, setRequested] = useState<{
     tenantId: string;
     warehouseId: string;
     status: BreachStatus;
+    clientId: string | null; clientEpoch: number;
     cursor: string | null;
   } | null>(null);
   const activeCursor =
     requested !== null &&
     requested.tenantId === tenantId &&
     requested.warehouseId === warehouseId &&
-    requested.status === status
+    requested.status === status &&
+    requested.clientId === clientId && requested.clientEpoch === clientEpoch
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
@@ -94,6 +103,7 @@ export function useReplenishmentBreaches(
     tenantId: string;
     warehouseId: string;
     status: BreachStatus;
+    clientId: string | null;
     requested: string | null;
     state: ResourceState<BreachesPage>;
   } | null>(null);
@@ -105,19 +115,25 @@ export function useReplenishmentBreaches(
   }, []);
 
   useEffect(() => {
-    if (tenantId === null || warehouseId === null) return;
+    if (tenantId === null || warehouseId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
         const page = await fetchApiListBreaches(
           tenantId,
-          activeCursor === null ? { warehouseId, status } : { warehouseId, status, cursor: activeCursor },
+          {
+            warehouseId,
+            status,
+            ...(clientId === null ? {} : { clientId }),
+            ...(activeCursor === null ? {} : { cursor: activeCursor }),
+          },
         );
         if (!cancelled) {
           setResult({
             tenantId,
             warehouseId,
             status,
+            clientId,
             requested: activeCursor,
             state: {
               state: 'ready',
@@ -131,6 +147,7 @@ export function useReplenishmentBreaches(
             tenantId,
             warehouseId,
             status,
+            clientId,
             requested: activeCursor,
             state: { state: 'failed', reason: replenishmentListReason(error, 'breaches') },
           });
@@ -140,14 +157,14 @@ export function useReplenishmentBreaches(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, status, activeCursor, revision]);
+  }, [tenantId, warehouseId, status, clientId, pending, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null || warehouseId === null) return;
-      setRequested({ tenantId, warehouseId, status, cursor });
+      setRequested({ tenantId, warehouseId, status, clientId, clientEpoch, cursor });
     },
-    [tenantId, warehouseId, status],
+    [tenantId, warehouseId, status, clientId, clientEpoch],
   );
   // Clearing the result first is what makes Retry visible — and `requested`
   // resets too, so a Retry never loops a stale cursor's own failure.
@@ -160,10 +177,12 @@ export function useReplenishmentBreaches(
   const stale =
     tenantId === null ||
     warehouseId === null ||
+    pending ||
     result === null ||
     result.tenantId !== tenantId ||
     result.warehouseId !== warehouseId ||
     result.status !== status ||
+    result.clientId !== clientId ||
     result.requested !== activeCursor;
 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
@@ -173,6 +192,8 @@ export function useReplenishmentBreaches(
 export function useReplenishmentSuggestedPos(
   warehouseId: string | null,
   status: SuggestedPoStatus,
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
 ): ResourceState<SuggestedPosPage> &
   Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   const tenantId = useSyncExternalStore(
@@ -180,17 +201,22 @@ export function useReplenishmentSuggestedPos(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
   const [requested, setRequested] = useState<{
     tenantId: string;
     warehouseId: string;
     status: SuggestedPoStatus;
+    clientId: string | null; clientEpoch: number;
     cursor: string | null;
   } | null>(null);
   const activeCursor =
     requested !== null &&
     requested.tenantId === tenantId &&
     requested.warehouseId === warehouseId &&
-    requested.status === status
+    requested.status === status &&
+    requested.clientId === clientId && requested.clientEpoch === clientEpoch
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
@@ -198,6 +224,7 @@ export function useReplenishmentSuggestedPos(
     tenantId: string;
     warehouseId: string;
     status: SuggestedPoStatus;
+    clientId: string | null;
     requested: string | null;
     state: ResourceState<SuggestedPosPage>;
   } | null>(null);
@@ -209,21 +236,25 @@ export function useReplenishmentSuggestedPos(
   }, []);
 
   useEffect(() => {
-    if (tenantId === null || warehouseId === null) return;
+    if (tenantId === null || warehouseId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
         const page = await fetchApiListSuggestedPos(
           tenantId,
-          activeCursor === null
-            ? { warehouseId, status }
-            : { warehouseId, status, cursor: activeCursor },
+          {
+            warehouseId,
+            status,
+            ...(clientId === null ? {} : { clientId }),
+            ...(activeCursor === null ? {} : { cursor: activeCursor }),
+          },
         );
         if (!cancelled) {
           setResult({
             tenantId,
             warehouseId,
             status,
+            clientId,
             requested: activeCursor,
             state: {
               state: 'ready',
@@ -237,6 +268,7 @@ export function useReplenishmentSuggestedPos(
             tenantId,
             warehouseId,
             status,
+            clientId,
             requested: activeCursor,
             state: { state: 'failed', reason: replenishmentListReason(error, 'suggested POs') },
           });
@@ -246,14 +278,14 @@ export function useReplenishmentSuggestedPos(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, status, activeCursor, revision]);
+  }, [tenantId, warehouseId, status, clientId, pending, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null || warehouseId === null) return;
-      setRequested({ tenantId, warehouseId, status, cursor });
+      setRequested({ tenantId, warehouseId, status, clientId, clientEpoch, cursor });
     },
-    [tenantId, warehouseId, status],
+    [tenantId, warehouseId, status, clientId, clientEpoch],
   );
   // Clearing the result first is what makes Retry visible; `requested`
   // resets with it so a Retry never loops a stale cursor's own failure.
@@ -266,10 +298,12 @@ export function useReplenishmentSuggestedPos(
   const stale =
     tenantId === null ||
     warehouseId === null ||
+    pending ||
     result === null ||
     result.tenantId !== tenantId ||
     result.warehouseId !== warehouseId ||
     result.status !== status ||
+    result.clientId !== clientId ||
     result.requested !== activeCursor;
 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
@@ -300,16 +334,21 @@ export interface ReorderPolicies {
  */
 export function useReorderPolicies(
   warehouseId: string | null,
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
 ): ResourceState<ReorderPolicies> & Reloadable {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{
     tenantId: string;
     warehouseId: string;
+    clientId: string | null;
     state: ResourceState<ReorderPolicies>;
   } | null>(null);
 
@@ -320,7 +359,7 @@ export function useReorderPolicies(
   }, []);
 
   useEffect(() => {
-    if (tenantId === null || warehouseId === null) return;
+    if (tenantId === null || warehouseId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
@@ -333,7 +372,11 @@ export function useReorderPolicies(
         for (let hops = 0; hops < MAX_PAGE_HOPS; hops++) {
           const page = await fetchApiListReorderPolicies(
             tenantId,
-            cursor === undefined ? { warehouseId } : { warehouseId, cursor },
+            {
+              warehouseId,
+              ...(clientId === null ? {} : { clientId }),
+              ...(cursor === undefined ? {} : { cursor }),
+            },
           );
           items.push(...page.items);
           const next = page.nextCursor ?? null;
@@ -345,6 +388,7 @@ export function useReorderPolicies(
           setResult({
             tenantId,
             warehouseId,
+            clientId,
             state: { state: 'ready', data: { warehouseId, items, truncated } },
           });
         }
@@ -353,6 +397,7 @@ export function useReorderPolicies(
           setResult({
             tenantId,
             warehouseId,
+            clientId,
             state: { state: 'failed', reason: replenishmentListReason(error, 'reorder policies') },
           });
         }
@@ -361,7 +406,7 @@ export function useReorderPolicies(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, revision]);
+  }, [tenantId, warehouseId, clientId, pending, revision]);
 
   // Clearing the result first is what makes Retry visible (the waves shape).
   const reload = useCallback(() => {
@@ -372,9 +417,11 @@ export function useReorderPolicies(
   const stale =
     tenantId === null ||
     warehouseId === null ||
+    pending ||
     result === null ||
     result.tenantId !== tenantId ||
-    result.warehouseId !== warehouseId;
+    result.warehouseId !== warehouseId ||
+    result.clientId !== clientId;
 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
 }
@@ -395,6 +442,8 @@ export function useBatchAlerts(
   warehouseId: string | null,
   kind: BatchAlertKindFilter,
   status: BatchAlertStatus,
+  /** Story 1-5a — the active-client filter; a drill ignores it (decision 11). */
+  clientFilter: ClientFilter,
   /**
    * Story 9-1b — drilled mode: the request is exactly the drill's keys
    * (`kind` and `status` only when the drill names them — never the tabs'),
@@ -411,6 +460,10 @@ export function useBatchAlerts(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const effective = clientFilterForDrill(clientFilter, drill !== null);
+  const pending = effective === CLIENT_PENDING;
+  const clientId: string | null = effective === CLIENT_PENDING ? null : effective;
+  const clientEpoch = useClientEpoch(clientId, pending);
   // The scope a cursor and a result are stamped with: the warehouse, or —
   // for a drill naming none — the whole tenant.
   const scope = warehouseId ?? (drill === null ? null : '*');
@@ -419,6 +472,7 @@ export function useBatchAlerts(
     warehouseId: string;
     kind: BatchAlertKindFilter;
     status: BatchAlertStatus;
+    clientId: string | null; clientEpoch: number;
     cursor: string | null;
   } | null>(null);
   const activeCursor =
@@ -426,7 +480,8 @@ export function useBatchAlerts(
     requested.tenantId === tenantId &&
     requested.warehouseId === scope &&
     requested.kind === kind &&
-    requested.status === status
+    requested.status === status &&
+    requested.clientId === clientId && requested.clientEpoch === clientEpoch
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
@@ -435,6 +490,7 @@ export function useBatchAlerts(
     warehouseId: string;
     kind: BatchAlertKindFilter;
     status: BatchAlertStatus;
+    clientId: string | null;
     requested: string | null;
     state: ResourceState<BatchAlertsPage>;
   } | null>(null);
@@ -446,7 +502,7 @@ export function useBatchAlerts(
   }, []);
 
   useEffect(() => {
-    if (tenantId === null || scope === null) return;
+    if (tenantId === null || scope === null || pending) return;
     let cancelled = false;
     (async () => {
       // `all` is no query at all — the kind axis is plain `kind`, riding the
@@ -458,14 +514,13 @@ export function useBatchAlerts(
             ? await fetchBatchAlertsDrill(tenantId, drill, activeCursor)
             : await fetchApiListBatchAlerts(
                 tenantId,
-                activeCursor === null
-                  ? { warehouseId: scope, status, ...(kindQuery === undefined ? {} : { kind: kindQuery }) }
-                  : {
-                      warehouseId: scope,
-                      status,
-                      cursor: activeCursor,
-                      ...(kindQuery === undefined ? {} : { kind: kindQuery }),
-                    },
+                {
+                  warehouseId: scope,
+                  status,
+                  ...(activeCursor === null ? {} : { cursor: activeCursor }),
+                  ...(kindQuery === undefined ? {} : { kind: kindQuery }),
+                  ...(clientId === null ? {} : { clientId }),
+                },
               );
         if (!cancelled) {
           setResult({
@@ -473,6 +528,7 @@ export function useBatchAlerts(
             warehouseId: scope,
             kind,
             status,
+            clientId,
             requested: activeCursor,
             state: {
               state: 'ready',
@@ -487,6 +543,7 @@ export function useBatchAlerts(
             warehouseId: scope,
             kind,
             status,
+            clientId,
             requested: activeCursor,
             state: { state: 'failed', reason: replenishmentListReason(error, 'batch alerts') },
           });
@@ -496,14 +553,14 @@ export function useBatchAlerts(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, scope, drill, kind, status, activeCursor, revision]);
+  }, [tenantId, scope, drill, kind, status, clientId, pending, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null || scope === null) return;
-      setRequested({ tenantId, warehouseId: scope, kind, status, cursor });
+      setRequested({ tenantId, warehouseId: scope, kind, status, clientId, clientEpoch, cursor });
     },
-    [tenantId, scope, kind, status],
+    [tenantId, scope, kind, status, clientId, clientEpoch],
   );
   const reload = useCallback(() => {
     setRequested(null);
@@ -514,10 +571,12 @@ export function useBatchAlerts(
   const stale =
     tenantId === null ||
     scope === null ||
+    pending ||
     result === null ||
     result.tenantId !== tenantId ||
     result.warehouseId !== scope ||
     result.kind !== kind ||
+    result.clientId !== clientId ||
     result.status !== status ||
     result.requested !== activeCursor;
 

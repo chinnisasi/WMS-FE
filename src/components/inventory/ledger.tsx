@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSyncExternalStore } from 'react';
 
 import type { LedgerEventDto } from '@/lib/api/generated';
+import { clientFilterKey, type ClientFilter } from '@/lib/active-client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
   drillFor,
@@ -22,12 +23,14 @@ import {
   ledgerReferenceLabel,
   shortId,
 } from '@/lib/ledger';
+import { useActiveClient } from '@/lib/use-active-client';
 import { useBinCodeMap, useSkuMap, useUserMap } from '@/lib/use-inbound';
 import { useLedgerEvents } from '@/lib/use-ledger';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { ReadFailure, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
@@ -66,6 +69,9 @@ export function Ledger({ drill = null }: { drill?: ParsedDrill } = {}) {
 }
 
 function LedgerSessioned({ drill }: { drill: LedgerDrill | null }) {
+  // Story 1-5a — the client switcher filters the undrilled timeline; a drill
+  // ignores it (decision 11) and says "All clients".
+  const active = useActiveClient();
   const warehouses = useTenantWarehouses();
   const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
   const items = warehouses.state === 'ready' ? warehouses.data.items : [];
@@ -85,6 +91,7 @@ function LedgerSessioned({ drill }: { drill: LedgerDrill | null }) {
     return (
       <Section title="Ledger">
         <DrillBanner drill={drill} />
+        <AllClientsNote active={active} />
         <div className="text-(--muted-foreground)">
           {document === null
             ? `${label} — the dashboard figure's ledger events, newest first.`
@@ -92,7 +99,7 @@ function LedgerSessioned({ drill }: { drill: LedgerDrill | null }) {
               ? `${label} — the receipt events of ${ledgerDocName(document)}, newest first (its putaways name their GRN).`
               : `${label} — the ledger events of ${ledgerDocName(document)}, newest first.`}
         </div>
-        <LedgerTable key={drill.warehouseId} warehouseId={drill.warehouseId} drill={drill} />
+        <LedgerTable key={drill.warehouseId} warehouseId={drill.warehouseId} clientFilter={null} drill={drill} />
       </Section>
     );
   }
@@ -132,13 +139,27 @@ function LedgerSessioned({ drill }: { drill: LedgerDrill | null }) {
       <div className="text-(--muted-foreground)">
         {warehouseLabel} — every stock movement, newest first. The ledger is append-only: a correction is a new event.
       </div>
-      <LedgerTable key={warehouseId} warehouseId={warehouseId} drill={null} />
+      <ClientFilterChip active={active} tenantName={active.tenantName} />
+      <LedgerTable
+        key={`${warehouseId}|${clientFilterKey(active.filter)}`}
+        warehouseId={warehouseId}
+        clientFilter={active.filter}
+        drill={null}
+      />
     </Section>
   );
 }
 
-function LedgerTable({ warehouseId, drill }: { warehouseId: string; drill: LedgerDrill | null }) {
-  const events = useLedgerEvents(warehouseId, drill);
+function LedgerTable({
+  warehouseId,
+  clientFilter,
+  drill,
+}: {
+  warehouseId: string;
+  clientFilter: ClientFilter;
+  drill: LedgerDrill | null;
+}) {
+  const events = useLedgerEvents(warehouseId, clientFilter, drill);
   const skus = useSkuMap();
   const bins = useBinCodeMap(warehouseId);
   const users = useUserMap();

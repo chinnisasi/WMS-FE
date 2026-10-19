@@ -9,6 +9,7 @@ import { COMPLIANCE_PAGE_TABS, OUTBOUND_PAGE_TABS, REPLENISHMENT_PAGE_TABS, type
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { readActiveWarehouseId, writeActiveWarehouseId } from '../../lib/warehouses';
+import { writeActiveClientId } from '../../lib/active-client';
 
 /**
  * Story 9-1b — every drill target, driven through a stubbed `fetch` with
@@ -225,6 +226,8 @@ let grnMode: 'ok' | 'fail' | 'hold' = 'ok';
 /** Story 9-3a — the rows the GRN and PO cards list (empty unless a test sets them). */
 let grnRows: unknown[] = [];
 let poRows: unknown[] = [];
+/** Story 1-5a — the tenant's clients (null: the read is unrouted, as before 1-5a). */
+let clientRows: unknown[] | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -250,6 +253,7 @@ function stubRouter(): void {
     // A drilled read (a window bound, or the drill's warehouse in the path)
     // answers with rows, so the row actions a drilled view keeps are observable.
     const drilled = url.searchParams.has('to') || p.includes(W2);
+    if (p === `/api/v1/tenants/${T}/clients` && clientRows !== null) return json(200, { items: clientRows });
     if (p.endsWith('/catalog/skus')) return json(200, { items: [SKU], nextCursor: null });
     if (p.endsWith('/users')) {
       return json(200, { items: [{ id: 'u-1', email: 'priya@example.com', role: 'owner', status: 'active' }], nextCursor: null });
@@ -306,6 +310,7 @@ beforeEach(() => {
   grnMode = 'ok';
   grnRows = [];
   poRows = [];
+  clientRows = null;
   try {
     localStorage.clear();
   } catch {
@@ -616,6 +621,42 @@ describe.each([...CASES])('$name', (c) => {
     c.normal(first!);
     expect(view.container.querySelector('[data-testid="drill-banner"]')).toBeNull();
     expect(readActiveWarehouseId(T)).toBe(W1);
+  });
+});
+
+/** Story 1-5a — two clients: the tenant's own and GlowCo, which the switcher has picked. */
+const GLOW = '0198f7a2-1b3c-7d4e-8f90-0000000c1002';
+const CLIENTS = [
+  { id: '0198f7a2-1b3c-7d4e-8f90-0000000c1001', tenantId: T, code: 'self', name: 'Priya Spices', status: 'active', systemOwned: true },
+  { id: GLOW, tenantId: T, code: 'GLOWCO', name: 'GlowCo', status: 'active', systemOwned: false },
+];
+
+describe.each([...CASES])('story 1-5a — a drill ignores the client switcher: $name', (c) => {
+  test('GlowCo stored: the drill sends no clientId and says "All clients"; Clear reads the normal view for GlowCo', async () => {
+    clientRows = CLIENTS;
+    writeActiveClientId(T, 'u-1', GLOW);
+    pathname = c.route;
+    const { element } = page(c.component(), c.screen, c.params);
+    view = await mount('owner', element);
+
+    const list = reads(c.list).filter(
+      (r) => c.pathWarehouse === undefined || r.pathname.includes(`/warehouses/${c.pathWarehouse}/`),
+    );
+    expect(list.length).toBeGreaterThan(0);
+    for (const r of list) {
+      expect(r.params.has('clientId')).toBe(false);
+      expect(entries(r.params)).toEqual(sorted(c.sent));
+    }
+    expect(view.container.querySelector('[data-testid="all-clients-note"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+
+    // The bite: the same screen undrilled DOES filter by the stored client.
+    await click(buttonIn(bannerOf(view), 'Clear'));
+    const before = requests.length;
+    view.rerender(page(c.component(), c.screen, c.clearTo ?? {}).element);
+    await settle();
+    const first = requests.slice(before).find((r) => r.method === 'GET' && r.pathname.endsWith(c.list));
+    expect(first?.params.get('clientId')).toBe(GLOW);
   });
 });
 

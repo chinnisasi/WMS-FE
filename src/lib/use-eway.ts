@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiListEwayBills, fetchApiListEwayGstinSettings, fetchApiListEwayStateThresholds } from '@/lib/api/client';
+import { CLIENT_PENDING, clientFilterForDrill, type ClientFilter } from '@/lib/active-client';
+import { useClientEpoch } from '@/lib/use-client-epoch';
 import { useKeyedDrill } from '@/lib/use-drill';
 import type { EwayBillDto, EwayGstinSettingDto, EwayStateThresholdDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -105,28 +107,44 @@ export interface EwayBillsPage {
 export function useEwayBills(
   tab: EwayTab,
   gstin: string | null,
+  /** Story 1-5a — the active-client filter; a drill ignores it (decision 11). */
+  clientFilter: ClientFilter,
   drillProp: EwayDrill | null = null,
 ): ResourceState<EwayBillsPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   // Keyed on drillKey, not identity: an RSC refresh must not refetch.
   const drill = useKeyedDrill(drillProp);
   const tenantId = useTenantId();
+  const effective = clientFilterForDrill(clientFilter, drill !== null);
+  const pending = effective === CLIENT_PENDING;
+  const clientId: string | null = effective === CLIENT_PENDING ? null : effective;
+  const clientEpoch = useClientEpoch(clientId, pending);
   // The cursor is stamped with the scope it was requested for: a cursor from
   // another tab or GSTIN filter is a first-page request, never replayed.
-  const [requested, setRequested] = useState<{ tenantId: string; tab: EwayTab; gstin: string | null; cursor: string | null } | null>(null);
+  const [requested, setRequested] = useState<{
+    tenantId: string;
+    tab: EwayTab;
+    gstin: string | null;
+    clientId: string | null; clientEpoch: number;
+    cursor: string | null;
+  } | null>(null);
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId && requested.tab === tab && requested.gstin === gstin ? requested.cursor : null;
+    requested !== null && requested.tenantId === tenantId && requested.tab === tab && requested.gstin === gstin &&
+    requested.clientId === clientId && requested.clientEpoch === clientEpoch
+      ? requested.cursor
+      : null;
   const [revision, setRevision] = useChangeRevision();
   useInvoiceFollowUp(tenantId, setRevision);
   const [result, setResult] = useState<{
     tenantId: string;
     tab: EwayTab;
     gstin: string | null;
+    clientId: string | null;
     requested: string | null;
     state: ResourceState<EwayBillsPage>;
   } | null>(null);
 
   useEffect(() => {
-    if (tenantId === null) return;
+    if (tenantId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
@@ -135,27 +153,28 @@ export function useEwayBills(
             ? await fetchApiListEwayBills(tenantId, {
                 status: tab,
                 ...(gstin === null ? {} : { gstin }),
+                ...(clientId === null ? {} : { clientId }),
                 ...(activeCursor === null ? {} : { cursor: activeCursor }),
               })
             : await fetchEwayDrill(tenantId, drill, activeCursor);
         if (!cancelled) {
-          setResult({ tenantId, tab, gstin, requested: activeCursor, state: { state: 'ready', data: { items: page.items, nextCursor: page.nextCursor ?? null } } });
+          setResult({ tenantId, tab, gstin, clientId, requested: activeCursor, state: { state: 'ready', data: { items: page.items, nextCursor: page.nextCursor ?? null } } });
         }
       } catch (error) {
-        if (!cancelled) setResult({ tenantId, tab, gstin, requested: activeCursor, state: { state: 'failed', reason: ewayListReason(error) } });
+        if (!cancelled) setResult({ tenantId, tab, gstin, clientId, requested: activeCursor, state: { state: 'failed', reason: ewayListReason(error) } });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [tenantId, tab, gstin, drill, activeCursor, revision]);
+  }, [tenantId, tab, gstin, clientId, pending, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null) return;
-      setRequested({ tenantId, tab, gstin, cursor });
+      setRequested({ tenantId, tab, gstin, clientId, clientEpoch, cursor });
     },
-    [tenantId, tab, gstin],
+    [tenantId, tab, gstin, clientId, clientEpoch],
   );
   const reload = useCallback(() => {
     setRequested(null);
@@ -165,10 +184,12 @@ export function useEwayBills(
 
   const stale =
     tenantId === null ||
+    pending ||
     result === null ||
     result.tenantId !== tenantId ||
     result.tab !== tab ||
     result.gstin !== gstin ||
+    result.clientId !== clientId ||
     result.requested !== activeCursor;
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
 }

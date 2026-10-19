@@ -29,5 +29,7 @@ import { useOutboundOrders } from '@/lib/use-outbound-orders';
  * out of.
  */
 export function usePipelineOrders(warehouseId: string | null) {
-  return useOutboundOrders(warehouseId);
+  // Story 1-5a — never client-filtered: the pack bench and a carrier pickup
+  // act on every client's parcels (decision 10).
+  return useOutboundOrders(warehouseId, null);
 }

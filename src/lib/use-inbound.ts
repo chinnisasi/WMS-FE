@@ -16,6 +16,8 @@ import {
   fetchApiListPartners,
   fetchApiListZones,
 } from '@/lib/api/client';
+import { CLIENT_PENDING, clientFilterForDrill, type ClientFilter } from '@/lib/active-client';
+import { useClientEpoch } from '@/lib/use-client-epoch';
 import { useKeyedDrill } from '@/lib/use-drill';
 import type {
   AsnLineDto,
@@ -68,38 +70,45 @@ export interface PurchaseOrdersPage {
 
 export function usePurchaseOrders(
   warehouseId: string | null,
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
 ): (PurchaseOrdersPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
   const [requested, setRequested] = useState<{
     tenantId: string;
     warehouseId: string;
+    clientId: string | null; clientEpoch: number;
     cursor: string | null;
   } | null>(null);
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId && requested.warehouseId === warehouseId
+    requested !== null && requested.tenantId === tenantId && requested.warehouseId === warehouseId && requested.clientId === clientId && requested.clientEpoch === clientEpoch
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
   const [page, setPage] = useState<{
     tenantId: string;
     warehouseId: string;
+    clientId: string | null;
     requested: string | null;
     page: PurchaseOrdersPage;
   } | null>(null);
 
   useEffect(() => {
-    if (tenantId === null || warehouseId === null) return;
+    if (tenantId === null || warehouseId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
         const result = await fetchApiListPurchaseOrders(
           tenantId,
           warehouseId,
-          activeCursor === null ? undefined : { cursor: activeCursor },
+          { ...(clientId === null ? {} : { clientId }), ...(activeCursor === null ? {} : { cursor: activeCursor }) },
         );
         // The list carries headers only — each PO's lines come from its
         // detail read (a small page's worth; a failed detail leaves that
@@ -119,6 +128,7 @@ export function usePurchaseOrders(
           setPage({
             tenantId,
             warehouseId,
+            clientId,
             requested: activeCursor,
             page: { items: result.items, nextCursor: result.nextCursor ?? null, lines },
           });
@@ -130,23 +140,25 @@ export function usePurchaseOrders(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, activeCursor, revision]);
+  }, [tenantId, warehouseId, clientId, pending, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null || warehouseId === null) return;
-      setRequested({ tenantId, warehouseId, cursor });
+      setRequested({ tenantId, warehouseId, clientId, clientEpoch, cursor });
     },
-    [tenantId, warehouseId],
+    [tenantId, warehouseId, clientId, clientEpoch],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
   if (
     tenantId === null ||
     warehouseId === null ||
+    pending ||
     page === null ||
     page.tenantId !== tenantId ||
     page.warehouseId !== warehouseId ||
+    page.clientId !== clientId ||
     page.requested !== activeCursor
   ) {
     return null;
@@ -172,6 +184,8 @@ export interface GoodsReceiptsPage {
  */
 export function useGoodsReceipts(
   warehouseId: string | null,
+  /** Story 1-5a — the active-client filter; a drill ignores it (decision 11). */
+  clientFilter: ClientFilter,
   drillProp: GrnsDrill | null = null,
 ): ResourceState<GoodsReceiptsPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   // Keyed on drillKey, not identity: an RSC refresh must not refetch.
@@ -181,38 +195,41 @@ export function useGoodsReceipts(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const effective = clientFilterForDrill(clientFilter, drill !== null);
+  const pending = effective === CLIENT_PENDING;
+  const clientId: string | null = effective === CLIENT_PENDING ? null : effective;
+  const clientEpoch = useClientEpoch(clientId, pending);
   const [requested, setRequested] = useState<{
     tenantId: string;
     warehouseId: string | null;
+    clientId: string | null; clientEpoch: number;
     cursor: string | null;
   } | null>(null);
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId && requested.warehouseId === warehouseId
+    requested !== null && requested.tenantId === tenantId && requested.warehouseId === warehouseId && requested.clientId === clientId && requested.clientEpoch === clientEpoch
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
   const [page, setPage] = useState<{
     tenantId: string;
     warehouseId: string | null;
+    clientId: string | null;
     requested: string | null;
     state: ResourceState<GoodsReceiptsPage>;
   } | null>(null);
 
   useEffect(() => {
-    if (tenantId === null) return;
+    if (tenantId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
         const result =
           drill === null
-            ? await fetchApiListGoodsReceipts(
-                tenantId,
-                activeCursor === null
-                  ? warehouseId === null
-                    ? undefined
-                    : { warehouseId }
-                  : { warehouseId: warehouseId ?? undefined, cursor: activeCursor },
-              )
+            ? await fetchApiListGoodsReceipts(tenantId, {
+                ...(warehouseId === null ? {} : { warehouseId }),
+                ...(clientId === null ? {} : { clientId }),
+                ...(activeCursor === null ? {} : { cursor: activeCursor }),
+              })
             : await fetchGrnsDrill(tenantId, drill, activeCursor);
         if (cancelled) return;
         // Resolve the referenced POs' codes so rows show `PO-0004`, not a uuid.
@@ -232,6 +249,7 @@ export function useGoodsReceipts(
           setPage({
             tenantId,
             warehouseId,
+            clientId,
             requested: activeCursor,
             state: { state: 'ready', data: { items: result.items, nextCursor: result.nextCursor ?? null, poCodes } },
           });
@@ -241,6 +259,7 @@ export function useGoodsReceipts(
           setPage({
             tenantId,
             warehouseId,
+            clientId,
             requested: activeCursor,
             state: { state: 'failed', reason: readReason(error, 'the goods receipts') },
           });
@@ -250,14 +269,14 @@ export function useGoodsReceipts(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, drill, activeCursor, revision]);
+  }, [tenantId, warehouseId, clientId, pending, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null) return;
-      setRequested({ tenantId, warehouseId, cursor });
+      setRequested({ tenantId, warehouseId, clientId, clientEpoch, cursor });
     },
-    [tenantId, warehouseId],
+    [tenantId, warehouseId, clientId, clientEpoch],
   );
   // Clear first, and restart from page one (a stale cursor's Retry would fail forever).
   const reload = useCallback(() => {
@@ -268,9 +287,11 @@ export function useGoodsReceipts(
 
   const stale =
     tenantId === null ||
+    pending ||
     page === null ||
     page.tenantId !== tenantId ||
     page.warehouseId !== warehouseId ||
+    page.clientId !== clientId ||
     page.requested !== activeCursor;
   return { ...(stale ? ({ state: 'loading' } as const) : page.state), onCursor, reload };
 }
@@ -308,6 +329,8 @@ export interface OverReceiptsPage {
  */
 export function useOverReceipts(
   status: 'pending' | 'approved' | 'rejected',
+  /** Story 1-5a — the active-client filter; a drill ignores it (decision 11). */
+  clientFilter: ClientFilter,
   drillProp: OverReceiptsDrill | null = null,
 ): (OverReceiptsPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
   // Keyed on drillKey, not identity: an RSC refresh must not refetch.
@@ -317,28 +340,34 @@ export function useOverReceipts(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const effective = clientFilterForDrill(clientFilter, drill !== null);
+  const pending = effective === CLIENT_PENDING;
+  const clientId: string | null = effective === CLIENT_PENDING ? null : effective;
+  const clientEpoch = useClientEpoch(clientId, pending);
   const [requested, setRequested] = useState<{
     tenantId: string;
     status: 'pending' | 'approved' | 'rejected';
+    clientId: string | null; clientEpoch: number;
     cursor: string | null;
   } | null>(null);
   // The cursor is scoped to the scope it was asked for — a cursor paged on
   // one status tab is a first-page request on another (a cursor from the
   // pending tab must never ride the approved query, or rows are skipped).
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId && requested.status === status
+    requested !== null && requested.tenantId === tenantId && requested.status === status && requested.clientId === clientId && requested.clientEpoch === clientEpoch
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
   const [page, setPage] = useState<{
     tenantId: string;
     status: 'pending' | 'approved' | 'rejected';
+    clientId: string | null;
     requested: string | null;
     page: OverReceiptsPage;
   } | null>(null);
 
   useEffect(() => {
-    if (tenantId === null) return;
+    if (tenantId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
@@ -346,7 +375,11 @@ export function useOverReceipts(
           drill === null
             ? await fetchApiListOverReceipts(
                 tenantId,
-                activeCursor === null ? { status } : { status, cursor: activeCursor },
+                {
+                  status,
+                  ...(clientId === null ? {} : { clientId }),
+                  ...(activeCursor === null ? {} : { cursor: activeCursor }),
+                },
               )
             : await fetchOverReceiptsDrill(tenantId, drill, activeCursor);
         if (cancelled) return;
@@ -388,6 +421,7 @@ export function useOverReceipts(
           setPage({
             tenantId,
             status,
+            clientId,
             requested: activeCursor,
             page: {
               items: result.items,
@@ -406,22 +440,24 @@ export function useOverReceipts(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, status, drill, activeCursor, revision]);
+  }, [tenantId, status, clientId, pending, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null) return;
-      setRequested({ tenantId, status, cursor });
+      setRequested({ tenantId, status, clientId, clientEpoch, cursor });
     },
-    [tenantId, status],
+    [tenantId, status, clientId, clientEpoch],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
   if (
     tenantId === null ||
+    pending ||
     page === null ||
     page.tenantId !== tenantId ||
     page.status !== status ||
+    page.clientId !== clientId ||
     page.requested !== activeCursor
   ) {
     return null;
@@ -571,6 +607,11 @@ export function useQcHolds(
   warehouseId: string | null,
   status: 'open' | 'released',
   /**
+   * Story 1-5a — the active-client filter. The QC-hold FORM's open-holds
+   * read passes `null` (a write-side screen is never filtered, decision 10).
+   */
+  clientFilter: ClientFilter,
+  /**
    * Story 1-2b — one goods receipt's holds only. The GRN pins its own
    * warehouse, so a narrowed read sends `grnId` without the warehouse (a
    * notification may name a receipt of another warehouse than the active one).
@@ -582,11 +623,15 @@ export function useQcHolds(
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
   const [requested, setRequested] = useState<{
     tenantId: string;
     warehouseId: string | null;
     status: 'open' | 'released';
     grnId: string | null;
+    clientId: string | null; clientEpoch: number;
     cursor: string | null;
   } | null>(null);
   // The cursor is scoped to the scope it was asked for — a cursor paged on
@@ -596,7 +641,8 @@ export function useQcHolds(
     requested.tenantId === tenantId &&
     requested.warehouseId === warehouseId &&
     requested.status === status &&
-    requested.grnId === grnId
+    requested.grnId === grnId &&
+    requested.clientId === clientId && requested.clientEpoch === clientEpoch
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
@@ -605,16 +651,18 @@ export function useQcHolds(
     warehouseId: string | null;
     status: 'open' | 'released';
     grnId: string | null;
+    clientId: string | null;
     requested: string | null;
     page: QcHoldsPage;
   } | null>(null);
 
   useEffect(() => {
-    if (tenantId === null || warehouseId === null) return;
+    if (tenantId === null || warehouseId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
-        const scope = grnId === null ? { warehouseId, status } : { status, grnId };
+        const base = grnId === null ? { warehouseId, status } : { status, grnId };
+        const scope = clientId === null ? base : { ...base, clientId };
         const result = await fetchApiListQcHolds(
           tenantId,
           activeCursor === null ? scope : { ...scope, cursor: activeCursor },
@@ -625,6 +673,7 @@ export function useQcHolds(
           warehouseId,
           status,
           grnId,
+          clientId,
           requested: activeCursor,
           page: { items: result.items, nextCursor: result.nextCursor ?? null },
         });
@@ -635,25 +684,27 @@ export function useQcHolds(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, status, grnId, activeCursor, revision]);
+  }, [tenantId, warehouseId, status, grnId, clientId, pending, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null || warehouseId === null) return;
-      setRequested({ tenantId, warehouseId, status, grnId, cursor });
+      setRequested({ tenantId, warehouseId, status, grnId, clientId, clientEpoch, cursor });
     },
-    [tenantId, warehouseId, status, grnId],
+    [tenantId, warehouseId, status, grnId, clientId, clientEpoch],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
   if (
     tenantId === null ||
     warehouseId === null ||
+    pending ||
     page === null ||
     page.tenantId !== tenantId ||
     page.warehouseId !== warehouseId ||
     page.status !== status ||
     page.grnId !== grnId ||
+    page.clientId !== clientId ||
     page.requested !== activeCursor
   ) {
     return null;

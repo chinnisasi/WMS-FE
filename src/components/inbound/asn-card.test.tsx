@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import type { UserRole } from '../../lib/users';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
+import { useActiveClient } from '../../lib/use-active-client';
 import { AsnsCard } from './asn-card';
+
+/** Story 1-5a — the Inbound root reads the active client once and hands it down. */
+function Card(props: Omit<Parameters<typeof AsnsCard>[0], 'active'>) {
+  const active = useActiveClient();
+  return <AsnsCard active={active} {...props} />;
+}
 
 /**
  * Story 21-6 — the ASN card's claims a `src/lib` test cannot make:
@@ -102,6 +110,7 @@ function detailOf(row: ReturnType<typeof asn>) {
 interface Recorded {
   readonly method: string;
   readonly pathname: string;
+  readonly search: URLSearchParams;
   readonly body: unknown;
   readonly key: string | null;
 }
@@ -114,7 +123,7 @@ function json(status: number, body: unknown): Response {
 function stubRouter(): void {
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
-    const { pathname } = new URL(request.url);
+    const { pathname, searchParams } = new URL(request.url);
     const method = request.method.toUpperCase();
     let body: unknown = null;
     try {
@@ -122,7 +131,7 @@ function stubRouter(): void {
     } catch {
       body = null;
     }
-    requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key') });
+    requests.push({ method, pathname, search: searchParams, body, key: request.headers.get('Idempotency-Key') });
     if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: clientItems });
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) return json(200, { items: SKUS, nextCursor: null });
     if (method === 'GET' && pathname.endsWith('/catalog/kits')) return json(200, { items: KITS, nextCursor: null });
@@ -152,6 +161,7 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  localStorage.clear();
   restoreGlobals();
 });
 
@@ -198,7 +208,7 @@ async function expand(container: HTMLElement, index: number): Promise<void> {
 
 async function mount(role: UserRole): Promise<Rendered> {
   writeSession(session(role));
-  const rendered = render(<AsnsCard warehouseId={WAREHOUSE_ID} warehouseLabel="Peenya" />);
+  const rendered = render(<Card warehouseId={WAREHOUSE_ID} warehouseLabel="Peenya" />);
   await settle();
   return rendered;
 }
@@ -298,5 +308,95 @@ describe('AsnsCard', () => {
     } finally {
       clientItems = [SELF, ACME];
     }
+  });
+
+  // Story 1-5a — the client switcher filters the ASN list, and the create
+  // form defaults to the active client; a create for another client says
+  // it is hidden by the filter (decision 10).
+  describe('the client filter', () => {
+    const listReads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/inbound/asns'));
+
+    test('under a stored client the list request carries clientId and the chip renders', async () => {
+      writeActiveClientId(TENANT_ID, 'u-1', ACME.id);
+      view = await mount('owner');
+      expect(listReads().length).toBeGreaterThan(0);
+      expect(listReads().every((r) => r.search.get('clientId') === ACME.id)).toBe(true);
+      expect(view.container.querySelector('[data-testid="client-filter-chip"]')?.textContent).toContain('Client: ACME — Acme Foods');
+    });
+
+    test('with no stored client no clientId is sent and no chip renders', async () => {
+      view = await mount('owner');
+      expect(listReads().length).toBeGreaterThan(0);
+      expect(listReads().every((r) => !r.search.has('clientId'))).toBe(true);
+      expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+    });
+
+    test('the create form defaults its client to the active one', async () => {
+      writeActiveClientId(TENANT_ID, 'u-1', ACME.id);
+      view = await mount('owner');
+      await press(buttons(view.container, 'Announce a shipment')[0]);
+      const form = view.container.querySelector('form[aria-label="Announce a shipment"]')!;
+      expect(form.querySelector<HTMLSelectElement>('select[aria-label="Client"]')!.value).toBe(ACME.id);
+    });
+
+    test('a form opened while the clients load lands on the active client once they arrive', async () => {
+      writeActiveClientId(TENANT_ID, 'u-1', ACME.id);
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const inner = globalThis.fetch;
+      stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input.toString());
+        if (new URL(request.url).pathname.endsWith('/clients')) await gate;
+        return inner(request);
+      }) as unknown as typeof fetch);
+      view = await mount('owner');
+      await press(buttons(view.container, 'Announce a shipment')[0]);
+      release();
+      await settle();
+      const form = view.container.querySelector('form[aria-label="Announce a shipment"]')!;
+      expect(form.querySelector<HTMLSelectElement>('select[aria-label="Client"]')!.value).toBe(ACME.id);
+    });
+
+    test('a switcher change after the draft is edited never moves its client', async () => {
+      writeActiveClientId(TENANT_ID, 'u-1', ACME.id);
+      view = await mount('owner');
+      await press(buttons(view.container, 'Announce a shipment')[0]);
+      const form = view.container.querySelector('form[aria-label="Announce a shipment"]')!;
+      setInput(form.querySelector<HTMLInputElement>('input[aria-label="ASN code"]')!, 'ASN-78');
+      act(() => writeActiveClientId(TENANT_ID, 'u-1', SELF.id));
+      await settle();
+      expect(form.querySelector<HTMLSelectElement>('select[aria-label="Client"]')!.value).toBe(ACME.id);
+    });
+
+    test('a create for another client than the active one says it is hidden by the filter', async () => {
+      writeActiveClientId(TENANT_ID, 'u-1', SELF.id);
+      view = await mount('owner');
+      await press(buttons(view.container, 'Announce a shipment')[0]);
+      const form = view.container.querySelector('form[aria-label="Announce a shipment"]')!;
+      expect(form.querySelector<HTMLSelectElement>('select[aria-label="Client"]')!.value).toBe(SELF.id);
+      setSelect(form.querySelector<HTMLSelectElement>('select[aria-label="Client"]')!, ACME.id);
+      setInput(form.querySelector<HTMLInputElement>('input[aria-label="ASN code"]')!, 'ASN-77');
+      setSelect(form.querySelector<HTMLSelectElement>('select[aria-label="Line 1 SKU"]')!, 's-acme');
+      setInput(form.querySelector<HTMLInputElement>('input[aria-label="Line 1 quantity"]')!, '12');
+      await press(buttons(form as HTMLElement, 'Announce')[0]);
+      expect(view.container.querySelector('[data-testid="hidden-by-client-filter"]')?.textContent).toBe(
+        'Created for ACME — Acme Foods — hidden by the client filter',
+      );
+    });
+
+    test('a create for the active client shows no hidden note', async () => {
+      writeActiveClientId(TENANT_ID, 'u-1', ACME.id);
+      view = await mount('owner');
+      await press(buttons(view.container, 'Announce a shipment')[0]);
+      const form = view.container.querySelector('form[aria-label="Announce a shipment"]')!;
+      setInput(form.querySelector<HTMLInputElement>('input[aria-label="ASN code"]')!, 'ASN-77');
+      setSelect(form.querySelector<HTMLSelectElement>('select[aria-label="Line 1 SKU"]')!, 's-acme');
+      setInput(form.querySelector<HTMLInputElement>('input[aria-label="Line 1 quantity"]')!, '12');
+      await press(buttons(form as HTMLElement, 'Announce')[0]);
+      expect(view.container.textContent).toContain('ASN ASN-77 announced');
+      expect(view.container.querySelector('[data-testid="hidden-by-client-filter"]')).toBeNull();
+    });
   });
 });

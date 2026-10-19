@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiListReturns, fetchApiReturnable } from '@/lib/api/client';
 import type { ReturnableOrderDto, ReturnAuthorizationDto } from '@/lib/api/generated';
+import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
+import { useClientEpoch } from '@/lib/use-client-epoch';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { readReason } from '@/lib/outbound-orders';
 import { RETURNS_CHANGED_EVENT, type ReturnStatus } from '@/lib/returns';
@@ -25,13 +27,21 @@ export interface ReturnsPage {
 export function useReturns(
   warehouseId: string | null,
   status: ReturnStatus | null,
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
 ): ResourceState<ReturnsPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
-  const scope = tenantId === null || warehouseId === null ? null : `${tenantId}|${warehouseId}|${status ?? 'all'}`;
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
+  const scope =
+    tenantId === null || warehouseId === null || pending
+      ? null
+      : `${tenantId}|${warehouseId}|${status ?? 'all'}|${clientId ?? '*'}#${clientEpoch}`;
   const [requested, setRequested] = useState<{ scope: string; cursor: string | null } | null>(null);
   const activeCursor = requested !== null && requested.scope === scope ? requested.cursor : null;
   const [revision, setRevision] = useState(0);
@@ -55,6 +65,7 @@ export function useReturns(
         const page = await fetchApiListReturns(tenantId, {
           warehouseId,
           ...(status === null ? {} : { status }),
+          ...(clientId === null ? {} : { clientId }),
           ...(activeCursor === null ? {} : { cursor: activeCursor }),
         });
         if (!cancelled) {
@@ -73,7 +84,7 @@ export function useReturns(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, status, scope, activeCursor, revision]);
+  }, [tenantId, warehouseId, status, clientId, scope, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {

@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 
-import { stubGlobal } from './test/globals';
+import { restoreGlobals, stubGlobal } from './test/globals';
 
 import { THEME_STORAGE_KEY, readStoredTheme, writeStoredTheme } from './theme';
 
@@ -14,6 +14,10 @@ stubGlobal('localStorage', {
   getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
   setItem: (k: string, v: string) => void store.set(k, v),
 });
+// The module-level stub must not outlive this file: a later file that
+// clears the real storage (story 1-5a's client-filter suites) would meet a
+// fake without `clear`.
+afterAll(() => restoreGlobals());
 
 describe('theme persistence', () => {
   afterEach(() => {

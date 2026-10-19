@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -136,7 +137,12 @@ function stubRouter(role: string = 'owner'): void {
       return json(200, { items: [], nextCursor: null });
     }
     if (method === 'POST' && pathname.endsWith('/catalog/products')) {
-      return json(201, product({ id: 'prod-2', name: 'Mugs', axes: ['size'], skuCount: 0 }));
+      // Story 1-5a — the created product carries the client the POST named.
+      const posted = (body !== null && typeof body === 'object' ? body : {}) as { clientId?: string };
+      return json(
+        201,
+        product({ id: 'prod-2', name: 'Mugs', axes: ['size'], skuCount: 0, ...(posted.clientId === undefined ? {} : { clientId: posted.clientId }) }),
+      );
     }
     if (method === 'PATCH' && /\/catalog\/products\/[^/]+$/.test(pathname)) {
       // The product edit PATCH echoes the accepted fields over the fixture and
@@ -189,6 +195,7 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  localStorage.clear();
   restoreGlobals();
 });
 
@@ -578,5 +585,94 @@ describe('ProductsCard: the attach picker is the product\'s client\'s (stories 1
     await settle();
     form = [...view.container.querySelectorAll('form')].pop()!;
     expect([...form.querySelectorAll('label')].some((label) => label.textContent!.startsWith('Client'))).toBe(true);
+  });
+});
+
+describe('story 1-5a: the client switcher and the products card', () => {
+  const clientRow = (id: string, code: string, systemOwned = false): Record<string, unknown> => ({
+    id,
+    code,
+    name: systemOwned ? 'Priya Spices' : code === 'GLOWCO' ? 'GlowCo' : code,
+    status: 'active',
+    systemOwned,
+  });
+  beforeEach(() => {
+    clientsBody = [clientRow('c-self', 'self', true), clientRow('c-glow', 'GLOWCO')];
+    writeActiveClientId(TENANT_ID, SESSION.user.id, 'c-glow');
+  });
+  const listReads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/catalog/products'));
+
+  function openCreate(container: HTMLElement): HTMLFormElement {
+    const create = [...container.querySelectorAll('button')].find((b) => b.textContent === 'New product')!;
+    act(() => create.click());
+    return [...container.querySelectorAll('form')].pop()!;
+  }
+  const clientSelectOf = (form: HTMLFormElement) =>
+    [...form.querySelectorAll('label')]
+      .find((label) => label.textContent!.startsWith('Client'))!
+      .querySelector<HTMLSelectElement>('select')!;
+
+  test('a stored client: the list request carries its clientId and the chip names it', async () => {
+    view = await mount();
+    expect(listReads().length).toBeGreaterThan(0);
+    expect(listReads().every((r) => new URLSearchParams(r.query).get('clientId') === 'c-glow')).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')?.textContent).toContain('Client: GLOWCO — GlowCo');
+  });
+
+  test('the create form defaults its client to the active one', async () => {
+    view = await mount();
+    const form = openCreate(view.container);
+    await settle();
+    expect(clientSelectOf(form).value).toBe('c-glow');
+  });
+
+  test('a form opened while the clients load lands on the active client once they arrive', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inner = globalThis.fetch;
+    stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init);
+      if (new URL(request.url).pathname.endsWith('/clients')) await gate;
+      return inner(request);
+    }) as unknown as typeof fetch);
+    view = await mount();
+    const form = openCreate(view.container);
+    release();
+    await settle();
+    expect(clientSelectOf(form).value).toBe('c-glow');
+  });
+
+  test('a product created for another client says it is hidden by the filter', async () => {
+    view = await mount();
+    const form = openCreate(view.container);
+    await settle();
+    const inputs = form.querySelectorAll<HTMLInputElement>('input');
+    setInput(inputs[0]!, 'Hoodies');
+    setInput(inputs[1]!, 'size');
+    const select = clientSelectOf(form);
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'c-self');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(view.container.textContent).toContain('Created for Priya Spices (your company) — hidden by the client filter');
+  });
+
+  test('a product created for the active client says nothing about the filter', async () => {
+    view = await mount();
+    const form = openCreate(view.container);
+    await settle();
+    const inputs = form.querySelectorAll<HTMLInputElement>('input');
+    setInput(inputs[0]!, 'Hoodies');
+    setInput(inputs[1]!, 'size');
+    act(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    const post = requests.find((r) => r.method === 'POST' && r.pathname.endsWith('/catalog/products'));
+    expect((post!.body as { clientId?: string }).clientId).toBe('c-glow');
+    expect(view.container.textContent).not.toContain('hidden by the client filter');
+    expect(view.container.textContent).toContain('Attach SKUs to it from its variant matrix.');
   });
 });

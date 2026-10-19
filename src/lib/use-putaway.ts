@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
+import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
 import { fetchApiListPutawayTasks } from '@/lib/api/client';
 import type { PutawayTaskDto } from '@/lib/api/generated';
 import { INBOUND_CHANGED_EVENT } from '@/lib/asns';
@@ -23,16 +24,21 @@ import type { Reloadable, ResourceState } from '@/lib/resource-state';
  */
 export function usePutawayTasks(
   warehouseId: string | null,
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
 ): ResourceState<readonly PutawayTaskDto[]> & Reloadable {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{
     tenantId: string;
     warehouseId: string;
+    clientId: string | null;
     state: ResourceState<readonly PutawayTaskDto[]>;
   } | null>(null);
 
@@ -44,22 +50,22 @@ export function usePutawayTasks(
   }, []);
 
   useEffect(() => {
-    if (tenantId === null || warehouseId === null) return;
+    if (tenantId === null || warehouseId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
-        const { items } = await fetchApiListPutawayTasks(tenantId, warehouseId);
-        if (!cancelled) setResult({ tenantId, warehouseId, state: { state: 'ready', data: items } });
+        const { items } = await fetchApiListPutawayTasks(tenantId, warehouseId, clientId === null ? undefined : { clientId });
+        if (!cancelled) setResult({ tenantId, warehouseId, clientId, state: { state: 'ready', data: items } });
       } catch (error) {
         if (!cancelled) {
-          setResult({ tenantId, warehouseId, state: { state: 'failed', reason: readReason(error, 'the putaway tasks') } });
+          setResult({ tenantId, warehouseId, clientId, state: { state: 'failed', reason: readReason(error, 'the putaway tasks') } });
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, revision]);
+  }, [tenantId, warehouseId, clientId, pending, revision]);
 
   const reload = useCallback(() => {
     setResult(null);
@@ -69,8 +75,10 @@ export function usePutawayTasks(
   const stale =
     tenantId === null ||
     warehouseId === null ||
+    pending ||
     result === null ||
     result.tenantId !== tenantId ||
-    result.warehouseId !== warehouseId;
+    result.warehouseId !== warehouseId ||
+    result.clientId !== clientId;
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
 }

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
+import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -32,6 +33,8 @@ const SESSION: StoredSession = {
 interface Recorded {
   readonly method: string;
   readonly pathname: string;
+  /** Story 1-5a — the query, so the client filter is observable. */
+  readonly params: URLSearchParams;
   readonly body: unknown;
   readonly headers: Record<string, string>;
 }
@@ -125,7 +128,7 @@ function stubRouter(): void {
     } catch {
       body = null;
     }
-    requests.push({ method, pathname, body, headers });
+    requests.push({ method, pathname, params: url.searchParams, body, headers });
     if (method === 'PUT' && /\/catalog\/skus\/[^/]+\/packaging$/.test(pathname)) {
       if (packagingRefusal !== null) {
         const refusal = packagingRefusal;
@@ -244,6 +247,7 @@ afterEach(() => {
   view?.unmount();
   view = undefined;
   clearSession();
+  localStorage.clear();
   restoreGlobals();
 });
 
@@ -863,6 +867,70 @@ describe('story 21-2b: the client column and the owner client correction', () =>
     view = await mount();
     expect(headerTexts(view.container)).toContain('Client');
     expect(view.container.textContent).not.toContain('Correct client');
+  });
+});
+
+describe('story 1-5a: the client switcher filters the SKU list', () => {
+  const SELF = {
+    id: 'c-self',
+    tenantId: TENANT_ID,
+    code: 'self',
+    name: 'Priya Spices',
+    status: 'active',
+    systemOwned: true,
+    createdAt: '2026-10-06T00:00:00.000Z',
+    updatedAt: '2026-10-06T00:00:00.000Z',
+  };
+  const GLOW = { ...SELF, id: 'c-glow', code: 'GLOWCO', name: 'GlowCo', systemOwned: false };
+  const listReads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/catalog/skus'));
+
+  test('a stored client: the list request carries its clientId and the chip names it', async () => {
+    clientRows = [SELF, GLOW];
+    writeActiveClientId(TENANT_ID, SESSION.user.id, 'c-glow');
+    view = await mount();
+    // The paged list read (the kit editor's lookup is separate and unfiltered).
+    expect(listReads().some((r) => r.params.get('clientId') === 'c-glow')).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')?.textContent).toContain(
+      'Client: GLOWCO — GlowCo',
+    );
+  });
+
+  test('"Show all clients" clears the filter: the next read sends no clientId and the chip goes', async () => {
+    clientRows = [SELF, GLOW];
+    writeActiveClientId(TENANT_ID, SESSION.user.id, 'c-glow');
+    view = await mount();
+    const chip = view.container.querySelector('[data-testid="client-filter-chip"]')!;
+    const before = requests.length;
+    await act(async () => {
+      [...chip.querySelectorAll('button')].find((b) => b.textContent === 'Show all clients')!.click();
+    });
+    await settle();
+    const after = requests.slice(before).filter((r) => r.method === 'GET' && r.pathname.endsWith('/catalog/skus'));
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((r) => !r.params.has('clientId'))).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+  });
+
+  test('a single-client tenant: no clientId and no chip, even with a stored id', async () => {
+    clientRows = [SELF];
+    writeActiveClientId(TENANT_ID, SESSION.user.id, 'c-self');
+    view = await mount();
+    expect(listReads().length).toBeGreaterThan(0);
+    expect(listReads().every((r) => !r.params.has('clientId'))).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+  });
+
+  test('while the clients load, a stored client sends no list read', async () => {
+    clientRows = [SELF, GLOW];
+    writeActiveClientId(TENANT_ID, SESSION.user.id, 'c-glow');
+    const real = globalThis.fetch;
+    stubGlobal('fetch', ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (new URL(url).pathname.endsWith('/clients')) return new Promise<Response>(() => undefined);
+      return real(input, init);
+    }) as typeof fetch);
+    view = await mount();
+    expect(listReads().length).toBe(0);
   });
 });
 

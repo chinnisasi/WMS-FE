@@ -29,8 +29,10 @@ import {
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
 import { useReportingOverview } from '@/lib/use-reporting-overview';
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
+import { useActiveClient } from '@/lib/use-active-client';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { AllClientsNote } from '@/components/shared/client-filter-chip';
 import { KpiTile } from '@/components/kpi-tile';
 import { buttonClass, ReadFailure } from '@/components/outbound/shell';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
@@ -45,6 +47,16 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
  * banner appears when a tile is unavailable or the read is over 5 minutes
  * old against the render-time clock.
  */
+/**
+ * Story 1-5a — the overview tiles are never client-filtered (decision 11:
+ * a drill must equal its tile), so with a client picked the page says
+ * "All clients" rather than let a figure read as that client's.
+ */
+function OverviewClientNote() {
+  const active = useActiveClient();
+  return <AllClientsNote active={active} />;
+}
+
 export function OverviewDashboard({ health }: { health: string }) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
@@ -61,7 +73,10 @@ export function OverviewDashboard({ health }: { health: string }) {
         </p>
       </div>
       {sessioned === null ? null : sessioned ? (
-        <OverviewSessioned />
+        <>
+          <OverviewClientNote />
+          <OverviewSessioned />
+        </>
       ) : (
         <div className="text-sm text-(--muted-foreground)">
           Sign in to see the dashboard —{' '}

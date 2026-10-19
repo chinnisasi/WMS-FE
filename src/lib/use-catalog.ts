@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiListKits, fetchApiListProducts, fetchApiListSkus } from '@/lib/api/client';
 import type { KitResponse, ProductResponse, SkuResponse } from '@/lib/api/generated';
+import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
+import { useClientEpoch } from '@/lib/use-client-epoch';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CATALOG_CHANGED_EVENT } from '@/lib/catalog';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
@@ -24,22 +26,31 @@ export interface SkusPage {
  * (tenant changed) are filtered at render time — no synchronous setState in
  * effects, matching useZoneBins.
  */
-export function useSkus(): (SkusPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
+export function useSkus(
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
+): (SkusPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
   // `null` = unknown (server render) or signed out.
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
   // The cursor the viewer asked for, scoped to the tenant it was asked for —
   // a cursor left over from another tenant is treated as a first-page
   // request, never replayed against the wrong scope.
-  const [requested, setRequested] = useState<{ tenantId: string; cursor: string | null } | null>(null);
+  const [requested, setRequested] = useState<{ tenantId: string; clientId: string | null; clientEpoch: number; cursor: string | null } | null>(
+    null,
+  );
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId ? requested.cursor : null;
+    requested !== null && requested.tenantId === tenantId && requested.clientId === clientId && requested.clientEpoch === clientEpoch ? requested.cursor : null;
   const [revision, setRevision] = useState(0);
   const [page, setPage] = useState<{
     tenantId: string;
+    clientId: string | null;
     requested: string | null;
     page: SkusPage;
   } | null>(null);
@@ -51,16 +62,16 @@ export function useSkus(): (SkusPage & { onCursor: (cursor: string | null) => vo
   }, []);
 
   useEffect(() => {
-    if (tenantId === null) return;
+    if (tenantId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
         const result = await fetchApiListSkus(
           tenantId,
-          activeCursor === null ? undefined : { cursor: activeCursor },
+          { ...(clientId === null ? {} : { clientId }), ...(activeCursor === null ? {} : { cursor: activeCursor }) },
         );
         if (!cancelled) {
-          setPage({ tenantId, requested: activeCursor, page: result });
+          setPage({ tenantId, clientId, requested: activeCursor, page: result });
         }
       } catch {
         // Quiet chrome on failure — the render-time key check hides stale data.
@@ -69,21 +80,23 @@ export function useSkus(): (SkusPage & { onCursor: (cursor: string | null) => vo
     return () => {
       cancelled = true;
     };
-  }, [tenantId, activeCursor, revision]);
+  }, [tenantId, clientId, pending, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null) return;
-      setRequested({ tenantId, cursor });
+      setRequested({ tenantId, clientId, clientEpoch, cursor });
     },
-    [tenantId],
+    [tenantId, clientId, clientEpoch],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
   if (
     tenantId === null ||
+    pending ||
     page === null ||
     page.tenantId !== tenantId ||
+    page.clientId !== clientId ||
     page.requested !== activeCursor
   ) {
     return null;
@@ -113,20 +126,29 @@ export interface ProductsPage {
  * CATALOG_CHANGED_EVENT, which bumps the revision and refetches the page;
  * stale pages (tenant changed) are filtered at render.
  */
-export function useProducts(): ResourceState<ProductsPage> &
+export function useProducts(
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
+): ResourceState<ProductsPage> &
   Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
   // The cursor the viewer asked for, scoped to the tenant it was asked for.
-  const [requested, setRequested] = useState<{ tenantId: string; cursor: string | null } | null>(null);
+  const [requested, setRequested] = useState<{ tenantId: string; clientId: string | null; clientEpoch: number; cursor: string | null } | null>(
+    null,
+  );
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId ? requested.cursor : null;
+    requested !== null && requested.tenantId === tenantId && requested.clientId === clientId && requested.clientEpoch === clientEpoch ? requested.cursor : null;
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{
     tenantId: string;
+    clientId: string | null;
     requested: string | null;
     state: ResourceState<ProductsPage>;
   } | null>(null);
@@ -138,17 +160,18 @@ export function useProducts(): ResourceState<ProductsPage> &
   }, []);
 
   useEffect(() => {
-    if (tenantId === null) return;
+    if (tenantId === null || pending) return;
     let cancelled = false;
     (async () => {
       try {
         const page = await fetchApiListProducts(
           tenantId,
-          activeCursor === null ? undefined : { cursor: activeCursor },
+          { ...(clientId === null ? {} : { clientId }), ...(activeCursor === null ? {} : { cursor: activeCursor }) },
         );
         if (!cancelled) {
           setResult({
             tenantId,
+            clientId,
             requested: activeCursor,
             state: {
               state: 'ready',
@@ -160,6 +183,7 @@ export function useProducts(): ResourceState<ProductsPage> &
         if (!cancelled) {
           setResult({
             tenantId,
+            clientId,
             requested: activeCursor,
             state: { state: 'failed', reason: readReason(error, 'products') },
           });
@@ -169,19 +193,24 @@ export function useProducts(): ResourceState<ProductsPage> &
     return () => {
       cancelled = true;
     };
-  }, [tenantId, activeCursor, revision]);
+  }, [tenantId, clientId, pending, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null) return;
-      setRequested({ tenantId, cursor });
+      setRequested({ tenantId, clientId, clientEpoch, cursor });
     },
-    [tenantId],
+    [tenantId, clientId, clientEpoch],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
   const stale =
-    tenantId === null || result === null || result.tenantId !== tenantId || result.requested !== activeCursor;
+    tenantId === null ||
+    pending ||
+    result === null ||
+    result.tenantId !== tenantId ||
+    result.clientId !== clientId ||
+    result.requested !== activeCursor;
 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
 }

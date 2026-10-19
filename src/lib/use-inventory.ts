@@ -16,6 +16,8 @@ import type {
   StockEntryDto,
   ZoneResponse,
 } from '@/lib/api/generated';
+import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
+import { useClientEpoch } from '@/lib/use-client-epoch';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CATALOG_CHANGED_EVENT } from '@/lib/catalog';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
@@ -171,14 +173,19 @@ export function useStockList(
   warehouseId: string | null,
   filter: StockFilter,
   walkAll: boolean,
+  /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
+  clientFilter: ClientFilter,
 ): ResourceState<StockRows> & Reloadable & { readonly loadMore: () => void } {
   const tenantId = useTenantId();
   const [epoch, setEpoch] = useState(0);
   const { skuId, binId } = filter;
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
   const scope =
-    tenantId === null || warehouseId === null
+    tenantId === null || warehouseId === null || pending
       ? null
-      : `${tenantId}|${warehouseId}|${skuId ?? ''}|${binId ?? ''}|${walkAll ? 'all' : 'paged'}|${epoch}`;
+      : `${tenantId}|${warehouseId}|${clientId ?? '*'}#${clientEpoch}|${skuId ?? ''}|${binId ?? ''}|${walkAll ? 'all' : 'paged'}|${epoch}`;
   const [wanted, setWanted] = useState<{ scope: string; cursor: string; page: number } | null>(null);
   const wantedCursor = wanted !== null && wanted.scope === scope ? wanted.cursor : null;
   const wantedPage = wanted !== null && wanted.scope === scope ? wanted.page : 1;
@@ -201,6 +208,7 @@ export function useStockList(
         const page = await fetchApiListStock(tenantId, warehouseId, {
           ...(skuId === null ? {} : { skuId }),
           ...(binId === null ? {} : { binId }),
+          ...(clientId === null ? {} : { clientId }),
           ...(wantedCursor === null ? {} : { cursor: wantedCursor }),
           limit: STOCK_PAGE_LIMIT,
           order: 'location',
@@ -230,7 +238,7 @@ export function useStockList(
     return () => {
       cancelled = true;
     };
-  }, [scope, tenantId, warehouseId, skuId, binId, walkAll, wantedCursor, wantedPage]);
+  }, [scope, tenantId, warehouseId, clientId, skuId, binId, walkAll, wantedCursor, wantedPage]);
 
   const reload = useCallback(() => setEpoch((e) => e + 1), []);
 
