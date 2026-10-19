@@ -152,7 +152,7 @@ describe('Settings — tabs (page-tabs)', () => {
   /** The decided grouping (user, 2026-10-17): each tab's cards, panel-scoped. */
   test.each([
     ['warehouses', ['Create a warehouse', 'MAIN Chennai DC', 'Zones and bins']],
-    ['catalog', ['Import catalog', 'Products', 'SKUs', 'Segregation matrix']],
+    ['catalog', ['Import catalog', 'New SKU', 'Products', 'SKUs', 'Segregation matrix']],
     ['clients', ['Clients', 'Rate cards']],
     ['partners', ['Partners']],
     ['team', ['Users & roles']],
@@ -163,6 +163,24 @@ describe('Settings — tabs (page-tabs)', () => {
     const panel = view.container.querySelector('#settings-panel')!;
     const headings = [...panel.querySelectorAll('h2, .font-medium')].map((h) => h.textContent?.trim());
     for (const card of cards) expect(headings).toContain(card);
+  });
+});
+
+describe('Settings — the New SKU card is gated on sku.edit (story 1-4)', () => {
+  test.each([
+    ['owner', true],
+    ['ops_manager', true],
+    ['operator', false],
+    ['accountant', false],
+  ] as const)('a %s %s offered the create card', async (role, offered) => {
+    writeSession({ ...OWNER, user: { ...OWNER.user, role } });
+    view = await mountPage({ tab: 'catalog' });
+    const panel = view.container.querySelector('#settings-panel')!;
+    const headings = [...panel.querySelectorAll('h2')].map((h) => h.textContent?.trim());
+    expect(headings.includes('New SKU')).toBe(offered);
+    expect([...panel.querySelectorAll('button')].some((b) => b.textContent === 'New SKU')).toBe(offered);
+    // The SKU table itself stays readable for every role.
+    expect(headings).toContain('SKUs');
   });
 });
 

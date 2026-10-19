@@ -669,8 +669,17 @@ export function correctClientReason(error: unknown): string {
       // (the server names which).
       case 'duplicate-sku-code':
         return error.detail ?? 'That client already has a SKU with this code — rename one first.';
+      // Story 1-4: every barcode of the SKU moves — the primary, extra
+      // base-level and pack barcodes — so any of them can clash (the server
+      // names which, and the holder).
       case 'duplicate-barcode':
-        return error.detail ?? 'That client already has a SKU with this barcode — clear or change one first.';
+        return error.detail ?? 'That client already has a SKU with one of this SKU\'s barcodes — clear or change one first.';
+      // Story 1-4: the SKU's product moves with it, and product names are
+      // unique per client.
+      case 'duplicate-product-name':
+        return error.detail ?? 'That client already has a product with this SKU\'s product name — rename one first.';
+      case 'barcode-is-code':
+        return error.detail ?? 'One of this SKU\'s barcodes equals a SKU code in that client — change the barcode first.';
       case 'not-found':
         return 'That SKU or client no longer exists — refresh the page.';
       case 'role-denied':

@@ -4,7 +4,10 @@ import { act } from 'react';
 
 import { render, type Rendered } from '../../lib/test/render';
 import type { CatalogImportErrorResponse, CatalogImportResponse } from '../../lib/api/generated';
-import { ImportResult } from './import-catalog';
+import { ImportCatalogCard, ImportResult } from './import-catalog';
+import { clearSession, writeSession } from '../../lib/auth';
+import { CATALOG_IMPORT_OPTIONAL_COLUMNS, CATALOG_IMPORT_REQUIRED_COLUMNS } from '../../lib/catalog';
+import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 
 /**
  * The import report's per-row error table (story 10.5's matrix row for it).
@@ -143,5 +146,38 @@ describe('ImportResult: the error-report download (csvField / downloadText, move
       URL.revokeObjectURL = originalRevoke;
       HTMLAnchorElement.prototype.click = originalClick;
     }
+  });
+});
+
+describe('ImportCatalogCard: the help lists every column the import takes (story 1-4)', () => {
+  afterEach(() => {
+    clearSession();
+    restoreGlobals();
+  });
+
+  test('the fixed-header help names all 25 columns, the two new ones included, with their grammar', async () => {
+    stubGlobal('fetch', (async () =>
+      new Response(JSON.stringify({ code: 'not-found', status: 404, title: 'Unrouted' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch);
+    writeSession({
+      token: 'header.payload.signature',
+      tenant: { id: '0198f7a2-1b3c-7d4e-8f90-112233445566', name: 'Priya Spices', gstin: null },
+      user: { id: 'u-1', email: 'priya@example.com', role: 'owner', status: 'active' },
+      expiresAt: Date.now() + 15 * 60_000,
+    });
+    view = render(<ImportCatalogCard />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const text = view.container.textContent ?? '';
+    for (const column of [...CATALOG_IMPORT_REQUIRED_COLUMNS, ...CATALOG_IMPORT_OPTIONAL_COLUMNS]) {
+      expect(text).toContain(column);
+    }
+    expect(CATALOG_IMPORT_REQUIRED_COLUMNS.length + CATALOG_IMPORT_OPTIONAL_COLUMNS.length).toBe(25);
+    expect(text).toContain('shelf_life_days, barcodes');
+    expect(text).toContain('case:8901234567890;each:8900000000001');
+    expect(text).toContain('2 to 1,000,000 base units each');
   });
 });

@@ -6,6 +6,7 @@ import {
   clientsControllerRenameClient,
   catalogControllerCreateKit,
   catalogControllerCreateProduct,
+  catalogControllerCreateSku,
   catalogControllerEditProduct,
   catalogControllerEditSku,
   catalogControllerGetSegregationMatrix,
@@ -14,6 +15,7 @@ import {
   catalogControllerListProducts,
   catalogControllerListSkus,
   catalogControllerReplaceKit,
+  catalogControllerReplacePackaging,
   channelsControllerConnect,
   channelsControllerDisconnect,
   channelsControllerListConnections,
@@ -273,6 +275,9 @@ import type {
   ColdChainTraceResponse,
   CreateBinDto,
   CreateProductDto,
+  CreateSkuDto,
+  ReplacePackagingDto,
+  SkuWriteResponse,
   CreateWarehouseDto,
   CreateZoneDto,
   CountVarianceListResponse,
@@ -974,6 +979,48 @@ export async function fetchApiEditSku(
   idempotencyKey: string,
 ): Promise<SkuResponse> {
   const { data, error } = await catalogControllerEditSku({
+    path: { tenantId, skuId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 1-4 — create ONE SKU (gated `sku.edit`): one import row's worth of
+ * typed fields, its pack levels and barcodes included. The caller notifies
+ * the catalog readers on success (`notifyCatalogChanged`).
+ */
+export async function fetchApiCreateSku(
+  tenantId: string,
+  body: CreateSkuDto,
+  idempotencyKey: string,
+): Promise<SkuWriteResponse> {
+  const { data, error } = await catalogControllerCreateSku({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 1-4 — replace a SKU's pack levels and every NON-primary barcode
+ * (PUT — replace semantics; the primary rides the SKU PATCH).
+ */
+export async function fetchApiReplacePackaging(
+  tenantId: string,
+  skuId: string,
+  body: ReplacePackagingDto,
+  idempotencyKey: string,
+): Promise<SkuWriteResponse> {
+  const { data, error } = await catalogControllerReplacePackaging({
     path: { tenantId, skuId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
