@@ -15,7 +15,6 @@ import {
   useSkuMap,
   useStockScopes,
   useUserMap,
-  useVendorMap,
   type PurchaseOrderHeader,
 } from '@/lib/use-inbound';
 import {
@@ -232,7 +231,6 @@ function PurchaseOrdersCard({
   warehouseLabel: string | null;
 }) {
   const pos = usePurchaseOrders(warehouseId);
-  const vendors = useVendorMap();
   const skus = useSkuMap();
   // Story 21-2b — the PO's client (derived from its lines' SKUs), shown once
   // the tenant holds more than its own client. The row carries its lines
@@ -258,7 +256,9 @@ function PurchaseOrdersCard({
     {
       key: 'vendor',
       header: 'Vendor',
-      render: (po) => vendors?.[po.vendorId]?.name ?? '—',
+      // Story 1-3 — the vendor as the PO froze it at creation (a later
+      // partner edit never rewrites it); absent only on a pre-1-3 replay.
+      render: (po) => po.vendorSnapshot?.name ?? '—',
     },
     {
       key: 'lines',

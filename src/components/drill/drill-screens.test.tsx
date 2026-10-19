@@ -646,6 +646,7 @@ describe('story 9-3a — "View ledger" on the inbound cards uses the DOCUMENT\'s
         tenantId: T,
         warehouseId: W2,
         vendorId: 'v-1',
+        vendorSnapshot: { v: 1, code: 'V-1', name: 'Prime Foods', legalName: null, gstin: null, stateCode: null, registeredAddress: null, dispatchAddress: null },
         code: 'PO-0007',
         status: 'open',
         carriedFromPoId: null,

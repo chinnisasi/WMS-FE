@@ -13,7 +13,7 @@ import {
   fetchApiListSkus,
   fetchApiListStock,
   fetchApiListUsers,
-  fetchApiListVendors,
+  fetchApiListPartners,
   fetchApiListZones,
 } from '@/lib/api/client';
 import { useKeyedDrill } from '@/lib/use-drill';
@@ -28,7 +28,7 @@ import type {
   SkuResponse,
   StockEntryDto,
   UserResponse,
-  VendorDto,
+  PartnerDto,
   ZoneResponse,
 } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -37,6 +37,7 @@ import type { GrnsDrill, OverReceiptsDrill } from '@/lib/drill';
 import { fetchGrnsDrill, fetchOverReceiptsDrill } from '@/lib/drill-fetch';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { USERS_CHANGED_EVENT } from '@/lib/users';
+import { PARTNERS_CHANGED_EVENT } from '@/lib/partners';
 import { readReason } from '@/lib/outbound-orders';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
 
@@ -429,30 +430,38 @@ export function useOverReceipts(
 }
 
 /**
- * The full vendor list (a read, open to every member) as an id→vendor map —
- * the PO card names vendors without a join per row.
+ * Story 1-3 — every partner holding the vendor role (`GET /partners?role=vendor`,
+ * a read open to every member, any status) as an id→partner map, refetched
+ * on `PARTNERS_CHANGED_EVENT`. The replenishment picker names a draft's vendor
+ * from it even when that vendor is no longer linked or active. (The PO table
+ * reads the PO's own frozen `vendorSnapshot`, not this map.)
  */
-export function useVendorMap(): Readonly<Record<string, VendorDto>> | null {
+export function useVendorMap(): Readonly<Record<string, PartnerDto>> | null {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
-  const [map, setMap] = useState<{ tenantId: string; map: Record<string, VendorDto> } | null>(null);
+  const [map, setMap] = useState<{ tenantId: string; revision: number; map: Record<string, PartnerDto> } | null>(null);
+  const [revision, setRevision] = useState(0);
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(PARTNERS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(PARTNERS_CHANGED_EVENT, onChange);
+  }, []);
 
   useEffect(() => {
     if (tenantId === null) return;
     let cancelled = false;
     (async () => {
       try {
-        // VendorListResponse's nextCursor is optional in the generated type,
-        // so the page is normalized to the walker's contract.
-        const vendors = await fetchAllPages<VendorDto>(async (options) => {
-          const result = await fetchApiListVendors(tenantId, options);
+        const vendors = await fetchAllPages<PartnerDto>(async (options) => {
+          const result = await fetchApiListPartners(tenantId, { ...options, role: 'vendor' });
           return { items: result.items, nextCursor: result.nextCursor ?? null };
         });
         if (!cancelled) {
-          setMap({ tenantId, map: Object.fromEntries(vendors.map((v) => [v.id, v])) });
+          setMap({ tenantId, revision, map: Object.fromEntries(vendors.map((v) => [v.id, v])) });
         }
       } catch {
         // Quiet chrome on failure.
@@ -461,7 +470,7 @@ export function useVendorMap(): Readonly<Record<string, VendorDto>> | null {
     return () => {
       cancelled = true;
     };
-  }, [tenantId]);
+  }, [tenantId, revision]);
 
   if (tenantId === null || map === null || map.tenantId !== tenantId) return null;
   return map.map;

@@ -67,6 +67,8 @@ let breachRows: Record<string, unknown>[];
 /** Story 1-1: the tenant's clients (null → unrouted, the bare-code arm). */
 let clientsBody: Record<string, unknown>[] | null = null;
 let draftRows: Record<string, unknown>[];
+// Story 1-3 — the vendor-role partners (`GET /partners?role=vendor`), links inline.
+let partnerRows: Record<string, unknown>[];
 let policyRows: Record<string, unknown>[];
 let batchAlertRows: Record<string, unknown>[];
 /** null = no config row (the OFF convention read back). */
@@ -103,6 +105,8 @@ function draft(): Record<string, unknown> {
     tenantId: TENANT_ID,
     warehouseId: WAREHOUSE_ID,
     skuId: SKU_ID,
+    // Story 1-3 — the SKU's client: the picker offers its linked vendors.
+    clientId: 'c-acme',
     breachId: BREACH_ID,
     vendorId: VENDOR_ID,
     quantityMilli: 5000,
@@ -110,6 +114,30 @@ function draft(): Record<string, unknown> {
     submittedPoId: null,
     createdAt: '2026-09-28T08:00:00.000Z',
     updatedAt: '2026-09-28T08:00:00.000Z',
+  };
+}
+
+function partner(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: VENDOR_ID,
+    tenantId: TENANT_ID,
+    code: 'V-1',
+    name: 'Annapurna Traders',
+    legalName: null,
+    gstin: null,
+    pan: null,
+    roles: ['vendor'],
+    registeredAddress: null,
+    dispatchAddress: null,
+    contactName: null,
+    contactPhone: null,
+    contactEmail: null,
+    status: 'active',
+    inactiveReason: null,
+    links: [{ id: 'l-1', clientId: 'c-acme', role: 'vendor', active: true, isDefault: true, clientCode: null }],
+    createdAt: '2026-09-02T00:00:00.000Z',
+    updatedAt: '2026-09-02T00:00:00.000Z',
+    ...over,
   };
 }
 
@@ -231,11 +259,8 @@ function stubRouter(): void {
         nextCursor: null,
       });
     }
-    if (method === 'GET' && pathname.endsWith('/vendors')) {
-      return json(200, {
-        items: [{ id: VENDOR_ID, code: 'V-1', name: 'Annapurna Traders', createdAt: '2026-09-02T00:00:00.000Z' }],
-        nextCursor: null,
-      });
+    if (method === 'GET' && pathname.endsWith('/partners')) {
+      return json(200, { items: partnerRows, nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith('/users')) {
       return json(200, { items: [{ id: 'u-1', email: 'priya@example.com' }], nextCursor: null });
@@ -357,6 +382,7 @@ beforeEach(() => {
   nextAlertDismissStatus = 200;
   breachRows = [breach()];
   draftRows = [draft()];
+  partnerRows = [partner()];
   policyRows = [policy()];
   batchAlertRows = [
     batchAlert(),
@@ -465,6 +491,29 @@ describe('ReplenishmentView: the suggested-PO submit flow (story 6-1)', () => {
     expect(banner).toContain('3 lines');
     // The queue re-reads — the submitted draft must leave the Drafts tab.
     expect(readsEndingWith('/replenishment/suggested-pos').length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('story 1-3 — the picker offers only the vendors linked (active) to the draft\'s client, and keeps an unlinked draft vendor as a labelled fallback', async () => {
+    const OTHER = '0198f7a2-1b3c-7d4e-8f90-343434343434';
+    const LINKED = '0198f7a2-1b3c-7d4e-8f90-353535353535';
+    partnerRows = [
+      // The draft's vendor: its link to the draft's client is switched off.
+      partner({ links: [{ id: 'l-1', clientId: 'c-acme', role: 'vendor', active: false, isDefault: false, clientCode: null }] }),
+      // Linked to ANOTHER client only — never offered for this draft.
+      partner({ id: OTHER, code: 'V-2', name: 'Other Client Vendor', links: [{ id: 'l-2', clientId: 'c-beta', role: 'vendor', active: true, isDefault: false, clientCode: null }] }),
+      // Linked to the draft's client — offered.
+      partner({ id: LINKED, code: 'V-3', name: 'Linked Vendor', links: [{ id: 'l-3', clientId: 'c-acme', role: 'vendor', active: true, isDefault: false, clientCode: null }] }),
+    ];
+    view = await mount(OWNER_SESSION, 'suggested-pos');
+    const select = view.container.querySelector('select') as HTMLSelectElement;
+    const options = [...select.querySelectorAll('option')].map((o) => [o.value, o.textContent]);
+    expect(options).toEqual([
+      [VENDOR_ID, 'Annapurna Traders (not linked / inactive)'],
+      [LINKED, 'Linked Vendor (V-3)'],
+    ]);
+    expect(select.value).toBe(VENDOR_ID);
+    // The partner read asks for the vendor role.
+    expect(requests.some((r) => r.method === 'GET' && r.pathname.endsWith('/partners') && r.query.includes('role=vendor'))).toBe(true);
   });
 
   test('a 409 suggested-po-submitted renders the server\'s words verbatim AND re-reads the queue', async () => {

@@ -11,7 +11,7 @@ import { SettingsTabs } from './settings-tabs';
 
 /**
  * page-tabs — the Settings page: the header and the setup checklist above a
- * five-tab bar (Warehouses · Catalog · Clients · Team · Devices), one group
+ * tab bar (Warehouses · Catalog · Clients · Partners · Team · Devices), one group
  * mounted at a time, `?tab=` linkable, and the checklist's Continue links
  * opening the tab that holds each step's card. Drives the real `page.tsx`
  * (`await Page({ searchParams })`) through a stubbed `fetch`.
@@ -97,6 +97,7 @@ describe('Settings — tabs (page-tabs)', () => {
       'Warehouses',
       'Catalog',
       'Clients',
+      'Partners',
       'Team',
       'Devices',
     ]);
@@ -153,6 +154,7 @@ describe('Settings — tabs (page-tabs)', () => {
     ['warehouses', ['Create a warehouse', 'MAIN Chennai DC', 'Zones and bins']],
     ['catalog', ['Import catalog', 'Products', 'SKUs', 'Segregation matrix']],
     ['clients', ['Clients', 'Rate cards']],
+    ['partners', ['Partners']],
     ['team', ['Users & roles']],
     ['devices', ['Device enrollment']],
   ] as const)('the %s tab holds its cards (an owner holds catalog.import)', async (tab, cards) => {

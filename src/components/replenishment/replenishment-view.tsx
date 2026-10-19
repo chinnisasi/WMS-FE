@@ -18,7 +18,7 @@ import type {
   ReorderPolicyDto,
   SkuResponse,
   SuggestedPoDto,
-  VendorDto,
+  PartnerDto,
 } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { quantityLabel } from '@/lib/format-quantity';
@@ -55,6 +55,7 @@ import { ulid } from '@/lib/ulid';
 import { drillFor, warehouseDisplayLabel, type BatchAlertsDrill, type ParsedDrill } from '@/lib/drill';
 import { REPLENISHMENT_PAGE_TABS, type ReplenishmentTab } from '@/lib/page-tabs';
 import { useSkuMap, useUserMap, useVendorMap } from '@/lib/use-inbound';
+import { unlinkedVendorLabel, vendorsLinkedTo } from '@/lib/partners';
 import { skuDisplayLabel, sortSkusForPicker } from '@/lib/clients';
 import { readyClients, useClients } from '@/lib/use-clients';
 import { useOutboundWarehouses } from '@/lib/use-outbound-orders';
@@ -1051,7 +1052,7 @@ function SuggestedPoCard({
   draft: SuggestedPoDto;
   sku: SkuResponse | null;
   clients: readonly ClientDto[] | null;
-  vendors: Readonly<Record<string, VendorDto>> | null;
+  vendors: Readonly<Record<string, PartnerDto>> | null;
   warehouseLabel: string | null;
   canManage: boolean;
   submitting: boolean;
@@ -1060,10 +1061,15 @@ function SuggestedPoCard({
   const qtyLabel = quantityLabel(milliToBase(draft.quantityMilli), sku);
   const [vendorPick, setVendorPick] = useState(draft.vendorId ?? '');
   const [qtyRaw, setQtyRaw] = useState('');
+  // Story 1-3 — only the vendors this draft can be submitted with: active
+  // partners holding the vendor role with an ACTIVE vendor link to the
+  // draft's client (the SKU's). The map is every vendor-role partner with
+  // its links inline, so the filter needs no second read.
   const options =
     vendors === null
       ? []
-      : Object.values(vendors).sort((a, b) => a.code.localeCompare(b.code));
+      : vendorsLinkedTo(Object.values(vendors), draft.clientId).sort((a, b) => a.code.localeCompare(b.code));
+  const draftVendorOffered = draft.vendorId !== null && options.some((vendor) => vendor.id === draft.vendorId);
   const effectiveVendor = vendorPick !== '' ? vendorPick : draft.vendorId;
   const isDraft = draft.status === 'draft';
 
@@ -1092,10 +1098,14 @@ function SuggestedPoCard({
               onChange={(e) => setVendorPick(e.target.value)}
             >
               {draft.vendorId === null && <option value="">No vendor chosen</option>}
-              {/* A suggested vendor the vendor map cannot resolve keeps its
-                  own option so the select still shows it selected. */}
-              {draft.vendorId !== null && vendors?.[draft.vendorId] === undefined && (
-                <option value={draft.vendorId}>{draft.vendorId.slice(0, 8)}…</option>
+              {/* Story 1-3 — the draft's vendor is not offered (no longer
+                  linked to the client, or inactive): it keeps its own option
+                  so the select shows what the draft holds — and says why a
+                  submit would be refused (409 vendor-not-linked). */}
+              {draft.vendorId !== null && !draftVendorOffered && (
+                <option value={draft.vendorId}>
+                  {unlinkedVendorLabel(vendors?.[draft.vendorId]?.name ?? `${draft.vendorId.slice(0, 8)}…`)}
+                </option>
               )}
               {options.map((vendor) => (
                 <option key={vendor.id} value={vendor.id}>

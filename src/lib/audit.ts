@@ -47,6 +47,9 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   manifest: 'Manifest',
   order: 'Order',
   over_receipt: 'Over-receipt',
+  // Story 1-3 — a business partner and one of its client links.
+  partner: 'Partner',
+  partner_link: 'Partner link',
   pick: 'Pick',
   picklist_line: 'Picklist line',
   product: 'Product',
@@ -68,7 +71,9 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   tenant: 'Company',
   transfer_order: 'Transfer',
   user: 'User',
-  vendor: 'Vendor',
+  // Story 1-3 — no writer stores it now; the rows written before the partner
+  // master (`vendor.created`) still carry it, so the filter keeps it.
+  vendor: 'Vendor (before partners)',
   warehouse: 'Warehouse',
   wave: 'Wave',
   wave_policy: 'Wave policy',

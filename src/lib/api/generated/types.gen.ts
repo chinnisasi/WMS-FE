@@ -1876,48 +1876,6 @@ export type SerialDetailResponse = {
     history: Array<SerialLedgerEntryDto>;
 };
 
-export type CreateVendorDto = {
-    /**
-     * Vendor code — unique per tenant
-     */
-    code: string;
-    /**
-     * Vendor name
-     */
-    name: string;
-    /**
-     * The tenant’s default vendor (Epic 6 suggested-PO drafts read it)
-     */
-    isDefault?: boolean;
-};
-
-export type VendorDto = {
-    id: string;
-    tenantId: string;
-    /**
-     * Vendor code (unique per tenant)
-     */
-    code: string;
-    name: string;
-    /**
-     * The tenant’s default vendor flag
-     */
-    isDefault: boolean;
-    /**
-     * ISO-8601 UTC creation time
-     */
-    createdAt: string;
-};
-
-export type VendorResponse = {
-    vendor: VendorDto;
-};
-
-export type VendorListResponse = {
-    items: Array<VendorDto>;
-    nextCursor?: string | null;
-};
-
 export type PurchaseOrderLineInputDto = {
     /**
      * Existing line to update (amend only) — omitted means a new line
@@ -1952,6 +1910,37 @@ export type CreatePurchaseOrderDto = {
      * At least one line with a known SKU
      */
     lines: Array<PurchaseOrderLineInputDto>;
+};
+
+export type PartnerAddressDto = {
+    line1: string;
+    line2: string | null;
+    city: string;
+    /**
+     * A two-digit GST registration state code
+     */
+    stateCode: string;
+    /**
+     * Six digits
+     */
+    pincode: string;
+};
+
+export type VendorSnapshotDto = {
+    /**
+     * The snapshot shape version
+     */
+    v: 1;
+    code: string;
+    name: string;
+    legalName: string | null;
+    gstin: string | null;
+    /**
+     * The registered state, else the GSTIN's prefix
+     */
+    stateCode: string | null;
+    registeredAddress: PartnerAddressDto | null;
+    dispatchAddress: PartnerAddressDto | null;
 };
 
 export type PurchaseOrderLineDto = {
@@ -2006,6 +1995,10 @@ export type PurchaseOrderDto = {
      * Story 21-2b — the client the PO is for, derived from its lines' SKUs. Absent or null only on a replayed response stored before 21-2b
      */
     clientId?: string | null;
+    /**
+     * Story 1-3 — the vendor as it was when the PO was created (copied to a close successor; never rewritten by a later partner edit). Absent or null only on a replayed response stored before 1-3
+     */
+    vendorSnapshot?: VendorSnapshotDto | null;
     /**
      * Per-line ordered / received / open (detail and mutations; headers only on the list)
      */
@@ -3621,6 +3614,10 @@ export type CatalogSnapshotPoDto = {
     warehouseId: string;
     vendorId: string;
     /**
+     * Story 1-3 — the vendor's name as the PO froze it (the handheld's receive card shows it; an older server omits it)
+     */
+    vendorName: string;
+    /**
      * Per-line ordered / received / open quantities
      */
     lines: Array<PurchaseOrderLineDto>;
@@ -5140,7 +5137,11 @@ export type SuggestedPoDto = {
     warehouseId: string;
     skuId: string;
     /**
-     * The suggested vendor, null when the tenant carried no default
+     * Story 1-3 — the SKU's client: the draft's vendor must be an active vendor linked to it
+     */
+    clientId: string;
+    /**
+     * The suggested vendor — the SKU's client's default vendor at detection; null when the client had none
      */
     vendorId: string | null;
     /**
@@ -6419,9 +6420,9 @@ export type AuditExportRequestDto = {
      */
     actionPrefix?: string;
     /**
-     * Only actions on this kind of target
+     * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -6446,9 +6447,9 @@ export type AuditFilterBaseDto = {
      */
     actionPrefix?: string;
     /**
-     * Only actions on this kind of target
+     * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -6785,6 +6786,195 @@ export type UpdateClientContactDto = {
      * true makes this the primary contact (the previous primary is cleared). false is refused — make another contact primary instead
      */
     isPrimary?: boolean;
+};
+
+export type PartnerLinkDto = {
+    id: string;
+    clientId: string;
+    role: 'vendor' | 'consignee';
+    active: boolean;
+    /**
+     * The client's default vendor (at most one per client)
+     */
+    isDefault: boolean;
+    /**
+     * The client's own code for the partner
+     */
+    clientCode: string | null;
+};
+
+export type PartnerDto = {
+    id: string;
+    tenantId: string;
+    code: string;
+    /**
+     * The display name
+     */
+    name: string;
+    legalName: string | null;
+    gstin: string | null;
+    pan: string | null;
+    roles: Array<'vendor' | 'consignee' | 'transporter'>;
+    registeredAddress: PartnerAddressDto | null;
+    dispatchAddress: PartnerAddressDto | null;
+    contactName: string | null;
+    contactPhone: string | null;
+    contactEmail: string | null;
+    status: 'active' | 'inactive';
+    /**
+     * Why it is inactive (null while active)
+     */
+    inactiveReason: string | null;
+    links: Array<PartnerLinkDto>;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last-mutation time
+     */
+    updatedAt: string;
+};
+
+export type PartnerListResponse = {
+    items: Array<PartnerDto>;
+    nextCursor: string | null;
+};
+
+export type PartnerAddressInputDto = {
+    line1: string;
+    /**
+     * Omit (or null) when there is none
+     */
+    line2?: string | null;
+    city: string;
+    /**
+     * A two-digit GST registration state code
+     */
+    stateCode: string;
+    /**
+     * Six digits, as text
+     */
+    pincode: string;
+};
+
+export type CreatePartnerDto = {
+    /**
+     * The registered legal name
+     */
+    legalName?: string | null;
+    /**
+     * One GST registration — unique per tenant (409 `partner-gstin-taken` names the holder). Uppercased; absent for an unregistered supplier
+     */
+    gstin?: string | null;
+    /**
+     * Derived from the GSTIN's characters 3-12 when absent and a GSTIN is present; a different PAN is 400 `pan-gstin-mismatch`
+     */
+    pan?: string | null;
+    /**
+     * The registered address — its state must be the GSTIN's (400 `gstin-state-mismatch`)
+     */
+    registeredAddress?: PartnerAddressInputDto | null;
+    /**
+     * Where goods ship from (or to, for a consignee)
+     */
+    dispatchAddress?: PartnerAddressInputDto | null;
+    contactName?: string | null;
+    contactPhone?: string | null;
+    contactEmail?: string | null;
+    /**
+     * Unique per tenant (409 `partner-code-taken`); trimmed, case kept
+     */
+    code: string;
+    /**
+     * The display name
+     */
+    name: string;
+    /**
+     * The roles the partner plays (at least one)
+     */
+    roles: Array<'vendor' | 'consignee' | 'transporter'>;
+};
+
+export type PartnerResponse = {
+    partner: PartnerDto;
+};
+
+export type UpdatePartnerDto = {
+    /**
+     * The registered legal name
+     */
+    legalName?: string | null;
+    /**
+     * One GST registration — unique per tenant (409 `partner-gstin-taken` names the holder). Uppercased; absent for an unregistered supplier
+     */
+    gstin?: string | null;
+    /**
+     * Derived from the GSTIN's characters 3-12 when absent and a GSTIN is present; a different PAN is 400 `pan-gstin-mismatch`
+     */
+    pan?: string | null;
+    /**
+     * The registered address — its state must be the GSTIN's (400 `gstin-state-mismatch`)
+     */
+    registeredAddress?: PartnerAddressInputDto | null;
+    /**
+     * Where goods ship from (or to, for a consignee)
+     */
+    dispatchAddress?: PartnerAddressInputDto | null;
+    contactName?: string | null;
+    contactPhone?: string | null;
+    contactEmail?: string | null;
+    code?: string;
+    name?: string;
+    /**
+     * The full new role set. Removing vendor or consignee while an active link carries it is 409 `partner-role-in-use`
+     */
+    roles?: Array<'vendor' | 'consignee' | 'transporter'>;
+};
+
+export type UpdatePartnerStatusDto = {
+    /**
+     * `inactive` keeps the partner off new documents (open POs keep receiving); `active` restores it and clears the reason
+     */
+    status: 'active' | 'inactive';
+    /**
+     * Why it was deactivated — only with `inactive`
+     */
+    reason?: string | null;
+};
+
+export type CreatePartnerLinkDto = {
+    /**
+     * The client (the tenant's own `self` client included)
+     */
+    clientId: string;
+    /**
+     * vendor or consignee — a transporter is never linked (400 `link-role-invalid`)
+     */
+    role: 'vendor' | 'consignee' | 'transporter';
+    /**
+     * The client's own code for this partner — trimmed, case kept; unique per client and role
+     */
+    clientCode?: string | null;
+    /**
+     * Make it the client's default vendor (vendor links only; the previous default is cleared)
+     */
+    isDefault?: boolean;
+};
+
+export type UpdatePartnerLinkDto = {
+    /**
+     * Absent unchanged, null clears
+     */
+    clientCode?: string | null;
+    /**
+     * false switches the link off (and clears its default); true switches it back on
+     */
+    active?: boolean;
+    /**
+     * true makes it the client's default vendor; false clears it
+     */
+    isDefault?: boolean;
 };
 
 export type RateCardLineResponseDto = {
@@ -11916,99 +12106,6 @@ export type InventoryControllerGetSerialResponses = {
 
 export type InventoryControllerGetSerialResponse = InventoryControllerGetSerialResponses[keyof InventoryControllerGetSerialResponses];
 
-export type InboundControllerListVendorsData = {
-    body?: never;
-    path: {
-        /**
-         * Owning tenant (must match the session)
-         */
-        tenantId: string;
-    };
-    query?: {
-        /**
-         * Opaque keyset cursor from the previous page
-         */
-        cursor?: string;
-        limit?: number;
-    };
-    url: '/tenants/{tenantId}/vendors';
-};
-
-export type InboundControllerListVendorsErrors = {
-    /**
-     * Malformed cursor (invalid-cursor) or out-of-range limit (validation-failed)
-     */
-    400: ProblemDetailsDto;
-    /**
-     * Missing or invalid session token
-     */
-    401: ProblemDetailsDto;
-    /**
-     * Session belongs to another tenant (permission-denied)
-     */
-    403: ProblemDetailsDto;
-};
-
-export type InboundControllerListVendorsError = InboundControllerListVendorsErrors[keyof InboundControllerListVendorsErrors];
-
-export type InboundControllerListVendorsResponses = {
-    200: VendorListResponse;
-};
-
-export type InboundControllerListVendorsResponse = InboundControllerListVendorsResponses[keyof InboundControllerListVendorsResponses];
-
-export type InboundControllerCreateVendorData = {
-    body: CreateVendorDto;
-    headers: {
-        /**
-         * Client-generated ULID key; replays return the original response
-         */
-        'Idempotency-Key': string;
-    };
-    path: {
-        /**
-         * Owning tenant (must match the session)
-         */
-        tenantId: string;
-    };
-    query?: never;
-    url: '/tenants/{tenantId}/vendors';
-};
-
-export type InboundControllerCreateVendorErrors = {
-    /**
-     * Missing or malformed Idempotency-Key, or invalid body
-     */
-    400: ProblemDetailsDto;
-    /**
-     * Missing or invalid session token
-     */
-    401: ProblemDetailsDto;
-    /**
-     * Session belongs to another tenant (permission-denied), or the caller lacks vendor.manage (role-denied)
-     */
-    403: ProblemDetailsDto;
-    /**
-     * Vendor code already in use (conflict, naming the code), or a concurrent idempotent request (conflict)
-     */
-    409: ProblemDetailsDto;
-    /**
-     * Idempotency key reused with a different payload (idempotency-key-reuse)
-     */
-    422: ProblemDetailsDto;
-};
-
-export type InboundControllerCreateVendorError = InboundControllerCreateVendorErrors[keyof InboundControllerCreateVendorErrors];
-
-export type InboundControllerCreateVendorResponses = {
-    /**
-     * Vendor created (the idempotency snapshot)
-     */
-    201: VendorResponse;
-};
-
-export type InboundControllerCreateVendorResponse = InboundControllerCreateVendorResponses[keyof InboundControllerCreateVendorResponses];
-
 export type InboundControllerCreatePurchaseOrderData = {
     body: CreatePurchaseOrderDto;
     headers: {
@@ -12041,11 +12138,11 @@ export type InboundControllerCreatePurchaseOrderErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Warehouse, vendor, or a line's SKU does not exist in this tenant (not-found)
+     * Warehouse, a line's SKU, or the vendor does not exist in this tenant (not-found — the SKU's 404 wins over the vendor's)
      */
     404: ProblemDetailsDto;
     /**
-     * PO code already in use (conflict, naming the code), or a concurrent idempotent request (conflict)
+     * PO code already in use (conflict, naming the code); lines spanning clients (mixed-client); a departed client (client-departed); a partner without the vendor role (partner-not-vendor), an inactive vendor (vendor-inactive), or a vendor with no active link to the PO's client (vendor-not-linked, naming the client); or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -17789,9 +17886,9 @@ export type ReportingControllerAuditData = {
          */
         actionPrefix?: string;
         /**
-         * Only actions on this kind of target
+         * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor' | 'warehouse' | 'wave' | 'wave_policy' | 'zone';
+        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -18575,6 +18672,332 @@ export type ClientsControllerEditContactResponses = {
 };
 
 export type ClientsControllerEditContactResponse = ClientsControllerEditContactResponses[keyof ClientsControllerEditContactResponses];
+
+export type PartnersControllerListPartnersData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Partners holding this role (with clientId: an active link in this role)
+         */
+        role?: 'vendor' | 'consignee' | 'transporter';
+        /**
+         * Partners with an ACTIVE link to this client
+         */
+        clientId?: string;
+        status?: 'active' | 'inactive';
+        /**
+         * Matches code, name, legal name or GSTIN (case-insensitive, literal)
+         */
+        q?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/partners';
+};
+
+export type PartnersControllerListPartnersErrors = {
+    /**
+     * A malformed filter, cursor or limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PartnersControllerListPartnersError = PartnersControllerListPartnersErrors[keyof PartnersControllerListPartnersErrors];
+
+export type PartnersControllerListPartnersResponses = {
+    200: PartnerListResponse;
+};
+
+export type PartnersControllerListPartnersResponse = PartnersControllerListPartnersResponses[keyof PartnersControllerListPartnersResponses];
+
+export type PartnersControllerCreatePartnerData = {
+    body: CreatePartnerDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/partners';
+};
+
+export type PartnersControllerCreatePartnerErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a field that breaks its rule (validation-failed, naming the field); a PAN other than the GSTIN's (pan-gstin-mismatch); a GSTIN of another state than the registered address (gstin-state-mismatch)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks vendor.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The code is taken (partner-code-taken), the GSTIN belongs to another partner (partner-gstin-taken, naming it), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PartnersControllerCreatePartnerError = PartnersControllerCreatePartnerErrors[keyof PartnersControllerCreatePartnerErrors];
+
+export type PartnersControllerCreatePartnerResponses = {
+    /**
+     * The created partner, active (a matching Idempotency-Key replays it)
+     */
+    201: PartnerResponse;
+};
+
+export type PartnersControllerCreatePartnerResponse = PartnersControllerCreatePartnerResponses[keyof PartnersControllerCreatePartnerResponses];
+
+export type PartnersControllerUpdatePartnerData = {
+    body: UpdatePartnerDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        partnerId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/partners/{partnerId}';
+};
+
+export type PartnersControllerUpdatePartnerErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a field that breaks its rule (validation-failed / pan-gstin-mismatch / gstin-state-mismatch)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks vendor.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No partner with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * partner-code-taken, partner-gstin-taken, a role removed while an active link carries it (partner-role-in-use), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PartnersControllerUpdatePartnerError = PartnersControllerUpdatePartnerErrors[keyof PartnersControllerUpdatePartnerErrors];
+
+export type PartnersControllerUpdatePartnerResponses = {
+    200: PartnerResponse;
+};
+
+export type PartnersControllerUpdatePartnerResponse = PartnersControllerUpdatePartnerResponses[keyof PartnersControllerUpdatePartnerResponses];
+
+export type PartnersControllerUpdatePartnerStatusData = {
+    body: UpdatePartnerStatusDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        partnerId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/partners/{partnerId}/status';
+};
+
+export type PartnersControllerUpdatePartnerStatusErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an unknown status, or a reason with `active` (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks vendor.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No partner with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PartnersControllerUpdatePartnerStatusError = PartnersControllerUpdatePartnerStatusErrors[keyof PartnersControllerUpdatePartnerStatusErrors];
+
+export type PartnersControllerUpdatePartnerStatusResponses = {
+    200: PartnerResponse;
+};
+
+export type PartnersControllerUpdatePartnerStatusResponse = PartnersControllerUpdatePartnerStatusResponses[keyof PartnersControllerUpdatePartnerStatusResponses];
+
+export type PartnersControllerCreatePartnerLinkData = {
+    body: CreatePartnerLinkDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        partnerId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/partners/{partnerId}/links';
+};
+
+export type PartnersControllerCreatePartnerLinkErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed body (validation-failed), or a transporter / a role the partner lacks (link-role-invalid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks vendor.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such partner or client in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The link already exists (link-exists, naming linkId), the partner is inactive (partner-inactive), the client has departed (client-departed), the client code is taken (link-client-code-taken), a concurrent default (default-vendor-conflict), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PartnersControllerCreatePartnerLinkError = PartnersControllerCreatePartnerLinkErrors[keyof PartnersControllerCreatePartnerLinkErrors];
+
+export type PartnersControllerCreatePartnerLinkResponses = {
+    /**
+     * The partner, its new link included
+     */
+    201: PartnerResponse;
+};
+
+export type PartnersControllerCreatePartnerLinkResponse = PartnersControllerCreatePartnerLinkResponses[keyof PartnersControllerCreatePartnerLinkResponses];
+
+export type PartnersControllerUpdatePartnerLinkData = {
+    body: UpdatePartnerLinkDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        partnerId: string;
+        linkId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/partners/{partnerId}/links/{linkId}';
+};
+
+export type PartnersControllerUpdatePartnerLinkErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed body, a default on a switched-off or consignee link (validation-failed), or a reactivation the partner's roles no longer allow (link-role-invalid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks vendor.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such partner, or no such link on it (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * partner-inactive, client-departed, link-client-code-taken, default-vendor-conflict, or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PartnersControllerUpdatePartnerLinkError = PartnersControllerUpdatePartnerLinkErrors[keyof PartnersControllerUpdatePartnerLinkErrors];
+
+export type PartnersControllerUpdatePartnerLinkResponses = {
+    200: PartnerResponse;
+};
+
+export type PartnersControllerUpdatePartnerLinkResponse = PartnersControllerUpdatePartnerLinkResponses[keyof PartnersControllerUpdatePartnerLinkResponses];
 
 export type RateCardsControllerInForceData = {
     body?: never;

@@ -115,6 +115,7 @@ beforeEach(() => {
           tenantId: TENANT_ID,
           warehouseId: 'wh-1',
           vendorId: 'v-1',
+          vendorSnapshot: { v: 1, code: 'V-1', name: 'Prime Foods', legalName: null, gstin: null, stateCode: null, registeredAddress: null, dispatchAddress: null },
           code: 'PO-0004',
           status: 'open',
           carriedFromPoId: null,

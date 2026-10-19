@@ -25,7 +25,7 @@ export default async function SettingsPage({
     <section className="flex flex-col gap-6">
       <SurfacePlaceholder
         title="Settings"
-        description="Includes device enrollment, the team's users and roles, the warehouse floor setup, the clients whose goods you hold and their rate cards, the catalog import, and the setup checklist (which aggregates completion state across onboarding stories)."
+        description="Includes device enrollment, the team's users and roles, the warehouse floor setup, the clients whose goods you hold and their rate cards, the business partners (vendors, consignees and transporters) and the clients each trades with, the catalog import, and the setup checklist (which aggregates completion state across onboarding stories)."
       />
       <SetupChecklistCard />
       {/* Settings takes no drill, so the key is the tab alone. */}
