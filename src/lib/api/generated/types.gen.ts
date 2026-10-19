@@ -278,6 +278,10 @@ export type CreateBinDto = {
      */
     storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
     /**
+     * Story 1-5b: the client this bin is dedicated to — it then refuses any other client's stock in putaway, merge and transfer receive. Omit (or null) for a shared bin. Unknown client 404; a departed client 409 client-departed.
+     */
+    dedicatedClientId?: string | null;
+    /**
      * The bin's location type (12-4 vocabulary). A bulk asset (tank, silo) is weight-defined: maxWeightGrams is REQUIRED at create and can never be cleared; a bulk asset is never gridded.
      */
     type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard' | 'tank' | 'silo';
@@ -310,6 +314,10 @@ export type BinResponse = {
      */
     maxWeightGrams: number | null;
     storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    /**
+     * Story 1-5b: the client this bin is dedicated to (null = shared)
+     */
+    dedicatedClientId: string | null;
     type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard' | 'tank' | 'silo';
     blocked: boolean;
     /**
@@ -363,6 +371,10 @@ export type GenerateBinsDto = {
      */
     storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
     /**
+     * Story 1-5b: the client every generated bin is dedicated to (decision 1: the generator can dedicate a whole new grid) — it then refuses any other client's stock in putaway, merge and transfer receive. Omit (or null) for shared bins. Unknown client 404; a departed client 409 client-departed.
+     */
+    dedicatedClientId?: string | null;
+    /**
      * The location type, per bin (12-4 vocabulary). A bulk asset (tank, silo) is never gridded — the grid mints only the six conventional storage types.
      */
     type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard';
@@ -412,6 +424,10 @@ export type PatchBinDto = {
      * The bin's storage class (FR-40). Omit to leave unchanged. Mutually exclusive with blocked.
      */
     storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    /**
+     * Story 1-5b: the client this bin is dedicated to. Omit to leave unchanged; null to clear (shared — always allowed); a client id to dedicate. Refused on a system bin (400 validation-failed); an unknown client 404; a departed client 409 client-departed; a bin holding another client's stock or open QC holds 409 bin-client-conflict naming the SKUs. Mutually exclusive with blocked.
+     */
+    dedicatedClientId?: string | null;
 };
 
 export type MergeBinDto = {
@@ -3844,6 +3860,10 @@ export type PutawayBinDto = {
      * Story 12.8 (UX-DR29): the bin's storage class (defaults to `ambient`). It rides the snapshot beside the SKU arm's class (the catalog snapshot) so the device's offline conformance mirror can refuse a non-conforming placement in the Rejected banner — before anything queues.
      */
     storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    /**
+     * Story 1-5b: the client this bin is dedicated to (null = shared). A dedicated bin refuses any other client's stock; the device mirrors the rule offline (the snapshot `clients` arm names the client), the server re-gates at placement and transfer receive.
+     */
+    dedicatedClientId: string | null;
 };
 
 export type SuggestedBinDto = {
@@ -9317,11 +9337,11 @@ export type TenancyControllerCreateBinErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Warehouse or zone does not exist in this tenant (not-found)
+     * Warehouse or zone does not exist in this tenant, or the dedicated client does not exist (not-found, story 1-5b)
      */
     404: ProblemDetailsDto;
     /**
-     * Bin code already exists in this warehouse (duplicate-bin-code names the code), or the code is RETURNS — reserved for the system returns bin (reserved-location-code, story 13-2)
+     * Bin code already exists in this warehouse (duplicate-bin-code names the code), the code is RETURNS — reserved for the system returns bin (reserved-location-code, story 13-2), or the dedicated client has departed (client-departed, story 1-5b)
      */
     409: ProblemDetailsDto;
     /**
@@ -9372,11 +9392,11 @@ export type TenancyControllerGenerateBinGridErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Warehouse or zone does not exist in this tenant (not-found)
+     * Warehouse or zone does not exist in this tenant, or the dedicated client does not exist (not-found, story 1-5b)
      */
     404: ProblemDetailsDto;
     /**
-     * A generated code collides (duplicate-bin-code names the first conflicting code; nothing committed), or a generated code is RETURNS (reserved-location-code, story 13-2)
+     * A generated code collides (duplicate-bin-code names the first conflicting code; nothing committed), a generated code is RETURNS (reserved-location-code, story 13-2), or the dedicated client has departed (client-departed, story 1-5b)
      */
     409: ProblemDetailsDto;
     /**
@@ -9415,7 +9435,7 @@ export type TenancyControllerSetBinBlockedData = {
 
 export type TenancyControllerSetBinBlockedErrors = {
     /**
-     * Missing or malformed Idempotency-Key, invalid body, a system bin on the blocked arm (validation-failed names the bin — the capacity arm deliberately permits system bins), a body mixing blocked with capacity attributes, a body carrying neither (validation-failed), or a non-boolean blocked (validation-failed)
+     * Missing or malformed Idempotency-Key, invalid body, a system bin on the blocked arm (validation-failed names the bin — the capacity arm deliberately permits system bins), a system bin given a dedicated client (validation-failed, story 1-5b), a body mixing blocked with capacity attributes or a dedicated client, a body carrying neither (validation-failed), or a non-boolean blocked (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -9427,11 +9447,11 @@ export type TenancyControllerSetBinBlockedErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Bin does not exist in this warehouse (not-found)
+     * Bin does not exist in this warehouse, or the dedicated client does not exist (not-found)
      */
     404: ProblemDetailsDto;
     /**
-     * The bin is retired (bin-retired — retirement is terminal)
+     * The bin is retired (bin-retired — retirement is terminal), a storage-class change would strand stock (storage-class-conflict), the dedicated client has departed (client-departed, story 1-5b), or the bin holds another client's stock or open QC holds (bin-client-conflict names up to 10 SKUs, story 1-5b)
      */
     409: ProblemDetailsDto;
     /**
@@ -9473,7 +9493,7 @@ export type TenancyControllerMergeBinData = {
 
 export type TenancyControllerMergeBinErrors = {
     /**
-     * Missing or malformed Idempotency-Key, a structural guard (validation-failed / bin-retired / bin-blocked — a blocked SOURCE is allowed, the only way to empty a blocked bin; only the target must be live), a target overflow (bin-full names capacity and occupancy), the target over its physical limits (bin-overweight / bin-volume-exceeded / bin-item-oversize, story 11-5), a source SKU the target bin's class cannot satisfy (bin-storage-mismatch naming both classes — story 12-1), or an incompatible co-located pair (bin-segregation-conflict naming both SKUs and both classes — story 12-2; nothing committed in any arm)
+     * Missing or malformed Idempotency-Key, a structural guard (validation-failed / bin-retired / bin-blocked — a blocked SOURCE is allowed, the only way to empty a blocked bin; only the target must be live), a target overflow (bin-full names capacity and occupancy), the target over its physical limits (bin-overweight / bin-volume-exceeded / bin-item-oversize, story 11-5), a source SKU the target bin's class cannot satisfy (bin-storage-mismatch naming both classes — story 12-1), an incompatible co-located pair (bin-segregation-conflict naming both SKUs and both classes — story 12-2), or a source SKU of another client than the target's dedicated client (bin-client-mismatch naming the bin, its client and the SKU — story 1-5b; nothing committed in any arm)
      */
     400: ProblemDetailsDto;
     /**
@@ -15070,7 +15090,7 @@ export type PutawayControllerPlacePutawayData = {
 
 export type PutawayControllerPlacePutawayErrors = {
     /**
-     * Missing or malformed Idempotency-Key, an invalid body, a system target bin (validation-failed naming the bin), a blocked bin (bin-blocked naming the bin), a full bin (bin-full naming the bin, its capacity and occupancy), over its physical limits (bin-overweight / bin-volume-exceeded naming the bin, the limit and the load; bin-item-oversize naming the bin, the dimension and both sizes — story 11-5), a bin whose class cannot satisfy the SKU (bin-storage-mismatch naming both classes — story 12-1), an incompatible co-located pair (bin-segregation-conflict naming both SKUs and both classes — story 12-2), an over-place (validation-failed naming the remaining quantity), a missing/malformed mismatch reason, or a serial-arm violation (validation-failed)
+     * Missing or malformed Idempotency-Key, an invalid body, a system target bin (validation-failed naming the bin), a blocked bin (bin-blocked naming the bin), a full bin (bin-full naming the bin, its capacity and occupancy), over its physical limits (bin-overweight / bin-volume-exceeded naming the bin, the limit and the load; bin-item-oversize naming the bin, the dimension and both sizes — story 11-5), a bin whose class cannot satisfy the SKU (bin-storage-mismatch naming both classes — story 12-1), a bin dedicated to another client than the SKU's (bin-client-mismatch naming the bin, its client and the SKU — story 1-5b), an incompatible co-located pair (bin-segregation-conflict naming both SKUs and both classes — story 12-2), an over-place (validation-failed naming the remaining quantity), a missing/malformed mismatch reason (none is needed when the target equals the re-derived suggestion with or without the own-client preference — story 1-5b), or a serial-arm violation (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -15816,7 +15836,7 @@ export type MovementsControllerConfirmInboundErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The order is not in_transit (transfer-wrong-state), the scanned bin's state epoch is stale (transfer-bin-changed — the mobile client re-plans), or a destination placement gate refused — retired, blocked, storage-class mismatch (bin-retired, bin-blocked, bin-storage-mismatch), hazard co-location (bin-segregation-conflict), bulk-asset occupancy (bin-occupancy-conflict), or the load gates (bin-full, bin-overweight, bin-volume-exceeded, bin-item-oversize) — the order stays in_transit; or a concurrent idempotent request (conflict)
+     * The order is not in_transit (transfer-wrong-state), the scanned bin's state epoch is stale (transfer-bin-changed — the mobile client re-plans), or a destination placement gate refused — retired, blocked, storage-class mismatch (bin-retired, bin-blocked, bin-storage-mismatch), a landing SKU of another client than the bin's dedicated client (bin-client-mismatch naming the bin, its client and the SKU — story 1-5b; the receive-time landing-bin override recovers it), hazard co-location (bin-segregation-conflict), bulk-asset occupancy (bin-occupancy-conflict), or the load gates (bin-full, bin-overweight, bin-volume-exceeded, bin-item-oversize) — the order stays in_transit; or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**

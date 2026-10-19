@@ -180,7 +180,7 @@ export const tenancyControllerGenerateBinGrid = <ThrowOnError extends boolean = 
 });
 
 /**
- * Blocks or unblocks a bin (Story 3.6: never a system or retired bin), or edits its capacity attributes (Story 11-5: dimensions and max weight — tenancy owns the structure)
+ * Blocks or unblocks a bin (Story 3.6: never a system or retired bin), or edits its structure (Story 11-5: dimensions and max weight; 12-1: storage class; 1-5b: dedicated client — tenancy owns the structure)
  */
 export const tenancyControllerSetBinBlocked = <ThrowOnError extends boolean = false>(options: Options<TenancyControllerSetBinBlockedData, ThrowOnError>): RequestResult<TenancyControllerSetBinBlockedResponses, TenancyControllerSetBinBlockedErrors, ThrowOnError> => (options.client ?? client).patch<TenancyControllerSetBinBlockedResponses, TenancyControllerSetBinBlockedErrors, ThrowOnError>({
     security: [{

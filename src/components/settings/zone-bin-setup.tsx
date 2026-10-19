@@ -13,10 +13,24 @@ import {
   fetchApiRetireBin,
   fetchApiSetBinBlocked,
 } from '@/lib/api/client';
-import type { BinResponse, GenerateBinsDto, PatchBinDto, ZoneResponse } from '@/lib/api/generated';
+import type { BinResponse, ClientDto, GenerateBinsDto, PatchBinDto, ZoneResponse } from '@/lib/api/generated';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { binClassReason, STORAGE_CLASSES } from '@/lib/sku-admin';
+import {
+  BIN_CLIENTS_UNAVAILABLE,
+  binClientCell,
+  binClientOptions,
+  binClientPatch,
+  binClientReason,
+  binClientSavedWord,
+  dedicatedClientBody,
+  mergeTargetLabel,
+  type BinClientOption,
+} from '@/lib/bin-clients';
+import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
+import { showClients } from '@/lib/clients';
+import { useClients } from '@/lib/use-clients';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
@@ -113,6 +127,12 @@ function ZonesBinsSetupSessioned() {
   const selectedZoneId =
     zoneId !== null && zones?.some((z) => z.id === zoneId) ? zoneId : (zones?.[0]?.id ?? null);
   const bins = useZoneBins(warehouseId, selectedZoneId);
+  // Story 1-5b — every client (departed included), never the 1.5a switcher's
+  // pick (decision 13): bin admin is master data. `clientList` is non-null
+  // only for a MULTI-client tenant; a single-client tenant sees nothing new.
+  const clientsRead = useClients();
+  const clientList =
+    clientsRead.state === 'ready' && showClients(clientsRead.data) ? clientsRead.data : null;
 
   if (warehouseRead.state === 'failed') {
     return (
@@ -183,6 +203,18 @@ function ZonesBinsSetupSessioned() {
       {warehouseRead.state === 'ready' && warehouseRead.data.refreshFailed !== null && (
         <WarehousesRefreshNote reason={warehouseRead.data.refreshFailed} onRetry={warehouseRead.reload} />
       )}
+      {clientsRead.state === 'failed' && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-(--muted-foreground)">
+          <span>{BIN_CLIENTS_UNAVAILABLE}</span>
+          <button
+            type="button"
+            onClick={() => clientsRead.reload()}
+            className="rounded-sm border border-(--border) px-2 py-1 hover:bg-(--muted)"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {zones === null ? (
         <div className="text-(--muted-foreground)">Loading zones…</div>
       ) : (
@@ -200,6 +232,7 @@ function ZonesBinsSetupSessioned() {
               tenantId={tenantId}
               warehouseId={warehouseId}
               zones={zones}
+              clients={clientList}
             />
           )}
           <ZoneBinsTable
@@ -211,6 +244,7 @@ function ZonesBinsSetupSessioned() {
             bins={bins}
             canBlockBin={canBlockBin}
             canRetireBin={canRetireBin}
+            clients={clientList}
           />
         </>
       )}
@@ -344,20 +378,49 @@ function BinTypePicker({
   );
 }
 
+/** Story 1-5b — the dedicated-client select (create, grid and the Edit-client panel). */
+function BinClientPicker({
+  value,
+  onChange,
+  options,
+  label = 'Client',
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly BinClientOption[];
+  label?: string;
+}) {
+  return (
+    <label className="flex flex-1 flex-col gap-1">
+      <span className={labelClass}>{label}</span>
+      <select className={selectClass} value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map((option) => (
+          <option key={option.value} value={option.value} disabled={option.disabled}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 /** The grid generator and the manual single-bin form, side by side. */
 function BinFormsRow({
   tenantId,
   warehouseId,
   zones,
+  clients,
 }: {
   tenantId: string;
   warehouseId: string;
   zones: readonly ZoneResponse[];
+  /** Story 1-5b — the clients of a multi-client tenant, else null (no client field). */
+  clients: readonly ClientDto[] | null;
 }) {
   return (
     <div className="grid gap-3 lg:grid-cols-2">
-      <GridGeneratorForm tenantId={tenantId} warehouseId={warehouseId} zones={zones} />
-      <ManualBinForm tenantId={tenantId} warehouseId={warehouseId} zones={zones} />
+      <GridGeneratorForm tenantId={tenantId} warehouseId={warehouseId} zones={zones} clients={clients} />
+      <ManualBinForm tenantId={tenantId} warehouseId={warehouseId} zones={zones} clients={clients} />
     </div>
   );
 }
@@ -366,11 +429,15 @@ function GridGeneratorForm({
   tenantId,
   warehouseId,
   zones,
+  clients,
 }: {
   tenantId: string;
   warehouseId: string;
   zones: readonly ZoneResponse[];
+  clients: readonly ClientDto[] | null;
 }) {
+  // Story 1-5b — '' = Shared (the default); the grid can dedicate a whole run.
+  const [clientChoice, setClientChoice] = useState('');
   const [zoneId, setZoneId] = useState<string | null>(null);
   const [aisleFrom, setAisleFrom] = useState('A');
   const [aisleTo, setAisleTo] = useState('A');
@@ -399,6 +466,7 @@ function GridGeneratorForm({
           levelsPerBay: Number(levels),
           capacity: Number(capacity),
           type: type as GridBinType,
+          ...(clients === null ? {} : dedicatedClientBody(clientChoice)),
         },
         ulid(),
       );
@@ -409,7 +477,11 @@ function GridGeneratorForm({
       });
       notifyZonesChanged();
     } catch (error) {
-      setOutcome({ tone: 'rejected', word: 'Not generated', reason: rejectionReason(error) });
+      setOutcome({
+        tone: 'rejected',
+        word: 'Not generated',
+        reason: rejectionReason(error, undefined, clients !== null && clientChoice !== ''),
+      });
     } finally {
       setPending(false);
     }
@@ -486,6 +558,9 @@ function GridGeneratorForm({
         <div className="flex flex-1 flex-col justify-end">
           <BinTypePicker value={type} onChange={setType} options={GRID_TYPES} />
         </div>
+        {clients !== null && (
+          <BinClientPicker value={clientChoice} onChange={setClientChoice} options={binClientOptions(clients)} />
+        )}
         <button
           type="submit"
           disabled={pending}
@@ -503,11 +578,15 @@ function ManualBinForm({
   tenantId,
   warehouseId,
   zones,
+  clients,
 }: {
   tenantId: string;
   warehouseId: string;
   zones: readonly ZoneResponse[];
+  clients: readonly ClientDto[] | null;
 }) {
+  // Story 1-5b — '' = Shared (the default).
+  const [clientChoice, setClientChoice] = useState('');
   const [zoneId, setZoneId] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [capacity, setCapacity] = useState('120');
@@ -535,6 +614,7 @@ function ManualBinForm({
           capacity: Number(capacity),
           type: type as BinType,
           ...(isBulkAssetType(type) ? { maxWeightGrams: Number(maxWeightGrams) } : {}),
+          ...(clients === null ? {} : dedicatedClientBody(clientChoice)),
         },
         ulid(),
       );
@@ -547,7 +627,11 @@ function ManualBinForm({
       });
       notifyZonesChanged();
     } catch (error) {
-      setOutcome({ tone: 'rejected', word: 'Not created', reason: rejectionReason(error, code) });
+      setOutcome({
+        tone: 'rejected',
+        word: 'Not created',
+        reason: rejectionReason(error, code, clients !== null && clientChoice !== ''),
+      });
     } finally {
       setPending(false);
     }
@@ -583,6 +667,9 @@ function ManualBinForm({
         <div className="flex flex-1 flex-col justify-end">
           <BinTypePicker value={type} onChange={setType} />
         </div>
+        {clients !== null && (
+          <BinClientPicker value={clientChoice} onChange={setClientChoice} options={binClientOptions(clients)} />
+        )}
         {isBulkAssetType(type) && (
           <label className="flex flex-1 flex-col gap-1">
             <span className={labelClass}>Max weight (grams)</span>
@@ -631,6 +718,7 @@ function ZoneBinsTable({
   bins,
   canBlockBin,
   canRetireBin,
+  clients,
 }: {
   tenantId: string;
   warehouseId: string;
@@ -642,6 +730,8 @@ function ZoneBinsTable({
   canBlockBin: boolean;
   /** Story 3.6: merge/retire render only for `bin.retire` roles. */
   canRetireBin: boolean;
+  /** Story 1-5b — the clients of a multi-client tenant, else null (no column, no panel). */
+  clients: readonly ClientDto[] | null;
 }) {
   const [busyBinId, setBusyBinId] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
@@ -668,6 +758,12 @@ function ZoneBinsTable({
   // a second audit row for one intent (the inbound-cards pattern, checked
   // in both arms).
   const classEditInFlight = useRef<Set<string>>(new Set());
+  // Story 1-5b — the Edit-client panel (the Edit-class pattern): the picked
+  // bin (null = closed), its draft ('' = Shared) and the same synchronous
+  // re-entry guard.
+  const [clientEditingBin, setClientEditingBin] = useState<BinResponse | null>(null);
+  const [clientDraft, setClientDraft] = useState('');
+  const clientEditInFlight = useRef<Set<string>>(new Set());
   // The merge flow: the picked source bin (null = closed). The target picker
   // offers the WAREHOUSE's live bins (any zone), excluding system bins,
   // already-retired bins, and the source itself.
@@ -709,6 +805,39 @@ function ZoneBinsTable({
       setOutcome({ tone: 'rejected', word: 'Not updated', reason: binClassReason(error) });
     } finally {
       classEditInFlight.current.delete(classEditingBin.id);
+      setBusyBinId(null);
+    }
+  }
+
+  /** Story 1-5b — the Edit-client PATCH: `{ dedicatedClientId }` only
+   * (null = Shared). An unchanged pick sends NOTHING and closes the panel —
+   * so a bin kept on its (departed) current client never re-dedicates. A
+   * refusal renders through the lib mapper and the panel stays open. */
+  async function applyClientEdit() {
+    const session = readSession();
+    if (session === null || clientEditingBin === null || clients === null) return;
+    const body = binClientPatch(clientEditingBin.dedicatedClientId, clientDraft);
+    if (body === null) {
+      setClientEditingBin(null);
+      return;
+    }
+    if (clientEditInFlight.current.has(clientEditingBin.id)) return;
+    clientEditInFlight.current.add(clientEditingBin.id);
+    setBusyBinId(clientEditingBin.id);
+    setOutcome(null);
+    try {
+      const updated = await fetchApiSetBinBlocked(tenantId, warehouseId, clientEditingBin.id, body, ulid());
+      setOutcome({
+        tone: 'accepted',
+        word: binClientSavedWord(updated.code, updated.dedicatedClientId, clients),
+        reason: 'A dedicated bin refuses any other client\'s stock in putaway, merge and transfers; its own client\'s goods are suggested here first.',
+      });
+      setClientEditingBin(null);
+      bins?.reload();
+    } catch (error) {
+      setOutcome({ tone: 'rejected', word: 'Not updated', reason: binClientReason(error) });
+    } finally {
+      clientEditInFlight.current.delete(clientEditingBin.id);
       setBusyBinId(null);
     }
   }
@@ -833,6 +962,16 @@ function ZoneBinsTable({
   const canOperate = canBlockBin || canRetireBin || canEditClass;
   const columns: readonly DataTableColumn<BinResponse>[] = [
     ...binColumns,
+    // Story 1-5b — the dedicated client, resolved over ALL clients.
+    ...(clients === null
+      ? []
+      : [
+          {
+            key: 'client',
+            header: 'Client',
+            render: (bin: BinResponse) => binClientCell(bin.dedicatedClientId, clients),
+          } satisfies DataTableColumn<BinResponse>,
+        ]),
     {
       key: 'blocked',
       header: 'Status',
@@ -910,6 +1049,22 @@ function ZoneBinsTable({
                       Edit class
                     </button>
                   )}
+                  {/* Story 1-5b — the dedicated client's write path; the
+                      same gate and `inert` rule as Edit class. */}
+                  {canEditClass && clients !== null && (
+                    <button
+                      type="button"
+                      disabled={inert || busyBinId === bin.id}
+                      onClick={() => {
+                        setClientEditingBin(bin);
+                        setClientDraft(bin.dedicatedClientId ?? '');
+                        setOutcome(null);
+                      }}
+                      className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
+                    >
+                      Edit client
+                    </button>
+                  )}
                 </div>
               );
             },
@@ -958,6 +1113,38 @@ function ZoneBinsTable({
           </div>
         </div>
       )}
+      {clientEditingBin !== null && clients !== null && (
+        <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
+          <div className="text-xs text-(--muted-foreground)">
+            Dedicating <span className="font-mono">{clientEditingBin.code}</span> to a client — a
+            dedicated bin refuses every other client&apos;s stock. A bin still holding another
+            client&apos;s stock or QC holds is refused, naming them.
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <BinClientPicker
+              label="Dedicated to"
+              value={clientDraft}
+              onChange={setClientDraft}
+              options={binClientOptions(clients, clientEditingBin.dedicatedClientId ?? null)}
+            />
+            <button
+              type="button"
+              disabled={busyBinId === clientEditingBin.id}
+              onClick={() => applyClientEdit()}
+              className="self-end rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
+            >
+              {busyBinId === clientEditingBin.id ? 'Saving…' : 'Save client'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setClientEditingBin(null)}
+              className="self-end rounded-sm border border-(--border) px-3 py-2 text-sm hover:bg-(--muted)"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {mergeSource !== null && (
         <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
           <div className="text-xs text-(--muted-foreground)">
@@ -977,7 +1164,7 @@ function ZoneBinsTable({
                 .filter((bin) => !bin.blocked)
                 .map((bin) => (
                   <option key={bin.id} value={bin.id}>
-                    {bin.code}
+                    {mergeTargetLabel(bin, clients)}
                   </option>
                 ))}
             </select>
@@ -1020,7 +1207,7 @@ function ZoneBinsTable({
  * same convention as the warehouse form, extended with the new zone/bin
  * codes (spec 1.3).
  */
-function rejectionReason(error: unknown, attemptedCode?: string): string {
+function rejectionReason(error: unknown, attemptedCode?: string, withClient = false): string {
   if (error instanceof ApiProblem) {
     switch (error.code) {
       case 'duplicate-zone-code':
@@ -1037,7 +1224,10 @@ function rejectionReason(error: unknown, attemptedCode?: string): string {
       case 'grid-too-large':
         return error.detail ?? 'Narrow the aisle range, bays, or levels — 500 bins per run.';
       case 'not-found':
-        return 'That warehouse or zone no longer exists — refresh the page.';
+        // Story 1-5b: a create/grid naming a client can also miss on it.
+        return withClient
+          ? 'That warehouse, zone or client no longer exists — refresh the page.'
+          : 'That warehouse or zone no longer exists — refresh the page.';
       case 'idempotency-key-reuse':
         return 'This submission was already processed.';
       case 'unauthenticated':
@@ -1062,6 +1252,15 @@ function rejectionReason(error: unknown, attemptedCode?: string): string {
         return error.detail ?? 'The target bin is full — pick one with room.';
       case 'bin-blocked':
         return error.detail ?? 'The target bin is blocked — unblock it first.';
+      // Story 1-5b — dedicated client bins: the server's detail names the
+      // bin, its client and the other client's SKU (merge), or the SKUs a
+      // dedication would strand.
+      case 'bin-client-mismatch':
+        return error.detail ?? 'That bin is dedicated to another client — choose another bin.';
+      case 'bin-client-conflict':
+        return error.detail ?? "The bin holds another client's stock or QC holds — move them first.";
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       default:
         return error.detail ?? `Request failed (${error.code}).`;
     }
