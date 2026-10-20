@@ -3,6 +3,7 @@ import type { CreateSkuDto, SkuResponse } from '@/lib/api/generated';
 
 /** The create body (the generated DTO). */
 export type CreateSkuBody = CreateSkuDto;
+import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
 /**
@@ -123,6 +124,15 @@ export function binClassReason(error: unknown): string {
         // The backend's detail names the conflicting stock — the (sku, qty)
         // rows the class change strands — verbatim.
         return error.detail ?? 'The class change would strand stock that no longer fits the bin.';
+      // Story 1-5b — the dedicated-client arm of the same structure PATCH:
+      // the server's detail names the other client's SKUs (or the bin and
+      // the client) verbatim.
+      case 'bin-client-conflict':
+        return error.detail ?? "The bin holds another client's stock or QC holds — move them first.";
+      case 'bin-client-mismatch':
+        return error.detail ?? 'That bin is dedicated to another client — choose another bin.';
+      case 'client-departed':
+        return CLIENT_DEPARTED_REASON;
       case 'bin-retired':
         return error.detail ?? 'That bin is retired — retirement is terminal.';
       case 'not-found':
