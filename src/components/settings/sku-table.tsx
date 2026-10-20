@@ -42,6 +42,7 @@ import {
   goodsTypePatch,
   handlingCell,
   hazardSelectFor,
+  hazardSelectOnDgChange,
   hazardToSend,
   type GoodsTypeDraft,
 } from '@/lib/goods-type';
@@ -1033,7 +1034,7 @@ function SkuEditForm({
       <GoodsTypeFields
         draft={goods}
         onChange={setGoods}
-        onDgClassChange={(dgClass) => setHazardClass(hazardSelectFor(dgClass, storedHazard))}
+        onDgClassChange={(dgClass) => setHazardClass(hazardSelectOnDgChange(goods.dgClass, dgClass, hazardClass, storedHazard))}
       />
       <div className="flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 text-xs">

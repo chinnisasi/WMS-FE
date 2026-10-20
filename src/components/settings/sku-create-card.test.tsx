@@ -289,3 +289,49 @@ describe('story 1-5a: the active client and the SKU create card', () => {
     expect(clientSelect(view.container).value).toBe('');
   });
 });
+
+describe('story 1-6a: the create card hazard select follows the DG class', () => {
+  function select(container: HTMLElement, label: string): HTMLSelectElement {
+    return [...container.querySelectorAll('label')]
+      .find((node) => node.querySelector('span')?.textContent === label)!
+      .querySelector<HTMLSelectElement>('select')!;
+  }
+  function pick(sel: HTMLSelectElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(sel, value);
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+  async function fillBasics(container: HTMLElement): Promise<void> {
+    setInput(field(container, 'Code'), 'DG-NEW');
+    setInput(field(container, 'Name'), 'Drum');
+    setInput(field(container, 'GST %'), '18');
+  }
+
+  test('a hazard picked before DG class 8 resets to "Choose…"; Create sends nothing and says why', async () => {
+    view = await openForm();
+    await fillBasics(view.container);
+    pick(select(view.container, 'Hazard class'), 'toxic');
+    pick(select(view.container, 'DG class'), '8');
+    setInput(field(view.container, 'UN number'), '1830');
+    expect(select(view.container, 'Hazard class').value).toBe('');
+    submit(view.container);
+    await settle();
+    expect(requests.find((r) => r.method === 'POST')).toBeUndefined();
+    expect(view.container.textContent).toContain('DG class 8 needs its hazard class');
+  });
+
+  test('a free → free DG switch (9 → 4.1) keeps the picked hazard, and Create sends it', async () => {
+    view = await openForm();
+    await fillBasics(view.container);
+    pick(select(view.container, 'DG class'), '9');
+    pick(select(view.container, 'Hazard class'), 'toxic');
+    pick(select(view.container, 'DG class'), '4.1');
+    expect(select(view.container, 'Hazard class').value).toBe('toxic');
+    setInput(field(view.container, 'UN number'), '1325');
+    submit(view.container);
+    await settle();
+    expect(requests.find((r) => r.method === 'POST')!.body).toMatchObject({ dgClass: '4.1', dgUnNumber: '1325', hazardClass: 'toxic' });
+  });
+});

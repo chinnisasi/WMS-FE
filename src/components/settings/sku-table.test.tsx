@@ -1373,3 +1373,34 @@ describe('story 1-6a: goods-type attributes in the SKU table and edit form', () 
     expect(patchBody()).toMatchObject({ foodCategory: 'non-food', allergens: [] });
   });
 });
+
+describe('story 1-6a: the edit form hazard select follows the DG class', () => {
+  function selectByLabel(container: HTMLElement, label: string): HTMLSelectElement {
+    return [...container.querySelectorAll('form label')]
+      .find((l) => l.querySelector('span')?.textContent === label)!
+      .querySelector('select')!;
+  }
+  function pick(sel: HTMLSelectElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(sel, value);
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  test('a stored toxic SKU moved to DG class 8 reads "Choose…"; Save sends no PATCH and says why', async () => {
+    skuRows = [sku({ hazardClass: 'toxic' })];
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit')!;
+    act(() => edit.click());
+    await settle();
+    pick(selectByLabel(view.container, 'DG class'), '8');
+    const un = [...view.container.querySelectorAll('form label')].find((l) => l.querySelector('span')?.textContent === 'UN number')!.querySelector('input')!;
+    setInput(un, '1830');
+    expect(selectByLabel(view.container, 'Hazard class').value).toBe('');
+    submitForm(view.container);
+    await settle();
+    expect(requests.find((r) => r.method === 'PATCH')).toBeUndefined();
+    expect(view.container.textContent).toContain('DG class 8 needs its hazard class');
+  });
+});

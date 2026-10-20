@@ -334,6 +334,30 @@ export function hazardSelectFor(
 }
 
 /**
+ * The hazard select's value after the DG class moves from `previous` to
+ * `next`, given what the select holds now:
+ * - into a mapped class → the derived value (the select is disabled);
+ * - into class 8 → kept when it already holds acid, base or none, else the
+ *   class-8 start (`hazardSelectFor`);
+ * - free → free (9 → 4.1, '' → 9) → the current choice, untouched;
+ * - mapped or 8 → free → the stored hazard (decision 7 keeps it; '' on a create).
+ */
+export function hazardSelectOnDgChange(
+  previous: string,
+  next: string,
+  current: string,
+  stored: { readonly dgClass: string; readonly hazardClass: string },
+): string {
+  const control = hazardControl(next);
+  if (control.kind === 'derived') return control.value;
+  if (control.kind === 'corrosive') {
+    if (current === HAZARD_NONE || (CORROSIVE_HAZARDS as readonly string[]).includes(current)) return current;
+    return hazardSelectFor(next, stored);
+  }
+  return hazardControl(previous).kind === 'free' ? current : stored.hazardClass;
+}
+
+/**
  * The hazard key a save sends, from the select's value: `undefined` (omit —
  * the server keeps or derives it), a class, `null` (none / no rule), or a
  * problem keeping the form unsent.

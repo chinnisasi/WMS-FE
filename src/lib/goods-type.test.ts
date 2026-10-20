@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  ALLERGENS,
   allergensHint,
+  DG_CLASSES,
+  DG_CLASSES_WITHOUT_PACKING_GROUP,
+  DG_HAZARD_MAP,
+  DG_PACKING_GROUPS,
+  DRUG_SCHEDULES,
+  FOOD_CATEGORIES,
+  hazardSelectOnDgChange,
   dgBadge,
   emptyGoodsTypeDraft,
   goodsTypeCreateFields,
@@ -172,5 +180,73 @@ describe('goodsTypeCreateFields', () => {
         maxStackLayers: '1',
       }).body,
     ).toEqual({ drugSchedules: ['C', 'H'], dgClass: '3', dgUnNumber: '1230', dgSubsidiaryClasses: ['6.1'], highValue: false, fragile: true, maxStackLayers: 1 });
+  });
+});
+
+describe('the mirrors equal the backend tuples exactly (wms-be shared/primitives/goods-type.ts)', () => {
+  test('the vocabularies', () => {
+    expect([...DRUG_SCHEDULES]).toEqual(['G', 'H', 'H1', 'X', 'C', 'C1', 'NDPS']);
+    expect([...ALLERGENS]).toEqual(['gluten-cereals', 'crustaceans', 'milk', 'eggs', 'fish', 'peanuts', 'tree-nuts', 'soybean', 'sulphite']);
+    expect([...FOOD_CATEGORIES]).toEqual([
+      'dairy',
+      'meat-poultry-seafood',
+      'fresh-produce',
+      'bakery-cereals',
+      'ready-to-eat',
+      'beverages',
+      'oils-fats',
+      'spices-condiments',
+      'confectionery',
+      'packaged-dry-grocery',
+      'infant-food',
+      'other-food',
+      'non-food',
+    ]);
+    expect([...DG_CLASSES]).toEqual([
+      '1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '2.1', '2.2', '2.3', '3',
+      '4.1', '4.2', '4.3', '5.1', '5.2', '6.1', '6.2', '7', '8', '9',
+    ]);
+    expect([...DG_PACKING_GROUPS]).toEqual(['I', 'II', 'III']);
+  });
+
+  test('DG_HAZARD_MAP, exactly (decision 3)', () => {
+    expect(DG_HAZARD_MAP).toEqual({
+      '1.1': 'explosive',
+      '1.2': 'explosive',
+      '1.3': 'explosive',
+      '1.4': 'explosive',
+      '1.5': 'explosive',
+      '1.6': 'explosive',
+      '2.1': 'gas',
+      '2.2': 'gas',
+      '2.3': 'gas',
+      '3': 'flammable',
+      '5.1': 'oxidizer',
+      '6.1': 'toxic',
+    });
+  });
+
+  test('DG_CLASSES_WITHOUT_PACKING_GROUP, exactly', () => {
+    expect([...DG_CLASSES_WITHOUT_PACKING_GROUP]).toEqual(['1.1', '1.2', '1.3', '1.4', '1.5', '1.6', '2.1', '2.2', '2.3', '5.2', '6.2', '7']);
+  });
+});
+
+describe('hazardSelectOnDgChange', () => {
+  const none = { dgClass: '', hazardClass: '' };
+  test('free → free keeps the current pick', () => {
+    expect(hazardSelectOnDgChange('9', '4.1', 'toxic', none)).toBe('toxic');
+    expect(hazardSelectOnDgChange('', '9', 'gas', none)).toBe('gas');
+  });
+  test('into a mapped class → the derived value', () => {
+    expect(hazardSelectOnDgChange('9', '3', 'toxic', none)).toBe('flammable');
+  });
+  test('into class 8: a non-corrosive resets to "choose"; a corrosive or none is kept', () => {
+    expect(hazardSelectOnDgChange('', '8', 'toxic', none)).toBe('');
+    expect(hazardSelectOnDgChange('9', '8', 'corrosive-base', none)).toBe('corrosive-base');
+    expect(hazardSelectOnDgChange('', '8', 'toxic', { dgClass: '', hazardClass: 'corrosive-acid' })).toBe('corrosive-acid');
+  });
+  test('mapped or 8 → free → the stored hazard', () => {
+    expect(hazardSelectOnDgChange('3', '9', 'flammable', { dgClass: '3', hazardClass: 'flammable' })).toBe('flammable');
+    expect(hazardSelectOnDgChange('8', '', 'none', none)).toBe('');
   });
 });

@@ -29,7 +29,7 @@ import { useActiveClient } from '@/lib/use-active-client';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { PackagingEditor } from '@/components/settings/packaging-editor';
 import { GoodsTypeFields, HazardSelect } from '@/components/settings/goods-type-fields';
-import { hazardSelectFor } from '@/lib/goods-type';
+import { hazardSelectOnDgChange } from '@/lib/goods-type';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -287,8 +287,14 @@ function SkuCreateCardAllowed() {
           <GoodsTypeFields
             draft={draft.goods}
             onChange={(goods) => edit({ goods })}
-            // A create has no stored hazard: class 8 starts on "choose", a free class on "No rule".
-            onDgClassChange={(dgClass) => edit({ hazardClass: hazardSelectFor(dgClass, { dgClass: '', hazardClass: '' }) })}
+            // A create has no stored hazard: a free → free switch keeps the pick; class 8 starts
+            // on "choose" unless a corrosive or none is already picked; leaving a mapped class
+            // or 8 for a free one starts on "No rule".
+            onDgClassChange={(dgClass) =>
+              edit({
+                hazardClass: hazardSelectOnDgChange(draft.goods.dgClass, dgClass, draft.hazardClass, { dgClass: '', hazardClass: '' }),
+              })
+            }
           />
           <div className="flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2 text-xs">
