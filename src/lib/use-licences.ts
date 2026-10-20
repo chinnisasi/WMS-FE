@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiLicenceCoverage, fetchApiListLicences } from '@/lib/api/client';
-import type { CoverageGapDto, LicenceListItemDto } from '@/lib/api/generated';
+import { fetchApiLicenceCoverage, fetchApiLicencePolicy, fetchApiListLicences } from '@/lib/api/client';
+import type { CoverageGapDto, LicenceListItemDto, LicencePolicyResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { LICENCES_CHANGED_EVENT, knownGaps, knownLicences, licenceReason } from '@/lib/licences';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
@@ -71,4 +71,49 @@ export function useLicences(): ResourceState<LicencesView> & Reloadable & { refr
   const stale = tenantId === null || result === null || result.tenantId !== tenantId;
 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload, refresh };
+}
+
+/**
+ * Story 1-6d — the enforcement switch and the known gap count, the same
+ * house shape as `useLicences` (refetched on `LICENCES_CHANGED_EVENT`, so a
+ * licence write or the switch itself refreshes it).
+ */
+export function useLicencePolicy(): ResourceState<LicencePolicyResponse> & Reloadable {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{ tenantId: string; state: ResourceState<LicencePolicyResponse> } | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(LICENCES_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(LICENCES_CHANGED_EVENT, onChange);
+  }, []);
+
+  useEffect(() => {
+    if (tenantId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const policy = await fetchApiLicencePolicy(tenantId);
+        if (!cancelled) setResult({ tenantId, state: { state: 'ready', data: { enforce: policy.enforce, gapCount: policy.gapCount } } });
+      } catch (error) {
+        if (!cancelled) setResult({ tenantId, state: { state: 'failed', reason: licenceReason(error, 'read') } });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, revision]);
+
+  const reload = useCallback(() => {
+    setResult(null);
+    setRevision((r) => r + 1);
+  }, []);
+  const stale = tenantId === null || result === null || result.tenantId !== tenantId;
+
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
 }

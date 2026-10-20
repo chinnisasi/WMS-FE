@@ -274,3 +274,46 @@ export const LICENCES_CHANGED_EVENT = 'wms-licences-changed';
 export function notifyLicencesChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(LICENCES_CHANGED_EVENT));
 }
+
+// ── story 1-6d: the enforcement switch ──────────────────────────────────────
+
+/** The switch's state line, read by every staff session. */
+export function enforcementStateCopy(enforce: boolean): string {
+  return enforce
+    ? 'On — a receipt line of drug or food goods without a valid client and site licence goes to review, and such an order is refused.'
+    : 'Off — licences are recorded and the gaps below are warnings only; nothing is blocked.';
+}
+
+/**
+ * The turn-on confirmation. With known gaps (the policy read's `gapCount`)
+ * it names them and the request acknowledges them; with none it asks plainly.
+ */
+export function enforceOnQuestion(gapCount: number): string {
+  if (gapCount <= 0) {
+    return 'Turn on licence enforcement? Uncovered receipts will go to review, and orders will be refused.';
+  }
+  const gaps = gapCount === 1 ? '1 known coverage gap' : `${gapCount} known coverage gaps`;
+  return `Turn on with ${gaps}? Uncovered receipts, including goods on open POs and ASNs, will go to review, and orders will be refused.`;
+}
+
+export const ENFORCE_OFF_QUESTION =
+  'Turn off licence enforcement? Receipts and orders of drug and food goods will no longer be checked; the gaps still show.';
+
+/**
+ * The known gap count a 409 `licence-gaps-unacknowledged` carries (the gaps
+ * appeared since the page read the policy) — null for any other failure.
+ */
+export function unacknowledgedGapCount(error: unknown): number | null {
+  if (!(error instanceof ApiProblem) || error.code !== 'licence-gaps-unacknowledged') return null;
+  const count = error.extensions['gapCount'];
+  return typeof count === 'number' && Number.isInteger(count) && count > 0 ? count : null;
+}
+
+/** The switch's failures (the `licenceReason` arms, worded for the switch). */
+export function enforcementReason(error: unknown): string {
+  if (error instanceof ApiProblem && error.code === 'role-denied') return 'Only an owner can turn licence enforcement on or off.';
+  if (error instanceof ApiProblem && error.code === 'licence-gaps-unacknowledged') {
+    return error.detail ?? 'There are known coverage gaps — confirm them to turn enforcement on.';
+  }
+  return licenceReason(error, 'edit');
+}

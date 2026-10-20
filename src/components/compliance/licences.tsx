@@ -2,11 +2,16 @@
 
 import { useRef, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiAddLicence, fetchApiEditLicence, fetchApiWithdrawLicence } from '@/lib/api/client';
-import type { ClientDto, LicenceDto, LicenceListItemDto, WarehouseResponse } from '@/lib/api/generated';
+import { fetchApiAddLicence, fetchApiEditLicence, fetchApiSetLicencePolicy, fetchApiWithdrawLicence } from '@/lib/api/client';
+import type { ClientDto, LicenceDto, LicenceListItemDto, LicencePolicyResponse, WarehouseResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
   ALL_COVERED_COPY,
+  ENFORCE_OFF_QUESTION,
+  enforceOnQuestion,
+  enforcementReason,
+  enforcementStateCopy,
+  unacknowledgedGapCount,
   LICENCE_KINDS,
   LICENCE_KIND_LABEL,
   LICENCE_NOTE_MAX,
@@ -26,7 +31,7 @@ import {
 import { formatIstDate } from '@/lib/rate-cards';
 import { ulid } from '@/lib/ulid';
 import { useClients } from '@/lib/use-clients';
-import { useLicences } from '@/lib/use-licences';
+import { useLicencePolicy, useLicences } from '@/lib/use-licences';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { roleHasCapability } from '@/lib/users';
 
@@ -108,6 +113,8 @@ function LicencesSessioned({ canManage }: { canManage: boolean }) {
 
   return (
     <div className="flex flex-col gap-4">
+      <LicenceEnforcement canManage={canManage} />
+
       <Section title="Coverage gaps">
         <div className="text-(--muted-foreground)">
           Wherever drug or food goods are — on hand, or on an open purchase order or ASN — each needs a client licence and a site
@@ -438,5 +445,93 @@ function LicenceForm({
         </button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Story 1-6d — the "Enforce licences" section, above the gaps. Every staff
+ * session reads the state; the on/off action is the owner's
+ * (`licences.manage`), through `ConfirmRow`. Turning on with known gaps
+ * (the policy read's `gapCount`) names them and sends `acknowledgeGaps:
+ * true`; when the server answers 409 `licence-gaps-unacknowledged` (gaps
+ * appeared since the read), the `detail` hook opens a FRESH confirmation
+ * keyed `enforce-on-${gapCount}` that asks the question and acknowledges.
+ */
+function LicenceEnforcement({ canManage }: { canManage: boolean }) {
+  const policy = useLicencePolicy();
+  const [confirm, setConfirm] = useState<{ on: boolean; gapCount: number } | null>(null);
+  const [outcome, setOutcome] = useState<Outcome>(null);
+
+  if (policy.state === 'loading') {
+    return (
+      <Section title="Enforce licences">
+        <div className="text-(--muted-foreground)">Loading…</div>
+      </Section>
+    );
+  }
+  if (policy.state === 'failed') {
+    return (
+      <Section title="Enforce licences">
+        <ReadFailure word="Enforcement not loaded" reason={policy.reason} onRetry={policy.reload} />
+      </Section>
+    );
+  }
+  const { enforce, gapCount } = policy.data;
+
+  return (
+    <Section
+      title="Enforce licences"
+      action={
+        canManage && confirm === null ? (
+          <button
+            type="button"
+            className={rowButtonClass}
+            onClick={() => {
+              setOutcome(null);
+              setConfirm({ on: !enforce, gapCount });
+            }}
+          >
+            {enforce ? 'Turn off' : 'Turn on'}
+          </button>
+        ) : undefined
+      }
+    >
+      <div role="status">{enforcementStateCopy(enforce)}</div>
+      {canManage && confirm !== null ? (
+        <ConfirmRow<LicencePolicyResponse>
+          key={confirm.on ? `enforce-on-${confirm.gapCount}` : 'enforce-off'}
+          question={confirm.on ? enforceOnQuestion(confirm.gapCount) : ENFORCE_OFF_QUESTION}
+          confirmLabel={confirm.on ? 'Turn on' : 'Turn off'}
+          ariaLabel={confirm.on ? 'Confirm turn on licence enforcement' : 'Confirm turn off licence enforcement'}
+          run={(key, tenantId) =>
+            fetchApiSetLicencePolicy(
+              tenantId,
+              confirm.on && confirm.gapCount > 0 ? { enforce: true, acknowledgeGaps: true } : { enforce: confirm.on },
+              key,
+            )
+          }
+          reason={enforcementReason}
+          detail={(error) => {
+            const count = unacknowledgedGapCount(error);
+            if (count === null || !confirm.on) return null;
+            // A fresh, re-keyed confirmation that names the gaps and acknowledges them.
+            setConfirm({ on: true, gapCount: count });
+            return <span>{enforceOnQuestion(count)}</span>;
+          }}
+          onClose={() => setConfirm(null)}
+          onDone={(next) => {
+            setConfirm(null);
+            setOutcome({
+              tone: 'accepted',
+              word: next.enforce ? 'Enforcement on' : 'Enforcement off',
+              reason: enforcementStateCopy(next.enforce),
+            });
+            notifyLicencesChanged();
+          }}
+          onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Enforcement not changed', reason })}
+        />
+      ) : null}
+      {outcome !== null ? <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} /> : null}
+    </Section>
   );
 }

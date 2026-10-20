@@ -327,6 +327,15 @@ describe('createOutcome (over-ATP is acceptance, not failure)', () => {
 });
 
 describe('createReason (branching on the problem code)', () => {
+  test('story 1-6d — licence-not-covered shows the server detail; without one it names extensions.skuCodes', () => {
+    const detail = 'No valid licence covers this order\'s drug or food goods at site "W1" today: PARA — needs a Form 20B licence (client); PARA — needs a Form 20B licence (site "W1"). Add or renew the licence, then place the order again.';
+    expect(createReason(new ApiProblem('licence-not-covered', 409, detail))).toBe(detail);
+    expect(createReason(new ApiProblem('licence-not-covered', 409, undefined, undefined, { skuCodes: ['PARA', 'RICE'] }))).toBe(
+      'No valid licence covers PARA, RICE at this warehouse today — nothing was created. Add or renew the licence, then place the order again.',
+    );
+    expect(createReason(new ApiProblem('licence-not-covered', 409))).toContain('No valid licence covers these goods');
+  });
+
   test('each creation problem code maps to its plain-words reason', () => {
     expect(createReason(new ApiProblem('role-denied', 403))).toBe('Your role cannot create orders.');
     expect(createReason(new ApiProblem('idempotency-key-reuse', 422))).toBe(

@@ -1354,7 +1354,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused';
     /**
      * The replay fate the server refused with
      */
@@ -1430,7 +1430,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -1477,7 +1477,7 @@ export type ResolveRejectedOpDto = {
      */
     occurredAt?: string;
     /**
-     * Story 1-2b — the reviewer's note (trimmed, at most 500 characters). REQUIRED to apply a `grn.shelf-life-refused` row — accepting short-dated goods (400 without one; the row stays open); recorded in the outcome on any decision
+     * Story 1-2b — the reviewer's note (trimmed, at most 500 characters). REQUIRED to apply a `grn.shelf-life-refused` row — accepting short-dated goods — and (story 1-6d) a `grn.licence-refused` row — accepting goods without a valid licence (400 without one; the row stays open); recorded in the outcome on any decision
      */
     note?: string;
 };
@@ -3726,6 +3726,17 @@ export type GrnLineDto = {
     handlingUnitIds?: Array<string>;
 };
 
+export type MissingLicenceDto = {
+    /**
+     * What the goods need: drug-20b (G/H/H1), drug-21b (C/C1), drug-20g (X), ndps, or fssai (food)
+     */
+    need: 'drug-20b' | 'drug-21b' | 'drug-20g' | 'ndps' | 'fssai';
+    /**
+     * `client` — the brand holds no valid licence for this site (or for none); `site` — the site holds no valid licence
+     */
+    holder: 'client' | 'site';
+};
+
 export type RejectedGrnLineDto = {
     /**
      * The PO line named — null on an ASN line rejection
@@ -3738,15 +3749,15 @@ export type RejectedGrnLineDto = {
     skuId: string;
     qty: number;
     /**
-     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only). Story 1-2a: `client-departed` — a line of ANY receipt whose SKU's client has departed; also to review (Discard only — re-receive after an owner reactivates the client). Story 1-2b — the expiry rules, each per line: `expiry-on-untracked`, `expiry-before-mfg`, `batch-expiry-mismatch`, `expiry-required` (review, Discard only) and `shelf-life-short` (its own review row — Accept anyway with a note, or Discard)
+     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only). Story 1-2a: `client-departed` — a line of ANY receipt whose SKU's client has departed; also to review (Discard only — re-receive after an owner reactivates the client). Story 1-2b — the expiry rules, each per line: `expiry-on-untracked`, `expiry-before-mfg`, `batch-expiry-mismatch`, `expiry-required` (review, Discard only) and `shelf-life-short` (its own review row — Accept anyway with a note, or Discard). Story 1-6d: `licence-not-covered` — licence enforcement is on and no valid client and site licence covers the line's drug or food goods on the receipt's IST date; its own review row (`grn.licence-refused` — an owner may accept it anyway with a note, or discard it)
      */
-    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found' | 'sku-client-mismatch' | 'client-departed' | 'expiry-on-untracked' | 'expiry-before-mfg' | 'batch-expiry-mismatch' | 'expiry-required' | 'shelf-life-short';
+    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found' | 'sku-client-mismatch' | 'client-departed' | 'expiry-on-untracked' | 'expiry-before-mfg' | 'batch-expiry-mismatch' | 'expiry-required' | 'shelf-life-short' | 'licence-not-covered';
     /**
      * Human-readable reason naming the line state
      */
     reason: string;
     /**
-     * Story 1-2b — the line's index in the request (present on an expiry refusal only)
+     * Story 1-2b — the line's index in the request (present on an expiry refusal and — 1-6d — a licence refusal only)
      */
     index?: number;
     /**
@@ -3761,6 +3772,10 @@ export type RejectedGrnLineDto = {
      * Story 1-2b — `shelf-life-short` only: the client's minimum remaining shelf life in days (0 when the client sets none — the batch had expired)
      */
     minShelfLifeDays?: number;
+    /**
+     * Story 1-6d — `licence-not-covered` only: each need no valid licence covers on the receipt's IST date, and which holder lacks it (the entry also carries `index`)
+     */
+    missing?: Array<MissingLicenceDto>;
 };
 
 export type UnmatchedGrnLineDto = {
@@ -3832,6 +3847,10 @@ export type GoodsReceiptDto = {
      */
     shelfLifeReviewOpId?: string;
     /**
+     * Story 1-6d — the op id of the review row raised for the `licence-not-covered` lines (type `grn.licence-refused` — an owner may accept them anyway with a note, or discard them); present only when one was raised
+     */
+    licenceReviewOpId?: string;
+    /**
      * Story 1-4b — the op id of the review row raised for the blind or unmatched lines of an INACTIVE SKU this receipt booked (type `grn.inactive-sku-received` — Discard only, labelled Acknowledge; it books nothing); present only when one was raised
      */
     inactiveSkuReviewOpId?: string;
@@ -3857,7 +3876,7 @@ export type RefusedReceiptDto = {
      */
     occurredAt: string;
     /**
-     * Every request line, each `sku-client-mismatch` or (story 1-2a) `client-departed` or (story 1-2b) one of the expiry codes (`expiry-on-untracked`, `expiry-before-mfg`, `batch-expiry-mismatch`, `expiry-required`, `shelf-life-short`)
+     * Every request line, each `sku-client-mismatch` or (story 1-2a) `client-departed` or (story 1-2b) one of the expiry codes (`expiry-on-untracked`, `expiry-before-mfg`, `batch-expiry-mismatch`, `expiry-required`, `shelf-life-short`) or (story 1-6d) `licence-not-covered`
      */
     rejectedLines: Array<RejectedGrnLineDto>;
     /**
@@ -3868,6 +3887,10 @@ export type RefusedReceiptDto = {
      * Story 1-2b — the op id of the `grn.shelf-life-refused` review row, when one was raised
      */
     shelfLifeReviewOpId?: string;
+    /**
+     * Story 1-6d — the op id of the `grn.licence-refused` review row, when one was raised
+     */
+    licenceReviewOpId?: string;
 };
 
 export type GoodsReceiptResponse = {
@@ -5058,6 +5081,28 @@ export type ColdChainTraceResponse = {
      */
     bins: Array<ColdChainBinDto>;
     lines: Array<ColdChainLineDto>;
+};
+
+export type LicencePolicyResponse = {
+    /**
+     * Whether licence enforcement is on (a tenant that never set it is off)
+     */
+    enforce: boolean;
+    /**
+     * Known coverage gaps today (IST) — the length of GET …/licences/coverage. A lower bound: a blind receipt, or an order of goods with no stock or open document anywhere, can be refused without having been a gap
+     */
+    gapCount: number;
+};
+
+export type SetLicencePolicyDto = {
+    /**
+     * On: an uncovered drug or food receipt line goes to review (grn.licence-refused) and such an order is refused (409 licence-not-covered). Off by default
+     */
+    enforce: boolean;
+    /**
+     * Turning enforcement ON while known coverage gaps exist needs this to be true (else 409 licence-gaps-unacknowledged with gapCount). A precondition only — not part of the idempotency fingerprint. Ignored when turning off
+     */
+    acknowledgeGaps?: boolean;
 };
 
 export type CoverageGapDto = {
@@ -6953,7 +6998,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -6980,7 +7025,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -12063,7 +12108,7 @@ export type DevicesControllerResolveRejectedOpData = {
 
 export type DevicesControllerResolveRejectedOpErrors = {
     /**
-     * Missing or malformed Idempotency-Key, unknown decision, or the payload refusing an arm (validation-failed — including a payload recount cannot re-plan; story 1-2b: Apply on a grn.shelf-life-refused row without a note, or a note over 500 characters)
+     * Missing or malformed Idempotency-Key, unknown decision, or the payload refusing an arm (validation-failed — including a payload recount cannot re-plan; story 1-2b: Apply on a grn.shelf-life-refused row without a note, or a note over 500 characters; story 1-6d: Apply on a grn.licence-refused row without a note)
      */
     400: ProblemDetailsDto;
     /**
@@ -12071,7 +12116,7 @@ export type DevicesControllerResolveRejectedOpErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied), or the caller lacks review.decide (role-denied), or the apply re-execution's own guards refused (device-revoked, verbatim)
+     * Session belongs to another tenant (permission-denied), or the caller lacks review.decide (role-denied) — story 1-6d: Apply on a grn.licence-refused row also needs licences.manage, owner-only (role-denied) — or the apply re-execution's own guards refused (device-revoked, verbatim)
      */
     403: ProblemDetailsDto;
     /**
@@ -12079,7 +12124,7 @@ export type DevicesControllerResolveRejectedOpErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Row already resolved (rejected-op-resolved), a decision the op type does not admit — story 13-2: a return.receive row is Discard only; story 1-2b: a grn.shelf-life-refused row admits Apply and Discard (decision-not-available, member decisions), a pending count task on the bin (count-task-open), or the re-executed command's own conflict (verbatim)
+     * Row already resolved (rejected-op-resolved), a decision the op type does not admit — story 13-2: a return.receive row is Discard only; story 1-2b: a grn.shelf-life-refused row admits Apply and Discard; story 1-6d: so does a grn.licence-refused row (decision-not-available, member decisions), a pending count task on the bin (count-task-open), or the re-executed command's own conflict (verbatim)
      */
     409: ProblemDetailsDto;
     /**
@@ -13583,7 +13628,7 @@ export type OutboundControllerCreateOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A concurrent idempotent request (conflict), or a concurrent first delivery of the same channel payload (conflict — retry to read the settled result); a line of an inactive SKU that stock does not cover in full — an inactive SKU sells down, never backorders (sku-inactive, naming extensions.skuCodes); a line SKU became a kit while the order was placed (order-catalog-changed — retry)
+     * A concurrent idempotent request (conflict), or a concurrent first delivery of the same channel payload (conflict — retry to read the settled result); a line of an inactive SKU that stock does not cover in full — an inactive SKU sells down, never backorders (sku-inactive, naming extensions.skuCodes); a line SKU became a kit while the order was placed (order-catalog-changed — retry); story 1-6d: licence enforcement is on and no valid client and site licence covers a SKU (a line, a kit or a kit component) of drug or food goods at the warehouse today — nothing is created and every grant is released (licence-not-covered, the detail naming each SKU, its missing need and the holder, separated by "; ", and extensions.skuCodes)
      */
     409: ProblemDetailsDto;
     /**
@@ -16081,6 +16126,86 @@ export type ComplianceControllerGetOrderColdChainTraceResponses = {
 };
 
 export type ComplianceControllerGetOrderColdChainTraceResponse = ComplianceControllerGetOrderColdChainTraceResponses[keyof ComplianceControllerGetOrderColdChainTraceResponses];
+
+export type LicencesControllerGetPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/licence-policy';
+};
+
+export type LicencesControllerGetPolicyErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — an operator surface (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type LicencesControllerGetPolicyError = LicencesControllerGetPolicyErrors[keyof LicencesControllerGetPolicyErrors];
+
+export type LicencesControllerGetPolicyResponses = {
+    200: LicencePolicyResponse;
+};
+
+export type LicencesControllerGetPolicyResponse = LicencesControllerGetPolicyResponses[keyof LicencesControllerGetPolicyResponses];
+
+export type LicencesControllerSetPolicyData = {
+    body: SetLicencePolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/licence-policy';
+};
+
+export type LicencesControllerSetPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or enforce/acknowledgeGaps not a boolean (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks licences.manage — owner-only (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Turning on while known coverage gaps exist without acknowledgeGaps: true (licence-gaps-unacknowledged, member gapCount), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type LicencesControllerSetPolicyError = LicencesControllerSetPolicyErrors[keyof LicencesControllerSetPolicyErrors];
+
+export type LicencesControllerSetPolicyResponses = {
+    200: LicencePolicyResponse;
+};
+
+export type LicencesControllerSetPolicyResponse = LicencesControllerSetPolicyResponses[keyof LicencesControllerSetPolicyResponses];
 
 export type LicencesControllerCoverageData = {
     body?: never;
@@ -18984,7 +19109,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -22157,7 +22282,7 @@ export type WebhooksControllerIngestOrderErrors = {
      */
     409: ProblemDetailsDto;
     /**
-     * A divergent payload on a known order ref (order-source-conflict), no ingest warehouse set (ingest-warehouse-unset), config referencing deleted master data (ingest-config-invalid), or a line of an inactive SKU that stock does not cover in full (sku-inactive)
+     * A divergent payload on a known order ref (order-source-conflict), no ingest warehouse set (ingest-warehouse-unset), config referencing deleted master data (ingest-config-invalid), a line of an inactive SKU that stock does not cover in full (sku-inactive), or (story 1-6d) licence enforcement refused the order — no valid licence covers its drug or food goods (licence-not-covered, naming skuCodes; not retried — resend once the licence is fixed)
      */
     422: ProblemDetailsDto;
     /**

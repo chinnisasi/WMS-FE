@@ -261,8 +261,13 @@ export function rejectedOpsListReason(error: unknown): string {
  * task. The recount arm's payload-less refusal is a 400 BACKSTOP — the
  * client never sends recount without a bin, so reaching it is a defect.
  */
-export function rejectedOpsResolveReason(error: unknown): string {
+export function rejectedOpsResolveReason(error: unknown, entry?: Pick<RejectedOpResponse, 'opType'>): string {
   if (error instanceof ApiProblem) {
+    // Story 1-6d — a licence row's Apply is owner-only (`licences.manage`):
+    // its 403 names that, so the server's own detail is shown.
+    if (error.code === 'role-denied' && entry?.opType === 'grn.licence-refused' && error.detail !== undefined) {
+      return error.detail;
+    }
     switch (error.code) {
       case 'rejected-op-resolved':
         return 'This rejected op was already resolved — the queue has refreshed.';
@@ -404,6 +409,8 @@ export const GRN_REFUSAL_LABEL: Readonly<Record<RejectedGrnLineDto['code'], stri
   'batch-expiry-mismatch': "expiry date differs from its batch's",
   'expiry-required': 'expiry date required',
   'shelf-life-short': 'shelf life too short',
+  // Story 1-6d — licence enforcement: no valid client and site licence on the receipt date.
+  'licence-not-covered': 'no valid licence',
 };
 
 /** The remedy a `grn.lines-refused` row's reviewer reads (Discard only). */
@@ -426,6 +433,13 @@ export const GRN_EXPIRY_REQUIRED_GUIDANCE =
 /** Story 1-2b — the `grn.shelf-life-refused` row's remedy (Accept anyway with a note, or Discard). */
 export const GRN_SHELF_LIFE_GUIDANCE =
   "Short-dated for this client's minimum: accept them anyway with a note saying why (they book as on any receipt — QC and tolerance still apply), or discard this row and return the goods.";
+
+/** Story 1-6d — the `grn.licence-refused` row's remedy (an owner accepts with a note, or Discard). */
+export const GRN_LICENCE_GUIDANCE =
+  'No valid client and site licence covered these goods on the receipt date: an owner can accept them anyway with a note saying why (they book as on any receipt), or discard this row and return the goods. Add or renew the licence under Compliance → Licences.';
+
+/** Story 1-6d — what a non-owner reads where the licence row's Accept anyway would be. */
+export const GRN_LICENCE_OWNER_ONLY = 'An owner can accept these';
 
 /**
  * The remedy per `grn.lines-refused` code, in the server's `problemCode`
@@ -452,6 +466,7 @@ const GRN_LINES_GUIDANCE: readonly (readonly [RejectedGrnLineDto['code'], string
  */
 export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
   if (entry.opType === 'grn.shelf-life-refused') return [GRN_SHELF_LIFE_GUIDANCE];
+  if (entry.opType === 'grn.licence-refused') return [GRN_LICENCE_GUIDANCE];
   // Story 1-4b — one line per inactive SKU the receipt booked.
   if (isInactiveSkuFlag(entry)) return inactiveSkuCodesOf(entry).map(inactiveSkuGuidance);
   if (entry.opType === 'grn.lines-refused') {
@@ -473,9 +488,11 @@ export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'p
  * answer): "N line(s) booked on GRN-…; M refused again: <reasons>". The
  * re-run applies every other rule (departure, tolerance, a batch's expiry),
  * so lines can be refused again — or no receipt recorded at all. Null when
- * the outcome carries no recognisable snapshot.
+ * the outcome carries no recognisable snapshot. Story 1-6d renamed it (it
+ * was `shelfLifeRerunSummary`) — the licence row's Accept anyway reads the
+ * same answer; the output is unchanged.
  */
-export function shelfLifeRerunSummary(outcome: Record<string, unknown> | null): string | null {
+export function waivedRerunSummary(outcome: Record<string, unknown> | null): string | null {
   const snapshot = outcome?.['snapshot'];
   if (typeof snapshot !== 'object' || snapshot === null) return null;
   const goodsReceipt = (snapshot as { goodsReceipt?: unknown }).goodsReceipt;
@@ -536,16 +553,14 @@ function grnLinesRefusedSummary(
     if (typeof expiry === 'string') parts.push(`expires ${expiry}`);
     const owner = typeof refusal['skuClientLabel'] === 'string' ? refusal['skuClientLabel'] : null;
     const reason = grnRefusalWords(String(refusal['reason'] ?? entry.problemCode));
-    const shelf = shelfLifeWords(refusal);
-    return `${parts.join(' · ')} — ${reason}${shelf === null ? '' : ` (${shelf})`}${owner === null ? '' : ` (${owner})`}`;
+    // Story 1-6d — a licence refusal names each missing need and holder.
+    const detail = shelfLifeWords(refusal) ?? missingLicenceWords(refusal);
+    return `${parts.join(' · ')} — ${reason}${detail === null ? '' : ` (${detail})`}${owner === null ? '' : ` (${owner})`}`;
   });
   const count = lines.length;
   const noun = `${count} line${count === 1 ? '' : 's'}`;
-  if (entry.opType === 'grn.shelf-life-refused') {
-    return {
-      heading: `${grn} — ${noun} not booked: short-dated${clientLabel === null ? '' : ` for ${clientLabel}`}`,
-      lines: rendered,
-    };
+  if (isWaivableOpType(entry.opType)) {
+    return { heading: WAIVER_COPY[entry.opType].heading(grn, noun, clientLabel), lines: rendered };
   }
   const forClient =
     clientLabel === null
@@ -570,6 +585,35 @@ function shelfLifeWords(refusal: Record<string, unknown>): string | null {
   const left = remaining === null ? null : remaining < 0 ? `expired ${days(-remaining)} ago` : `${days(remaining)} left`;
   const floor = minimum === null ? null : minimum === 0 ? 'expired goods refused' : `minimum ${days(minimum)}`;
   return [left, floor].filter((part) => part !== null).join(', ');
+}
+
+/** Story 1-6d — the licence a need calls for, short (`FSSAI licence — site`). */
+const MISSING_NEED_WORDS: Readonly<Record<string, string>> = {
+  'drug-20b': 'Form 20B',
+  'drug-21b': 'Form 21B',
+  'drug-20g': 'Form 20G',
+  ndps: 'NDPS licence',
+  fssai: 'FSSAI licence',
+};
+
+/**
+ * Story 1-6d — a licence refusal's `missing` entries, worded: `FSSAI licence
+ * — site; NDPS licence — client`. Read defensively (a stored row is data);
+ * null when the refusal carries none.
+ */
+export function missingLicenceWords(refusal: Record<string, unknown>): string | null {
+  const missing = refusal['missing'];
+  if (!Array.isArray(missing)) return null;
+  const words = missing
+    .map((item) => {
+      if (typeof item !== 'object' || item === null) return null;
+      const need = (item as Record<string, unknown>)['need'];
+      const holder = (item as Record<string, unknown>)['holder'];
+      if (typeof need !== 'string' || (holder !== 'client' && holder !== 'site')) return null;
+      return `${MISSING_NEED_WORDS[need] ?? need} — ${holder}`;
+    })
+    .filter((word): word is string => word !== null);
+  return words.length === 0 ? null : words.join('; ');
 }
 
 function refusalWords(reason: string): string {
@@ -598,7 +642,8 @@ export function rejectedOpSummary(
 ): { heading: string; lines: readonly string[] } | null {
   // Story 1-2b — a `grn.shelf-life-refused` row has the same shape (the
   // receipt's header plus its short-dated lines, `lines[i]` ↔ `refusals[i]`).
-  if (entry.opType === 'grn.lines-refused' || entry.opType === 'grn.shelf-life-refused') return grnLinesRefusedSummary(entry, skuCode);
+  // Story 1-6d — so has a `grn.licence-refused` row (its lines and their `missing`).
+  if (entry.opType === 'grn.lines-refused' || isWaivableOpType(entry.opType)) return grnLinesRefusedSummary(entry, skuCode);
   if (isInactiveSkuFlag(entry)) return inactiveSkuReceivedSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
@@ -633,24 +678,99 @@ export function rejectedOpSummary(
 export const MAX_RESOLVE_NOTE_LENGTH = 500;
 
 /**
- * Whether a row's Apply is the Accept-anyway arm — accepting short-dated
- * goods, which needs a note (the server 400s Apply without one).
+ * Story 1-6d — the two review types whose Apply is an "Accept anyway": a
+ * recorded judgment that waives one receipt rule for these lines, with a
+ * mandatory note (the server 400s Apply without one).
  */
-export function applyNeedsNote(entry: Pick<RejectedOpResponse, 'opType'>): boolean {
-  return entry.opType === 'grn.shelf-life-refused';
+export const WAIVABLE_OP_TYPES = ['grn.shelf-life-refused', 'grn.licence-refused'] as const;
+export type WaivableOpType = (typeof WAIVABLE_OP_TYPES)[number];
+
+export function isWaivableOpType(opType: string): opType is WaivableOpType {
+  return (WAIVABLE_OP_TYPES as readonly string[]).includes(opType);
+}
+
+/** The words of one waivable type's Accept anyway — every place the queue names it reads this table. */
+export interface WaiverCopy {
+  /** The note's label. */
+  readonly noteLabel: string;
+  /** The problem a blank note reads. */
+  readonly blankNote: string;
+  /** The Apply button. */
+  readonly button: string;
+  /** The settled outcome's word. */
+  readonly outcomeWord: string;
+  /** The outcome's opening when the re-run's answer is unreadable. */
+  readonly outcomeFallback: string;
+  /** The outcome's ending, after what the re-run did. */
+  readonly outcomeEnding: string;
+  /** The summary's heading: the receipt, the line count, the client label. */
+  readonly heading: (grn: string, noun: string, clientLabel: string | null) => string;
+  /** A failed Accept anyway's word. */
+  readonly failedWord: string;
 }
 
 /**
- * The note an Accept anyway sends, trimmed, or a problem (blank, or past
- * 500 code points) — the button stays disabled while there is one.
+ * Story 1-6d — one copy table keyed by the two waivable types. The
+ * shelf-life values are 1-2b's words, copied out unchanged (its pins prove
+ * the bytes).
  */
-export function acceptAnywayNote(text: string): { note: string; problem: null } | { note: null; problem: string } {
+export const WAIVER_COPY: Readonly<Record<WaivableOpType, WaiverCopy>> = {
+  'grn.shelf-life-refused': {
+    noteLabel: 'Why accept these short-dated goods? (required)',
+    blankNote: 'Say why these short-dated goods are accepted — the note is required.',
+    button: 'Accept anyway',
+    outcomeWord: 'Accepted anyway',
+    outcomeFallback: 'The short-dated lines booked',
+    outcomeEnding: ' — the shelf-life rule waived for this receipt only; QC and tolerance applied as on any receipt; the note is audited.',
+    heading: (grn, noun, clientLabel) => `${grn} — ${noun} not booked: short-dated${clientLabel === null ? '' : ` for ${clientLabel}`}`,
+    failedWord: 'Not accepted',
+  },
+  'grn.licence-refused': {
+    noteLabel: 'Why accept goods without a valid licence?',
+    blankNote: 'Say why these goods are accepted without a valid licence — the note is required.',
+    button: 'Accept anyway',
+    outcomeWord: 'Accepted anyway',
+    outcomeFallback: 'The lines booked',
+    outcomeEnding: ' — licence waived for these lines only; the note is audited.',
+    heading: (grn, noun, clientLabel) => `Lines in licence review — ${grn}, ${noun} not booked${clientLabel === null ? '' : ` for ${clientLabel}`}`,
+    failedWord: 'Not accepted',
+  },
+};
+
+/**
+ * Whether a row's Apply is an Accept anyway — accepting short-dated goods
+ * (1-2b) or goods without a valid licence (1-6d), which needs a note.
+ */
+export function applyNeedsNote(entry: Pick<RejectedOpResponse, 'opType'>): boolean {
+  return isWaivableOpType(entry.opType);
+}
+
+/**
+ * The note an Accept anyway sends, trimmed, or a problem (blank — worded for
+ * the row's type — or past 500 code points); the button stays disabled
+ * while there is one. Story 1-6d added the entry (the blank-note words).
+ */
+export function acceptAnywayNote(
+  entry: Pick<RejectedOpResponse, 'opType'>,
+  text: string,
+): { note: string; problem: null } | { note: null; problem: string } {
   const note = text.trim();
-  if (note === '') return { note: null, problem: 'Say why these short-dated goods are accepted — the note is required.' };
+  if (note === '') {
+    return { note: null, problem: isWaivableOpType(entry.opType) ? WAIVER_COPY[entry.opType].blankNote : 'The note is required.' };
+  }
   if ([...note].length > MAX_RESOLVE_NOTE_LENGTH) {
     return { note: null, problem: `The note is at most ${MAX_RESOLVE_NOTE_LENGTH} characters.` };
   }
   return { note, problem: null };
+}
+
+/**
+ * Story 1-6d — whether this viewer may Apply the row: `review.decide`, plus
+ * `licences.manage` (owner-only) on a `grn.licence-refused` row — the
+ * server's own rule; a non-owner sees Discard and `GRN_LICENCE_OWNER_ONLY`.
+ */
+export function canApplyRow(entry: Pick<RejectedOpResponse, 'opType'>, canDecide: boolean, canManageLicences: boolean): boolean {
+  return canDecide && (entry.opType !== 'grn.licence-refused' || canManageLicences);
 }
 
 /** The outcome banner of a settled resolve, by the row's new status and type. */
@@ -659,14 +779,10 @@ export function rejectedOpResolvedOutcome(
   status: string,
   outcome?: Record<string, unknown> | null,
 ): { word: string; reason: string } {
-  if (status === 'applied' && applyNeedsNote(entry)) {
-    const rerun = shelfLifeRerunSummary(outcome ?? null);
-    return {
-      word: 'Accepted anyway',
-      reason:
-        (rerun === null ? 'The short-dated lines booked' : rerun) +
-        ' — the shelf-life rule waived for this receipt only; QC and tolerance applied as on any receipt; the note is audited.',
-    };
+  if (status === 'applied' && isWaivableOpType(entry.opType)) {
+    const copy = WAIVER_COPY[entry.opType];
+    const rerun = waivedRerunSummary(outcome ?? null);
+    return { word: copy.outcomeWord, reason: (rerun === null ? copy.outcomeFallback : rerun) + copy.outcomeEnding };
   }
   if (status === 'applied') {
     return {

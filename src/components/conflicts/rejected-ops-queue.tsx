@@ -5,9 +5,13 @@ import { useId, useRef, useState, useSyncExternalStore } from 'react';
 import { ApiProblem, fetchApiResolveRejectedOp } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
+  GRN_LICENCE_OWNER_ONLY,
   MAX_RESOLVE_NOTE_LENGTH,
+  WAIVER_COPY,
   acceptAnywayNote,
   applyNeedsNote,
+  canApplyRow,
+  isWaivableOpType,
   rejectedOpResolvedOutcome,
   rejectedOpBadge,
   discardLabel,
@@ -126,6 +130,8 @@ function RejectedOpsQueueSessioned() {
     () => undefined,
   );
   const canDecide = roleHasCapability(role, 'review.decide');
+  // Story 1-6d — accepting goods without a valid licence is the owner's (`licences.manage`).
+  const canManageLicences = roleHasCapability(role, 'licences.manage');
 
   // Per-entry in-flight state (a Set, in state — not a single slot): two
   // rows can be in flight at once, and one slot would re-enable card A's
@@ -185,13 +191,13 @@ function RejectedOpsQueueSessioned() {
         tone: 'rejected',
         word:
           decision === 'apply'
-            ? applyNeedsNote(entry)
-              ? 'Not accepted'
+            ? isWaivableOpType(entry.opType)
+              ? WAIVER_COPY[entry.opType].failedWord
               : 'Not applied'
             : decision === 'recount'
               ? 'No recount opened'
               : discardFailedWord(entry),
-        reason: rejectedOpsResolveReason(error),
+        reason: rejectedOpsResolveReason(error, entry),
       });
       if (alreadyResolved) queue.reload();
     } finally {
@@ -255,6 +261,7 @@ function RejectedOpsQueueSessioned() {
               binCode={binLabelFor(entry, binMaps)}
               resolvedBy={entry.resolvedBy === null ? null : (users?.[entry.resolvedBy]?.email ?? null)}
               canDecide={canDecide}
+              canApply={canApplyRow(entry, canDecide, canManageLicences)}
               skuCode={skuCode}
               resolving={resolving.has(entry.id)}
               onResolve={resolve}
@@ -303,6 +310,7 @@ function RejectedOpCard({
   binCode,
   resolvedBy,
   canDecide,
+  canApply,
   skuCode,
   resolving,
   onResolve,
@@ -311,14 +319,18 @@ function RejectedOpCard({
   binCode: string | null;
   resolvedBy: string | null;
   canDecide: boolean;
+  /** Story 1-6d — `canDecide`, plus `licences.manage` on a licence row. */
+  canApply: boolean;
   skuCode: (skuId: string) => string | null;
   resolving: boolean;
   onResolve: (entry: RejectedOpEntry, decision: ResolutionDecision, note?: string) => void;
 }) {
-  // Story 1-2b — the Accept-anyway note (a shelf-life row only); it dies with the card.
+  // Story 1-2b — the Accept-anyway note (a waivable row only — 1-6d adds the
+  // licence row); it dies with the card.
   const [note, setNote] = useState('');
   const noteId = useId();
-  const acceptNote = acceptAnywayNote(note);
+  const acceptNote = acceptAnywayNote(entry, note);
+  const waiver = isWaivableOpType(entry.opType) ? WAIVER_COPY[entry.opType] : null;
   // The expanded panel mounts the payload list — and the ledger walk when
   // the payload names a bin; its selection state dies with the card.
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -429,10 +441,13 @@ function RejectedOpCard({
                   {resolving ? 'Resolving…' : 'Open a recount'}
                 </button>
               )}
-              {decisions.includes('apply') && applyNeedsNote(entry) && (
+              {decisions.includes('apply') && waiver !== null && !canApply && (
+                <div className="w-full text-right text-xs text-(--muted-foreground)">{GRN_LICENCE_OWNER_ONLY}</div>
+              )}
+              {decisions.includes('apply') && waiver !== null && canApply && (
                 <div className="flex w-full flex-col gap-1">
                   <label htmlFor={noteId} className="text-xs font-medium">
-                    Why accept these short-dated goods? (required)
+                    {waiver.noteLabel}
                   </label>
                   <textarea
                     id={noteId}
@@ -451,12 +466,12 @@ function RejectedOpCard({
                       }}
                       className="rounded-sm bg-(--primary) px-3 py-1 text-xs font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
                     >
-                      {resolving ? 'Resolving…' : 'Accept anyway'}
+                      {resolving ? 'Resolving…' : waiver.button}
                     </button>
                   </div>
                 </div>
               )}
-              {decisions.includes('apply') && !applyNeedsNote(entry) && (
+              {decisions.includes('apply') && !applyNeedsNote(entry) && canApply && (
               <button
                 type="button"
                 disabled={resolving}

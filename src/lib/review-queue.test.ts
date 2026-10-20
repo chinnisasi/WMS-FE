@@ -26,11 +26,17 @@ import {
   GRN_BATCH_EXPIRY_MISMATCH_GUIDANCE,
   GRN_EXPIRY_REQUIRED_GUIDANCE,
   GRN_SHELF_LIFE_GUIDANCE,
+  GRN_LICENCE_GUIDANCE,
+  GRN_LICENCE_OWNER_ONLY,
+  WAIVABLE_OP_TYPES,
+  WAIVER_COPY,
+  canApplyRow,
+  missingLicenceWords,
   MAX_RESOLVE_NOTE_LENGTH,
   acceptAnywayNote,
   applyNeedsNote,
   rejectedOpResolvedOutcome,
-  shelfLifeRerunSummary,
+  waivedRerunSummary,
   rejectedOpsListReason,
   rejectedOpsResolveReason,
   resolveDraftProblem,
@@ -470,7 +476,7 @@ describe('story 1-1 — a blind receipt\'s lines of another client (grn.lines-re
   test('every GRN line refusal reason has words', () => {
     expect(GRN_REFUSAL_LABEL['sku-client-mismatch']).toBe("another client's SKU");
     expect(Object.keys(GRN_REFUSAL_LABEL).sort()).toEqual(
-      // Story 1-2a adds `client-departed`; story 1-2b the five expiry codes.
+      // Story 1-2a adds `client-departed`; story 1-2b the five expiry codes; story 1-6d `licence-not-covered`.
       [
         'asn-line-not-found',
         'batch-expiry-mismatch',
@@ -478,6 +484,7 @@ describe('story 1-1 — a blind receipt\'s lines of another client (grn.lines-re
         'expiry-before-mfg',
         'expiry-on-untracked',
         'expiry-required',
+        'licence-not-covered',
         'po-line-not-found',
         'po-line-not-open',
         'shelf-life-short',
@@ -609,11 +616,11 @@ describe('story 1-2b — the expiry refusals and the shelf-life row', () => {
     expect(applyNeedsNote(shelfRow)).toBe(true);
     expect(applyNeedsNote({ opType: 'grn.lines-refused' })).toBe(false);
     expect(applyNeedsNote({ opType: 'pick.record' })).toBe(false);
-    expect(acceptAnywayNote('  Vendor confirmed a credit note  ')).toEqual({ note: 'Vendor confirmed a credit note', problem: null });
-    expect(acceptAnywayNote('   ')).toEqual({ note: null, problem: 'Say why these short-dated goods are accepted — the note is required.' });
+    expect(acceptAnywayNote(shelfRow, '  Vendor confirmed a credit note  ')).toEqual({ note: 'Vendor confirmed a credit note', problem: null });
+    expect(acceptAnywayNote(shelfRow, '   ')).toEqual({ note: null, problem: 'Say why these short-dated goods are accepted — the note is required.' });
     expect(MAX_RESOLVE_NOTE_LENGTH).toBe(500);
-    expect(acceptAnywayNote('x'.repeat(500)).note).toHaveLength(500);
-    expect(acceptAnywayNote('x'.repeat(501))).toEqual({ note: null, problem: 'The note is at most 500 characters.' });
+    expect(acceptAnywayNote(shelfRow, 'x'.repeat(500)).note).toHaveLength(500);
+    expect(acceptAnywayNote(shelfRow, 'x'.repeat(501))).toEqual({ note: null, problem: 'The note is at most 500 characters.' });
   });
 
   test('the resolve outcome names Accept anyway on a shelf-life row and keeps the other words', () => {
@@ -631,15 +638,95 @@ describe('story 1-2b — the expiry refusals and the shelf-life row', () => {
     expect(rejectedOpResolvedOutcome(shelfRow, 'discarded').word).toBe('Discarded');
   });
 
-  test('shelfLifeRerunSummary reads the re-run receipt: booked, refused again, or nothing recorded', () => {
-    expect(shelfLifeRerunSummary(null)).toBeNull();
-    expect(shelfLifeRerunSummary({ kind: 'applied' })).toBeNull();
-    expect(shelfLifeRerunSummary({ snapshot: { goodsReceipt: { code: 'GRN-0007', lines: [{}] } } })).toBe('1 line(s) booked on GRN-0007');
+  test('waivedRerunSummary reads the re-run receipt: booked, refused again, or nothing recorded', () => {
+    expect(waivedRerunSummary(null)).toBeNull();
+    expect(waivedRerunSummary({ kind: 'applied' })).toBeNull();
+    expect(waivedRerunSummary({ snapshot: { goodsReceipt: { code: 'GRN-0007', lines: [{}] } } })).toBe('1 line(s) booked on GRN-0007');
     expect(
-      shelfLifeRerunSummary({
+      waivedRerunSummary({
         snapshot: { goodsReceipt: null, refusedReceipt: { rejectedLines: [{ code: 'batch-expiry-mismatch' }, { code: 'batch-expiry-mismatch' }] } },
       }),
     ).toBe(`No line booked; 2 refused again: ${GRN_REFUSAL_LABEL['batch-expiry-mismatch']}`);
-    expect(shelfLifeRerunSummary({ snapshot: { goodsReceipt: null, refusedReceipt: { rejectedLines: [] } } })).toBe('No receipt was recorded');
+    expect(waivedRerunSummary({ snapshot: { goodsReceipt: null, refusedReceipt: { rejectedLines: [] } } })).toBe('No receipt was recorded');
+  });
+});
+
+describe('story 1-6d — a grn.licence-refused row (owner-only Accept anyway)', () => {
+  const licenceRow = {
+    opType: 'grn.licence-refused' as const,
+    problemCode: 'licence-not-covered',
+    payload: {
+      warehouseId: 'w-1',
+      poId: null,
+      blindReasonCode: 'other',
+      occurredAt: '2026-11-01T04:30:00.000Z',
+      grnId: 'grn-1',
+      grnCode: 'GRN-0051',
+      clientLabel: 'ACME',
+      lines: [
+        { poLineId: null, skuId: 'sku-1', batchCode: null, mfgDate: null, qty: 5 },
+        { poLineId: null, skuId: 'sku-2', batchCode: null, mfgDate: null, qty: 1 },
+      ],
+      refusals: [
+        { lineIndex: 1, skuId: 'sku-1', skuCode: 'RICE-5KG', skuClientId: 'c', skuClientLabel: 'ACME', reason: 'licence-not-covered', missing: [{ need: 'fssai', holder: 'site' }] },
+        {
+          lineIndex: 2,
+          skuId: 'sku-2',
+          skuCode: 'CODEINE',
+          skuClientId: 'c',
+          skuClientLabel: 'ACME',
+          reason: 'licence-not-covered',
+          missing: [
+            { need: 'ndps', holder: 'client' },
+            { need: 'ndps', holder: 'site' },
+          ],
+        },
+      ],
+    },
+  };
+
+  test('the copy table is keyed by exactly the two waivable types; the shelf-life entry is 1-2b\'s words', () => {
+    expect([...WAIVABLE_OP_TYPES]).toEqual(['grn.shelf-life-refused', 'grn.licence-refused']);
+    expect(Object.keys(WAIVER_COPY).sort()).toEqual(['grn.licence-refused', 'grn.shelf-life-refused']);
+    expect(WAIVER_COPY['grn.shelf-life-refused'].noteLabel).toBe('Why accept these short-dated goods? (required)');
+    expect(WAIVER_COPY['grn.licence-refused'].noteLabel).toBe('Why accept goods without a valid licence?');
+  });
+
+  test('the summary names each line with its missing needs and holders, under the licence heading', () => {
+    expect(rejectedOpSummary(licenceRow)).toEqual({
+      heading: 'Lines in licence review — GRN-0051, 2 lines not booked for ACME',
+      lines: [
+        'RICE-5KG × 5 — no valid licence (FSSAI licence — site) (ACME)',
+        'CODEINE × 1 — no valid licence (NDPS licence — client; NDPS licence — site) (ACME)',
+      ],
+    });
+    expect(GRN_REFUSAL_LABEL['licence-not-covered']).toBe('no valid licence');
+    expect(rejectedOpGuidance(licenceRow)).toEqual([GRN_LICENCE_GUIDANCE]);
+  });
+
+  test('missingLicenceWords reads `missing` defensively', () => {
+    expect(missingLicenceWords({})).toBeNull();
+    expect(missingLicenceWords({ missing: 'fssai' })).toBeNull();
+    expect(missingLicenceWords({ missing: [{ need: 'fssai' }, null, { need: 'drug-20b', holder: 'client' }] })).toBe('Form 20B — client');
+  });
+
+  test('Accept anyway needs a note worded for the licence; the outcome reads "Accepted anyway … — licence waived"', () => {
+    expect(applyNeedsNote(licenceRow)).toBe(true);
+    expect(acceptAnywayNote(licenceRow, '  ')).toEqual({ note: null, problem: 'Say why these goods are accepted without a valid licence — the note is required.' });
+    expect(acceptAnywayNote(licenceRow, ' renewal filed ')).toEqual({ note: 'renewal filed', problem: null });
+    const outcome = rejectedOpResolvedOutcome(licenceRow, 'applied', { kind: 'applied', snapshot: { goodsReceipt: { code: 'GRN-0052', lines: [{}] } } });
+    expect(outcome).toEqual({ word: 'Accepted anyway', reason: '1 line(s) booked on GRN-0052 — licence waived for these lines only; the note is audited.' });
+    expect(rejectedOpResolvedOutcome(licenceRow, 'applied').reason).toBe('The lines booked — licence waived for these lines only; the note is audited.');
+  });
+
+  test('only an owner (licences.manage) may Apply it; a non-owner reads the owner-only words; its 403 shows the server detail', () => {
+    expect(canApplyRow(licenceRow, true, true)).toBe(true);
+    expect(canApplyRow(licenceRow, true, false)).toBe(false);
+    expect(canApplyRow(licenceRow, false, true)).toBe(false);
+    expect(canApplyRow({ opType: 'grn.shelf-life-refused' }, true, false)).toBe(true);
+    expect(GRN_LICENCE_OWNER_ONLY).toBe('An owner can accept these');
+    const denied = problem('role-denied', 403, 'Your role (ops_manager) lacks licences.manage.');
+    expect(rejectedOpsResolveReason(denied, licenceRow)).toBe('Your role (ops_manager) lacks licences.manage.');
+    expect(rejectedOpsResolveReason(denied, { opType: 'pick.record' })).toContain('cannot resolve');
   });
 });

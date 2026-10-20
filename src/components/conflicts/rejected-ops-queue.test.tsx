@@ -47,6 +47,7 @@ const OWNER_SESSION: StoredSession = {
 };
 
 const OPERATOR_SESSION: StoredSession = { ...OWNER_SESSION, user: { ...OWNER_SESSION.user, role: 'operator' } };
+const OPS_SESSION: StoredSession = { ...OWNER_SESSION, user: { ...OWNER_SESSION.user, role: 'ops_manager' } };
 
 function rejectedOp(over: Record<string, unknown> = {}, id: string = OP_ID): Record<string, unknown> {
   return {
@@ -89,7 +90,7 @@ function json(status: number, body: unknown): Response {
 let requests: { method: string; pathname: string; query: string; body: unknown; headers: Record<string, string> }[] = [];
 let opRows: Record<string, unknown>[] = [];
 /** The next resolve answer; a non-null setting simulates the 409/403 refusal arms. */
-let nextResolveStatus: { status: number; code: string; title?: string } | null = null;
+let nextResolveStatus: { status: number; code: string; title?: string; detail?: string } | null = null;
 
 function stubRouter(): void {
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
@@ -137,6 +138,7 @@ function stubRouter(): void {
           code: refusal.code,
           title: refusal.title ?? 'Refused',
           status: refusal.status,
+          ...(refusal.detail === undefined ? {} : { detail: refusal.detail }),
         });
       }
       const decision = (body as { decision: string }).decision;
@@ -633,5 +635,84 @@ describe('RejectedOpsQueue: the inactive-SKU flag (story 1-4b)', () => {
     await click(articleButton(card, 'Acknowledge'));
     await settle();
     expect(resolvePosts()[0]!.body).toEqual({ decision: 'discard' });
+  });
+});
+
+describe('story 1-6d — a grn.licence-refused row: an owner accepts with a note; others see why not', () => {
+  const LICENCE_OP_ID = '01989f7a-1b3c-7d4e-8f90-eeeeeeeeeeee';
+  const licenceRow = () =>
+    rejectedOp(
+      {
+        opType: 'grn.licence-refused',
+        classification: 'rejected',
+        problemCode: 'licence-not-covered',
+        problemDetail: null,
+        decisions: ['apply', 'discard'],
+        payload: {
+          warehouseId: WAREHOUSE_ID,
+          poId: null,
+          blindReasonCode: 'other',
+          occurredAt: '2026-11-01T04:30:00.000Z',
+          grnId: '01989f7a-1b3c-7d4e-8f90-ffffffffffff',
+          grnCode: 'GRN-0051',
+          clientLabel: 'ACME',
+          lines: [{ poLineId: null, skuId: 'sku-1', batchCode: null, mfgDate: null, qty: 5 }],
+          refusals: [
+            { lineIndex: 0, skuId: 'sku-1', skuCode: 'RICE-5KG', skuClientId: 'c', skuClientLabel: 'ACME', reason: 'licence-not-covered', missing: [{ need: 'fssai', holder: 'site' }] },
+          ],
+        },
+      },
+      LICENCE_OP_ID,
+    );
+
+  function setNote(card: Element, value: string): void {
+    const textarea = card.querySelector('textarea') as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(textarea, value);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  test('an owner reads the licence heading and line, and Accept anyway (with the licence note) sends {decision:"apply", note}', async () => {
+    opRows = [licenceRow()];
+    view = await mount();
+    const card = article(view, 'GRN-0051');
+    expect(card.textContent).toContain('Lines in licence review — GRN-0051, 1 line not booked for ACME');
+    expect(card.textContent).toContain('RICE-5KG × 5 — no valid licence (FSSAI licence — site) (ACME)');
+    expect(card.textContent).toContain('Why accept goods without a valid licence?');
+    expect(articleButton(card, 'Accept anyway').disabled).toBe(true);
+    setNote(card, '  renewal filed  ');
+    await click(articleButton(card, 'Accept anyway'));
+    await settle();
+    expect(resolvePosts()[0]!.body).toEqual({ decision: 'apply', note: 'renewal filed' });
+    expect(view.container.textContent).toContain('Accepted anyway');
+    expect(view.container.textContent).toContain('licence waived');
+  });
+
+  test('an ops manager sees Discard and "An owner can accept these" — no note, no Accept anyway', async () => {
+    opRows = [licenceRow()];
+    view = await mount(OPS_SESSION);
+    const card = article(view, 'GRN-0051');
+    expect(card.querySelector('textarea')).toBeNull();
+    const labels = [...card.querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels).toContain('Discard');
+    expect(labels).not.toContain('Accept anyway');
+    expect(card.textContent).toContain('An owner can accept these');
+    await click(articleButton(card, 'Discard'));
+    await settle();
+    expect(resolvePosts()[0]!.body).toEqual({ decision: 'discard' });
+  });
+
+  test('a 403 on this type shows the server detail', async () => {
+    opRows = [licenceRow()];
+    view = await mount();
+    const card = article(view, 'GRN-0051');
+    setNote(card, 'x');
+    nextResolveStatus = { status: 403, code: 'role-denied', detail: 'Accepting goods without a valid licence is an owner decision.' };
+    await click(articleButton(card, 'Accept anyway'));
+    await settle();
+    expect(view.container.textContent).toContain('Not accepted');
+    expect(view.container.textContent).toContain('Accepting goods without a valid licence is an owner decision.');
   });
 });
