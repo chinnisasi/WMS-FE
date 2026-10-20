@@ -12,6 +12,9 @@ import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { readReason } from '@/lib/outbound-orders';
 import type { Reloadable, ResourceState } from '@/lib/use-outbound-orders';
 
+/** Story 1-4b — the SKU table's status filter: All (`null`), Active or Inactive. */
+export type SkuStatusFilter = 'active' | 'inactive' | null;
+
 export interface SkusPage {
   items: readonly SkuResponse[];
   /** Cursor for the DataTable's Next button; null on the last page. */
@@ -29,6 +32,8 @@ export interface SkusPage {
 export function useSkus(
   /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
   clientFilter: ClientFilter,
+  /** Story 1-4b — the status filter (All = null). Joins the requested-cursor scope. */
+  status: SkuStatusFilter = null,
 ): (SkusPage & { onCursor: (cursor: string | null) => void; reload: () => void }) | null {
   // `null` = unknown (server render) or signed out.
   const tenantId = useSyncExternalStore(
@@ -42,15 +47,26 @@ export function useSkus(
   // The cursor the viewer asked for, scoped to the tenant it was asked for —
   // a cursor left over from another tenant is treated as a first-page
   // request, never replayed against the wrong scope.
-  const [requested, setRequested] = useState<{ tenantId: string; clientId: string | null; clientEpoch: number; cursor: string | null } | null>(
-    null,
-  );
+  const [requested, setRequested] = useState<{
+    tenantId: string;
+    clientId: string | null;
+    clientEpoch: number;
+    status: SkuStatusFilter;
+    cursor: string | null;
+  } | null>(null);
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId && requested.clientId === clientId && requested.clientEpoch === clientEpoch ? requested.cursor : null;
+    requested !== null &&
+    requested.tenantId === tenantId &&
+    requested.clientId === clientId &&
+    requested.clientEpoch === clientEpoch &&
+    requested.status === status
+      ? requested.cursor
+      : null;
   const [revision, setRevision] = useState(0);
   const [page, setPage] = useState<{
     tenantId: string;
     clientId: string | null;
+    status: SkuStatusFilter;
     requested: string | null;
     page: SkusPage;
   } | null>(null);
@@ -68,10 +84,14 @@ export function useSkus(
       try {
         const result = await fetchApiListSkus(
           tenantId,
-          { ...(clientId === null ? {} : { clientId }), ...(activeCursor === null ? {} : { cursor: activeCursor }) },
+          {
+            ...(clientId === null ? {} : { clientId }),
+            ...(status === null ? {} : { status }),
+            ...(activeCursor === null ? {} : { cursor: activeCursor }),
+          },
         );
         if (!cancelled) {
-          setPage({ tenantId, clientId, requested: activeCursor, page: result });
+          setPage({ tenantId, clientId, status, requested: activeCursor, page: result });
         }
       } catch {
         // Quiet chrome on failure — the render-time key check hides stale data.
@@ -80,14 +100,14 @@ export function useSkus(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, clientId, pending, activeCursor, revision]);
+  }, [tenantId, clientId, status, pending, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null) return;
-      setRequested({ tenantId, clientId, clientEpoch, cursor });
+      setRequested({ tenantId, clientId, clientEpoch, status, cursor });
     },
-    [tenantId, clientId, clientEpoch],
+    [tenantId, clientId, clientEpoch, status],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
@@ -97,6 +117,7 @@ export function useSkus(
     page === null ||
     page.tenantId !== tenantId ||
     page.clientId !== clientId ||
+    page.status !== status ||
     page.requested !== activeCursor
   ) {
     return null;

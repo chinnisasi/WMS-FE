@@ -452,6 +452,8 @@ const GRN_LINES_GUIDANCE: readonly (readonly [RejectedGrnLineDto['code'], string
  */
 export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
   if (entry.opType === 'grn.shelf-life-refused') return [GRN_SHELF_LIFE_GUIDANCE];
+  // Story 1-4b — one line per inactive SKU the receipt booked.
+  if (isInactiveSkuFlag(entry)) return inactiveSkuCodesOf(entry).map(inactiveSkuGuidance);
   if (entry.opType === 'grn.lines-refused') {
     const refusals = Array.isArray(entry.payload['refusals']) ? (entry.payload['refusals'] as unknown[]) : [];
     const codes = new Set<string>([entry.problemCode]);
@@ -597,6 +599,7 @@ export function rejectedOpSummary(
   // Story 1-2b — a `grn.shelf-life-refused` row has the same shape (the
   // receipt's header plus its short-dated lines, `lines[i]` ↔ `refusals[i]`).
   if (entry.opType === 'grn.lines-refused' || entry.opType === 'grn.shelf-life-refused') return grnLinesRefusedSummary(entry, skuCode);
+  if (isInactiveSkuFlag(entry)) return inactiveSkuReceivedSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
   const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;
@@ -677,5 +680,76 @@ export function rejectedOpResolvedOutcome(
       reason: 'A fresh count task is the corrected basis — the bin’s history, not a force-write, answers the op.',
     };
   }
+  if (isInactiveSkuFlag(entry)) {
+    return { word: 'Acknowledged', reason: 'The flag is closed — the lines stay booked; nothing moved.' };
+  }
   return { word: 'Discarded', reason: 'The op is retired with a discard marker — its refusal stays readable in the row.' };
+}
+
+// ── story 1-4b: the inactive-SKU flag (a grn.inactive-sku-received row) ─────
+
+/**
+ * Whether the row is the server-raised flag for lines of an INACTIVE SKU a
+ * receipt booked (blind or unmatched). Its lines were booked — the row is a
+ * flag, not a refusal: the badge reads "flagged", its only decision (Discard)
+ * is labelled Acknowledge, and it books nothing.
+ */
+export function isInactiveSkuFlag(entry: Pick<RejectedOpResponse, 'opType'>): boolean {
+  return entry.opType === 'grn.inactive-sku-received';
+}
+
+/** The row's badge: quarantined, flagged (1-4b), or refused. */
+export function rejectedOpBadge(entry: Pick<RejectedOpResponse, 'opType' | 'classification'>): string {
+  if (entry.classification === 'quarantined') return 'quarantined · AD-14';
+  return isInactiveSkuFlag(entry) ? 'flagged' : 'refused';
+}
+
+/** The Discard button's label: Acknowledge on the inactive-SKU flag. */
+export function discardLabel(entry: Pick<RejectedOpResponse, 'opType'>): string {
+  return isInactiveSkuFlag(entry) ? 'Acknowledge' : 'Discard';
+}
+
+/** The failed discard's outcome word. */
+export function discardFailedWord(entry: Pick<RejectedOpResponse, 'opType'>): string {
+  return isInactiveSkuFlag(entry) ? 'Not acknowledged' : 'Not discarded';
+}
+
+/** The guidance for one inactive SKU the receipt booked. */
+export function inactiveSkuGuidance(code: string): string {
+  return `Booked — ${code} is inactive; check why it arrived`;
+}
+
+function inactiveSkuLines(entry: Pick<RejectedOpResponse, 'payload'>): Record<string, unknown>[] {
+  const lines = entry.payload['lines'];
+  return Array.isArray(lines) ? (lines.filter((line) => typeof line === 'object' && line !== null) as Record<string, unknown>[]) : [];
+}
+
+function inactiveSkuCodesOf(entry: Pick<RejectedOpResponse, 'payload'>): string[] {
+  const codes = inactiveSkuLines(entry)
+    .map((line) => line['skuCode'])
+    .filter((code): code is string => typeof code === 'string');
+  return [...new Set(codes)];
+}
+
+/** The flag's summary: the receipt, then each booked line (`code × qty uom`). */
+function inactiveSkuReceivedSummary(
+  entry: Pick<RejectedOpResponse, 'payload'>,
+  skuLabel: (skuId: string) => string | null,
+): { heading: string; lines: readonly string[] } {
+  const grnCode = typeof entry.payload['grnCode'] === 'string' ? entry.payload['grnCode'] : null;
+  const grnId = typeof entry.payload['grnId'] === 'string' ? entry.payload['grnId'] : null;
+  const grn = grnCode ?? (grnId === null ? 'unknown receipt' : `receipt …${shortIdTail(grnId)}`);
+  const lines = inactiveSkuLines(entry);
+  const rendered = lines.map((line) => {
+    const skuId = typeof line['skuId'] === 'string' ? line['skuId'] : '';
+    const sku =
+      (typeof line['skuCode'] === 'string' ? line['skuCode'] : null) ??
+      skuLabel(skuId) ??
+      (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
+    const qty = typeof line['qty'] === 'number' ? line['qty'] : '?';
+    const uom = typeof line['uom'] === 'string' ? ` ${line['uom']}` : '';
+    return `${sku} × ${qty}${uom} — booked, SKU inactive`;
+  });
+  const count = lines.length;
+  return { heading: `${grn} — ${count} line${count === 1 ? '' : 's'} of inactive SKUs booked`, lines: rendered };
 }

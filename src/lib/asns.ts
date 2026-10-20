@@ -7,6 +7,7 @@
  * Pure: no React, no fetch — every sentence and derivation is pinned by
  * `asns.test.ts` (a claim left in JSX is a claim nothing can pin).
  */
+import { skuInactiveSentence } from '@/lib/sku-status';
 import { ApiProblem } from '@/lib/api/client';
 import type {
   AmendAsnDto,
@@ -235,6 +236,9 @@ export function asnReason(error: unknown): string {
       // Story 1-2a: the client has departed (no new ASNs).
       case 'client-departed':
         return CLIENT_DEPARTED_REASON;
+      // Story 1-4b: an inactive SKU takes no new inbound (a new line, or a raised quantity on an amend).
+      case 'sku-inactive':
+        return skuInactiveSentence(error, 'a new ASN, nor take a raised quantity on one');
       case 'asn-not-open':
         return 'This ASN is no longer open (received, closed or cancelled) — refresh the list.';
       case 'asn-line-received':

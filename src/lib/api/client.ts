@@ -16,6 +16,7 @@ import {
   catalogControllerListSkus,
   catalogControllerReplaceKit,
   catalogControllerReplacePackaging,
+  catalogControllerUpdateSkuStatus,
   channelsControllerConnect,
   channelsControllerDisconnect,
   channelsControllerListConnections,
@@ -277,6 +278,7 @@ import type {
   CreateProductDto,
   CreateSkuDto,
   ReplacePackagingDto,
+  UpdateSkuStatusDto,
   SkuWriteResponse,
   CreateWarehouseDto,
   CreateZoneDto,
@@ -950,11 +952,19 @@ export async function fetchApiImportCatalog(
 
 export async function fetchApiListSkus(
   tenantId: string,
-  options?: { cursor?: string; productId?: string; /** Story 1-5a — one client's SKUs; sent only when set. */ clientId?: string; signal?: AbortSignal },
+  options?: {
+    cursor?: string;
+    productId?: string;
+    /** Story 1-5a — one client's SKUs; sent only when set. */
+    clientId?: string;
+    /** Story 1-4b — only active or only inactive SKUs; absent lists every SKU. */
+    status?: 'active' | 'inactive';
+    signal?: AbortSignal;
+  },
 ): Promise<SkuListResponse> {
   const { data, error } = await catalogControllerListSkus({
     path: { tenantId },
-    query: definedQuery({ cursor: options?.cursor, productId: options?.productId, clientId: options?.clientId }),
+    query: definedQuery({ cursor: options?.cursor, productId: options?.productId, clientId: options?.clientId, status: options?.status }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -1015,6 +1025,27 @@ export async function fetchApiReplacePackaging(
   idempotencyKey: string,
 ): Promise<SkuWriteResponse> {
   const { data, error } = await catalogControllerReplacePackaging({
+    path: { tenantId, skuId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 1-4b — deactivate (with an optional reason) or reactivate a SKU
+ * (gated `sku.edit`). The caller notifies the catalog readers on success.
+ */
+export async function fetchApiUpdateSkuStatus(
+  tenantId: string,
+  skuId: string,
+  body: UpdateSkuStatusDto,
+  idempotencyKey: string,
+): Promise<SkuWriteResponse> {
+  const { data, error } = await catalogControllerUpdateSkuStatus({
     path: { tenantId, skuId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },

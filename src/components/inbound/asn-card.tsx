@@ -27,6 +27,7 @@ import {
   withoutKits,
   type AsnDraftLine,
 } from '@/lib/asns';
+import { skuInactiveMarker, withoutInactive } from '@/lib/sku-status';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { clientCell, clientLabel, showClients, skusOfClient, workingClients } from '@/lib/clients';
 import { quantityLabel } from '@/lib/format-quantity';
@@ -310,7 +311,8 @@ function AsnCreateForm({
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const inFlight = useRef(false);
 
-  const options = withoutKits(skusOfClient(Object.values(skus ?? {}), clientId), kitIds);
+  // Story 1-4b — an inactive SKU takes no new ASN: it drops out of the create picker.
+  const options = withoutInactive(withoutKits(skusOfClient(Object.values(skus ?? {}), clientId), kitIds));
 
   function edit<T>(setter: (value: T) => void): (value: T) => void {
     return (value) => {
@@ -475,6 +477,9 @@ function AsnDetail({
           return (
             <div key={line.id} className="flex flex-wrap gap-x-2">
               <span className="font-mono">{sku?.code ?? '(unknown SKU)'}</span>
+              {skuInactiveMarker(sku) !== null ? (
+                <span className="rounded-sm bg-(--muted) px-1">{skuInactiveMarker(sku)}</span>
+              ) : null}
               <span className="text-(--muted-foreground)">
                 {qty(line.announcedQty)} announced · {qty(line.receivedQty)} received · {openQtyLabel({ openQty: line.openQty, receivedQty: line.receivedQty, expected: line.announcedQty }, sku)} open
               </span>
@@ -552,7 +557,10 @@ function AsnAmendForm({
   const inFlight = useRef(false);
   const received = new Set(asn.lines.filter((line) => line.receivedQty > 0).map((line) => line.id));
   // A kit already on a line (keyed before kits were refused) stays shown.
-  const options = withoutKits(skusOfClient(Object.values(skus ?? {}), asn.clientId), kitIds, new Set(asn.lines.map((line) => line.skuId)));
+  // Story 1-4b — the amend keeps every SKU already on the ASN (an inactive one
+  // included); other inactive SKUs drop out, like kits.
+  const onAsn = new Set(asn.lines.map((line) => line.skuId));
+  const options = withoutInactive(withoutKits(skusOfClient(Object.values(skus ?? {}), asn.clientId), kitIds, onAsn), onAsn);
 
   async function submit() {
     const session = readSession();

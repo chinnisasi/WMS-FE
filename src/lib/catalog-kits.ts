@@ -1,3 +1,4 @@
+import { skuInactiveSentence } from '@/lib/sku-status';
 import { ApiProblem } from '@/lib/api/client';
 import type { KitResponse } from '@/lib/api/generated';
 import { quantityLabel, parseQuantityInput, type QuantityUom } from '@/lib/format-quantity';
@@ -84,6 +85,9 @@ export function kitReason(error: unknown): string {
       // Story 1-2a — the client has departed (it takes no new work).
       case 'client-departed':
         return CLIENT_DEPARTED_REASON;
+      // Story 1-4b — an inactive SKU is composed into no new kit (a stored component stays).
+      case 'sku-inactive':
+        return skuInactiveSentence(error, 'a new kit, as the kit or as a new component');
       // Story 21-2b — a kit and its components share one client.
       case 'mixed-client':
         return error.detail ?? 'A component belongs to another client — a kit and its components share one client.';

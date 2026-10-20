@@ -138,6 +138,13 @@ function stubRouter(): void {
       const put = body as { levels: unknown[] };
       return json(200, { sku: sku({ uomConversions: put.levels }) });
     }
+    // Story 1-4b — the status route echoes the SKU with its new status.
+    if (method === 'PATCH' && /\/catalog\/skus\/[^/]+\/status$/.test(pathname)) {
+      const sent = body as { status: string; reason?: string };
+      const skuId = pathname.split('/catalog/skus/')[1]!.split('/status')[0]!;
+      const row = (skuRows.find((r) => (r as { id: string }).id === skuId) ?? sku()) as Record<string, unknown>;
+      return json(200, { sku: { ...row, status: sent.status, inactiveReason: sent.status === 'inactive' ? (sent.reason ?? null) : null } });
+    }
     if (method === 'PATCH' && /\/catalog\/skus\/[^/]+$/.test(pathname)) {
       if (nextPatchStatus !== 200) {
         const refusal = nextPatchBody;
@@ -1158,5 +1165,102 @@ describe('story 1-4: shelf life, pack levels and the Packaging panel', () => {
     submitForm(view.container);
     await settle();
     expect(view.container.textContent).toContain('SKU "SHELF-1" has stock on hand — batch tracking cannot change.');
+  });
+});
+
+describe('story 1-4b: SKU status — the column, the filter, deactivate and reactivate', () => {
+  function rowOf(container: HTMLElement, code: string): HTMLTableRowElement {
+    return [...container.querySelectorAll<HTMLTableRowElement>('tbody tr')].find((row) => row.textContent!.includes(code))!;
+  }
+
+  function buttonIn(scope: ParentNode, text: string): HTMLButtonElement {
+    return [...scope.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === text)!;
+  }
+
+  test('the Status column reads Active / Inactive — {reason}; an inactive plain row offers no Kit', async () => {
+    skuRows = [
+      sku({ id: 'sku-a', code: 'LIVE-1', status: 'active', inactiveReason: null }),
+      sku({ id: 'sku-b', code: 'GONE-1', status: 'inactive', inactiveReason: 'discontinued' }),
+    ];
+    kitRows = [];
+    view = await mount();
+    const headers = [...view.container.querySelectorAll('thead th')].map((th) => th.textContent);
+    expect(headers.indexOf('Status')).toBe(headers.indexOf('Name') + 1);
+    expect(rowOf(view.container, 'LIVE-1').textContent).toContain('Active');
+    expect(rowOf(view.container, 'GONE-1').textContent).toContain('Inactive — discontinued');
+    const buttons = (code: string) => [...rowOf(view!.container, code).querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons('LIVE-1')).toEqual(expect.arrayContaining(['Kit', 'Deactivate']));
+    expect(buttons('GONE-1')).not.toContain('Kit');
+    expect(buttons('GONE-1')).toContain('Reactivate');
+  });
+
+  test('the status filter sends ?status and remounts the table', async () => {
+    view = await mount();
+    const select = view.container.querySelector<HTMLSelectElement>('select[aria-label="Status filter"]')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+      setter.call(select, 'inactive');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await settle();
+    const lists = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/catalog/skus'));
+    expect(lists[0]!.params.get('status')).toBeNull();
+    expect(lists.at(-1)!.params.get('status')).toBe('inactive');
+  });
+
+  test('Deactivate sends {status: inactive, reason} trimmed; a too-long reason is refused client-side', async () => {
+    skuRows = [sku({ id: 'sku-a', code: 'LIVE-1', status: 'active', inactiveReason: null })];
+    kitRows = [];
+    view = await mount();
+    act(() => buttonIn(rowOf(view!.container, 'LIVE-1'), 'Deactivate').click());
+    await settle();
+    const panel = view.container.querySelector('[aria-label="Confirm deactivate"]')!;
+    expect(panel.textContent).toContain('channel buffers');
+    const input = panel.querySelector<HTMLInputElement>('input')!;
+    setInput(input, 'x'.repeat(501));
+    act(() => buttonIn(panel, 'Deactivate LIVE-1').click());
+    await settle();
+    expect(panel.textContent).toContain('at most 500');
+    expect(requests.filter((r) => r.pathname.endsWith('/status'))).toHaveLength(0);
+    setInput(input, '  end of line  ');
+    act(() => buttonIn(panel, 'Deactivate LIVE-1').click());
+    await settle();
+    const sent = requests.filter((r) => r.method === 'PATCH' && r.pathname.endsWith('/status'));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toEqual({ status: 'inactive', reason: 'end of line' });
+    expect(view.container.textContent).toContain('LIVE-1 deactivated');
+  });
+
+  test('Reactivate confirms and sends {status: active}', async () => {
+    skuRows = [sku({ id: 'sku-b', code: 'GONE-1', status: 'inactive', inactiveReason: null })];
+    kitRows = [];
+    view = await mount();
+    act(() => buttonIn(rowOf(view!.container, 'GONE-1'), 'Reactivate').click());
+    await settle();
+    act(() => buttonIn(view!.container, 'Reactivate GONE-1').click());
+    await settle();
+    const sent = requests.filter((r) => r.method === 'PATCH' && r.pathname.endsWith('/status'));
+    expect(sent.map((r) => r.body)).toEqual([{ status: 'active' }]);
+    expect(view.container.textContent).toContain('GONE-1 reactivated');
+  });
+
+  test('kit compose drops an inactive SKU from the picker; a kit edit keeps a stored inactive component', async () => {
+    skuRows = [
+      sku({ id: 'sku-k', code: 'KIT-1', status: 'active', inactiveReason: null }),
+      sku({ id: 'sku-c', code: 'COMP-1', status: 'active', inactiveReason: null }),
+      sku({ id: 'sku-x', code: 'OLD-1', status: 'inactive', inactiveReason: null }),
+      sku({ id: 'sku-p', code: 'PLAIN-1', status: 'active', inactiveReason: null }),
+    ];
+    kitRows = [kit({ skuId: 'sku-k', code: 'KIT-1', components: [{ skuId: 'sku-x', code: 'OLD-1', qty: 1 }] })];
+    view = await mount();
+    act(() => buttonIn(rowOf(view!.container, 'PLAIN-1'), 'Kit').click());
+    await settle();
+    const createOptions = [...view.container.querySelectorAll('form select option')].map((o) => o.textContent);
+    expect(createOptions.join(' ')).not.toContain('OLD-1');
+    expect(createOptions.join(' ')).toContain('COMP-1');
+    act(() => buttonIn(rowOf(view!.container, 'KIT-1'), 'Edit kit').click());
+    await settle();
+    const editOptions = [...view.container.querySelectorAll('form select option')].map((o) => o.textContent);
+    expect(editOptions.join(' ')).toContain('OLD-1');
   });
 });

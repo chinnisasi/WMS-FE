@@ -15,6 +15,7 @@ import {
   fetchApiSetConnectionMappings,
   fetchApiUpdateChannelConnectionConfig,
 } from '@/lib/api/client';
+import { skuInactiveMarker, withoutInactive } from '@/lib/sku-status';
 import type {
   ChannelBufferVerdictDto,
   ChannelConnectionListEntryDto,
@@ -1405,7 +1406,9 @@ function MappingEditor({
   const mappingClient = clientOfSku(skuList, rows[0]?.skuId);
   // Story 1-2a — a departed client's SKUs take no new mapping: never offered
   // (a stored row's own pick stays listed).
-  const pickable = skusOfWorkingClients(skuList, clients);
+  // Story 1-4b — an inactive SKU takes no NEW mapping: it drops out of every
+  // picker; a stored row's own pick stays listed and is marked (it publishes 0).
+  const pickable = withoutInactive(skusOfWorkingClients(skuList, clients));
   const rowOptions = (index: number, currentId: string) =>
     keepCurrentSku(index === 0 ? pickable : narrowToClient(pickable, mappingClient), skuList, currentId);
   // A row left holding another client's SKU (row 0 changed client, or was
@@ -1576,6 +1579,11 @@ function MappingEditor({
                               </option>
                             ))}
                           </select>
+                          {skuInactiveMarker(skus?.[row.skuId], 'mapping') !== null && (
+                            <div className="mt-1 text-[10px] text-(--muted-foreground)" data-testid="mapping-inactive">
+                              {skuInactiveMarker(skus?.[row.skuId], 'mapping')}
+                            </div>
+                          )}
                           {offClient(index, row.skuId) && (
                             <div className="mt-1 text-[10px] text-(--destructive)" data-testid="mapping-off-client">
                               Another client&apos;s SKU — change or remove this row.

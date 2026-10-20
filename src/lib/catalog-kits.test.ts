@@ -57,6 +57,8 @@ function sku(over: Partial<SkuResponse> = {}): SkuResponse {
     uomConversions: [],
     shelfLifeDays: null,
     barcodes: [],
+    status: 'active',
+    inactiveReason: null,
     // The 12-1 storage-class vocabulary — every SKU carries a class (ambient
     // by default), required on SkuResponse since the 12-1 schema landed.
     storageClass: 'ambient',

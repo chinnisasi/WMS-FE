@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
+import { orderSkuOptionLabel } from '@/lib/sku-status';
 import type { OrderEntryDto, ReturnAuthorizationDto, SkuResponse } from '@/lib/api/generated';
 import { quantityInputLabel, sharedQuantityUom } from '@/lib/format-quantity';
 import { buyerGstinStateMismatch } from '@/lib/gst-states';
@@ -585,9 +586,11 @@ function OrderCreateForm({
                 </option>
                 {/* Story 1-1 — an order is for ONE client: every line offers
                     the chosen client's SKUs (every SKU with one client). */}
+                {/* Story 1-4b (decision 10) — an inactive SKU stays, labelled:
+                    it sells existing stock only. */}
                 {skuOptions.map((sku) => (
                   <option key={sku.id} value={sku.id}>
-                    {sku.code} {sku.name}
+                    {orderSkuOptionLabel(sku, `${sku.code} ${sku.name}`)}
                   </option>
                 ))}
               </select>

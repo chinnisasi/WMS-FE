@@ -8,6 +8,7 @@
  * `clients.test.ts` (the house rule: a claim left in JSX is a claim nothing
  * can pin).
  */
+import { skuInactiveSentence } from '@/lib/sku-status';
 import { ApiProblem } from '@/lib/api/client';
 import type {
   AddressDto,
@@ -706,6 +707,9 @@ export function importReason(error: unknown): string {
       // Story 1-2a: the run's client has departed (it takes no new SKUs).
       case 'client-departed':
         return CLIENT_DEPARTED_REASON;
+      // Story 1-4b — a kit_components cell naming an inactive SKU (a row error; never file-level today).
+      case 'sku-inactive':
+        return skuInactiveSentence(error, 'a new kit');
       case 'not-found':
         return 'That client no longer exists — refresh the page and choose again.';
       case 'role-denied':
