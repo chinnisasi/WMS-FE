@@ -8,8 +8,8 @@ import {
   fetchApiGenerateWave,
   fetchApiReleaseWave,
 } from '@/lib/api/client';
-import type { OrderEntryDto, PicklistDto, WaveEntryDto, WavePolicyDto } from '@/lib/api/generated';
-import { sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
+import type { OrderEntryDto, PicklistDto, SkuResponse, WaveEntryDto, WavePolicyDto } from '@/lib/api/generated';
+import { sharedQuantityUom } from '@/lib/format-quantity';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import { filterPage, pageFilterCount, type Outcome } from '@/lib/outbound-orders';
 import {
@@ -58,6 +58,7 @@ import { ulid } from '@/lib/ulid';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
+import { HandlingBadges } from '@/components/shared/handling-badges';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
 import {
   buttonClass,
@@ -1057,7 +1058,8 @@ function PicklistPanel({
   skuOf,
 }: {
   picklist: PicklistDto;
-  skuOf: (skuId: string) => QuantityUom | undefined;
+  /** Story 1-6a — the whole SKU (it names the unit and carries the handling warnings). */
+  skuOf: (skuId: string) => SkuResponse | undefined;
 }) {
   return (
     <div className="flex flex-col gap-1 rounded-sm border border-(--border) p-2">
@@ -1080,6 +1082,8 @@ function PicklistPanel({
               {/* The stop's own SKU names the unit and its precision — a
                   batch walk mixes units, so each row states its own. */}
               <span className="data">{pickLineQuantityLabel(line, skuOf(line.skuId))}</span>
+              {/* Story 1-6a — the handling warnings of the SKU at this stop. */}
+              <HandlingBadges sku={skuOf(line.skuId)} />
               <span
                 className={
                   line.status === 'unfulfillable' || line.status === 'short'

@@ -159,6 +159,9 @@ describe('story 1-4: the SKU create card', () => {
       serialTracked: false,
       catchWeightTracked: false,
       storageClass: 'ambient',
+      // Story 1-6a — the two handling flags always ride, like batchTracked.
+      highValue: false,
+      fragile: false,
     });
     expect(view.container.textContent).toContain('TEA-1 created');
   });

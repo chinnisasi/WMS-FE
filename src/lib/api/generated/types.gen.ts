@@ -594,7 +594,7 @@ export type CatalogImportErrorResponse = {
      */
     skuCode: string | null;
     /**
-     * validation-failed | duplicate-sku-code | duplicate-barcode
+     * validation-failed | duplicate-sku-code | duplicate-barcode | … ; story 1-6a adds dg-hazard-mismatch (a hazard_class cell disagreeing with dg_class) and dg-hazard-required (dg_class 8 with a blank hazard_class — write corrosive-acid, corrosive-base or none)
      */
     code: string;
     detail: string;
@@ -732,6 +732,46 @@ export type SkuResponse = {
      * Story 1-4b — why it was deactivated; null unless inactive (and optional then)
      */
     inactiveReason: string | null;
+    /**
+     * Story 1-6a — drug schedules, sorted; empty when not a scheduled drug
+     */
+    drugSchedules: Array<'G' | 'H' | 'H1' | 'X' | 'C' | 'C1' | 'NDPS'>;
+    /**
+     * Story 1-6a — the food category; `non-food` declares the SKU not food, null means not set
+     */
+    foodCategory: 'dairy' | 'meat-poultry-seafood' | 'fresh-produce' | 'bakery-cereals' | 'ready-to-eat' | 'beverages' | 'oils-fats' | 'spices-condiments' | 'confectionery' | 'packaged-dry-grocery' | 'infant-food' | 'other-food' | 'non-food';
+    /**
+     * Story 1-6a — FSSAI allergens, sorted; only with a food category that is not non-food
+     */
+    allergens: Array<'gluten-cereals' | 'crustaceans' | 'milk' | 'eggs' | 'fish' | 'peanuts' | 'tree-nuts' | 'soybean' | 'sulphite'>;
+    /**
+     * Story 1-6a — the UN number, four digits without the "UN" prefix; set together with dgClass
+     */
+    dgUnNumber: string | null;
+    /**
+     * Story 1-6a — the primary dangerous-goods class; a mapped class sets hazardClass
+     */
+    dgClass: '1.1' | '1.2' | '1.3' | '1.4' | '1.5' | '1.6' | '2.1' | '2.2' | '2.3' | '3' | '4.1' | '4.2' | '4.3' | '5.1' | '5.2' | '6.1' | '6.2' | '7' | '8' | '9';
+    /**
+     * Story 1-6a — up to two subsidiary DG classes, sorted, never the primary
+     */
+    dgSubsidiaryClasses: Array<'1.1' | '1.2' | '1.3' | '1.4' | '1.5' | '1.6' | '2.1' | '2.2' | '2.3' | '3' | '4.1' | '4.2' | '4.3' | '5.1' | '5.2' | '6.1' | '6.2' | '7' | '8' | '9'>;
+    /**
+     * Story 1-6a — the UN packing group; none for classes 1, 2, 5.2, 6.2 and 7
+     */
+    dgPackingGroup: 'I' | 'II' | 'III';
+    /**
+     * Story 1-6a — a handling and insurance marker; placement stays governed by storage class
+     */
+    highValue: boolean;
+    /**
+     * Story 1-6a — handle with care
+     */
+    fragile: boolean;
+    /**
+     * Story 1-6a — how many of the SKU's outermost received units may stand on one another (1 = do not stack); shown, not enforced
+     */
+    maxStackLayers: number | null;
     createdAt: string;
 };
 
@@ -781,6 +821,40 @@ export type ExtraBarcodeDto = {
 
 export type CreateSkuDto = {
     /**
+     * Drug schedules (a drug may carry several, e.g. C and H)
+     */
+    drugSchedules?: Array<'G' | 'H' | 'H1' | 'X' | 'C' | 'C1' | 'NDPS'>;
+    /**
+     * `non-food` declares the SKU not food; null clears
+     */
+    foodCategory?: 'dairy' | 'meat-poultry-seafood' | 'fresh-produce' | 'bakery-cereals' | 'ready-to-eat' | 'beverages' | 'oils-fats' | 'spices-condiments' | 'confectionery' | 'packaged-dry-grocery' | 'infant-food' | 'other-food' | 'non-food';
+    /**
+     * FSSAI allergens — only with a food category that is not non-food
+     */
+    allergens?: Array<'gluten-cereals' | 'crustaceans' | 'milk' | 'eggs' | 'fish' | 'peanuts' | 'tree-nuts' | 'soybean' | 'sulphite'>;
+    /**
+     * The UN number 0001–3599, with or without the "UN" prefix (any case; stored without it). Set together with dgClass; null clears
+     */
+    dgUnNumber?: string | null;
+    /**
+     * The primary DG class. 1.x → explosive, 2.x → gas, 3 → flammable, 5.1 → oxidizer, 6.1 → toxic set hazardClass; 8 needs hazardClass corrosive-acid, corrosive-base or null; null clears
+     */
+    dgClass?: '1.1' | '1.2' | '1.3' | '1.4' | '1.5' | '1.6' | '2.1' | '2.2' | '2.3' | '3' | '4.1' | '4.2' | '4.3' | '5.1' | '5.2' | '6.1' | '6.2' | '7' | '8' | '9';
+    /**
+     * Up to two subsidiary DG classes, never the primary, only with a primary
+     */
+    dgSubsidiaryClasses?: Array<'1.1' | '1.2' | '1.3' | '1.4' | '1.5' | '1.6' | '2.1' | '2.2' | '2.3' | '3' | '4.1' | '4.2' | '4.3' | '5.1' | '5.2' | '6.1' | '6.2' | '7' | '8' | '9'>;
+    /**
+     * I, II or III; none for classes 1, 2, 5.2, 6.2 and 7; null clears
+     */
+    dgPackingGroup?: 'I' | 'II' | 'III';
+    highValue?: boolean;
+    fragile?: boolean;
+    /**
+     * How many of the SKU's outermost received units may stand on one another (1 = do not stack); null clears
+     */
+    maxStackLayers?: number | null;
+    /**
      * Unique in the client; immutable
      */
     code: string;
@@ -809,6 +883,9 @@ export type CreateSkuDto = {
      * Defaults to ambient
      */
     storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    /**
+     * Story 1-6a — omitted, a mapped dgClass derives it; with dgClass 8 send corrosive-acid, corrosive-base or null (none). A value that disagrees with the DG class is 400 dg-hazard-mismatch
+     */
     hazardClass?: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
     abcClass?: 'a' | 'b' | 'c';
     /**
@@ -922,6 +999,40 @@ export type PatchProductDto = {
 };
 
 export type PatchSkuDto = {
+    /**
+     * Drug schedules (a drug may carry several, e.g. C and H)
+     */
+    drugSchedules?: Array<'G' | 'H' | 'H1' | 'X' | 'C' | 'C1' | 'NDPS'>;
+    /**
+     * `non-food` declares the SKU not food; null clears
+     */
+    foodCategory?: 'dairy' | 'meat-poultry-seafood' | 'fresh-produce' | 'bakery-cereals' | 'ready-to-eat' | 'beverages' | 'oils-fats' | 'spices-condiments' | 'confectionery' | 'packaged-dry-grocery' | 'infant-food' | 'other-food' | 'non-food';
+    /**
+     * FSSAI allergens — only with a food category that is not non-food
+     */
+    allergens?: Array<'gluten-cereals' | 'crustaceans' | 'milk' | 'eggs' | 'fish' | 'peanuts' | 'tree-nuts' | 'soybean' | 'sulphite'>;
+    /**
+     * The UN number 0001–3599, with or without the "UN" prefix (any case; stored without it). Set together with dgClass; null clears
+     */
+    dgUnNumber?: string | null;
+    /**
+     * The primary DG class. 1.x → explosive, 2.x → gas, 3 → flammable, 5.1 → oxidizer, 6.1 → toxic set hazardClass; 8 needs hazardClass corrosive-acid, corrosive-base or null; null clears
+     */
+    dgClass?: '1.1' | '1.2' | '1.3' | '1.4' | '1.5' | '1.6' | '2.1' | '2.2' | '2.3' | '3' | '4.1' | '4.2' | '4.3' | '5.1' | '5.2' | '6.1' | '6.2' | '7' | '8' | '9';
+    /**
+     * Up to two subsidiary DG classes, never the primary, only with a primary
+     */
+    dgSubsidiaryClasses?: Array<'1.1' | '1.2' | '1.3' | '1.4' | '1.5' | '1.6' | '2.1' | '2.2' | '2.3' | '3' | '4.1' | '4.2' | '4.3' | '5.1' | '5.2' | '6.1' | '6.2' | '7' | '8' | '9'>;
+    /**
+     * I, II or III; none for classes 1, 2, 5.2, 6.2 and 7; null clears
+     */
+    dgPackingGroup?: 'I' | 'II' | 'III';
+    highValue?: boolean;
+    fragile?: boolean;
+    /**
+     * How many of the SKU's outermost received units may stand on one another (1 = do not stack); null clears
+     */
+    maxStackLayers?: number | null;
     name?: string;
     /**
      * GST in basis points (1800 = 18%)
@@ -985,7 +1096,7 @@ export type PatchSkuDto = {
      */
     storageClass?: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
     /**
-     * The SKU's hazard class (FR-41): explosive, oxidizer, flammable, corrosive-acid, corrosive-base, toxic or gas. Omit to leave unchanged; null clears the class (always succeeds — null carries no rule).
+     * The SKU's hazard class (FR-41): explosive, oxidizer, flammable, corrosive-acid, corrosive-base, toxic or gas. Omit to leave unchanged — or, when the SKU's resulting dgClass is mapped (1.x, 2.x, 3, 5.1, 6.1), to take the derived class. null clears it unless the DG class sets one (400 dg-hazard-mismatch); with dgClass 8 only corrosive-acid, corrosive-base or null are accepted, and changing into class 8 from a non-corrosive needs one of them (400 dg-hazard-required). A change to a non-null class runs the co-location guard.
      */
     hazardClass?: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
     /**
@@ -3767,6 +3878,25 @@ export type CatalogSnapshotPackBarcodeDto = {
     factor: number;
 };
 
+export type CatalogSnapshotDgDto = {
+    /**
+     * The UN number, four digits without the "UN" prefix
+     */
+    unNumber: string;
+    /**
+     * The primary DG class
+     */
+    class: '1.1' | '1.2' | '1.3' | '1.4' | '1.5' | '1.6' | '2.1' | '2.2' | '2.3' | '3' | '4.1' | '4.2' | '4.3' | '5.1' | '5.2' | '6.1' | '6.2' | '7' | '8' | '9';
+    /**
+     * Up to two subsidiary DG classes, sorted
+     */
+    subsidiaryClasses: Array<'1.1' | '1.2' | '1.3' | '1.4' | '1.5' | '1.6' | '2.1' | '2.2' | '2.3' | '3' | '4.1' | '4.2' | '4.3' | '5.1' | '5.2' | '6.1' | '6.2' | '7' | '8' | '9'>;
+    /**
+     * The UN packing group, or null
+     */
+    packingGroup: 'I' | 'II' | 'III';
+};
+
 export type CatalogSnapshotSkuDto = {
     id: string;
     code: string;
@@ -3809,6 +3939,22 @@ export type CatalogSnapshotSkuDto = {
      * Story 1-4b: `inactive` — the SKU takes no new inbound. A receive scan of it that is not on the document is still booked and flagged for review; the handheld warns at scan time. An older device ignores it.
      */
     status: 'active' | 'inactive';
+    /**
+     * Story 1-6a: handle with care — the handheld notes it on receive, pick, pack and putaway
+     */
+    fragile: boolean;
+    /**
+     * Story 1-6a: a handling and insurance marker — noted on the handheld, never a placement rule
+     */
+    highValue: boolean;
+    /**
+     * Story 1-6a: how many of the SKU's outermost received units may stand on one another (1 = do not stack); shown, not enforced
+     */
+    maxStackLayers: number | null;
+    /**
+     * Story 1-6a: the dangerous-goods identity, null when the SKU is not a dangerous good
+     */
+    dg: CatalogSnapshotDgDto | null;
 };
 
 export type CatalogSnapshotPoDto = {
@@ -10460,7 +10606,7 @@ export type CatalogControllerCreateSkuData = {
 
 export type CatalogControllerCreateSkuErrors = {
     /**
-     * Missing or malformed Idempotency-Key; an invalid field — unknown uom, GST, attributes, classes, shelf life, a level equal to the base uom or repeated, a factor outside 2–1,000,000, a barcode breaking the rule or equal to the primary (validation-failed); a barcode on a level the SKU does not declare (barcode-level-unknown); no clientId while the tenant holds more than one client (client-required)
+     * Missing or malformed Idempotency-Key; an invalid field — unknown uom, GST, attributes, classes, shelf life, a level equal to the base uom or repeated, a factor outside 2–1,000,000, a barcode breaking the rule or equal to the primary (validation-failed); a barcode on a level the SKU does not declare (barcode-level-unknown); no clientId while the tenant holds more than one client (client-required); a goods-type field breaking its vocabulary or a pairing rule, or an explicit null for highValue, fragile, drugSchedules, allergens or dgSubsidiaryClasses (validation-failed); a hazardClass that disagrees with the dgClass (dg-hazard-mismatch); dgClass 8 without hazardClass corrosive-acid, corrosive-base or null (dg-hazard-required)
      */
     400: ProblemDetailsDto;
     /**
@@ -10811,7 +10957,7 @@ export type CatalogControllerEditSkuData = {
 
 export type CatalogControllerEditSkuErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or invalid/empty body, or variantValues not covering the product's axes (names the axis)
+     * Missing or malformed Idempotency-Key, or invalid/empty body, or variantValues not covering the product's axes (names the axis); a goods-type field breaking its vocabulary or a pairing rule over the resulting SKU, or an explicit null for storageClass, highValue, fragile, drugSchedules, allergens or dgSubsidiaryClasses (validation-failed); a hazardClass that disagrees with the resulting dgClass (dg-hazard-mismatch); a change into dgClass 8 from a non-corrosive hazard without hazardClass corrosive-acid, corrosive-base or null (dg-hazard-required)
      */
     400: ProblemDetailsDto;
     /**

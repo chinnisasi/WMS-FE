@@ -435,15 +435,18 @@ function stubRouter(): void {
       if (skuFail) {
         return json(500, { code: 'internal', title: 'Broken', status: 500, detail: 'The SKU list is down.' });
       }
-      return json(200, { items: SKU_ROWS, nextCursor: null });
+      return json(200, { items: skuRowsOverride ?? SKU_ROWS, nextCursor: null });
     }
     return json(404, { code: 'not-found', title: 'Unrouted in this test', status: 404 });
   }) as unknown as typeof fetch);
 }
 
 let view: Rendered | undefined;
+/** Story 1-6a — a SKU list carrying goods-type fields (SKU_ROWS is the pre-1-6a shape: no keys). */
+let skuRowsOverride: unknown[] | null = null;
 
 beforeEach(() => {
+  skuRowsOverride = null;
   requests = [];
   orderStatuses = {
     'order-1': 'accepted',
@@ -660,6 +663,19 @@ describe('the pipeline list', () => {
 /* ------------------------------------------------------------------ */
 
 describe('the pack bench', () => {
+  test('story 1-6a: a fragile DG line shows its handling badges; a SKU without goods-type keys shows none', async () => {
+    skuRowsOverride = [
+      { ...SKU_ROWS[0], fragile: true, dgClass: '3', dgUnNumber: '1230', dgSubsidiaryClasses: ['6.1'], dgPackingGroup: null, maxStackLayers: 4 },
+      SKU_ROWS[1],
+    ];
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    const badges = [...view.container.querySelectorAll('[data-handling-badge]')].map((b) => b.textContent);
+    expect(badges).toEqual(['Fragile', 'DG 3 (6.1) · UN1230', 'Stacks ≤ 4']);
+    const flourLine = [...view.container.querySelectorAll('li')].find((li) => li.textContent!.includes('FLOUR-01'))!;
+    expect(flourLine.querySelector('[data-handling-badge]')).toBeNull();
+  });
+
   test('entries seed from the ORDERED quantity, and a full pack sends exactly them', async () => {
     view = await mount('operator');
     await expand(view, 'order-1');

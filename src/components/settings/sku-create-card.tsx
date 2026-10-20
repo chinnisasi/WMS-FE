@@ -28,6 +28,8 @@ import { useActiveClient } from '@/lib/use-active-client';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { PackagingEditor } from '@/components/settings/packaging-editor';
+import { GoodsTypeFields, HazardSelect } from '@/components/settings/goods-type-fields';
+import { hazardSelectFor } from '@/lib/goods-type';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -245,17 +247,14 @@ function SkuCreateCardAllowed() {
                 ))}
               </select>
             </label>
-            <label className="flex flex-1 flex-col gap-1">
-              <span className={labelClass}>Hazard class</span>
-              <select className={inputClass} value={draft.hazardClass} onChange={(e) => edit({ hazardClass: e.target.value })}>
-                <option value="">No rule</option>
-                {HAZARD_CLASSES.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {/* Story 1-6a — decision 7: a mapped DG class sets the hazard (not
+                sent — the server derives it); class 8 chooses acid, base or none. */}
+            <HazardSelect
+              dgClass={draft.goods.dgClass}
+              value={draft.hazardClass}
+              onChange={(hazardClass) => edit({ hazardClass })}
+              hazardClasses={HAZARD_CLASSES}
+            />
             <label className="flex flex-1 flex-col gap-1">
               <span className={labelClass}>ABC class</span>
               <select className={inputClass} value={draft.abcClass} onChange={(e) => edit({ abcClass: e.target.value })}>
@@ -285,6 +284,12 @@ function SkuCreateCardAllowed() {
               {shelfWarning}
             </div>
           ) : null}
+          <GoodsTypeFields
+            draft={draft.goods}
+            onChange={(goods) => edit({ goods })}
+            // A create has no stored hazard: class 8 starts on "choose", a free class on "No rule".
+            onDgClassChange={(dgClass) => edit({ hazardClass: hazardSelectFor(dgClass, { dgClass: '', hazardClass: '' }) })}
+          />
           <div className="flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={draft.batchTracked} onChange={(e) => edit({ batchTracked: e.target.checked })} />

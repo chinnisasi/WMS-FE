@@ -252,6 +252,9 @@ describe('story 1-4 — the SKU master rules mirrored from the server', () => {
         shelfLifeDays: 365,
         levels: [{ uom: 'case', factor: 12 }],
         barcodes: [{ barcode: '8901', uom: 'case' }],
+        // Story 1-6a — the two flags always ride (the batchTracked shape); every other goods-type key is dropped when blank.
+        highValue: false,
+        fragile: false,
       },
       problem: null,
     });
@@ -265,10 +268,32 @@ describe('story 1-4 — the SKU master rules mirrored from the server', () => {
     });
   });
 
+  test('the create draft carries the goods-type fields and decision 7 (story 1-6a)', () => {
+    const base = { ...emptySkuCreateDraft(), code: 'DG-1', name: 'Acetone', gstPercent: '18' };
+    const derived = parseSkuCreateDraft(
+      { ...base, hazardClass: 'toxic', goods: { ...base.goods, dgClass: '3', dgUnNumber: 'UN1090', fragile: true } },
+      false,
+    );
+    expect(derived.problem).toBeNull();
+    // A mapped class derives the hazard server-side — the stale pick is not sent.
+    expect(derived.body).toMatchObject({ dgClass: '3', dgUnNumber: '1090', fragile: true, highValue: false });
+    expect(derived.body).not.toHaveProperty('hazardClass');
+    const choose = parseSkuCreateDraft({ ...base, goods: { ...base.goods, dgClass: '8', dgUnNumber: '1830' } }, false);
+    expect(choose.problem).toContain('DG class 8');
+    const none = parseSkuCreateDraft({ ...base, hazardClass: 'none', goods: { ...base.goods, dgClass: '8', dgUnNumber: '1830' } }, false);
+    expect((none.body as Record<string, unknown> | null)?.['hazardClass']).toBeNull();
+  });
+
   test('skuMasterReason: the 1-4 codes, the server detail verbatim where it names the party', () => {
     const p = (code: string, status: number, detail?: string) => new ApiProblem(code, status, detail);
     expect(skuMasterReason(p('sku-has-stock', 409, 'SKU "A" has stock on hand — batch tracking cannot change'))).toBe(
       'SKU "A" has stock on hand — batch tracking cannot change',
+    );
+    expect(skuMasterReason(p('dg-hazard-mismatch', 400, 'DG class 3 sets the hazard class to "flammable".'))).toBe(
+      'DG class 3 sets the hazard class to "flammable".',
+    );
+    expect(skuMasterReason(p('dg-hazard-required', 400))).toBe(
+      'DG class 8 needs its hazard class — choose corrosive acid, corrosive base or none.',
     );
     expect(skuMasterReason(p('sku-has-stock', 409))).toBe(
       'Tracking cannot change while the SKU has stock, a pending over-receipt or a pending adjustment.',

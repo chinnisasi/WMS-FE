@@ -222,7 +222,21 @@ function stubRouter(): void {
     if (method === 'GET' && pathname.endsWith('/catalog/skus')) {
       return json(200, {
         items: [
-          { id: 'sku-1', code: 'SPICE-01', name: 'Turmeric', uom: 'kg', uomPrecision: 3, clientId: skuClients['sku-1'] ?? null },
+          {
+            id: 'sku-1',
+            code: 'SPICE-01',
+            name: 'Turmeric',
+            uom: 'kg',
+            uomPrecision: 3,
+            clientId: skuClients['sku-1'] ?? null,
+            // Story 1-6a — a fragile DG stop (sku-2 carries no goods-type keys: the pre-1-6a shape).
+            fragile: true,
+            dgClass: '3',
+            dgUnNumber: '1230',
+            dgSubsidiaryClasses: ['6.1'],
+            dgPackingGroup: null,
+            maxStackLayers: null,
+          },
           { id: 'sku-2', code: 'FLOUR-01', name: 'Flour', uom: 'kg', uomPrecision: 3, clientId: skuClients['sku-2'] ?? null },
         ],
         nextCursor: null,
@@ -579,6 +593,12 @@ describe('the waves.manage gate', () => {
     expect(body).toContain('3.000 kg to pick');
     // …and the shared-unit totals render at that unit too.
     expect(body).toContain('1 order · 1 picklist · 2 stops · 2 lines · 7.000 kg to pick');
+    // Story 1-6a — the fragile DG stop carries its handling badges; the other stop none.
+    const stops = [...view.container.querySelectorAll('ol li')];
+    const spice = stops.find((li) => li.textContent!.includes('A-01-01'))!;
+    expect([...spice.querySelectorAll('[data-handling-badge]')].map((b) => b.textContent)).toEqual(['Fragile', 'DG 3 (6.1) · UN1230']);
+    const flour = stops.find((li) => li.textContent!.includes('B-02-07'))!;
+    expect(flour.querySelector('[data-handling-badge]')).toBeNull();
   });
 
   test('an Ops Manager is offered the policy and generate affordances', async () => {

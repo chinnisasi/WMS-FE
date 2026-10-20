@@ -175,7 +175,11 @@ describe('ImportCatalogCard: the help lists every column the import takes (story
     for (const column of [...CATALOG_IMPORT_REQUIRED_COLUMNS, ...CATALOG_IMPORT_OPTIONAL_COLUMNS]) {
       expect(text).toContain(column);
     }
-    expect(CATALOG_IMPORT_REQUIRED_COLUMNS.length + CATALOG_IMPORT_OPTIONAL_COLUMNS.length).toBe(25);
+    expect(CATALOG_IMPORT_REQUIRED_COLUMNS.length + CATALOG_IMPORT_OPTIONAL_COLUMNS.length).toBe(35);
+    // Story 1-6a — the goods-type cell grammars are explained.
+    expect(text).toContain('barcodes, drug_schedules');
+    expect(text).toContain('max_stack_layers is a whole number 1–100 (1 = do not stack)');
+    expect(text).toContain('dg_class 8 needs hazard_class corrosive-acid, corrosive-base or none');
     expect(text).toContain('shelf_life_days, barcodes');
     expect(text).toContain('case:8901234567890;each:8900000000001');
     expect(text).toContain('2 to 1,000,000 base units each');

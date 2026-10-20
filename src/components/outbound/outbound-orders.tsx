@@ -67,6 +67,7 @@ import { canCreateReturn, RETURN_CREATED_REASON, returnCreatedWord } from '@/lib
 
 import { StateSelect } from '@/components/address/state-select';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { HandlingBadges } from '@/components/shared/handling-badges';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { ReturnCreateForm } from '@/components/returns/return-create-form';
@@ -1082,6 +1083,10 @@ export function OrderDetailPanel({
                   ? kitParentHoldLabel(line, detail.data.status)
                   : `Hold: ${holdStateLabel(line)}`}
               </span>
+              {/* Story 1-6a (decision 9) — the handling warnings of the SKU
+                  actually handled: a plain line's own; a kit parent shows
+                  none, its exploded children carry theirs. */}
+              {children.length === 0 ? <HandlingBadges sku={skuMap?.[line.skuId]} /> : null}
             </div>
             {children.length > 0 ? (
               <ul className="flex flex-col gap-1 border-l border-(--border) pl-3">
@@ -1103,6 +1108,7 @@ export function OrderDetailPanel({
                       {child.status === 'backordered' ? 'Backordered' : 'Open'}
                     </span>
                     <span className="text-(--muted-foreground)">Hold: {holdStateLabel(child)}</span>
+                    <HandlingBadges sku={skuMap?.[child.skuId]} />
                   </li>
                 ))}
               </ul>

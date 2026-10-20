@@ -4,6 +4,13 @@ import type { CreateSkuDto, SkuResponse } from '@/lib/api/generated';
 /** The create body (the generated DTO). */
 export type CreateSkuBody = CreateSkuDto;
 import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
+import {
+  dgHazardReason,
+  emptyGoodsTypeDraft,
+  goodsTypeCreateFields,
+  hazardToSend,
+  type GoodsTypeDraft,
+} from '@/lib/goods-type';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
 /**
@@ -323,6 +330,10 @@ export function skuMasterReason(error: unknown): string {
       case 'storage-class-conflict':
       case 'hazard-segregation-conflict':
         return skuClassReason(error);
+      // Story 1-6a — decision 7: the hazard class against the DG class.
+      case 'dg-hazard-mismatch':
+      case 'dg-hazard-required':
+        return dgHazardReason(error.code, error.detail);
       case 'not-found':
         return 'That SKU or client no longer exists — refresh the page.';
       case 'role-denied':
@@ -365,6 +376,12 @@ export interface SkuCreateDraft {
   readonly shelfLifeDays: string;
   readonly levels: readonly PackLevelRow[];
   readonly barcodes: readonly PackBarcodeRow[];
+  /**
+   * Story 1-6a — the goods-type fields. `hazardClass` above follows decision
+   * 7 against `goods.dgClass`: a mapped class derives it (not sent), class 8
+   * needs acid, base or `none`.
+   */
+  readonly goods: GoodsTypeDraft;
 }
 
 export function emptySkuCreateDraft(): SkuCreateDraft {
@@ -392,6 +409,7 @@ export function emptySkuCreateDraft(): SkuCreateDraft {
     shelfLifeDays: '',
     levels: [],
     barcodes: [],
+    goods: emptyGoodsTypeDraft(),
   };
 }
 
@@ -459,6 +477,13 @@ export function parseSkuCreateDraft(
   if (shelf.problem !== null) return fail(shelf.problem);
   const packaging = parsePackagingDraft(draft.uom, barcode, draft.levels, draft.barcodes);
   if (packaging.problem !== null) return fail(packaging.problem);
+  // Story 1-6a — the goods-type keys (the flags always, blank optionals
+  // dropped) and the hazard key under decision 7 (a create has no stored
+  // state: a mapped DG class derives it, so it is not sent).
+  const goods = goodsTypeCreateFields(draft.goods);
+  if (goods.problem !== null) return fail(goods.problem);
+  const hazard = hazardToSend(draft.goods.dgClass, draft.hazardClass, { dgClass: '', hazardClass: '' });
+  if (hazard.problem !== null) return fail(hazard.problem);
   return {
     body: {
       code,
@@ -472,13 +497,16 @@ export function parseSkuCreateDraft(
       catchWeightTracked: draft.catchWeightTracked,
       ...(Object.keys(attributes).length === 0 ? {} : { attributes }),
       storageClass: draft.storageClass as StorageClass,
-      ...(draft.hazardClass === '' ? {} : { hazardClass: draft.hazardClass as NonNullable<CreateSkuBody['hazardClass']> }),
+      // The generated type drops `| null` on hazardClass (the KNOWN-BAD
+      // family); class 8's "none" rides as null through the cast.
+      ...(hazard.value === undefined ? {} : { hazardClass: hazard.value as NonNullable<CreateSkuBody['hazardClass']> }),
       ...(draft.abcClass === '' ? {} : { abcClass: draft.abcClass as NonNullable<CreateSkuBody['abcClass']> }),
       ...reorder,
       ...(shelf.value === null ? {} : { shelfLifeDays: shelf.value }),
       ...(draft.clientId === '' ? {} : { clientId: draft.clientId }),
       ...(packaging.body.levels.length === 0 ? {} : { levels: packaging.body.levels }),
       ...(packaging.body.barcodes.length === 0 ? {} : { barcodes: packaging.body.barcodes }),
+      ...goods.body,
     },
     problem: null,
   };
