@@ -342,6 +342,9 @@ export function portalAsnReason(error: unknown): string {
         return 'You already have a shipment notice with this reference — use another one.';
       case 'kit-cannot-hold-stock':
         return 'A kit cannot be announced — announce the SKUs it is made of instead.';
+      // Story 1-4b — a fixed portal sentence: the SKU was discontinued.
+      case 'sku-inactive':
+        return 'A SKU on this notice is no longer active with the warehouse — remove it and send the rest.';
       case 'validation-failed':
         // A fixed portal sentence — never the server's validator wording.
         return 'Check the quantities, the reference and the expected arrival, then try again.';

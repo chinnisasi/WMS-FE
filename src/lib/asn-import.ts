@@ -61,6 +61,8 @@ export const ASN_IMPORT_REASON_LABEL: Readonly<Record<AsnImportRowErrorCode, str
   'client-required': 'Name the client — several clients hold these codes',
   // Story 1-2a: the ASN's client has departed (it takes no new work).
   'client-departed': 'Client departed — reactivate it to announce shipments',
+  // Story 1-4b: the SKU is inactive (it takes no new inbound).
+  'sku-inactive': 'Inactive SKU — reactivate it to announce shipments',
   'kit-cannot-hold-stock': 'Kit SKU',
   'duplicate-asn-code': 'ASN code already used',
   'invalid-asn-code': 'ASN code too long',

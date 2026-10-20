@@ -353,6 +353,13 @@ export function createReason(error: unknown): string {
       // Story 1-2a — the order's client has departed (no new orders).
       case 'client-departed':
         return CLIENT_DEPARTED_REASON;
+      // Story 1-4b (decision 1) — an inactive SKU sells down: its line is
+      // accepted only when stock covers it in full. The server names the
+      // SKU and the available quantity.
+      case 'sku-inactive':
+        return error.detail ?? 'An inactive SKU sells existing stock only — lower the quantity to what is available.';
+      case 'order-catalog-changed':
+        return 'The catalog changed while the order was placed — nothing was created; submit again.';
       case 'conflict':
         return 'The same submission is still in flight — retry to read the settled result.';
       case 'reservation-store-unavailable':

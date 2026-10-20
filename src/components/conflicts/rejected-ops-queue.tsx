@@ -9,6 +9,9 @@ import {
   acceptAnywayNote,
   applyNeedsNote,
   rejectedOpResolvedOutcome,
+  rejectedOpBadge,
+  discardLabel,
+  discardFailedWord,
   rejectedOpGuidance,
   rejectedOpDecisions,
   rejectedOpPayloadBinId,
@@ -187,7 +190,7 @@ function RejectedOpsQueueSessioned() {
               : 'Not applied'
             : decision === 'recount'
               ? 'No recount opened'
-              : 'Not discarded',
+              : discardFailedWord(entry),
         reason: rejectedOpsResolveReason(error),
       });
       if (alreadyResolved) queue.reload();
@@ -334,7 +337,7 @@ function RejectedOpCard({
           {binCode ?? '(unknown bin)'}
         </span>
         <span className="rounded-sm border border-(--border) px-2 py-0.5 text-xs">
-          {entry.classification === 'quarantined' ? 'quarantined · AD-14' : 'refused'}
+          {rejectedOpBadge(entry)}
         </span>
       </div>
       <div className="text-xs">
@@ -413,7 +416,7 @@ function RejectedOpCard({
                 onClick={() => onResolve(entry, 'discard')}
                 className="rounded-sm border border-(--border) px-3 py-1 text-xs hover:bg-(--muted) disabled:opacity-60"
               >
-                {resolving ? 'Resolving…' : 'Discard'}
+                {resolving ? 'Resolving…' : discardLabel(entry)}
               </button>
               )}
               {decisions.includes('recount') && (

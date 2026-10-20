@@ -1,3 +1,4 @@
+import { skuInactiveSentence } from '@/lib/sku-status';
 import { ApiProblem } from '@/lib/api/client';
 import type { BatchAlertResponse, SubmitSuggestedPoResponse } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
@@ -221,6 +222,11 @@ export function dismissBreachReason(error: unknown): string {
  */
 export function submitSuggestedPoReason(error: unknown): string {
   if (error instanceof ApiProblem) {
+    // Story 1-4b — ahead of the verbatim 409 branch: the SKU was deactivated
+    // after the draft was raised (the next sweep dismisses the draft).
+    if (error.code === 'sku-inactive') {
+      return skuInactiveSentence(error, 'a new purchase order — this draft stays a draft; the next reorder sweep dismisses it, or reactivate the SKU');
+    }
     if (error.status === 409) {
       return error.title !== undefined
         ? `${error.title}${error.detail === undefined ? '' : ` — ${error.detail}`}`

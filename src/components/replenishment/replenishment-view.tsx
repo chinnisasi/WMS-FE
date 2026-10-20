@@ -11,6 +11,7 @@ import {
   fetchApiSubmitSuggestedPo,
   fetchApiUpsertReorderPolicy,
 } from '@/lib/api/client';
+import { skuInactiveMarker } from '@/lib/sku-status';
 import type {
   BatchAlertDto,
   BreachDto,
@@ -1103,6 +1104,10 @@ function SuggestedPoCard({
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-mono text-xs">{sku === null ? '(unknown SKU)' : skuDisplayLabel(sku, clients)}</span>
+        {/* Story 1-4b — an inactive SKU takes no PO: submit is refused, the next sweep dismisses the draft. */}
+        {skuInactiveMarker(sku ?? undefined) !== null ? (
+          <span className="rounded-sm bg-(--muted) px-1 text-xs">{skuInactiveMarker(sku ?? undefined)} — takes no new PO</span>
+        ) : null}
         {warehouseLabel !== null && (
           <span className="font-mono text-xs text-(--muted-foreground)">{warehouseLabel}</span>
         )}

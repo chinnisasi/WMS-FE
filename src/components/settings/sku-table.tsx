@@ -10,6 +10,7 @@ import {
   fetchApiListKits,
   fetchApiReplaceKit,
   fetchApiReplacePackaging,
+  fetchApiUpdateSkuStatus,
 } from '@/lib/api/client';
 import type { ClientDto, KitResponse, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -38,7 +39,17 @@ import {
 import { skuPhysicalLabel } from '@/lib/sku-attributes';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
-import { useCatalogSkus, useKits, useSkus } from '@/lib/use-catalog';
+import { useCatalogSkus, useKits, useSkus, type SkuStatusFilter } from '@/lib/use-catalog';
+import {
+  MAX_SKU_INACTIVE_REASON_LENGTH,
+  SKU_DEACTIVATE_COPY,
+  isSkuInactive,
+  parseSkuInactiveReason,
+  skuStatusLabel,
+  withoutInactive,
+} from '@/lib/sku-status';
+import { skuStatusReason } from '@/lib/sku-status-reason';
+import { ConfirmRow } from '@/components/settings/confirm-row';
 import {
   CLIENT_DEPARTED_REASON,
   clientCell,
@@ -125,7 +136,10 @@ export function SkuTableCard() {
 function SkuTableCardSessioned() {
   // Story 1-5a — the client switcher filters this list (one clients read: reused below).
   const active = useActiveClient();
-  const skus = useSkus(active.filter);
+  // Story 1-4b — the status filter (All / Active / Inactive); it joins the
+  // hook's requested-cursor scope and the DataTable key.
+  const [statusFilter, setStatusFilter] = useState<SkuStatusFilter>(null);
+  const skus = useSkus(active.filter, statusFilter);
   // Story 11-6 — kit-ness is DERIVED, never a flag on the SKU: the marker and
   // the edit-kit affordance come from this kits-list join.
   const kits = useKits();
@@ -135,6 +149,8 @@ function SkuTableCardSessioned() {
   const [packaging, setPackaging] = useState<SkuResponse | null>(null);
   // Story 21-2b — the owner's client correction, one SKU at a time.
   const [correcting, setCorrecting] = useState<SkuResponse | null>(null);
+  // Story 1-4b — deactivate (with a reason) or reactivate, one SKU at a time.
+  const [statusChange, setStatusChange] = useState<{ kind: 'deactivate' | 'reactivate'; sku: SkuResponse } | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
   // Story 21-2b — the client column appears only once the tenant holds more
   // than its own client (the D2C case shows nothing new).
@@ -164,6 +180,8 @@ function SkuTableCardSessioned() {
   const columns: readonly DataTableColumn<SkuResponse>[] = [
     { key: 'code', header: 'SKU code', render: (sku) => <span className="font-mono text-xs">{sku.code}</span> },
     { key: 'name', header: 'Name' },
+    // Story 1-4b — "Active", "Inactive", "Inactive — {reason}".
+    { key: 'status', header: 'Status', render: (sku) => skuStatusLabel(sku) },
     ...(multiClient
       ? [
           {
@@ -228,17 +246,21 @@ function SkuTableCardSessioned() {
                 {canEditSku ? (
                   <>
                 {/* A kit-marked row edits its composition (PUT); a plain SKU
-                    row offers create — the only door into kit-ness. */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setKitEditing(sku);
-                    setOutcome(null);
-                  }}
-                  className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
-                >
-                  {kitOf(sku.id) === undefined ? 'Kit' : 'Edit kit'}
-                </button>
+                    row offers create — the only door into kit-ness. Story
+                    1-4b: an inactive SKU is composed into no new kit, so
+                    its row offers no create. */}
+                {kitOf(sku.id) !== undefined || !isSkuInactive(sku) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKitEditing(sku);
+                      setOutcome(null);
+                    }}
+                    className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+                  >
+                    {kitOf(sku.id) === undefined ? 'Kit' : 'Edit kit'}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
@@ -258,6 +280,17 @@ function SkuTableCardSessioned() {
                   className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
                 >
                   Edit
+                </button>
+                <button
+                  type="button"
+                  aria-label={`${isSkuInactive(sku) ? 'Reactivate' : 'Deactivate'} ${sku.code}`}
+                  onClick={() => {
+                    setStatusChange({ kind: isSkuInactive(sku) ? 'reactivate' : 'deactivate', sku });
+                    setOutcome(null);
+                  }}
+                  className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
+                >
+                  {isSkuInactive(sku) ? 'Reactivate' : 'Deactivate'}
                 </button>
                   </>
                 ) : null}
@@ -296,8 +329,25 @@ function SkuTableCardSessioned() {
 
       <ClientFilterChip active={active} tenantName={active.tenantName} />
 
+      <label className="flex items-center gap-2 text-xs">
+        <span>Status</span>
+        <select
+          aria-label="Status filter"
+          value={statusFilter ?? 'all'}
+          onChange={(event) => {
+            const value = event.target.value;
+            setStatusFilter(value === 'active' || value === 'inactive' ? value : null);
+          }}
+          className="rounded-sm border border-(--input) bg-(--background) px-2 py-1 text-xs"
+        >
+          <option value="all">All</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </label>
+
       <DataTable<SkuResponse>
-        key={clientFilterKey(active.filter)}
+        key={`${clientFilterKey(active.filter)}|${statusFilter ?? 'all'}`}
         columns={columns}
         rows={skus?.items ?? []}
         nextCursor={skus?.nextCursor ?? null}
@@ -377,8 +427,145 @@ function SkuTableCardSessioned() {
           onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Not updated', reason })}
         />
       )}
+      {canEditSku && statusChange?.kind === 'deactivate' && (
+        <DeactivateSkuPanel
+          key={`deactivate-${statusChange.sku.id}`}
+          sku={statusChange.sku}
+          onClose={() => setStatusChange(null)}
+          onDone={(updated) => {
+            setStatusChange(null);
+            setOutcome({
+              tone: 'accepted',
+              word: `${updated.code} deactivated`,
+              reason: 'New POs, ASNs, kits and channel mappings refuse it; orders sell down existing stock; its channels show 0.',
+            });
+            skus?.reload();
+            notifyCatalogChanged();
+          }}
+          onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Not deactivated', reason })}
+        />
+      )}
+      {canEditSku && statusChange?.kind === 'reactivate' && (
+        <ConfirmRow<SkuResponse>
+          key={`reactivate-${statusChange.sku.id}`}
+          question={`Reactivate ${statusChange.sku.code}? It can go on new POs, ASNs, kits and mappings again, orders may backorder it, and its channels publish the real quantity on the next sync.`}
+          confirmLabel={`Reactivate ${statusChange.sku.code}`}
+          ariaLabel="Confirm reactivate"
+          run={async (key, tenantId) =>
+            (await fetchApiUpdateSkuStatus(tenantId, statusChange.sku.id, { status: 'active' }, key)).sku
+          }
+          reason={(error) => skuStatusReason(error, 'reactivated')}
+          onClose={() => setStatusChange(null)}
+          onDone={(updated) => {
+            setStatusChange(null);
+            setOutcome({ tone: 'accepted', word: `${updated.code} reactivated`, reason: 'Its reason was cleared.' });
+            skus?.reload();
+            notifyCatalogChanged();
+          }}
+          onRejected={(reason) => setOutcome({ tone: 'rejected', word: 'Not reactivated', reason })}
+        />
+      )}
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
     </section>
+  );
+}
+
+/**
+ * Story 1-4b — deactivate one SKU, with an optional reason (≤ 500). The
+ * partners `DeactivatePanel` shape: the key is per draft (`keyRef.current ??=
+ * ulid()`, cleared on a reason edit), a synchronous ref guards the
+ * pre-render double-click, and the copy says what deactivation does.
+ */
+function DeactivateSkuPanel({
+  sku,
+  onClose,
+  onDone,
+  onRejected,
+}: {
+  sku: SkuResponse;
+  onClose: () => void;
+  onDone: (sku: SkuResponse) => void;
+  onRejected: (reason: string) => void;
+}) {
+  const [reasonText, setReasonText] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const keyRef = useRef<string | null>(null);
+  const inFlight = useRef(false);
+
+  async function confirm() {
+    if (inFlight.current) return;
+    const parsed = parseSkuInactiveReason(reasonText);
+    if (parsed.problem !== null) {
+      setProblem(parsed.problem);
+      return;
+    }
+    const session = readSession();
+    if (session === null) return;
+    inFlight.current = true;
+    setBusy(true);
+    setProblem(null);
+    keyRef.current ??= ulid();
+    try {
+      const saved = await fetchApiUpdateSkuStatus(
+        session.tenant.id,
+        sku.id,
+        { status: 'inactive', ...(parsed.reason === null ? {} : { reason: parsed.reason }) },
+        keyRef.current,
+      );
+      onDone(saved.sku);
+    } catch (error) {
+      onRejected(skuStatusReason(error, 'deactivated'));
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div role="group" aria-label="Confirm deactivate" className="flex flex-wrap items-end gap-2">
+      <div className="w-full">
+        <div>Deactivate {sku.code}? Its stock, history and existing documents stay as they are.</div>
+        <ul className="list-disc pl-5 text-(--muted-foreground)">
+          {SKU_DEACTIVATE_COPY.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      </div>
+      <label className="flex min-w-48 flex-1 flex-col gap-1">
+        <span className="text-xs">Reason (optional)</span>
+        <input
+          className={inputClass}
+          value={reasonText}
+          maxLength={MAX_SKU_INACTIVE_REASON_LENGTH * 2}
+          onChange={(e) => {
+            keyRef.current = null;
+            setReasonText(e.target.value);
+          }}
+        />
+      </label>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={confirm}
+        className="rounded-md bg-(--primary) px-3 py-2 text-sm font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-40"
+      >
+        Deactivate {sku.code}
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onClose}
+        className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
+      >
+        Keep
+      </button>
+      {problem !== null ? (
+        <div role="alert" className="w-full text-xs text-(--destructive)">
+          {problem}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1065,10 +1252,13 @@ function KitForm({
   // client's — another client's SKU is a guaranteed `mixed-client`, and a
   // code another client shares would read the same — so only the kit's
   // client's SKUs are offered (every SKU when the kit carries no client).
+  // Story 1-4b — an inactive SKU is composed into no new kit, so it drops
+  // out; a kit PUT keeps the components the stored composition holds.
+  const storedComponents = new Set((existing?.components ?? []).map((component) => component.skuId));
   const pickerOptions: readonly SkuResponse[] =
     skuMap === null
       ? []
-      : skusOfWorkingClients(narrowToClient(Object.values(skuMap), sku.clientId ?? null), kitClients)
+      : withoutInactive(skusOfWorkingClients(narrowToClient(Object.values(skuMap), sku.clientId ?? null), kitClients), storedComponents)
           .filter((candidate) => {
             if (candidate.id === sku.id) return false;
             return kitOf(candidate.id) === undefined;

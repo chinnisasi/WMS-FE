@@ -1,3 +1,4 @@
+import { skuInactiveSentence } from '@/lib/sku-status';
 import { ApiProblem } from '@/lib/api/client';
 import type {
   ChannelBufferVerdictDto,
@@ -435,6 +436,9 @@ export function setMappingsReason(error: unknown): string {
       // Story 1-2a — the client has departed (it takes no new work).
       case 'client-departed':
         return CLIENT_DEPARTED_REASON;
+      // Story 1-4b — a NEW mapping to an inactive SKU (a stored one stays and publishes 0).
+      case 'sku-inactive':
+        return skuInactiveSentence(error, 'a new channel mapping');
       case 'not-found':
         return 'A connection or SKU on this editor no longer exists — refresh the page.';
       case 'role-denied':

@@ -724,6 +724,14 @@ export type SkuResponse = {
      * Story 1-4 — every barcode of the SKU with its level: the primary first, then by (uom, barcode). Empty only on a replayed response stored before 1-4
      */
     barcodes: Array<SkuBarcodeResponse>;
+    /**
+     * Story 1-4b — `inactive`: the SKU takes no new POs, ASNs, kits or channel mappings, sells down only what stock covers in full, and publishes 0 to its channels. `active` on every response stored before 1-4b
+     */
+    status: 'active' | 'inactive';
+    /**
+     * Story 1-4b — why it was deactivated; null unless inactive (and optional then)
+     */
+    inactiveReason: string | null;
     createdAt: string;
 };
 
@@ -839,6 +847,17 @@ export type ReplacePackagingDto = {
      * Every NON-primary barcode the SKU carries afterwards (the primary is edited through the SKU PATCH)
      */
     barcodes: Array<ExtraBarcodeDto>;
+};
+
+export type UpdateSkuStatusDto = {
+    /**
+     * `inactive` stops new inbound, kits and channel listings and sells down what is left; `active` restores it and clears the reason
+     */
+    status: 'active' | 'inactive';
+    /**
+     * Why it was deactivated — only with `inactive`; trimmed, at most 500 characters
+     */
+    reason?: string | null;
 };
 
 export type SegregationPairResponse = {
@@ -1209,7 +1228,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received';
     /**
      * The replay fate the server refused with
      */
@@ -1285,7 +1304,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -2352,7 +2371,7 @@ export type AsnImportRowErrorDto = {
     /**
      * Why the row (and with it its whole ASN) was refused
      */
-    code: 'unknown-client' | 'unknown-warehouse' | 'wrong-warehouse' | 'unknown-sku' | 'sku-client-mismatch' | 'mixed-client' | 'client-required' | 'client-departed' | 'kit-cannot-hold-stock' | 'duplicate-asn-code' | 'invalid-asn-code' | 'too-many-lines' | 'asn-rows-disagree' | 'duplicate-sku-in-asn' | 'invalid-quantity' | 'quantity-precision' | 'invalid-expected-at' | 'missing-value';
+    code: 'unknown-client' | 'unknown-warehouse' | 'wrong-warehouse' | 'unknown-sku' | 'sku-client-mismatch' | 'mixed-client' | 'client-required' | 'client-departed' | 'sku-inactive' | 'kit-cannot-hold-stock' | 'duplicate-asn-code' | 'invalid-asn-code' | 'too-many-lines' | 'asn-rows-disagree' | 'duplicate-sku-in-asn' | 'invalid-quantity' | 'quantity-precision' | 'invalid-expected-at' | 'missing-value';
     detail: string;
     /**
      * The row’s sku cell as written; null when blank
@@ -3687,6 +3706,10 @@ export type GoodsReceiptDto = {
      */
     shelfLifeReviewOpId?: string;
     /**
+     * Story 1-4b — the op id of the review row raised for the blind or unmatched lines of an INACTIVE SKU this receipt booked (type `grn.inactive-sku-received` — Discard only, labelled Acknowledge; it books nothing); present only when one was raised
+     */
+    inactiveSkuReviewOpId?: string;
+    /**
      * Story 1-2b — how many booked lines were put on receipt QC holds (the client's QC on receipt); present only when > 0
      */
     qcHeldLines?: number;
@@ -3782,6 +3805,10 @@ export type CatalogSnapshotSkuDto = {
      * Story 1-4: every non-primary barcode of the SKU with its level and factor (1 at the base uom). Empty when the SKU has none; an older device ignores it.
      */
     packBarcodes: Array<CatalogSnapshotPackBarcodeDto>;
+    /**
+     * Story 1-4b: `inactive` — the SKU takes no new inbound. A receive scan of it that is not on the document is still booked and flagged for review; the handheld warns at scan time. An older device ignores it.
+     */
+    status: 'active' | 'inactive';
 };
 
 export type CatalogSnapshotPoDto = {
@@ -10382,6 +10409,10 @@ export type CatalogControllerListSkusData = {
          * List only the SKUs attached to this product
          */
         productId?: string;
+        /**
+         * Story 1-4b — only active or only inactive SKUs; absent lists every SKU
+         */
+        status?: 'active' | 'inactive';
     };
     url: '/tenants/{tenantId}/catalog/skus';
 };
@@ -10518,6 +10549,60 @@ export type CatalogControllerReplacePackagingResponses = {
 };
 
 export type CatalogControllerReplacePackagingResponse = CatalogControllerReplacePackagingResponses[keyof CatalogControllerReplacePackagingResponses];
+
+export type CatalogControllerUpdateSkuStatusData = {
+    body: UpdateSkuStatusDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        skuId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/catalog/skus/{skuId}/status';
+};
+
+export type CatalogControllerUpdateSkuStatusErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; an unknown status, a reason with `active`, or a reason over 500 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks sku.edit (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The SKU does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent same-key request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type CatalogControllerUpdateSkuStatusError = CatalogControllerUpdateSkuStatusErrors[keyof CatalogControllerUpdateSkuStatusErrors];
+
+export type CatalogControllerUpdateSkuStatusResponses = {
+    200: SkuWriteResponse;
+};
+
+export type CatalogControllerUpdateSkuStatusResponse = CatalogControllerUpdateSkuStatusResponses[keyof CatalogControllerUpdateSkuStatusResponses];
 
 export type CatalogControllerGetSegregationMatrixData = {
     body?: never;
@@ -10853,7 +10938,7 @@ export type CatalogControllerCreateKitErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The SKU is already a kit (kit-already-composed), a component appears twice (duplicate-kit-component), a component is itself a kit (kit-component-is-kit — flat BOM), or the SKU already holds stock or a live reservation — making it a kit would strand that stock (kit-sku-holds-stock)
+     * The SKU is already a kit (kit-already-composed), a component appears twice (duplicate-kit-component), a component is itself a kit (kit-component-is-kit — flat BOM), or the SKU already holds stock or a live reservation — making it a kit would strand that stock (kit-sku-holds-stock); the kit or a component is inactive (sku-inactive)
      */
     409: ProblemDetailsDto;
     /**
@@ -10913,7 +10998,7 @@ export type CatalogControllerReplaceKitErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A component appears twice (duplicate-kit-component), or a component is itself a kit (kit-component-is-kit — flat BOM)
+     * A component appears twice (duplicate-kit-component), or a component is itself a kit (kit-component-is-kit — flat BOM); a component the stored composition did not hold is inactive (sku-inactive)
      */
     409: ProblemDetailsDto;
     /**
@@ -12464,7 +12549,7 @@ export type InboundControllerCreatePurchaseOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * PO code already in use (conflict, naming the code); lines spanning clients (mixed-client); a departed client (client-departed); a partner without the vendor role (partner-not-vendor), an inactive vendor (vendor-inactive), or a vendor with no active link to the PO's client (vendor-not-linked, naming the client); or a concurrent idempotent request (conflict)
+     * PO code already in use (conflict, naming the code); lines spanning clients (mixed-client); a departed client (client-departed); a partner without the vendor role (partner-not-vendor), an inactive vendor (vendor-inactive), or a vendor with no active link to the PO's client (vendor-not-linked, naming the client); or a concurrent idempotent request (conflict); a line of an inactive SKU (sku-inactive, naming extensions.skuCodes)
      */
     409: ProblemDetailsDto;
     /**
@@ -12621,7 +12706,7 @@ export type InboundControllerAmendPurchaseOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The PO is not open (po-not-open, naming the status), a line that has received stock would be removed, change SKU or order less than it received (po-line-received), or a concurrent idempotent request (conflict)
+     * The PO is not open (po-not-open, naming the status), a line that has received stock would be removed, change SKU or order less than it received (po-line-received), or a concurrent idempotent request (conflict); a line that adds inbound for an inactive SKU — a SKU not on the PO, or a raised ordered total (sku-inactive)
      */
     409: ProblemDetailsDto;
     /**
@@ -12734,7 +12819,7 @@ export type InboundControllerCreateAsnErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The lines span clients (mixed-client), their client is not clientId (sku-client-mismatch), a line names a kit SKU, which can never be received (kit-cannot-hold-stock, naming it), the client already has this code (duplicate-asn-code), or a concurrent idempotent request (conflict)
+     * The lines span clients (mixed-client), their client is not clientId (sku-client-mismatch), a line names a kit SKU, which can never be received (kit-cannot-hold-stock, naming it), the client already has this code (duplicate-asn-code), or a concurrent idempotent request (conflict); a line of an inactive SKU (sku-inactive, naming extensions.skuCodes)
      */
     409: ProblemDetailsDto;
     /**
@@ -12962,7 +13047,7 @@ export type InboundControllerAmendAsnErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The ASN is received, closed or cancelled (asn-not-open), a line that has received stock would be removed, change SKU or announce less than it received (asn-line-received), a SKU of another client (sku-client-mismatch), a line names a kit SKU (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
+     * The ASN is received, closed or cancelled (asn-not-open), a line that has received stock would be removed, change SKU or announce less than it received (asn-line-received), a SKU of another client (sku-client-mismatch), a line names a kit SKU (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict); a line that adds inbound for an inactive SKU — a SKU not on the ASN, or a raised announced total (sku-inactive)
      */
     409: ProblemDetailsDto;
     /**
@@ -13132,7 +13217,7 @@ export type OutboundControllerCreateOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A concurrent idempotent request (conflict), or a concurrent first delivery of the same channel payload (conflict — retry to read the settled result)
+     * A concurrent idempotent request (conflict), or a concurrent first delivery of the same channel payload (conflict — retry to read the settled result); a line of an inactive SKU that stock does not cover in full — an inactive SKU sells down, never backorders (sku-inactive, naming extensions.skuCodes); a line SKU became a kit while the order was placed (order-catalog-changed — retry)
      */
     409: ProblemDetailsDto;
     /**
@@ -16704,7 +16789,7 @@ export type ReplenishmentControllerSubmitSuggestedPoErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The draft is not a draft (suggested-po-submitted), the PO code is already in use (conflict), or a concurrent idempotent request (conflict)
+     * The draft is not a draft (suggested-po-submitted), the PO code is already in use (conflict), the SKU is inactive (sku-inactive — the draft stays a draft), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -17325,7 +17410,7 @@ export type ChannelsControllerSetConnectionMappingsErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The same Idempotency-Key is being processed concurrently (conflict), or the mapped SKUs belong to more than one client (mixed-client, story 21-2b — names the clients)
+     * The same Idempotency-Key is being processed concurrently (conflict), or the mapped SKUs belong to more than one client (mixed-client, story 21-2b — names the clients); a new mapping to an inactive SKU — a stored pair re-sent is kept (sku-inactive)
      */
     409: ProblemDetailsDto;
     /**
@@ -20658,7 +20743,7 @@ export type PortalControllerAnnounceAsnErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A line names a kit SKU (kit-cannot-hold-stock), the client already has this code (duplicate-asn-code), or a concurrent idempotent request (conflict)
+     * A line names a kit SKU (kit-cannot-hold-stock) or an inactive SKU (sku-inactive), the client already has this code (duplicate-asn-code), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -21463,7 +21548,7 @@ export type WebhooksControllerIngestOrderErrors = {
      */
     409: ProblemDetailsDto;
     /**
-     * A divergent payload on a known order ref (order-source-conflict), no ingest warehouse set (ingest-warehouse-unset), or config referencing deleted master data (ingest-config-invalid)
+     * A divergent payload on a known order ref (order-source-conflict), no ingest warehouse set (ingest-warehouse-unset), config referencing deleted master data (ingest-config-invalid), or a line of an inactive SKU that stock does not cover in full (sku-inactive)
      */
     422: ProblemDetailsDto;
     /**
