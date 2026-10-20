@@ -92,7 +92,10 @@ export function hazardClassLabel(sku: SkuResponse): string {
  * `code` — the same contract as `decisionReason` / `qcReason`. The two class
  * codes surface the server's detail verbatim: `storage-class-conflict` names
  * the stranded bins, `hazard-segregation-conflict` names the co-located
- * stock (SKUs, bins and the pinning hold, where one exists).
+ * stock (SKUs, bins and the pinning hold, where one exists) and — since
+ * story 1-6b — the rule the change newly fires: it answers any edit to the
+ * SKU's segregation profile (hazard class, DG classes, drug schedules, food
+ * category, allergens), so its fallback names no single field.
  */
 export function skuClassReason(error: unknown): string {
   if (error instanceof ApiProblem) {
@@ -100,7 +103,7 @@ export function skuClassReason(error: unknown): string {
       case 'storage-class-conflict':
         return error.detail ?? 'The class change would strand stock in bins that no longer fit it.';
       case 'hazard-segregation-conflict':
-        return error.detail ?? 'The hazard class conflicts with co-located stock — relocate or release it first.';
+        return error.detail ?? 'This change conflicts with stock in the same bins — relocate it first.';
       case 'not-found':
         return 'That SKU no longer exists — refresh the page.';
       case 'role-denied':

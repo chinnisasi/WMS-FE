@@ -942,12 +942,27 @@ export type SegregationPairResponse = {
     b: 'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas';
 };
 
+export type SegregationRuleDto = {
+    /**
+     * The rule's machine code (hazard-pair, explosive-dg, food-chemical, drug-chemical, allergen-mismatch, raw-ready-to-eat today)
+     */
+    code: string;
+    /**
+     * The rule in one sentence, for display verbatim
+     */
+    description: string;
+};
+
 export type SegregationMatrixResponse = {
     classes: Array<'explosive' | 'oxidizer' | 'flammable' | 'corrosive-acid' | 'corrosive-base' | 'toxic' | 'gas'>;
     /**
      * Every incompatible unordered pair, fully expanded (11 today: the 7 explosive pairs incl. self + the 4 explicit ones)
      */
     incompatible: Array<SegregationPairResponse>;
+    /**
+     * Story 1-6b — every co-location rule, in the order the gates check them: the hazard grid above (with DG subsidiaries), explosives vs any dangerous good, food and scheduled drugs vs chemicals, allergens, raw vs ready-to-eat
+     */
+    rules: Array<SegregationRuleDto>;
 };
 
 export type CreateProductDto = {
@@ -9666,7 +9681,7 @@ export type TenancyControllerMergeBinData = {
 
 export type TenancyControllerMergeBinErrors = {
     /**
-     * Missing or malformed Idempotency-Key, a structural guard (validation-failed / bin-retired / bin-blocked — a blocked SOURCE is allowed, the only way to empty a blocked bin; only the target must be live), a target overflow (bin-full names capacity and occupancy), the target over its physical limits (bin-overweight / bin-volume-exceeded / bin-item-oversize, story 11-5), a source SKU the target bin's class cannot satisfy (bin-storage-mismatch naming both classes — story 12-1), an incompatible co-located pair (bin-segregation-conflict naming both SKUs and both classes — story 12-2), or a source SKU of another client than the target's dedicated client (bin-client-mismatch naming the bin, its client and the SKU — story 1-5b; nothing committed in any arm)
+     * Missing or malformed Idempotency-Key, a structural guard (validation-failed / bin-retired / bin-blocked — a blocked SOURCE is allowed, the only way to empty a blocked bin; only the target must be live), a target overflow (bin-full names capacity and occupancy), the target over its physical limits (bin-overweight / bin-volume-exceeded / bin-item-oversize, story 11-5), a source SKU the target bin's class cannot satisfy (bin-storage-mismatch naming both classes — story 12-1), a moved SKU that must be kept apart from a target occupant (bin-segregation-conflict naming both SKUs, the facts that fired and the rule — hazard classes and DG subsidiaries, explosives vs any dangerous good, food or a scheduled drug vs a chemical, differing allergens, raw vs ready-to-eat; stories 12-2, 1-6b), or a source SKU of another client than the target's dedicated client (bin-client-mismatch naming the bin, its client and the SKU — story 1-5b; nothing committed in any arm)
      */
     400: ProblemDetailsDto;
     /**
@@ -10973,7 +10988,7 @@ export type CatalogControllerEditSkuErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Barcode already belongs to another SKU (duplicate-barcode names it and its level) or equals a SKU code (barcode-is-code), another SKU of this product already carries identical variantValues (duplicate-variant-values), the product belongs to another client (product-client-mismatch), a batch/serial/catch-weight change while the SKU has stock, a pending over-receipt or a pending adjustment (sku-has-stock), or a hazard-class change would strand stock co-located with an incompatible binmate (hazard-segregation-conflict names the bins and the parties)
+     * Barcode already belongs to another SKU (duplicate-barcode names it and its level) or equals a SKU code (barcode-is-code), another SKU of this product already carries identical variantValues (duplicate-variant-values), the product belongs to another client (product-client-mismatch), a batch/serial/catch-weight change while the SKU has stock, a pending over-receipt or a pending adjustment (sku-has-stock), or a change to the SKU's segregation profile (hazard class, DG classes, drug schedules, food category, allergens) would newly conflict with stock it shares a bin with (hazard-segregation-conflict names each bin, binmate and hold, and the rule that fires)
      */
     409: ProblemDetailsDto;
     /**
@@ -15321,7 +15336,7 @@ export type PutawayControllerPlacePutawayData = {
 
 export type PutawayControllerPlacePutawayErrors = {
     /**
-     * Missing or malformed Idempotency-Key, an invalid body, a system target bin (validation-failed naming the bin), a blocked bin (bin-blocked naming the bin), a full bin (bin-full naming the bin, its capacity and occupancy), over its physical limits (bin-overweight / bin-volume-exceeded naming the bin, the limit and the load; bin-item-oversize naming the bin, the dimension and both sizes — story 11-5), a bin whose class cannot satisfy the SKU (bin-storage-mismatch naming both classes — story 12-1), a bin dedicated to another client than the SKU's (bin-client-mismatch naming the bin, its client and the SKU — story 1-5b), an incompatible co-located pair (bin-segregation-conflict naming both SKUs and both classes — story 12-2), an over-place (validation-failed naming the remaining quantity), a missing/malformed mismatch reason (none is needed when the target equals the re-derived suggestion with or without the own-client preference — story 1-5b), or a serial-arm violation (validation-failed)
+     * Missing or malformed Idempotency-Key, an invalid body, a system target bin (validation-failed naming the bin), a blocked bin (bin-blocked naming the bin), a full bin (bin-full naming the bin, its capacity and occupancy), over its physical limits (bin-overweight / bin-volume-exceeded naming the bin, the limit and the load; bin-item-oversize naming the bin, the dimension and both sizes — story 11-5), a bin whose class cannot satisfy the SKU (bin-storage-mismatch naming both classes — story 12-1), a bin dedicated to another client than the SKU's (bin-client-mismatch naming the bin, its client and the SKU — story 1-5b), a co-located pair that must be kept apart (bin-segregation-conflict naming both SKUs, the facts that fired and the rule — hazard classes and DG subsidiaries, explosives vs any dangerous good, food or a scheduled drug vs a chemical, differing allergens, raw vs ready-to-eat; stories 12-2, 1-6b), an over-place (validation-failed naming the remaining quantity), a missing/malformed mismatch reason (none is needed when the target equals the re-derived suggestion with or without the own-client preference — story 1-5b), or a serial-arm violation (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -16067,7 +16082,7 @@ export type MovementsControllerConfirmInboundErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The order is not in_transit (transfer-wrong-state), the scanned bin's state epoch is stale (transfer-bin-changed — the mobile client re-plans), or a destination placement gate refused — retired, blocked, storage-class mismatch (bin-retired, bin-blocked, bin-storage-mismatch), a landing SKU of another client than the bin's dedicated client (bin-client-mismatch naming the bin, its client and the SKU — story 1-5b; the receive-time landing-bin override recovers it), hazard co-location (bin-segregation-conflict), bulk-asset occupancy (bin-occupancy-conflict), or the load gates (bin-full, bin-overweight, bin-volume-exceeded, bin-item-oversize) — the order stays in_transit; or a concurrent idempotent request (conflict)
+     * The order is not in_transit (transfer-wrong-state), the scanned bin's state epoch is stale (transfer-bin-changed — the mobile client re-plans), or a destination placement gate refused — retired, blocked, storage-class mismatch (bin-retired, bin-blocked, bin-storage-mismatch), a landing SKU of another client than the bin's dedicated client (bin-client-mismatch naming the bin, its client and the SKU — story 1-5b; the receive-time landing-bin override recovers it), co-location with goods that must be kept apart (bin-segregation-conflict naming both SKUs, the facts that fired and the rule — the putaway rules, stories 12-2, 1-6b), bulk-asset occupancy (bin-occupancy-conflict), or the load gates (bin-full, bin-overweight, bin-volume-exceeded, bin-item-oversize) — the order stays in_transit; or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**

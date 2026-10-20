@@ -336,6 +336,54 @@ describe('ZonesBinsSetup: the 12-4 location types', () => {
     expect(alert).not.toBeNull();
     expect(alert!.textContent).toContain('A bulk asset holds exactly one SKU');
   });
+
+  /**
+   * Open the merge flow on A-01-01, pick an ORDINARY shelf bin as target,
+   * confirm. Never the tank: the server's bulk-asset gate runs before the
+   * segregation gate, so a tank target can only answer bin-occupancy-conflict.
+   */
+  const SHELF_TARGET_ID = '0198f7a2-1b3c-7d4e-8f90-888888888888';
+  async function mergeIntoShelf(current: Rendered): Promise<void> {
+    const row = [...current.container.querySelectorAll('tbody tr')].find((tr) => tr.textContent!.includes('A-01-01'))!;
+    act(() => [...row.querySelectorAll('button')].find((b) => b.textContent === 'Merge')!.click());
+    await settle();
+    const targetSelect = [...current.container.querySelectorAll('select')].find((s) =>
+      [...s.querySelectorAll('option')].some((o) => o.textContent === 'Pick a target bin…'),
+    )!;
+    setSelect(targetSelect, SHELF_TARGET_ID);
+    const confirm = [...current.container.querySelectorAll('button')]
+      .filter((b) => b.textContent === 'Merge')
+      .find((b) => b.closest('table') === null)!;
+    act(() => confirm.click());
+    await settle();
+  }
+
+  test('story 1-6b: a merge refused with bin-segregation-conflict renders the server detail verbatim', async () => {
+    nextMergeStatus = 400;
+    const detail =
+      'Merge refused — target bin "A-01-02" holds SKU "BATT" (chemical: DG 9); moved SKU "RICE" (food: packaged-dry-grocery) must be kept apart from it: food never shares a bin with a chemical.';
+    nextMergeBody = { code: 'bin-segregation-conflict', title: 'Target bin holds goods that must be kept apart', status: 400, detail };
+    binsItems = [bin(), bin({ id: SHELF_TARGET_ID, code: 'A-01-02', type: 'shelf' })];
+    view = await mount();
+    await mergeIntoShelf(view);
+    const alert = view.container.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert!.textContent).toContain(detail);
+    // The merge went to the ordinary shelf bin, not a bulk asset.
+    const mergeRequest = requests.find((r) => r.method === 'POST' && r.pathname.endsWith('/merge'))!;
+    expect(JSON.stringify(mergeRequest.body)).toContain(SHELF_TARGET_ID);
+  });
+
+  test('story 1-6b: a bin-segregation-conflict without a detail renders the surface copy, not the generic fallback', async () => {
+    nextMergeStatus = 400;
+    nextMergeBody = { code: 'bin-segregation-conflict', title: 'Target bin holds goods that must be kept apart', status: 400 };
+    binsItems = [bin(), bin({ id: SHELF_TARGET_ID, code: 'A-01-02', type: 'shelf' })];
+    view = await mount();
+    await mergeIntoShelf(view);
+    const alert = view.container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain('The target bin holds goods the moved stock must be kept apart from — choose another bin.');
+    expect(alert.textContent).not.toContain('Request failed');
+  });
 });
 
 /**
