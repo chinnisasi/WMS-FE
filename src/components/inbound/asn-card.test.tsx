@@ -54,8 +54,10 @@ const ACME = { ...SELF, id: 'c-acme', code: 'ACME', name: 'Acme Foods', systemOw
 /** The clients the read answers (story 1-2a widens it with a departed brand). */
 let clientItems: unknown[] = [SELF, ACME];
 
-function sku(id: string, code: string, clientId: string) {
+function sku(id: string, code: string, clientId: string, status: 'active' | 'inactive' = 'active') {
   return {
+    status,
+    inactiveReason: null,
     id,
     tenantId: TENANT_ID,
     clientId,
@@ -76,7 +78,14 @@ function sku(id: string, code: string, clientId: string) {
   };
 }
 // ACME-KIT is a kit (the kit list names it): the operator pickers never offer it.
-const SKUS = [sku('s-acme', 'ACME-1', ACME.id), sku('s-self', 'SELF-1', SELF.id), sku('s-kit', 'ACME-KIT', ACME.id)];
+// Story 1-4b — ACME-INA is inactive: ASN create never offers it; an amend of an
+// ASN that already carries it keeps it.
+const SKUS = [
+  sku('s-acme', 'ACME-1', ACME.id),
+  sku('s-self', 'SELF-1', SELF.id),
+  sku('s-kit', 'ACME-KIT', ACME.id),
+  sku('s-ina', 'ACME-INA', ACME.id, 'inactive'),
+];
 const KITS = [{ skuId: 's-kit', skuCode: 'ACME-KIT', components: [{ skuId: 's-acme', quantity: 1 }] }];
 
 function asn(id: string, code: string, status: string, received: number) {
@@ -139,7 +148,13 @@ function stubRouter(): void {
       return json(200, { items: [PARTIAL, ANNOUNCED], nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith(`/inbound/asns/${PARTIAL.id}`)) return json(200, { asn: detailOf(PARTIAL) });
-    if (method === 'GET' && pathname.endsWith(`/inbound/asns/${ANNOUNCED.id}`)) return json(200, { asn: detailOf(ANNOUNCED) });
+    if (method === 'GET' && pathname.endsWith(`/inbound/asns/${ANNOUNCED.id}`)) {
+      // Story 1-4b — the announced ASN also carries a line of the now-inactive SKU.
+      const detail = detailOf(ANNOUNCED);
+      return json(200, {
+        asn: { ...detail, lines: [...detail.lines, { id: `${ANNOUNCED.id}-l2`, skuId: 's-ina', announcedQty: 3, receivedQty: 0, openQty: 3 }] },
+      });
+    }
     if (method === 'POST' && pathname.endsWith('/inbound/asns')) {
       return json(201, { asn: { ...detailOf(asn('a-created', 'ASN-77', 'announced', 0)) } });
     }
@@ -292,6 +307,29 @@ describe('AsnsCard', () => {
     expect(created.body).toEqual({ clientId: ACME.id, warehouseId: WAREHOUSE_ID, asnCode: 'ASN-77', lines: [{ skuId: 's-acme', announcedQty: 12 }] });
     expect(created.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(view.container.textContent).toContain('ASN ASN-77 announced');
+  });
+
+  // Story 1-4b (decision 10) — the create picker drops an inactive SKU; the
+  // amend picker keeps one already on the ASN.
+  test('the create picker omits an inactive SKU', async () => {
+    view = await mount('owner');
+    await press(buttons(view.container, 'Announce a shipment')[0]);
+    const form = view.container.querySelector('form[aria-label="Announce a shipment"]')!;
+    setSelect(form.querySelector<HTMLSelectElement>('select[aria-label="Client"]')!, ACME.id);
+    const skuOptions = [...form.querySelectorAll('select[aria-label="Line 1 SKU"] option')].map((o) => o.textContent ?? '');
+    expect(skuOptions.some((o) => o.includes('ACME-INA'))).toBe(false);
+    expect(skuOptions.some((o) => o.includes('ACME-1'))).toBe(true);
+  });
+
+  test('the amend picker still offers an inactive SKU already on a line', async () => {
+    view = await mount('ops_manager');
+    await expand(view.container, 1);
+    await press(buttons(view.container, 'Amend')[0]);
+    const form = view.container.querySelector(`form[aria-label="Amend ASN ${ANNOUNCED.code}"]`)!;
+    expect(form).not.toBeNull();
+    const line2 = [...form.querySelectorAll('select[aria-label="Line 2 SKU"] option')].map((o) => o.textContent ?? '');
+    expect(line2.some((o) => o.includes('ACME-INA'))).toBe(true);
+    expect(form.querySelector<HTMLSelectElement>('select[aria-label="Line 2 SKU"]')!.value).toBe('s-ina');
   });
 
   // Story 1-2a — the single-client gate counts ALL clients; only the options

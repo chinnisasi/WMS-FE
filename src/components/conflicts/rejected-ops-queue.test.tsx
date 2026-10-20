@@ -599,3 +599,39 @@ describe('story 1-2b — a grn.shelf-life-refused row: Accept anyway needs a not
     expect([...card.querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Accept anyway');
   });
 });
+
+describe('RejectedOpsQueue: the inactive-SKU flag (story 1-4b)', () => {
+  const FLAG_OP_ID = '01989f7a-1b3c-7d4e-8f90-cccccccccccc';
+  const flagRow = () =>
+    rejectedOp(
+      {
+        opType: 'grn.inactive-sku-received',
+        classification: 'rejected',
+        problemCode: 'sku-inactive',
+        problemDetail: 'Goods receipt "GRN-0077" booked 1 line(s) of inactive SKU(s) "OLD-1"',
+        decisions: ['discard'],
+        payload: {
+          grnId: '01989f7a-1b3c-7d4e-8f90-dddddddddddd',
+          grnCode: 'GRN-0077',
+          lines: [{ skuId: 'sku-1', skuCode: 'OLD-1', qty: 12, uom: 'each' }],
+        },
+      },
+      FLAG_OP_ID,
+    );
+
+  test('the card reads "flagged", offers only Acknowledge, and Acknowledge sends the discard arm', async () => {
+    opRows = [flagRow()];
+    view = await mount();
+    const card = article(view, 'GRN-0077');
+    expect(card.textContent).toContain('flagged');
+    expect(card.textContent).not.toContain('refused');
+    expect(card.textContent).toContain('Booked — OLD-1 is inactive; check why it arrived');
+    const labels = [...card.querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels).toContain('Acknowledge');
+    expect(labels).not.toContain('Discard');
+    expect(labels).not.toContain('Apply (re-execute)');
+    await click(articleButton(card, 'Acknowledge'));
+    await settle();
+    expect(resolvePosts()[0]!.body).toEqual({ decision: 'discard' });
+  });
+});
