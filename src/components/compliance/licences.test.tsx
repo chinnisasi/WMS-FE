@@ -62,6 +62,9 @@ let items: Record<string, unknown>[] = [];
 let gaps: Record<string, unknown>[] = [];
 let listFails = false;
 let addAnswer: () => Response = () => json(201, { licence: licence({ id: 'l-new' }) });
+/** Story 1-6d — the switch the policy GET reads, and the PUT answers in order (the last repeats). */
+let policy: { enforce: boolean; gapCount: number } = { enforce: false, gapCount: 1 };
+let putAnswers: (() => Response)[] = [];
 
 beforeEach(() => {
   requests = [];
@@ -73,6 +76,8 @@ beforeEach(() => {
   ];
   gaps = [{ holder: 'client', clientId: ACME, warehouseId: W1, need: 'drug-20g', coveredBy: ['drug-20g'], skuCount: 2 }];
   addAnswer = () => json(201, { licence: licence({ id: 'l-new' }) });
+  policy = { enforce: false, gapCount: 1 };
+  putAnswers = [];
   stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(input.toString(), init);
     const url = new URL(request.url);
@@ -84,6 +89,14 @@ beforeEach(() => {
     }
     requests.push({ method: request.method, pathname: url.pathname, key: request.headers.get('Idempotency-Key'), body });
     if (request.method === 'GET' && url.pathname.endsWith('/licences/coverage')) return json(200, { asOfDate: '2026-11-01', gaps });
+    if (request.method === 'GET' && url.pathname.endsWith('/licence-policy')) return json(200, policy);
+    if (request.method === 'PUT' && url.pathname.endsWith('/licence-policy')) {
+      const answer = putAnswers.length > 1 ? putAnswers.shift()! : putAnswers[0];
+      if (answer !== undefined) return answer();
+      const enforce = (body as { enforce: boolean }).enforce;
+      policy = { ...policy, enforce };
+      return json(200, enforce ? policy : { enforce });
+    }
     if (request.method === 'GET' && url.pathname.endsWith('/licences')) {
       if (listFails) return json(500, { type: 'about:blank', title: 'Boom', status: 500, code: 'internal', detail: 'The licence read failed.' });
       return json(200, { asOfDate: '2026-11-01', items });
@@ -284,5 +297,79 @@ describe('Licences', () => {
     listFails = false;
     await press(buttonNamed(view.container, 'Retry'));
     expect(view.container.querySelectorAll('tbody tr')).toHaveLength(3);
+  });
+});
+
+describe('story 1-6d — Enforce licences', () => {
+  function section(container: HTMLElement): HTMLElement {
+    const found = [...container.querySelectorAll<HTMLElement>('section')].find((el) => el.querySelector('h2')?.textContent === 'Enforce licences');
+    expect(found).toBeTruthy();
+    return found!;
+  }
+  const puts = () => requests.filter((r) => r.method === 'PUT');
+
+  test('the section sits above the gaps; an ops manager reads the state with no action', async () => {
+    view = await mount('ops_manager');
+    const headings = [...view.container.querySelectorAll('h2')].map((h) => h.textContent);
+    expect(headings.indexOf('Enforce licences')).toBeLessThan(headings.indexOf('Coverage gaps'));
+    const enforce = section(view.container);
+    expect(enforce.textContent).toContain('Off — licences are recorded');
+    expect(enforce.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  test('an owner turns it on with known gaps: the question names N and the PUT acknowledges exactly N', async () => {
+    policy = { enforce: false, gapCount: 3 };
+    view = await mount('owner');
+    await press(buttonNamed(section(view.container), 'Turn on'));
+    expect(section(view.container).textContent).toContain(
+      'Turn on with 3 known coverage gaps? Uncovered receipts, including goods on open POs and ASNs, will go to review, and orders will be refused.',
+    );
+    await press(buttonNamed(section(view.container), 'Turn on'));
+    expect(puts()).toHaveLength(1);
+    expect(puts()[0]!.body).toEqual({ enforce: true, acknowledgedGapCount: 3 });
+    expect(puts()[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(view.container.textContent).toContain('Enforcement on');
+    // The policy GET re-read on notifyLicencesChanged: the state line follows.
+    expect(section(view.container).textContent).toContain('On — a receipt line of drug or food goods');
+  });
+
+  test('more gaps than shown: the 409 opens a fresh, re-keyed confirmation that names the new count and acknowledges it', async () => {
+    policy = { enforce: false, gapCount: 0 };
+    putAnswers = [
+      () => json(409, { code: 'licence-gaps-unacknowledged', status: 409, title: 'Known licence coverage gaps', detail: 'There are 2 known coverage gaps …', gapCount: 2 }),
+      () => json(200, { enforce: true, gapCount: 2 }),
+    ];
+    view = await mount('owner');
+    await press(buttonNamed(section(view.container), 'Turn on'));
+    expect(section(view.container).textContent).toContain('Turn on licence enforcement?');
+    await press(buttonNamed(section(view.container), 'Turn on'));
+    expect(puts()[0]!.body).toEqual({ enforce: true, acknowledgedGapCount: 0 });
+    expect(section(view.container).textContent).toContain('Turn on with 2 known coverage gaps?');
+    expect(view.container.textContent).not.toContain('Enforcement not changed');
+    await press(buttonNamed(section(view.container), 'Turn on'));
+    expect(puts()).toHaveLength(2);
+    expect(puts()[1]!.body).toEqual({ enforce: true, acknowledgedGapCount: 2 });
+    // A fresh confirmation mints a fresh key.
+    expect(puts()[1]!.key).not.toBe(puts()[0]!.key);
+    expect(view.container.textContent).toContain('Enforcement on');
+  });
+
+  test('an owner turns it off — always allowed, no acknowledgement', async () => {
+    policy = { enforce: true, gapCount: 4 };
+    view = await mount('owner');
+    await press(buttonNamed(section(view.container), 'Turn off'));
+    expect(section(view.container).textContent).toContain('Turn off licence enforcement?');
+    await press(buttonNamed(section(view.container), 'Turn off'));
+    expect(puts()[0]!.body).toEqual({ enforce: false });
+    expect(view.container.textContent).toContain('Enforcement off');
+  });
+
+  test('a refusal is worded and the switch is unchanged', async () => {
+    putAnswers = [() => json(403, { code: 'role-denied', status: 403, title: 'Forbidden' })];
+    view = await mount('owner');
+    await press(buttonNamed(section(view.container), 'Turn on'));
+    await press(buttonNamed(section(view.container), 'Turn on'));
+    expect(view.container.textContent).toContain('Enforcement not changed');
+    expect(view.container.textContent).toContain('Only an owner can turn licence enforcement on or off.');
   });
 });

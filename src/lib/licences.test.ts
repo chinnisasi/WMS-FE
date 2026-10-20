@@ -24,6 +24,11 @@ import {
   parseLicenceEdit,
   validUntilLabel,
   type LicenceDraft,
+  ENFORCE_OFF_QUESTION,
+  enforceOnQuestion,
+  enforcementReason,
+  enforcementStateCopy,
+  unacknowledgedGapCount,
 } from './licences';
 
 const C = '0198f7a2-1b3c-7d4e-8f90-0000000000c1';
@@ -176,5 +181,26 @@ describe('licenceReason — every route arm', () => {
     expect(licenceReason(problem('teapot'), 'add')).toBe('Licence not saved (teapot).');
     expect(licenceReason(problem('teapot'), 'read')).toBe('Licence not loaded (teapot).');
     expect(licenceReason(new TypeError('fetch failed'), 'add')).toBe('The API is unreachable — is wms-be running?');
+  });
+});
+
+describe('story 1-6d — the enforcement switch copy', () => {
+  test('the turn-on question names the known gaps (singular and plural) or asks plainly', () => {
+    expect(enforceOnQuestion(3)).toBe(
+      'Turn on with 3 known coverage gaps? Uncovered receipts, including goods on open POs and ASNs, will go to review, and orders will be refused.',
+    );
+    expect(enforceOnQuestion(1)).toContain('Turn on with 1 known coverage gap?');
+    expect(enforceOnQuestion(0)).toBe('Turn on licence enforcement? Uncovered receipts will go to review, and orders will be refused.');
+    expect(ENFORCE_OFF_QUESTION).toContain('Turn off licence enforcement?');
+    expect(enforcementStateCopy(true)).toContain('On —');
+    expect(enforcementStateCopy(false)).toContain('Off —');
+  });
+
+  test('unacknowledgedGapCount reads only the 409 arm, from its extensions', () => {
+    expect(unacknowledgedGapCount(new ApiProblem('licence-gaps-unacknowledged', 409, 'x', undefined, { gapCount: 2 }))).toBe(2);
+    expect(unacknowledgedGapCount(new ApiProblem('licence-gaps-unacknowledged', 409))).toBeNull();
+    expect(unacknowledgedGapCount(new ApiProblem('conflict', 409, undefined, undefined, { gapCount: 2 }))).toBeNull();
+    expect(unacknowledgedGapCount(new Error('x'))).toBeNull();
+    expect(enforcementReason(new ApiProblem('role-denied', 403))).toBe('Only an owner can turn licence enforcement on or off.');
   });
 });

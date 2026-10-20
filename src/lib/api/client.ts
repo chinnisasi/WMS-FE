@@ -31,6 +31,8 @@ import {
   licencesControllerAdd,
   licencesControllerCoverage,
   licencesControllerEdit,
+  licencesControllerGetPolicy,
+  licencesControllerSetPolicy,
   licencesControllerList,
   licencesControllerWithdraw,
   complianceControllerListExcursions,
@@ -259,6 +261,9 @@ import type {
   ClientContactDto,
   AddLicenceDto,
   CoverageGapsResponse,
+  LicencePolicyResponse,
+  SetLicencePolicyDto,
+  SetLicencePolicyResponse,
   EditLicenceDto,
   LicenceDto,
   LicenceListResponse,
@@ -1271,6 +1276,40 @@ export async function fetchApiLicenceCoverage(
   const { data, error } = await licencesControllerCoverage({
     path: { tenantId },
     signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 1-6d — the licence enforcement switch and today's known gap count (any staff session). */
+export async function fetchApiLicencePolicy(tenantId: string, options?: { signal?: AbortSignal }): Promise<LicencePolicyResponse> {
+  const { data, error } = await licencesControllerGetPolicy({
+    path: { tenantId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 1-6d — turn licence enforcement on or off (owner-only). Turning on
+ * sends the gap count the owner saw (`acknowledgedGapCount`); a live count
+ * above it is 409 `licence-gaps-unacknowledged` carrying `gapCount` in its
+ * extensions. The answer carries `gapCount` only on a turn-on.
+ */
+export async function fetchApiSetLicencePolicy(
+  tenantId: string,
+  body: SetLicencePolicyDto,
+  idempotencyKey: string,
+): Promise<SetLicencePolicyResponse> {
+  const { data, error } = await licencesControllerSetPolicy({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
     throw unwrapError(error, 400);

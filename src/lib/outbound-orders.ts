@@ -358,6 +358,11 @@ export function createReason(error: unknown): string {
       // SKU and the available quantity.
       case 'sku-inactive':
         return error.detail ?? 'An inactive SKU sells existing stock only — lower the quantity to what is available.';
+      // Story 1-6d — licence enforcement: the server's detail names each SKU,
+      // its missing need and the holder, entries separated by "; "; the
+      // fallback names the SKUs from `extensions.skuCodes`.
+      case 'licence-not-covered':
+        return error.detail ?? licenceNotCoveredFallback(error.extensions['skuCodes']);
       case 'order-catalog-changed':
         return 'The catalog changed while the order was placed — nothing was created; submit again.';
       case 'conflict':
@@ -373,6 +378,14 @@ export function createReason(error: unknown): string {
     }
   }
   return UNREACHABLE_REASON;
+}
+
+/** Story 1-6d — the order refusal's words when the server sent no detail. */
+function licenceNotCoveredFallback(skuCodes: unknown): string {
+  const codes = Array.isArray(skuCodes) ? skuCodes.filter((code): code is string => typeof code === 'string') : [];
+  return codes.length === 0
+    ? 'No valid licence covers these goods at this warehouse today — nothing was created. Add or renew the licence, then place the order again.'
+    : `No valid licence covers ${codes.join(', ')} at this warehouse today — nothing was created. Add or renew the licence, then place the order again.`;
 }
 
 /**
