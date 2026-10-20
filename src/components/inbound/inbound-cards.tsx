@@ -36,7 +36,8 @@ import type {
 import { roleHasCapability } from '@/lib/users';
 import { clientCell, showClients, skuDisplayLabel } from '@/lib/clients';
 import { readyClients } from '@/lib/use-clients';
-import { clientFilterForDrill, clientFilterKey } from '@/lib/active-client';
+import { clientFilterForDrill, clientFilterKey, hiddenByClientFilterNote } from '@/lib/active-client';
+import { poCreatedOutcome } from '@/lib/purchase-orders';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { ulid } from '@/lib/ulid';
 import { grnDocument, notifyInboundChanged } from '@/lib/asns';
@@ -65,17 +66,19 @@ import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-fil
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
+import { PoCreateForm } from '@/components/inbound/po-create-form';
 import { ReadFailure, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
 /**
  * The Inbound surface (stories 3.1 / 3.3) — the review half of receiving:
  * the active warehouse's purchase orders (code, vendor, per-line
- * ordered/received/open, status), its advance shipment notices (story 21-6,
- * `asn-card.tsx` — the one inbound document the web also writes) and its
- * goods receipt notes (code, the document — PO, ASN or blind + reason —
- * lines, units, recorded time). The mobile device records receipts; the web
- * surface reviews them.
+ * ordered/received/open, status — and, since story 2-1, the "Raise a
+ * purchase order" form, `po-create-form.tsx`, for `po.manage`), its advance
+ * shipment notices (story 21-6, `asn-card.tsx` — the other inbound document
+ * the web writes) and its goods receipt notes (code, the document — PO, ASN
+ * or blind + reason — lines, units, recorded time). The mobile device
+ * records receipts; the web surface reviews them.
  *
  * Warehouse scoping follows the sidebar switcher's pick (per-viewer, like
  * zone-bin-setup), falling back to the tenant's first warehouse.
@@ -251,6 +254,35 @@ function PurchaseOrdersCard({
     () => readSession()?.tenant.name ?? null,
     () => null,
   );
+  // Story 2-1 — raising a PO is `po.manage`'s (owner, ops manager). The role
+  // through the subscription, never a bare readSession() at render: the /me
+  // bootstrap rewrites it after mount.
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  const canManage = roleHasCapability(role, 'po.manage');
+  // The open form and the banner belong to ONE warehouse (keyed derivation,
+  // not a reset effect): a warehouse switch closes the form — dropping its
+  // draft and key — and hides the banner in the same render.
+  const [creatingFor, setCreatingFor] = useState<string | null>(null);
+  const creating = creatingFor !== null && creatingFor === warehouseId;
+  // …and stays closed on the way back: the open state is forgotten once the
+  // warehouse moves (React's adjust-state-during-render — never an effect),
+  // so returning to the first warehouse never re-shows a form for it.
+  const [seenWarehouseId, setSeenWarehouseId] = useState(warehouseId);
+  if (seenWarehouseId !== warehouseId) {
+    setSeenWarehouseId(warehouseId);
+    if (creatingFor !== null) setCreatingFor(null);
+  }
+  const [banner, setBanner] = useState<{
+    warehouseId: string;
+    outcome: ReturnType<typeof poCreatedOutcome>;
+    hidden: string | null;
+  } | null>(null);
+  const shownBanner = banner !== null && banner.warehouseId === warehouseId ? banner : null;
+  const [pageEpoch, setPageEpoch] = useState(0);
 
   const columns: readonly DataTableColumn<PurchaseOrderHeader>[] = [
     { key: 'code', header: 'PO code', render: (po) => <span className="font-mono text-xs">{po.code}</span> },
@@ -325,19 +357,55 @@ function PurchaseOrdersCard({
 
   return (
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
-      <div className="flex flex-col gap-0.5">
-        <h2 className="font-medium">Purchase orders</h2>
-        <ClientFilterChip active={active} tenantName={active.tenantName} />
-        <div className="text-(--muted-foreground)">
-          {warehouseLabel === null
-            ? 'Pick a warehouse to review its purchase orders.'
-            : `${warehouseLabel} — newest first. Open quantities are derived (ordered − received).`}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="font-medium">Purchase orders</h2>
+          <ClientFilterChip active={active} tenantName={active.tenantName} />
+          <div className="text-(--muted-foreground)">
+            {warehouseLabel === null
+              ? 'Pick a warehouse to review its purchase orders.'
+              : `${warehouseLabel} — newest first. Open quantities are derived (ordered − received).`}
+          </div>
         </div>
+        {canManage && warehouseId !== null && !creating && (
+          <button
+            type="button"
+            onClick={() => setCreatingFor(warehouseId)}
+            className="rounded-sm bg-(--primary) px-3 py-1 text-xs font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60"
+          >
+            Raise a purchase order
+          </button>
+        )}
       </div>
 
+      {canManage && warehouseId !== null && creating && (
+        <PoCreateForm
+          key={warehouseId}
+          warehouseId={warehouseId}
+          active={active}
+          tenantName={tenantName}
+          onCancel={() => setCreatingFor(null)}
+          onCreated={(po) => {
+            setCreatingFor(null);
+            setBanner({
+              warehouseId,
+              outcome: poCreatedOutcome(po),
+              hidden: hiddenByClientFilterNote(active, po.clientId, clients, tenantName),
+            });
+            // Back to page one, remounting the table's Prev/Next state; the
+            // list's INBOUND_CHANGED_EVENT listener refetches (onCursor(null)
+            // from page one alone would not), and so do the tab counts.
+            pos?.onCursor(null);
+            setPageEpoch((epoch) => epoch + 1);
+            notifyInboundChanged();
+          }}
+        />
+      )}
+
       <DataTable<PurchaseOrderHeader>
-        // Story 1-5a — a client switch remounts the table: no Prev/Next stack survives it.
-        key={clientFilterKey(active.filter)}
+        // Story 1-5a — a client switch remounts the table: no Prev/Next stack
+        // survives it; story 2-1 — nor does a create (the page epoch).
+        key={`${pageEpoch}|${clientFilterKey(active.filter)}`}
         columns={columns}
         rows={pos?.items ?? []}
         nextCursor={pos?.nextCursor ?? null}
@@ -346,6 +414,15 @@ function PurchaseOrdersCard({
           warehouseId === null ? 'Create a warehouse first.' : 'No purchase orders yet.'
         }
       />
+
+      {shownBanner !== null && (
+        <FeedbackBanner tone={shownBanner.outcome.tone} word={shownBanner.outcome.word} reason={shownBanner.outcome.reason} />
+      )}
+      {shownBanner !== null && shownBanner.hidden !== null && (
+        <p role="status" data-testid="hidden-by-client-filter" className="text-xs text-(--muted-foreground)">
+          {shownBanner.hidden}
+        </p>
+      )}
     </section>
   );
 }

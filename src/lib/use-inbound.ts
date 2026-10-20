@@ -42,6 +42,9 @@ import { USERS_CHANGED_EVENT } from '@/lib/users';
 import { PARTNERS_CHANGED_EVENT } from '@/lib/partners';
 import { readReason } from '@/lib/outbound-orders';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
+import { INBOUND_CHANGED_EVENT } from '@/lib/asns';
+import { sortedByCode } from '@/lib/purchase-orders';
+import { vendorsLinkedTo } from '@/lib/partners';
 
 /**
  * The PO list is headers-only (the lines ride the detail read), so the card
@@ -99,6 +102,15 @@ export function usePurchaseOrders(
     requested: string | null;
     page: PurchaseOrdersPage;
   } | null>(null);
+
+  // Story 2-1 — a PO create (or any inbound mutation) refetches. Load-bearing:
+  // the create returns the table to page one with `onCursor(null)`, which
+  // from page one changes nothing the fetch effect depends on.
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(INBOUND_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(INBOUND_CHANGED_EVENT, onChange);
+  }, []);
 
   useEffect(() => {
     if (tenantId === null || warehouseId === null || pending) return;
@@ -816,4 +828,95 @@ export function useBinCodeMap(warehouseId: string | null): Readonly<Record<strin
   if (tenantId === null || warehouseId === null) return null;
   if (map === null || map.tenantId !== tenantId || map.warehouseId !== warehouseId) return null;
   return map.map;
+}
+
+/**
+ * Story 2-1 — the PO create form's options, read PER PICKED CLIENT from the
+ * server (never the tenant-wide maps, which stop at 1,000 rows): the whole
+ * cursor chain at the routes' page ceiling (200), `fetchAllPages`' 20 hops
+ * — 4,000 rows per client (PENDING). `ResourceState`, re-read on a client
+ * change, on the module's change event and by `reload()` (which clears
+ * first, so Retry visibly reloads).
+ */
+function useClientScopedOptions<T>(
+  clientId: string,
+  changedEvent: string,
+  subject: string,
+  load: (tenantId: string, clientId: string) => Promise<readonly T[]>,
+): ResourceState<readonly T[]> & Reloadable {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{
+    tenantId: string;
+    clientId: string;
+    revision: number;
+    state: ResourceState<readonly T[]>;
+  } | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(changedEvent, onChange);
+    return () => window.removeEventListener(changedEvent, onChange);
+  }, [changedEvent]);
+
+  useEffect(() => {
+    if (tenantId === null || clientId === '') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const items = await load(tenantId, clientId);
+        if (!cancelled) setResult({ tenantId, clientId, revision, state: { state: 'ready', data: items } });
+      } catch (error) {
+        if (!cancelled) setResult({ tenantId, clientId, revision, state: { state: 'failed', reason: readReason(error, subject) } });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, clientId, revision, load, subject]);
+
+  const reload = useCallback(() => setRevision((r) => r + 1), []);
+  // A result from another tenant, client or revision is stale at render
+  // (loading) — `reload()` therefore shows loading until the re-read lands.
+  const stale =
+    tenantId === null ||
+    clientId === '' ||
+    result === null ||
+    result.tenantId !== tenantId ||
+    result.clientId !== clientId ||
+    result.revision !== revision;
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+}
+
+/** The partner list's and SKU list's `@Max(200)` page size. */
+const OPTIONS_PAGE_LIMIT = 200;
+
+async function loadLinkedVendors(tenantId: string, clientId: string): Promise<readonly PartnerDto[]> {
+  const partners = await fetchAllPages((options) =>
+    fetchApiListPartners(tenantId, { role: 'vendor', clientId, status: 'active', limit: OPTIONS_PAGE_LIMIT, ...options }),
+  );
+  // The server's `clientId` filter is an EXISTS over active links in any
+  // role; the vendor rule (an active vendor link to THIS client) is applied
+  // here, as the replenishment draft picker does.
+  return sortedByCode(vendorsLinkedTo(partners, clientId));
+}
+
+async function loadClientSkus(tenantId: string, clientId: string): Promise<readonly SkuResponse[]> {
+  return fetchAllPages((options) =>
+    fetchApiListSkus(tenantId, { clientId, status: 'active', limit: OPTIONS_PAGE_LIMIT, ...options }),
+  );
+}
+
+/** Story 2-1 — the vendors linked to `clientId` (active partner, vendor role, active vendor link), by code. */
+export function usePoVendorOptions(clientId: string): ResourceState<readonly PartnerDto[]> & Reloadable {
+  return useClientScopedOptions(clientId, PARTNERS_CHANGED_EVENT, 'the vendors', loadLinkedVendors);
+}
+
+/** Story 2-1 — `clientId`'s active SKUs (kits are removed by the form, through `useKits`). */
+export function usePoSkuOptions(clientId: string): ResourceState<readonly SkuResponse[]> & Reloadable {
+  return useClientScopedOptions(clientId, CATALOG_CHANGED_EVENT, 'the SKUs', loadClientSkus);
 }

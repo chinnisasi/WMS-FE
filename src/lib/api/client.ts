@@ -64,6 +64,7 @@ import {
   inboundControllerCancelAsn,
   inboundControllerCloseAsn,
   inboundControllerCreateAsn,
+  inboundControllerCreatePurchaseOrder,
   inboundControllerImportAsns,
   inboundControllerGetAsn,
   inboundControllerGetPurchaseOrder,
@@ -388,6 +389,7 @@ import type {
   AsnImportResponseDto,
   AsnResponse,
   CreateAsnDto,
+  CreatePurchaseOrderDto,
   RegisterTenantDto,
   RejectedOpListResponse,
   RejectedOpResolveResponse,
@@ -974,12 +976,20 @@ export async function fetchApiListSkus(
     clientId?: string;
     /** Story 1-4b — only active or only inactive SKUs; absent lists every SKU. */
     status?: 'active' | 'inactive';
+    /** Story 2-1 — the page size (the route's `@Max(200)`); absent = the server's default. */
+    limit?: number;
     signal?: AbortSignal;
   },
 ): Promise<SkuListResponse> {
   const { data, error } = await catalogControllerListSkus({
     path: { tenantId },
-    query: definedQuery({ cursor: options?.cursor, productId: options?.productId, clientId: options?.clientId, status: options?.status }),
+    query: definedQuery({
+      cursor: options?.cursor,
+      productId: options?.productId,
+      clientId: options?.clientId,
+      status: options?.status,
+      limit: options?.limit,
+    }),
     signal: options?.signal,
   });
   if (error || !data) {
@@ -2518,6 +2528,27 @@ export async function fetchApiTransitionAsn(
   const { data, error } = await call({
     path: { tenantId, asnId },
     body: { note },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-1 — raises a purchase order (capability `po.manage`) on the
+ * existing create route; the body is `CreatePurchaseOrderDto` as is (no
+ * `clientId` — the server derives it from the SKUs). The key is per draft.
+ */
+export async function fetchApiCreatePurchaseOrder(
+  tenantId: string,
+  body: CreatePurchaseOrderDto,
+  idempotencyKey: string,
+): Promise<PurchaseOrderResponse> {
+  const { data, error } = await inboundControllerCreatePurchaseOrder({
+    path: { tenantId },
+    body,
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
