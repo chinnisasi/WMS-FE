@@ -116,6 +116,8 @@ export const COMPLIANCE_PAGE_TABS = definePageTabs({
     { id: 'eway', label: 'E-way bills' },
     { id: 'hsn', label: 'HSN summary' },
     { id: 'cold-chain', label: 'Cold-chain trace' },
+    // Story 1-6c — the drug and FSSAI licences and their coverage gaps.
+    { id: 'licences', label: 'Licences' },
   ],
   drillTabs: { invoices: 'invoices', eway: 'eway' },
 });

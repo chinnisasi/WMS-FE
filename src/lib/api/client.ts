@@ -28,6 +28,11 @@ import {
   channelsControllerUpdateConnectionConfig,
   carriersControllerListConnections,
   complianceControllerGetOrderColdChainTrace,
+  licencesControllerAdd,
+  licencesControllerCoverage,
+  licencesControllerEdit,
+  licencesControllerList,
+  licencesControllerWithdraw,
   complianceControllerListExcursions,
   complianceControllerResolveExcursion,
   invoicingControllerGenerateInvoice,
@@ -252,6 +257,11 @@ import type {
   ClientReceivingPolicyResponse,
   ReleaseReceiptHoldsResponse,
   ClientContactDto,
+  AddLicenceDto,
+  CoverageGapsResponse,
+  EditLicenceDto,
+  LicenceDto,
+  LicenceListResponse,
   CreateClientContactDto,
   UpdateClientContactDto,
   UpdateClientTaxDetailsDto,
@@ -1236,6 +1246,79 @@ export async function fetchApiUpdateClientReceivingPolicy(
     throw unwrapError(error, 400);
   }
   return data.client;
+}
+
+/** Story 1-6c — the tenant's drug and FSSAI licences with the server's expiry badge (any staff session). */
+export async function fetchApiListLicences(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<LicenceListResponse> {
+  const { data, error } = await licencesControllerList({
+    path: { tenantId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 1-6c — the coverage gaps wherever drug or food goods are (any staff session). */
+export async function fetchApiLicenceCoverage(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<CoverageGapsResponse> {
+  const { data, error } = await licencesControllerCoverage({
+    path: { tenantId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 1-6c — add a client or site licence (owner-only, licences.manage). */
+export async function fetchApiAddLicence(tenantId: string, body: AddLicenceDto, idempotencyKey: string): Promise<LicenceDto> {
+  const { data, error } = await licencesControllerAdd({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.licence;
+}
+
+/** Story 1-6c — edit a licence: absent keeps, null clears (owner-only). */
+export async function fetchApiEditLicence(
+  tenantId: string,
+  licenceId: string,
+  body: EditLicenceDto,
+  idempotencyKey: string,
+): Promise<LicenceDto> {
+  const { data, error } = await licencesControllerEdit({
+    path: { tenantId, licenceId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.licence;
+}
+
+/** Story 1-6c — withdraw a licence (owner-only); never deleted. */
+export async function fetchApiWithdrawLicence(tenantId: string, licenceId: string, idempotencyKey: string): Promise<LicenceDto> {
+  const { data, error } = await licencesControllerWithdraw({
+    path: { tenantId, licenceId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.licence;
 }
 
 /** Story 1-2a — a client's contacts, the primary first (any staff session). */

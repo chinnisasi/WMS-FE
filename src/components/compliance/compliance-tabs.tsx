@@ -12,12 +12,14 @@ import { ColdChainTrace } from '@/components/compliance/cold-chain-trace';
 import { EwayBills } from '@/components/compliance/eway-bills';
 import { HsnSummary } from '@/components/compliance/hsn-summary';
 import { Invoices } from '@/components/compliance/invoices';
+import { Licences } from '@/components/compliance/licences';
 import { AllClientsNote } from '@/components/shared/client-filter-chip';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 
 /**
  * The Compliance page's sections behind a tab bar (page-tabs, 2026-10-17):
- * Invoices · Client invoices · E-way bills · HSN summary · Cold-chain trace,
+ * Invoices · Client invoices · E-way bills · HSN summary · Cold-chain trace ·
+ * Licences (1-6c),
  * one mounted at a time, `?tab=` linkable. An invoice (`list=invoices`) or
  * e-way (`list=eway`) drill opens on its own list's tab, under its banner;
  * another tab leaves the drill, and Clear lands on the drilled list's tab.
@@ -67,6 +69,13 @@ function ComplianceTabsKnown({ drill, initialTab }: { drill: ParsedDrill; initia
           <>
             <UnfilteredNote />
             <ColdChainTrace />
+          </>
+        )}
+        {/* Story 1-6c — the drug and FSSAI licences and their coverage gaps (never filtered by client). */}
+        {tab === 'licences' && (
+          <>
+            <UnfilteredNote />
+            <Licences />
           </>
         )}
       </PageTabPanel>

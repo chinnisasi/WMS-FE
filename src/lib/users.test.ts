@@ -56,7 +56,12 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 9-3a adds `audit.view` (owner-only — the audit trail read) — 41 became 42.
     // Story 9-3c adds `ledger.acknowledge` (owner-only — a chain break's acknowledgement) — 42 became 43.
     // Story 13-1 adds `returns.manage` (owner + ops_manager — return authorizations) — 43 became 44.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(44);
+    // Story 1-6c adds `licences.manage` (owner-only — the drug and FSSAI licences) — 44 became 45.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(45);
+    expect(roleHasCapability('owner', 'licences.manage')).toBe(true);
+    for (const role of ['ops_manager', 'operator', 'accountant', 'client'] as const) {
+      expect(roleHasCapability(role, 'licences.manage')).toBe(false);
+    }
     expect(roleHasCapability('owner', 'returns.manage')).toBe(true);
     expect(roleHasCapability('ops_manager', 'returns.manage')).toBe(true);
     for (const role of ['operator', 'accountant', 'client'] as const) {
