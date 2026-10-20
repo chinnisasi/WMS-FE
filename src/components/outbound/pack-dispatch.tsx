@@ -60,6 +60,7 @@ import { ulid } from '@/lib/ulid';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
+import { HandlingBadges } from '@/components/shared/handling-badges';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
 import {
@@ -436,6 +437,8 @@ function ReadOnlyLines({
           <span className="font-mono">{skuMap?.[line.skuId]?.code ?? line.skuId}</span>
           <span className="text-(--muted-foreground)">{skuMap?.[line.skuId]?.name ?? ''}</span>
           <span className="data">{lineQuantityLabel(line, skuMap?.[line.skuId])}</span>
+          {/* Story 1-6a — the handling warnings of the SKU on this line. */}
+          <HandlingBadges sku={skuMap?.[line.skuId]} />
         </li>
       ))}
     </ul>
@@ -558,6 +561,8 @@ function PackBench({
               <span className="font-mono">{skuOf(entry.skuId)?.code ?? entry.skuId}</span>
               <span className="text-(--muted-foreground)">{skuOf(entry.skuId)?.name ?? ''}</span>
               <span className="data">{quantityLabel(entry.orderedQty, skuOf(entry.skuId) ?? null)} ordered</span>
+              {/* Story 1-6a — the handling warnings of the SKU being packed. */}
+              <HandlingBadges sku={skuOf(entry.skuId)} />
             </div>
             <label className="flex flex-col gap-1 sm:w-40">
               <span className={labelClass}>Scanned</span>

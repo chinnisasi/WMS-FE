@@ -290,6 +290,42 @@ describe('OrderDetailPanel: kit parent/child rendering (story 11-6)', () => {
     expect(totals).not.toContain('4 lines');
   });
 
+  test('story 1-6a: handling badges sit on the SKU actually handled — each kit child and plain line, never the kit parent', async () => {
+    skusBody = [
+      sku({ fragile: true }),
+      sku({ id: 'pad-sku', code: 'PAD-01', name: 'Foam pad', barcode: 'BC-PAD', fragile: true, maxStackLayers: 1 }),
+      sku({ id: 'tape-sku', code: 'TAPE-01', name: 'Tape', uom: 'kg', uomPrecision: 3, barcode: 'BC-TAPE' }),
+      sku({ id: 'glove-sku', code: 'GLOVE-01', name: 'Gloves', barcode: 'BC-GLOVE', highValue: true }),
+    ];
+    order = {
+      id: 'order-1',
+      tenantId: TENANT_ID,
+      warehouseId: 'wh-1',
+      status: 'accepted',
+      source: 'manual',
+      integrationId: null,
+      externalEventId: null,
+      destination: null,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+      lines: [
+        line({ id: 'line-parent', skuId: 'kit-sku', qty: 2, reservedQty: 0, reservationId: null, reservationState: null, parentLineId: null }),
+        line({ id: 'line-child-1', skuId: 'pad-sku', qty: 4, reservedQty: 4, parentLineId: 'line-parent' }),
+        line({ id: 'line-child-2', skuId: 'tape-sku', qty: 1.5, reservedQty: 1.5, parentLineId: 'line-parent' }),
+        line({ id: 'line-plain', skuId: 'glove-sku', qty: 10, reservedQty: 10 }),
+      ],
+    };
+    view = await mount('order-1');
+    const topItems = [...view.container.querySelectorAll(':scope > div > ul > li')];
+    const parentRow = topItems[0]!.querySelector(':scope > div')!;
+    expect(parentRow.querySelector('[data-handling-badge]')).toBeNull();
+    const children = [...topItems[0]!.querySelectorAll('ul > li')];
+    const badgesOf = (el: Element) => [...el.querySelectorAll('[data-handling-badge]')].map((b) => b.textContent);
+    expect(badgesOf(children[0]!)).toEqual(['Fragile', 'Do not stack']);
+    expect(badgesOf(children[1]!)).toEqual([]);
+    expect(badgesOf(topItems[1]!)).toEqual(['High value']);
+  });
+
   test('the kit parent’s hold span reads the kit sentence, never "No hold"', async () => {
     order = {
       id: 'order-1',

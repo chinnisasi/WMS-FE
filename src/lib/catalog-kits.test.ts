@@ -72,6 +72,19 @@ function sku(over: Partial<SkuResponse> = {}): SkuResponse {
     // it is not yet classified") and 0.99.0 drops `| null` on the enum —
     // the fixture satisfies the generated type (5-3 regen).
     abcClass: 'a',
+    // Story 1-6a — the goods-type defaults. foodCategory / dgClass /
+    // dgPackingGroup are null on the wire; the same known-bad generated
+    // family drops `| null`, so the runtime truth rides through a cast.
+    drugSchedules: [],
+    foodCategory: null as unknown as SkuResponse['foodCategory'],
+    allergens: [],
+    dgUnNumber: null,
+    dgClass: null as unknown as SkuResponse['dgClass'],
+    dgSubsidiaryClasses: [],
+    dgPackingGroup: null as unknown as SkuResponse['dgPackingGroup'],
+    highValue: false,
+    fragile: false,
+    maxStackLayers: null,
     createdAt: '2026-09-01T00:00:00.000Z',
     ...over,
   };

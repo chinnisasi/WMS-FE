@@ -147,6 +147,19 @@ function ImportCatalogCardSessioned() {
           each component&apos;s own base UoM — a kit cell is resolved after every SKU row, so it may name an
           earlier row of the same file). A row whose kit cell is refused keeps its SKU — compose it
           with the Kit action on the SKUs table below; a fix run cannot retry it.
+          {/* Story 1-6a — one sentence per goods-type cell grammar. */}{' '}
+          Goods-type cells are trimmed and case-insensitive. drug_schedules lists schedules separated by{' '}
+          <span className="font-mono">;</span> (G, H, H1, X, C, C1, NDPS), e.g. <span className="font-mono">H;C</span>.
+          food_category is one category (dairy, beverages, non-food …); blank means not set. allergens lists the
+          FSSAI allergens separated by <span className="font-mono">;</span>, e.g.{' '}
+          <span className="font-mono">milk;tree-nuts</span>, and needs a food category that is not non-food.
+          dg_un_number is four digits, with or without UN (<span className="font-mono">UN1203</span> or{' '}
+          <span className="font-mono">1203</span>), and goes with dg_class (1.1–9). dg_subsidiary_classes lists
+          up to two other classes separated by <span className="font-mono">;</span>. dg_packing_group is I, II or III
+          (none for classes 1, 2, 5.2, 6.2 and 7). high_value and fragile take true or false. max_stack_layers is a
+          whole number 1–100 (1 = do not stack). A dg_class of 1.x, 2.x, 3, 5.1 or 6.1 sets hazard_class — leave it
+          blank; dg_class 8 needs hazard_class corrosive-acid, corrosive-base or{' '}
+          <span className="font-mono">none</span>.
         </div>
       </div>
 

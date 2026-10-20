@@ -1264,3 +1264,143 @@ describe('story 1-4b: SKU status — the column, the filter, deactivate and reac
     expect(editOptions.join(' ')).toContain('OLD-1');
   });
 });
+
+describe('story 1-6a: goods-type attributes in the SKU table and edit form', () => {
+  function setSelect(select: HTMLSelectElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(select, value);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+  function selectByLabel(container: HTMLElement, label: string): HTMLSelectElement {
+    const labelEl = [...container.querySelectorAll('form label')].find((l) => l.querySelector('span')?.textContent === label)!;
+    expect(labelEl).toBeDefined();
+    return labelEl.querySelector('select')!;
+  }
+  function inputByLabel(container: HTMLElement, label: string): HTMLInputElement {
+    const labelEl = [...container.querySelectorAll('form label')].find((l) => l.querySelector('span')?.textContent === label)!;
+    expect(labelEl).toBeDefined();
+    return labelEl.querySelector('input')!;
+  }
+  async function openEdit(container: HTMLElement, code: string): Promise<void> {
+    const row = [...container.querySelectorAll('tbody tr')].find((r) => r.textContent!.includes(code))!;
+    const edit = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Edit')!;
+    act(() => edit.click());
+    await settle();
+  }
+  const patchBody = () => requests.find((r) => r.method === 'PATCH')?.body as Record<string, unknown> | undefined;
+
+  test('the Handling column shows the badges, and the em-dash for a SKU without any', async () => {
+    skuRows = [
+      sku({ id: 'sku-dg', code: 'DG-01', fragile: true, dgClass: '3', dgUnNumber: '1230', dgSubsidiaryClasses: ['6.1'], dgPackingGroup: 'II', maxStackLayers: 1 }),
+      sku({ id: 'sku-plain', code: 'PLAIN-01', barcode: 'BC-PLAIN' }),
+    ];
+    view = await mount();
+    const headers = [...view.container.querySelectorAll('thead th')].map((th) => th.textContent);
+    const handling = headers.indexOf('Handling');
+    expect(handling).toBe(headers.indexOf('Barcode') + 1);
+    const cell = (code: string) =>
+      [...view!.container.querySelectorAll('tbody tr')].find((r) => r.textContent!.includes(code))!.querySelectorAll('td')[handling]!.textContent;
+    expect(cell('DG-01')).toBe('Fragile · DG 3 (6.1) · UN1230 · PG II · Do not stack');
+    expect(cell('PLAIN-01')).toBe('—');
+  });
+
+  test('an untouched edit sends no goods-type key; ticking Fragile sends only fragile', async () => {
+    view = await mount();
+    await openEdit(view.container, 'SPICE-01');
+    submitForm(view.container);
+    await settle();
+    const first = patchBody()!;
+    for (const key of ['drugSchedules', 'foodCategory', 'allergens', 'dgUnNumber', 'dgClass', 'dgSubsidiaryClasses', 'dgPackingGroup', 'highValue', 'fragile', 'maxStackLayers']) {
+      expect(first).not.toHaveProperty(key);
+    }
+    requests = [];
+    await openEdit(view.container, 'SPICE-01');
+    const fragile = [...view.container.querySelectorAll('form label')].find((l) => l.textContent === 'Fragile')!.querySelector('input')!;
+    act(() => fragile.click());
+    submitForm(view.container);
+    await settle();
+    expect(patchBody()).toMatchObject({ fragile: true });
+    expect(patchBody()).not.toHaveProperty('highValue');
+  });
+
+  test('a mapped DG class disables the hazard select with "Set by DG class 3" and sends no hazardClass', async () => {
+    skuRows = [sku({ hazardClass: 'toxic' })];
+    view = await mount();
+    await openEdit(view.container, 'SPICE-01');
+    setSelect(selectByLabel(view.container, 'DG class'), '3');
+    setInput(inputByLabel(view.container, 'UN number'), 'UN1203');
+    const hazard = selectByLabel(view.container, 'Hazard class');
+    expect(hazard.disabled).toBe(true);
+    expect(hazard.value).toBe('flammable');
+    expect(view.container.textContent).toContain('Set by DG class 3');
+    submitForm(view.container);
+    await settle();
+    expect(patchBody()).toMatchObject({ dgClass: '3', dgUnNumber: '1203' });
+    expect(patchBody()).not.toHaveProperty('hazardClass');
+  });
+
+  test('class 8 offers acid, base or none behind "Choose…"; unchosen it sends nothing, "none" sends null', async () => {
+    view = await mount();
+    await openEdit(view.container, 'SPICE-01');
+    setSelect(selectByLabel(view.container, 'DG class'), '8');
+    setInput(inputByLabel(view.container, 'UN number'), '1830');
+    const hazard = selectByLabel(view.container, 'Hazard class');
+    expect([...hazard.options].map((o) => o.value)).toEqual(['', 'corrosive-acid', 'corrosive-base', 'none']);
+    expect(hazard.value).toBe('');
+    submitForm(view.container);
+    await settle();
+    expect(patchBody()).toBeUndefined();
+    expect(view.container.textContent).toContain('DG class 8 needs its hazard class');
+    setSelect(selectByLabel(view.container, 'Hazard class'), 'none');
+    submitForm(view.container);
+    await settle();
+    expect(patchBody()).toMatchObject({ dgClass: '8', dgUnNumber: '1830', hazardClass: null });
+  });
+
+  test('a non-food category disables the allergens group with its hint and sends allergens []', async () => {
+    skuRows = [sku({ foodCategory: 'dairy', allergens: ['milk'] })];
+    view = await mount();
+    await openEdit(view.container, 'SPICE-01');
+    setSelect(selectByLabel(view.container, 'Food category'), 'non-food');
+    const group = [...view.container.querySelectorAll('fieldset')].find((f) => f.textContent!.includes('Allergens (FSSAI)'))!;
+    expect(group.disabled).toBe(true);
+    const hintId = group.getAttribute('aria-describedby')!;
+    expect(view.container.querySelector(`[id="${hintId}"]`)!.textContent).toBe('A non-food SKU carries no allergens.');
+    submitForm(view.container);
+    await settle();
+    expect(patchBody()).toMatchObject({ foodCategory: 'non-food', allergens: [] });
+  });
+});
+
+describe('story 1-6a: the edit form hazard select follows the DG class', () => {
+  function selectByLabel(container: HTMLElement, label: string): HTMLSelectElement {
+    return [...container.querySelectorAll('form label')]
+      .find((l) => l.querySelector('span')?.textContent === label)!
+      .querySelector('select')!;
+  }
+  function pick(sel: HTMLSelectElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(sel, value);
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  test('a stored toxic SKU moved to DG class 8 reads "Choose…"; Save sends no PATCH and says why', async () => {
+    skuRows = [sku({ hazardClass: 'toxic' })];
+    view = await mount();
+    const edit = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Edit')!;
+    act(() => edit.click());
+    await settle();
+    pick(selectByLabel(view.container, 'DG class'), '8');
+    const un = [...view.container.querySelectorAll('form label')].find((l) => l.querySelector('span')?.textContent === 'UN number')!.querySelector('input')!;
+    setInput(un, '1830');
+    expect(selectByLabel(view.container, 'Hazard class').value).toBe('');
+    submitForm(view.container);
+    await settle();
+    expect(requests.find((r) => r.method === 'PATCH')).toBeUndefined();
+    expect(view.container.textContent).toContain('DG class 8 needs its hazard class');
+  });
+});

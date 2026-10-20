@@ -37,6 +37,16 @@ import {
   type PackLevelRow,
 } from '@/lib/sku-admin';
 import { skuPhysicalLabel } from '@/lib/sku-attributes';
+import {
+  goodsTypeDraftOf,
+  goodsTypePatch,
+  handlingCell,
+  hazardSelectFor,
+  hazardSelectOnDgChange,
+  hazardToSend,
+  type GoodsTypeDraft,
+} from '@/lib/goods-type';
+import { GoodsTypeFields, HazardSelect } from '@/components/settings/goods-type-fields';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
 import { useCatalogSkus, useKits, useSkus, type SkuStatusFilter } from '@/lib/use-catalog';
@@ -222,6 +232,10 @@ function SkuTableCardSessioned() {
     { key: 'storage', header: 'Storage', render: (sku) => storageClassLabel(sku) },
     { key: 'hazard', header: 'Hazard', render: (sku) => hazardClassLabel(sku) },
     { key: 'barcode', header: 'Barcode', render: (sku) => <span className="font-mono text-xs">{sku.barcode}</span> },
+    // Story 1-6a — the handling warnings (fragile, high value, DG, stack), '—'
+    // when none. After Barcode, so the pinned HSN → Weight · dims → Tracking →
+    // Storage → Hazard → Barcode run (11-2, 12-7) is unchanged.
+    { key: 'handling', header: 'Handling', render: (sku) => handlingCell(sku) },
     ...(canEditSku || canCorrectClient
       ? [
           {
@@ -696,7 +710,12 @@ function SkuEditForm({
   // and the empty option IS the clear verb — "No rule" (null carries no
   // rule in either direction of the segregation matrix).
   const [storageClass, setStorageClass] = useState<string>(sku.storageClass);
-  const [hazardClass, setHazardClass] = useState<string>((sku.hazardClass as string | null) ?? '');
+  // Story 1-6a — the goods-type draft, and the stored DG/hazard pair the
+  // hazard select is judged against (decision 7: a mapped DG class sets the
+  // hazard, class 8 chooses, a free class re-shows the stored one).
+  const [goods, setGoods] = useState<GoodsTypeDraft>(() => goodsTypeDraftOf(sku));
+  const storedHazard = { dgClass: (sku.dgClass as string | null | undefined) ?? '', hazardClass: (sku.hazardClass as string | null) ?? '' };
+  const [hazardClass, setHazardClass] = useState<string>(() => hazardSelectFor(storedHazard.dgClass, storedHazard));
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: React.FormEvent) {
@@ -734,6 +753,19 @@ function SkuEditForm({
       onRejected(shelfParsed.problem);
       return;
     }
+    // Story 1-6a — the goods-type keys ride only when changed; the hazard
+    // key follows decision 7 (omitted under a mapped DG class — the server
+    // derives it, and the form already shows it).
+    const goodsPatch = goodsTypePatch(sku, goods);
+    if (goodsPatch.problem !== null) {
+      onRejected(goodsPatch.problem);
+      return;
+    }
+    const hazardSend = hazardToSend(goods.dgClass, hazardClass, storedHazard);
+    if (hazardSend.problem !== null) {
+      onRejected(hazardSend.problem);
+      return;
+    }
     setPending(true);
     try {
       const trimmedName = name.trim();
@@ -750,19 +782,12 @@ function SkuEditForm({
       // `string` state until submit.
       const changedStorage =
         storageClass !== sku.storageClass ? (storageClass as SkuResponse['storageClass']) : undefined;
-      const nextHazard = hazardClass === '' ? null : (hazardClass as SkuResponse['hazardClass']);
-      // Both sides normalize the same way — the picker's null (the "No rule"
-      // pick) and the row's null compare through the '' shape, or an
-      // untouched picker on an already-null SKU would read as a change and
-      // send a pointless `hazardClass: null`.
-      const changedHazard =
-        (nextHazard ?? '') === ((sku.hazardClass as string | null) ?? '')
-          ? undefined
-          : // The KNOWN-BAD generated `PatchSkuDto` drops `| null` on the clear
-            // verb (hsn renders nullable, hazardClass does not — vendor bug,
-            // tracked in PENDING); the BE contract is "null clears, always
-            // succeeds" (12-2), so the clear rides as null through the cast.
-            (nextHazard as SkuResponse['hazardClass'] | null);
+      // Story 1-6a — `hazardToSend` compares the pick and the row through the
+      // '' shape (an untouched "No rule" on a null SKU sends nothing), and
+      // answers decision 7. The KNOWN-BAD generated `PatchSkuDto` drops
+      // `| null` on the clear verb (vendor bug, tracked in PENDING), so the
+      // null rides through the cast below.
+      const changedHazard = hazardSend.value;
       // Story 1-4 — the shelf life and the ABC class ride only when changed
       // (the class's "" is the clear verb against a classed SKU).
       const currentShelf = sku.shelfLifeDays ?? null;
@@ -794,6 +819,7 @@ function SkuEditForm({
           ...(changedShelf === undefined ? {} : { shelfLifeDays: changedShelf }),
           // The generated type drops `| null` on the clear verb (the hazardClass precedent).
           ...(changedAbc === undefined ? {} : { abcClass: changedAbc as SkuResponse['abcClass'] }),
+          ...goodsPatch.body,
         },
         ulid(),
       );
@@ -973,21 +999,10 @@ function SkuEditForm({
             ))}
           </select>
         </label>
-        <label className="flex flex-1 flex-col gap-1">
-          <span className={labelClass}>Hazard class</span>
-          <select
-            className={inputClass}
-            value={hazardClass}
-            onChange={(e) => setHazardClass(e.target.value)}
-          >
-            <option value="">No rule</option>
-            {HAZARD_CLASSES.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
+        {/* Story 1-6a — decision 7: a mapped DG class sets the hazard and
+            disables the select ("Set by DG class 3"); class 8 chooses acid,
+            base or none. */}
+        <HazardSelect dgClass={goods.dgClass} value={hazardClass} onChange={setHazardClass} hazardClasses={HAZARD_CLASSES} />
         <label className="flex flex-1 flex-col gap-1">
           <span className={labelClass}>ABC class</span>
           <select className={inputClass} value={abcClass} onChange={(e) => setAbcClass(e.target.value)}>
@@ -1016,6 +1031,11 @@ function SkuEditForm({
           {shelfWarning}
         </div>
       ) : null}
+      <GoodsTypeFields
+        draft={goods}
+        onChange={setGoods}
+        onDgClassChange={(dgClass) => setHazardClass(hazardSelectOnDgChange(goods.dgClass, dgClass, hazardClass, storedHazard))}
+      />
       <div className="flex flex-wrap items-center gap-4">
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={batchTracked} onChange={(e) => setBatchTracked(e.target.checked)} />
@@ -1077,12 +1097,15 @@ function rejectionReason(error: unknown, attemptedBarcode?: string): string {
         // The API names the conflicting SKU (and, since 1-4, its level) in
         // the problem detail. Story 1-1: a barcode is unique per client.
         return error.detail ?? `Barcode ${attemptedBarcode ?? ''} already belongs to another SKU for this client.`;
-      // Story 1-4 — the SKU master's codes, through the tested lib mapper.
+      // Story 1-4 — the SKU master's codes, through the tested lib mapper
+      // (story 1-6a adds decision 7's two: the hazard against the DG class).
       case 'sku-has-stock':
       case 'barcode-is-code':
       case 'barcode-level-unknown':
       case 'product-client-mismatch':
       case 'role-denied':
+      case 'dg-hazard-mismatch':
+      case 'dg-hazard-required':
         return skuMasterReason(error);
       case 'not-found':
         return 'That SKU no longer exists — refresh the page.';

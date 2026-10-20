@@ -41,6 +41,17 @@ export const CATALOG_IMPORT_OPTIONAL_COLUMNS = [
   'abc_class',
   'shelf_life_days',
   'barcodes',
+  // Story 1-6a — the goods-type columns, appended after `barcodes`.
+  'drug_schedules',
+  'food_category',
+  'allergens',
+  'dg_un_number',
+  'dg_class',
+  'dg_subsidiary_classes',
+  'dg_packing_group',
+  'high_value',
+  'fragile',
+  'max_stack_layers',
 ] as const;
 
 /** The help sentence's column list. */
