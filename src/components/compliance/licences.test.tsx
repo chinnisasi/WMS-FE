@@ -95,7 +95,7 @@ beforeEach(() => {
       if (answer !== undefined) return answer();
       const enforce = (body as { enforce: boolean }).enforce;
       policy = { ...policy, enforce };
-      return json(200, policy);
+      return json(200, enforce ? policy : { enforce });
     }
     if (request.method === 'GET' && url.pathname.endsWith('/licences')) {
       if (listFails) return json(500, { type: 'about:blank', title: 'Boom', status: 500, code: 'internal', detail: 'The licence read failed.' });
@@ -317,7 +317,7 @@ describe('story 1-6d — Enforce licences', () => {
     expect(enforce.querySelectorAll('button')).toHaveLength(0);
   });
 
-  test('an owner turns it on with known gaps: the question names N and the PUT acknowledges them', async () => {
+  test('an owner turns it on with known gaps: the question names N and the PUT acknowledges exactly N', async () => {
     policy = { enforce: false, gapCount: 3 };
     view = await mount('owner');
     await press(buttonNamed(section(view.container), 'Turn on'));
@@ -326,14 +326,14 @@ describe('story 1-6d — Enforce licences', () => {
     );
     await press(buttonNamed(section(view.container), 'Turn on'));
     expect(puts()).toHaveLength(1);
-    expect(puts()[0]!.body).toEqual({ enforce: true, acknowledgeGaps: true });
+    expect(puts()[0]!.body).toEqual({ enforce: true, acknowledgedGapCount: 3 });
     expect(puts()[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(view.container.textContent).toContain('Enforcement on');
     // The policy GET re-read on notifyLicencesChanged: the state line follows.
     expect(section(view.container).textContent).toContain('On — a receipt line of drug or food goods');
   });
 
-  test('gaps appeared since the read: the 409 opens a fresh, re-keyed confirmation that names them and acknowledges', async () => {
+  test('more gaps than shown: the 409 opens a fresh, re-keyed confirmation that names the new count and acknowledges it', async () => {
     policy = { enforce: false, gapCount: 0 };
     putAnswers = [
       () => json(409, { code: 'licence-gaps-unacknowledged', status: 409, title: 'Known licence coverage gaps', detail: 'There are 2 known coverage gaps …', gapCount: 2 }),
@@ -343,12 +343,12 @@ describe('story 1-6d — Enforce licences', () => {
     await press(buttonNamed(section(view.container), 'Turn on'));
     expect(section(view.container).textContent).toContain('Turn on licence enforcement?');
     await press(buttonNamed(section(view.container), 'Turn on'));
-    expect(puts()[0]!.body).toEqual({ enforce: true });
+    expect(puts()[0]!.body).toEqual({ enforce: true, acknowledgedGapCount: 0 });
     expect(section(view.container).textContent).toContain('Turn on with 2 known coverage gaps?');
     expect(view.container.textContent).not.toContain('Enforcement not changed');
     await press(buttonNamed(section(view.container), 'Turn on'));
     expect(puts()).toHaveLength(2);
-    expect(puts()[1]!.body).toEqual({ enforce: true, acknowledgeGaps: true });
+    expect(puts()[1]!.body).toEqual({ enforce: true, acknowledgedGapCount: 2 });
     // A fresh confirmation mints a fresh key.
     expect(puts()[1]!.key).not.toBe(puts()[0]!.key);
     expect(view.container.textContent).toContain('Enforcement on');

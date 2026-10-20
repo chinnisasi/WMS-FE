@@ -1968,7 +1968,7 @@ export const licencesControllerGetPolicy = <ThrowOnError extends boolean = false
 });
 
 /**
- * Turns licence enforcement on or off (owner-only, licences.manage). While on, a goods-receipt line of drug or food goods not covered by a valid client and site licence on the receipt date is held in review (grn.licence-refused), and an order of such goods is refused (409 licence-not-covered). Turning on with known gaps needs acknowledgeGaps: true; turning off is always allowed. An unchanged PUT is a no-op (nothing written or audited; the key is stored)
+ * Turns licence enforcement on or off (owner-only, licences.manage). While on, a goods-receipt line of drug or food goods not covered by a valid client and site licence on the receipt date is held in review (grn.licence-refused), and an order of such goods is refused (409 licence-not-covered). Turning on needs acknowledgedGapCount ≥ the live known gap count; turning off is always allowed and scans nothing. An unchanged PUT is a no-op (nothing written or audited; the key is stored)
  */
 export const licencesControllerSetPolicy = <ThrowOnError extends boolean = false>(options: Options<LicencesControllerSetPolicyData, ThrowOnError>): RequestResult<LicencesControllerSetPolicyResponses, LicencesControllerSetPolicyErrors, ThrowOnError> => (options.client ?? client).put<LicencesControllerSetPolicyResponses, LicencesControllerSetPolicyErrors, ThrowOnError>({
     security: [{

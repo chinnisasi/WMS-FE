@@ -658,7 +658,7 @@ describe('story 1-6d — a grn.licence-refused row: an owner accepts with a note
           clientLabel: 'ACME',
           lines: [{ poLineId: null, skuId: 'sku-1', batchCode: null, mfgDate: null, qty: 5 }],
           refusals: [
-            { lineIndex: 0, skuId: 'sku-1', skuCode: 'RICE-5KG', skuClientId: 'c', skuClientLabel: 'ACME', reason: 'licence-not-covered', missing: [{ need: 'fssai', holder: 'site' }] },
+            { lineIndex: 0, skuId: 'sku-1', skuCode: 'RICE-5KG', skuClientId: 'c', skuClientLabel: 'ACME', reason: 'licence-not-covered', missing: [{ need: 'fssai', holder: 'site', siteCode: 'WH-PUN' }] },
           ],
         },
       },
@@ -679,7 +679,7 @@ describe('story 1-6d — a grn.licence-refused row: an owner accepts with a note
     view = await mount();
     const card = article(view, 'GRN-0051');
     expect(card.textContent).toContain('Lines in licence review — GRN-0051, 1 line not booked for ACME');
-    expect(card.textContent).toContain('RICE-5KG × 5 — no valid licence (FSSAI licence — site) (ACME)');
+    expect(card.textContent).toContain('RICE-5KG × 5 — no valid licence (FSSAI licence — site WH-PUN) (ACME)');
     expect(card.textContent).toContain('Why accept goods without a valid licence?');
     expect(articleButton(card, 'Accept anyway').disabled).toBe(true);
     setNote(card, '  renewal filed  ');

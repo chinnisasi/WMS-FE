@@ -3735,6 +3735,10 @@ export type MissingLicenceDto = {
      * `client` — the brand holds no valid licence for this site (or for none); `site` — the site holds no valid licence
      */
     holder: 'client' | 'site';
+    /**
+     * The receipt's site code — the site a site licence is missing at, or a client licence is missing for
+     */
+    siteCode?: string;
 };
 
 export type RejectedGrnLineDto = {
@@ -5100,9 +5104,20 @@ export type SetLicencePolicyDto = {
      */
     enforce: boolean;
     /**
-     * Turning enforcement ON while known coverage gaps exist needs this to be true (else 409 licence-gaps-unacknowledged with gapCount). A precondition only — not part of the idempotency fingerprint. Ignored when turning off
+     * The known coverage gap count the owner saw and accepted (absent = 0). Turning enforcement ON while the live count exceeds it is refused 409 licence-gaps-unacknowledged with the live gapCount — re-confirm with that count. A precondition only — not part of the idempotency fingerprint. Ignored when turning off
      */
-    acknowledgeGaps?: boolean;
+    acknowledgedGapCount?: number;
+};
+
+export type SetLicencePolicyResponse = {
+    /**
+     * Whether licence enforcement is now on
+     */
+    enforce: boolean;
+    /**
+     * The known coverage gaps when this PUT turned enforcement on; absent otherwise (read GET …/licence-policy for today's count)
+     */
+    gapCount?: number;
 };
 
 export type CoverageGapDto = {
@@ -16178,7 +16193,7 @@ export type LicencesControllerSetPolicyData = {
 
 export type LicencesControllerSetPolicyErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or enforce/acknowledgeGaps not a boolean (validation-failed)
+     * Missing or malformed Idempotency-Key, enforce not a boolean, or acknowledgedGapCount not a whole number ≥ 0 (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -16190,7 +16205,7 @@ export type LicencesControllerSetPolicyErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * Turning on while known coverage gaps exist without acknowledgeGaps: true (licence-gaps-unacknowledged, member gapCount), or a concurrent request with the same Idempotency-Key (conflict)
+     * Turning on while the live known gap count exceeds acknowledgedGapCount (licence-gaps-unacknowledged, member gapCount), or a concurrent request with the same Idempotency-Key (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -16202,7 +16217,7 @@ export type LicencesControllerSetPolicyErrors = {
 export type LicencesControllerSetPolicyError = LicencesControllerSetPolicyErrors[keyof LicencesControllerSetPolicyErrors];
 
 export type LicencesControllerSetPolicyResponses = {
-    200: LicencePolicyResponse;
+    200: SetLicencePolicyResponse;
 };
 
 export type LicencesControllerSetPolicyResponse = LicencesControllerSetPolicyResponses[keyof LicencesControllerSetPolicyResponses];

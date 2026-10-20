@@ -668,7 +668,7 @@ describe('story 1-6d — a grn.licence-refused row (owner-only Accept anyway)', 
         { poLineId: null, skuId: 'sku-2', batchCode: null, mfgDate: null, qty: 1 },
       ],
       refusals: [
-        { lineIndex: 1, skuId: 'sku-1', skuCode: 'RICE-5KG', skuClientId: 'c', skuClientLabel: 'ACME', reason: 'licence-not-covered', missing: [{ need: 'fssai', holder: 'site' }] },
+        { lineIndex: 1, skuId: 'sku-1', skuCode: 'RICE-5KG', skuClientId: 'c', skuClientLabel: 'ACME', reason: 'licence-not-covered', missing: [{ need: 'fssai', holder: 'site', siteCode: 'WH-PUN' }] },
         {
           lineIndex: 2,
           skuId: 'sku-2',
@@ -696,7 +696,7 @@ describe('story 1-6d — a grn.licence-refused row (owner-only Accept anyway)', 
     expect(rejectedOpSummary(licenceRow)).toEqual({
       heading: 'Lines in licence review — GRN-0051, 2 lines not booked for ACME',
       lines: [
-        'RICE-5KG × 5 — no valid licence (FSSAI licence — site) (ACME)',
+        'RICE-5KG × 5 — no valid licence (FSSAI licence — site WH-PUN) (ACME)',
         'CODEINE × 1 — no valid licence (NDPS licence — client; NDPS licence — site) (ACME)',
       ],
     });
@@ -708,6 +708,11 @@ describe('story 1-6d — a grn.licence-refused row (owner-only Accept anyway)', 
     expect(missingLicenceWords({})).toBeNull();
     expect(missingLicenceWords({ missing: 'fssai' })).toBeNull();
     expect(missingLicenceWords({ missing: [{ need: 'fssai' }, null, { need: 'drug-20b', holder: 'client' }] })).toBe('Form 20B — client');
+    // The site is named when the entry carries it; an older row without it still reads.
+    expect(missingLicenceWords({ missing: [{ need: 'fssai', holder: 'site', siteCode: 'W1' }, { need: 'fssai', holder: 'client', siteCode: 'W1' }] })).toBe(
+      'FSSAI licence — site W1; FSSAI licence — client',
+    );
+    expect(missingLicenceWords({ missing: [{ need: 'fssai', holder: 'site' }] })).toBe('FSSAI licence — site');
   });
 
   test('Accept anyway needs a note worded for the licence; the outcome reads "Accepted anyway … — licence waived"', () => {
@@ -725,8 +730,8 @@ describe('story 1-6d — a grn.licence-refused row (owner-only Accept anyway)', 
     expect(canApplyRow(licenceRow, false, true)).toBe(false);
     expect(canApplyRow({ opType: 'grn.shelf-life-refused' }, true, false)).toBe(true);
     expect(GRN_LICENCE_OWNER_ONLY).toBe('An owner can accept these');
-    const denied = problem('role-denied', 403, 'Your role (ops_manager) lacks licences.manage.');
-    expect(rejectedOpsResolveReason(denied, licenceRow)).toBe('Your role (ops_manager) lacks licences.manage.');
+    const denied = problem('role-denied', 403, 'Accepting goods without a valid licence is an owner decision.');
+    expect(rejectedOpsResolveReason(denied, licenceRow)).toBe('Accepting goods without a valid licence is an owner decision.');
     expect(rejectedOpsResolveReason(denied, { opType: 'pick.record' })).toContain('cannot resolve');
   });
 });

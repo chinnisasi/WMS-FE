@@ -3,7 +3,7 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiAddLicence, fetchApiEditLicence, fetchApiSetLicencePolicy, fetchApiWithdrawLicence } from '@/lib/api/client';
-import type { ClientDto, LicenceDto, LicenceListItemDto, LicencePolicyResponse, WarehouseResponse } from '@/lib/api/generated';
+import type { ClientDto, LicenceDto, LicenceListItemDto, SetLicencePolicyResponse, WarehouseResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
   ALL_COVERED_COPY,
@@ -452,10 +452,11 @@ function LicenceForm({
  * Story 1-6d — the "Enforce licences" section, above the gaps. Every staff
  * session reads the state; the on/off action is the owner's
  * (`licences.manage`), through `ConfirmRow`. Turning on with known gaps
- * (the policy read's `gapCount`) names them and sends `acknowledgeGaps:
- * true`; when the server answers 409 `licence-gaps-unacknowledged` (gaps
- * appeared since the read), the `detail` hook opens a FRESH confirmation
- * keyed `enforce-on-${gapCount}` that asks the question and acknowledges.
+ * (the policy read's `gapCount`) names them and sends that count as
+ * `acknowledgedGapCount`; when the server answers 409
+ * `licence-gaps-unacknowledged` (more gaps than shown), the `detail` hook
+ * opens a FRESH confirmation keyed `enforce-on-${gapCount}` that asks again
+ * with the new count and acknowledges it.
  */
 function LicenceEnforcement({ canManage }: { canManage: boolean }) {
   const policy = useLicencePolicy();
@@ -498,7 +499,7 @@ function LicenceEnforcement({ canManage }: { canManage: boolean }) {
     >
       <div role="status">{enforcementStateCopy(enforce)}</div>
       {canManage && confirm !== null ? (
-        <ConfirmRow<LicencePolicyResponse>
+        <ConfirmRow<SetLicencePolicyResponse>
           key={confirm.on ? `enforce-on-${confirm.gapCount}` : 'enforce-off'}
           question={confirm.on ? enforceOnQuestion(confirm.gapCount) : ENFORCE_OFF_QUESTION}
           confirmLabel={confirm.on ? 'Turn on' : 'Turn off'}
@@ -506,7 +507,8 @@ function LicenceEnforcement({ canManage }: { canManage: boolean }) {
           run={(key, tenantId) =>
             fetchApiSetLicencePolicy(
               tenantId,
-              confirm.on && confirm.gapCount > 0 ? { enforce: true, acknowledgeGaps: true } : { enforce: confirm.on },
+              // Turning on acknowledges exactly the count this confirmation showed.
+              confirm.on ? { enforce: true, acknowledgedGapCount: confirm.gapCount } : { enforce: false },
               key,
             )
           }

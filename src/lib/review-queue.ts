@@ -1,6 +1,7 @@
 import { ApiProblem } from '@/lib/api/client';
 import type {
   CountVarianceEntryResponseDto,
+  MissingLicenceDto,
   RejectedGrnLineDto,
   RejectedOpResponse,
   ReturnEntryRefusedDto,
@@ -587,8 +588,12 @@ function shelfLifeWords(refusal: Record<string, unknown>): string | null {
   return [left, floor].filter((part) => part !== null).join(', ');
 }
 
-/** Story 1-6d — the licence a need calls for, short (`FSSAI licence — site`). */
-const MISSING_NEED_WORDS: Readonly<Record<string, string>> = {
+/**
+ * Story 1-6d — the licence a need calls for, short (`FSSAI licence — site
+ * WH-PUN`). A `Record` over the generated need union, so a new need fails
+ * the compile until it has words.
+ */
+const MISSING_NEED_WORDS: Readonly<Record<MissingLicenceDto['need'], string>> = {
   'drug-20b': 'Form 20B',
   'drug-21b': 'Form 21B',
   'drug-20g': 'Form 20G',
@@ -598,8 +603,9 @@ const MISSING_NEED_WORDS: Readonly<Record<string, string>> = {
 
 /**
  * Story 1-6d — a licence refusal's `missing` entries, worded: `FSSAI licence
- * — site; NDPS licence — client`. Read defensively (a stored row is data);
- * null when the refusal carries none.
+ * — site WH-PUN; NDPS licence — client`. The site is named when the entry
+ * carries `siteCode` (an older row may not). Read defensively (a stored row
+ * is data); null when the refusal carries none.
  */
 export function missingLicenceWords(refusal: Record<string, unknown>): string | null {
   const missing = refusal['missing'];
@@ -609,8 +615,10 @@ export function missingLicenceWords(refusal: Record<string, unknown>): string | 
       if (typeof item !== 'object' || item === null) return null;
       const need = (item as Record<string, unknown>)['need'];
       const holder = (item as Record<string, unknown>)['holder'];
+      const siteCode = (item as Record<string, unknown>)['siteCode'];
       if (typeof need !== 'string' || (holder !== 'client' && holder !== 'site')) return null;
-      return `${MISSING_NEED_WORDS[need] ?? need} — ${holder}`;
+      const words = (MISSING_NEED_WORDS as Readonly<Record<string, string>>)[need] ?? need;
+      return `${words} — ${holder}${holder === 'site' && typeof siteCode === 'string' && siteCode !== '' ? ` ${siteCode}` : ''}`;
     })
     .filter((word): word is string => word !== null);
   return words.length === 0 ? null : words.join('; ');
