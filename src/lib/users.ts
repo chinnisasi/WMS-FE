@@ -203,6 +203,11 @@ export const CAPABILITIES = [
   // detail's "Create return" form and the /returns Cancel action; every
   // member reads returns. The ops grant is derived below — never hand-copied.
   'returns.manage',
+  // Story 1-6c — the drug and FSSAI licences: add, edit and withdraw a client
+  // or site licence (Compliance → Licences). OWNER-ONLY (see
+  // OWNER_ONLY_CAPABILITIES) — the legal basis for holding drugs and food is
+  // the owner's. Every staff session reads the licences and the gaps.
+  'licences.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -228,6 +233,8 @@ const OWNER_ONLY_CAPABILITIES: readonly Capability[] = [
   'audit.view',
   // Story 9-3c — and a ledger chain break is the owner's to acknowledge.
   'ledger.acknowledge',
+  // Story 1-6c — the drug and FSSAI licences are the owner's to manage.
+  'licences.manage',
 ];
 
 /**

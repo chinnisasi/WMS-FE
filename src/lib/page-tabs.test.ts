@@ -88,7 +88,11 @@ describe('page-tabs — the pages', () => {
       ['eway', 'E-way bills'],
       ['hsn', 'HSN summary'],
       ['cold-chain', 'Cold-chain trace'],
+      ['licences', 'Licences'],
     ]);
+    // Story 1-6c — the licences tab's own URL (the notification entry links it).
+    expect(COMPLIANCE_PAGE_TABS.href('licences')).toBe('/compliance?tab=licences');
+    expect(COMPLIANCE_PAGE_TABS.parse({ tab: 'licences' })).toBe('licences');
     expect(SETTINGS_PAGE_TABS.tabs.map((t) => t.id)).toEqual(['warehouses', 'catalog', 'clients', 'partners', 'team', 'devices']);
     expect(INVENTORY_PAGE_TABS.tabs.map((t) => [t.id, t.label])).toEqual([
       ['stock', 'Stock'],

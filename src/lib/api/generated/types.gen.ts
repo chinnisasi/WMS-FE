@@ -5060,6 +5060,165 @@ export type ColdChainTraceResponse = {
     lines: Array<ColdChainLineDto>;
 };
 
+export type CoverageGapDto = {
+    /**
+     * `client` — the brand’s licence for this site is missing; `site` — the site’s own
+     */
+    holder: 'client' | 'site';
+    /**
+     * The client of a client gap
+     */
+    clientId?: string;
+    warehouseId: string;
+    need: 'drug-20b' | 'drug-21b' | 'drug-20g' | 'ndps' | 'fssai';
+    /**
+     * The kinds that would close the gap
+     */
+    coveredBy: Array<'drug-20b' | 'drug-21b' | 'drug-20g' | 'ndps' | 'fssai-registration' | 'fssai-state' | 'fssai-central'>;
+    /**
+     * Distinct SKUs needing it there — on hand, or on an open PO or ASN
+     */
+    skuCount: number;
+};
+
+export type CoverageGapsResponse = {
+    /**
+     * The IST date the gaps were judged for
+     */
+    asOfDate: string;
+    /**
+     * Empty when every drug and food good is covered
+     */
+    gaps: Array<CoverageGapDto>;
+};
+
+export type LicenceListItemDto = {
+    id: string;
+    /**
+     * `client` — a brand’s licence (head office when warehouseId is null, else for that premises); `site` — the 3PL’s own site licence
+     */
+    holder: 'client' | 'site';
+    clientId: string | null;
+    warehouseId: string | null;
+    kind: 'drug-20b' | 'drug-21b' | 'drug-20g' | 'ndps' | 'fssai-registration' | 'fssai-state' | 'fssai-central';
+    number: string;
+    validFrom: string | null;
+    /**
+     * On a drug form: the retention due date
+     */
+    validUntil: string | null;
+    note: string | null;
+    status: 'active' | 'withdrawn';
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC
+     */
+    updatedAt: string;
+    /**
+     * On asOfDate (IST): upcoming from 60 days before validUntil, expired after it
+     */
+    expiryState: 'valid' | 'upcoming' | 'expired' | 'withdrawn';
+    /**
+     * Days from asOfDate to validUntil (negative once expired); null without a date or once withdrawn
+     */
+    daysLeft: number | null;
+};
+
+export type LicenceListResponse = {
+    /**
+     * The IST date the badges were computed for (the server’s clock)
+     */
+    asOfDate: string;
+    /**
+     * Active first, then by validUntil (soonest first, none last); at most 500
+     */
+    items: Array<LicenceListItemDto>;
+};
+
+export type AddLicenceDto = {
+    /**
+     * The client brand holding it. Omit (or null) for a site licence — the 3PL’s own. Never the tenant’s own (`self`) client: its goods are covered by the site licence
+     */
+    clientId?: string | null;
+    /**
+     * The site of a site licence (required then), or the premises of a client licence. A client licence without one is a head-office or central licence, valid at every site
+     */
+    warehouseId?: string | null;
+    /**
+     * The statutory form: drug-20b (G/H/H1), drug-21b (C/C1), drug-20g (X), ndps, or an FSSAI tier
+     */
+    kind: 'drug-20b' | 'drug-21b' | 'drug-20g' | 'ndps' | 'fssai-registration' | 'fssai-state' | 'fssai-central';
+    /**
+     * Stored trimmed, spaces collapsed, upper-cased. FSSAI: 14 digits (a registration starts with 2, a state or central licence with 1). Drug and NDPS: 1–50 of A–Z 0–9 space / . -
+     */
+    number: string;
+    /**
+     * YYYY-MM-DD; omit or null for none
+     */
+    validFrom?: string | null;
+    /**
+     * YYYY-MM-DD. Required for FSSAI and NDPS; optional on a drug form, where it is the retention due date
+     */
+    validUntil?: string | null;
+    /**
+     * Trimmed; blank is none. At most 200 characters
+     */
+    note?: string | null;
+};
+
+export type LicenceDto = {
+    id: string;
+    /**
+     * `client` — a brand’s licence (head office when warehouseId is null, else for that premises); `site` — the 3PL’s own site licence
+     */
+    holder: 'client' | 'site';
+    clientId: string | null;
+    warehouseId: string | null;
+    kind: 'drug-20b' | 'drug-21b' | 'drug-20g' | 'ndps' | 'fssai-registration' | 'fssai-state' | 'fssai-central';
+    number: string;
+    validFrom: string | null;
+    /**
+     * On a drug form: the retention due date
+     */
+    validUntil: string | null;
+    note: string | null;
+    status: 'active' | 'withdrawn';
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC
+     */
+    updatedAt: string;
+};
+
+export type LicenceResponse = {
+    licence: LicenceDto;
+};
+
+export type EditLicenceDto = {
+    /**
+     * The corrected number (same rules as the add); cannot be null
+     */
+    number?: string;
+    /**
+     * YYYY-MM-DD; null clears it
+     */
+    validFrom?: string | null;
+    /**
+     * YYYY-MM-DD; null clears it (refused on FSSAI and NDPS)
+     */
+    validUntil?: string | null;
+    /**
+     * Null or blank clears it
+     */
+    note?: string | null;
+};
+
 export type TransferLineDto = {
     skuId: string;
     /**
@@ -6794,7 +6953,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -6821,7 +6980,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -8726,11 +8885,57 @@ export type QcReceiptNotificationDto = {
     resolution: 'released' | null;
 };
 
+export type LicenceExpirySummaryDto = {
+    licenceId: string;
+    kind: 'drug-20b' | 'drug-21b' | 'drug-20g' | 'ndps' | 'fssai-registration' | 'fssai-state' | 'fssai-central';
+    number: string;
+    /**
+     * `client` — a brand’s licence; `site` — the 3PL’s own site
+     */
+    holder: 'client' | 'site';
+    /**
+     * The client’s name, or the site’s name
+     */
+    holderName: string;
+    /**
+     * The site’s code — a site licence, or a client licence for one premises
+     */
+    siteCode?: string;
+    /**
+     * YYYY-MM-DD (IST)
+     */
+    validUntil: string;
+    state: 'upcoming' | 'expired';
+};
+
+export type LicenceExpiryNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'licence-expiry';
+    summary: LicenceExpirySummaryDto;
+    resolution: 'renewed' | 'withdrawn' | 'expired' | null;
+};
+
 export type NotificationListResponse = {
     /**
      * Visible entries, newest first. A member sees only the sources it can act on.
      */
-    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto | AuditExportNotificationDto | LedgerChainBreakNotificationDto | QcReceiptNotificationDto>;
+    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto | AuditExportNotificationDto | LedgerChainBreakNotificationDto | QcReceiptNotificationDto | LicenceExpiryNotificationDto>;
     nextCursor: string | null;
 };
 
@@ -15877,6 +16082,249 @@ export type ComplianceControllerGetOrderColdChainTraceResponses = {
 
 export type ComplianceControllerGetOrderColdChainTraceResponse = ComplianceControllerGetOrderColdChainTraceResponses[keyof ComplianceControllerGetOrderColdChainTraceResponses];
 
+export type LicencesControllerCoverageData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/licences/coverage';
+};
+
+export type LicencesControllerCoverageErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — an operator surface (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type LicencesControllerCoverageError = LicencesControllerCoverageErrors[keyof LicencesControllerCoverageErrors];
+
+export type LicencesControllerCoverageResponses = {
+    200: CoverageGapsResponse;
+};
+
+export type LicencesControllerCoverageResponse = LicencesControllerCoverageResponses[keyof LicencesControllerCoverageResponses];
+
+export type LicencesControllerListData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Only this client’s licences
+         */
+        clientId?: string;
+        /**
+         * Only licences of this site (site licences and client premises licences)
+         */
+        warehouseId?: string;
+        status?: 'active' | 'withdrawn';
+    };
+    url: '/tenants/{tenantId}/licences';
+};
+
+export type LicencesControllerListErrors = {
+    /**
+     * A malformed clientId or warehouseId, or a status off the list (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — an operator surface (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type LicencesControllerListError = LicencesControllerListErrors[keyof LicencesControllerListErrors];
+
+export type LicencesControllerListResponses = {
+    200: LicenceListResponse;
+};
+
+export type LicencesControllerListResponse = LicencesControllerListResponses[keyof LicencesControllerListResponses];
+
+export type LicencesControllerAddData = {
+    body: AddLicenceDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/licences';
+};
+
+export type LicencesControllerAddErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, no holder, the tenant’s own client as holder, a kind off the list, a number that breaks its kind’s rule, a malformed date, no validUntil on an FSSAI or NDPS licence, validUntil before validFrom, or a note over 200 characters (validation-failed, naming the field)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks licences.manage — owner-only (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client, or no warehouse, with this id in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * An active licence of the same family already carries this number (licence-number-taken), the client has departed (client-departed), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type LicencesControllerAddError = LicencesControllerAddErrors[keyof LicencesControllerAddErrors];
+
+export type LicencesControllerAddResponses = {
+    /**
+     * The added licence (a matching Idempotency-Key replays it)
+     */
+    201: LicenceResponse;
+};
+
+export type LicencesControllerAddResponse = LicencesControllerAddResponses[keyof LicencesControllerAddResponses];
+
+export type LicencesControllerEditData = {
+    body: EditLicenceDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        licenceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/licences/{licenceId}';
+};
+
+export type LicencesControllerEditErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed licenceId, a null number, a field that breaks its rule on the merged licence — clearing validUntil on an FSSAI or NDPS licence included — or a kind, clientId or warehouseId in the body (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks licences.manage — owner-only (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No licence with this id in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The licence is withdrawn (licence-withdrawn), another active licence of the family carries the number (licence-number-taken), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type LicencesControllerEditError = LicencesControllerEditErrors[keyof LicencesControllerEditErrors];
+
+export type LicencesControllerEditResponses = {
+    200: LicenceResponse;
+};
+
+export type LicencesControllerEditResponse = LicencesControllerEditResponses[keyof LicencesControllerEditResponses];
+
+export type LicencesControllerWithdrawData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        licenceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/licences/{licenceId}/withdraw';
+};
+
+export type LicencesControllerWithdrawErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed licenceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks licences.manage — owner-only (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No licence with this id in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The licence is already withdrawn (licence-withdrawn), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type LicencesControllerWithdrawError = LicencesControllerWithdrawErrors[keyof LicencesControllerWithdrawErrors];
+
+export type LicencesControllerWithdrawResponses = {
+    /**
+     * The withdrawn licence (a matching Idempotency-Key replays it)
+     */
+    200: LicenceResponse;
+};
+
+export type LicencesControllerWithdrawResponse = LicencesControllerWithdrawResponses[keyof LicencesControllerWithdrawResponses];
+
 export type MovementsControllerListTransfersData = {
     body?: never;
     path: {
@@ -18536,7 +18984,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */

@@ -44,6 +44,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   kit: 'Kit',
   ledger_chain_break: 'Ledger chain break',
   ledger_event: 'Ledger event',
+  // Story 1-6c — a drug or FSSAI licence (added, edited, withdrawn; the expiry sweep's raises).
+  licence: 'Licence',
   manifest: 'Manifest',
   order: 'Order',
   over_receipt: 'Over-receipt',

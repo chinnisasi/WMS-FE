@@ -42,6 +42,11 @@ import {
   fetchApiReleaseReceiptQcHolds,
   fetchApiListQcHolds,
   fetchApiListClientContacts,
+  fetchApiListLicences,
+  fetchApiLicenceCoverage,
+  fetchApiAddLicence,
+  fetchApiEditLicence,
+  fetchApiWithdrawLicence,
   fetchApiAddClientContact,
   fetchApiEditClientContact,
   fetchApiRemoveClientContact,
@@ -1712,6 +1717,58 @@ describe('client master record wrappers (story 1-2a)', () => {
       code: 'client-not-wound-down',
       extensions: { blockers: [{ kind: 'stock', count: 1 }] },
     });
+    clearSession();
+  });
+});
+
+describe('licence wrappers (story 1-6c)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const LICENCE = {
+    id: 'l-1', holder: 'site', clientId: null, warehouseId: 'w-1', kind: 'fssai-state', number: '10012345678901',
+    validFrom: null, validUntil: '2027-03-31', note: null, status: 'active', createdAt: '', updatedAt: '',
+  };
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}/licences`;
+
+  test('the reads: GET list and GET coverage, no key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { asOfDate: '2026-11-01', items: [] });
+    const list = await fetchApiListLicences(SESSION.tenant.id);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(base());
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(list.asOfDate).toBe('2026-11-01');
+
+    stubFetch(200, { asOfDate: '2026-11-01', gaps: [] });
+    await fetchApiLicenceCoverage(SESSION.tenant.id);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/coverage`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    clearSession();
+  });
+
+  test('the writes: POST add, PATCH edit and POST withdraw, each with its key and body', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { licence: LICENCE });
+    await fetchApiAddLicence(SESSION.tenant.id, { warehouseId: 'w-1', kind: 'fssai-state', number: '10012345678901', validUntil: '2027-03-31' }, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(base());
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ warehouseId: 'w-1', kind: 'fssai-state', number: '10012345678901', validUntil: '2027-03-31' });
+
+    stubFetch(200, { licence: LICENCE });
+    await fetchApiEditLicence(SESSION.tenant.id, 'l-1', { validFrom: null, note: 'renewed' }, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/l-1`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ validFrom: null, note: 'renewed' });
+
+    stubFetch(200, { licence: { ...LICENCE, status: 'withdrawn' } });
+    const withdrawn = await fetchApiWithdrawLicence(SESSION.tenant.id, 'l-1', KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/l-1/withdraw`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(withdrawn.status).toBe('withdrawn');
     clearSession();
   });
 });

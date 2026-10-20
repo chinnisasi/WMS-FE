@@ -2,6 +2,9 @@ import type { NotificationListResponse } from '@/lib/api/generated';
 import { conflictsQueueHref } from '@/lib/conflicts-queues';
 import { inboundQcHoldsHref, inboundTabHref } from '@/lib/inbound-tabs';
 import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
+import { LICENCE_KIND_LABEL } from '@/lib/licences';
+import { COMPLIANCE_PAGE_TABS } from '@/lib/page-tabs';
+import { formatIstDate } from '@/lib/rate-cards';
 
 /**
  * Story 9-2 — the notification panel's copy and links, pure so each sentence
@@ -38,6 +41,7 @@ const KNOWN_SOURCE_TYPES = {
   'audit-export': true,
   'ledger-chain-break': true,
   'qc-receipt': true,
+  'licence-expiry': true,
 } as const satisfies Record<SourceType, true>;
 
 /** The entries this build can render — an unknown `sourceType` is dropped. */
@@ -102,6 +106,9 @@ export function notificationCategory(entry: NotificationEntry): string {
       return 'Ledger integrity';
     case 'qc-receipt':
       return 'Held for QC on receipt';
+    // Story 1-6c — one entry per warning: 60 days before validUntil, and once past it.
+    case 'licence-expiry':
+      return entry.summary.state === 'expired' ? 'Licence expired' : 'Licence expiring';
     default:
       return unknownSource(entry, 'Notification');
   }
@@ -215,9 +222,31 @@ export function notificationDescription(entry: NotificationEntry, lookups: Notif
     // Story 1-2b — one entry per receipt of a QC-on-receipt client.
     case 'qc-receipt':
       return [qcReceiptLine(entry.summary.grnCode, entry.summary.count), ...where].join(' · ');
+    // Story 1-6c — `Form 20G MH/PUN/20G-1 — ACME Brand at WH-PUN · valid until 31 Dec 2026`.
+    case 'licence-expiry':
+      return licenceExpiryLine(entry.summary);
     default:
       return unknownSource(entry, '');
   }
+}
+
+type LicenceExpirySummary = Extract<NotificationEntry, { sourceType: 'licence-expiry' }>['summary'];
+
+/**
+ * Story 1-6c — the licence, its holder (a brand, optionally at one site; or
+ * the site itself) and its date. An unknown kind from a newer backend reads
+ * as the raw kind, never a crash.
+ */
+export function licenceExpiryLine(s: LicenceExpirySummary): string {
+  const kind = (LICENCE_KIND_LABEL as Readonly<Record<string, string>>)[s.kind] ?? s.kind;
+  const holder =
+    s.holder === 'site'
+      ? `site ${s.siteCode ?? s.holderName}`
+      : s.siteCode === undefined
+        ? s.holderName
+        : `${s.holderName} at ${s.siteCode}`;
+  const date = `${s.state === 'expired' ? 'expired' : 'valid until'} ${formatIstDate(s.validUntil)}`;
+  return `${kind} ${s.number} — ${holder} · ${date}`;
 }
 
 /** Story 1-2b — `GRN-0042: 3 lines held for QC on receipt`. */
@@ -283,6 +312,9 @@ export function notificationHref(entry: NotificationEntry): string {
     // Story 9-3c — the Ledger integrity section on /reports (open and acknowledged alike).
     case 'ledger-chain-break':
       return '/reports#ledger-integrity';
+    // Story 1-6c — Compliance → Licences (open and resolved alike).
+    case 'licence-expiry':
+      return COMPLIANCE_PAGE_TABS.href('licences');
     default:
       return unknownSource(entry, '/notifications');
   }

@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { CONFLICTS_QUEUES, parseQueueParam } from './conflicts-queues';
 import { parseDrill, type DrillScreen } from './drill';
 import { parseInboundQcGrn, parseInboundTab } from './inbound-tabs';
+import { COMPLIANCE_PAGE_TABS } from './page-tabs';
 import {
   bellLabel,
   knownNotifications,
@@ -22,6 +23,7 @@ const UNKNOWN_SKU = '0198f7a2-1b3c-7d4e-8f90-0000000000ff';
 const CONNECTION = '0198f7a2-1b3c-7d4e-8f90-00000000c0de';
 const RAISED = '2026-10-06T04:30:00.000Z';
 const GRN = '0198f7a2-1b3c-7d4e-8f90-0000000000b7';
+const LICENCE = '0198f7a2-1b3c-7d4e-8f90-0000000001c0';
 
 const LOOKUPS: NotificationLookups = {
   sku: (id) => (id === SKU ? { code: 'SPICE-01', uom: 'kg', uomPrecision: 3 } : null),
@@ -49,6 +51,13 @@ const ENTRIES: Readonly<Record<NotificationEntry['sourceType'], NotificationEntr
   },
   // Story 1-2b — one entry per receipt of a QC-on-receipt client.
   'qc-receipt': { ...base, sourceType: 'qc-receipt', warehouseId: W, summary: { grnId: GRN, grnCode: 'GRN-0042', count: 3 } },
+  // Story 1-6c — a client's premises licence nearing expiry.
+  'licence-expiry': {
+    ...base,
+    sourceType: 'licence-expiry',
+    warehouseId: W,
+    summary: { licenceId: LICENCE, kind: 'drug-20g', number: 'MH/PUN/20G-1', holder: 'client', holderName: 'Acme Foods', siteCode: 'WH-PUN', validUntil: '2026-12-31', state: 'upcoming' },
+  },
 };
 
 function resolved(entry: NotificationEntry, resolution: string): NotificationEntry {
@@ -69,6 +78,7 @@ describe('notification copy', () => {
       'Audit export',
       'Ledger integrity',
       'Held for QC on receipt',
+      'Licence expiring',
     ]);
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
     expect(notificationCategory(expiring)).toBe('Batch nearing expiry');
@@ -87,6 +97,7 @@ describe('notification copy', () => {
       'Audit export ready — 1,02,345 events',
       'Ledger chain broken at #1042 — MAIN Chennai DC',
       'GRN-0042: 3 lines held for QC on receipt · MAIN Chennai DC',
+      'Form 20G MH/PUN/20G-1 — Acme Foods at WH-PUN · valid until 31 Dec 2026',
     ]);
     // The expiry arm names the IST date (18:30Z is the next IST day).
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
@@ -129,6 +140,20 @@ describe('notification copy', () => {
     expect(notificationResolvedLabel(resolved(ENTRIES['qc-receipt'], 'released'))).toBe('Resolved · released');
   });
 
+  test('the licence expiry (1-6c): the expired state, a head-office and a site licence; it resolves renewed, withdrawn or expired', () => {
+    const licence = (summary: object) => ({ ...ENTRIES['licence-expiry'], summary: { ...ENTRIES['licence-expiry'].summary, ...summary } }) as NotificationEntry;
+    const expired = licence({ state: 'expired', validUntil: '2026-10-31' });
+    expect(notificationCategory(expired)).toBe('Licence expired');
+    expect(notificationDescription(expired, LOOKUPS)).toBe('Form 20G MH/PUN/20G-1 — Acme Foods at WH-PUN · expired 31 Oct 2026');
+    const headOffice = { ...ENTRIES['licence-expiry'], warehouseId: null, summary: { licenceId: LICENCE, kind: 'fssai-central', number: '10012345678901', holder: 'client', holderName: 'Acme Foods', validUntil: '2027-03-31', state: 'upcoming' } } as NotificationEntry;
+    expect(notificationDescription(headOffice, LOOKUPS)).toBe('FSSAI central licence 10012345678901 — Acme Foods · valid until 31 Mar 2027');
+    const site = licence({ holder: 'site', holderName: 'Pune DC', kind: 'fssai-registration', number: '20012345678901' });
+    expect(notificationDescription(site, LOOKUPS)).toBe('FSSAI registration 20012345678901 — site WH-PUN · valid until 31 Dec 2026');
+    for (const outcome of ['renewed', 'withdrawn', 'expired']) {
+      expect(notificationResolvedLabel(resolved(ENTRIES['licence-expiry'], outcome))).toBe(`Resolved · ${outcome}`);
+    }
+  });
+
   test('resolved: null while open; "Resolved · {resolution}" once cleared', () => {
     expect(notificationResolvedLabel(ENTRIES['over-receipt'])).toBeNull();
     expect(notificationResolvedLabel(resolved(ENTRIES['over-receipt'], 'approved'))).toBe('Resolved · approved');
@@ -168,6 +193,8 @@ describe('click-through links', () => {
       'ledger-chain-break': ['/reports#ledger-integrity', '/reports#ledger-integrity'],
       // Story 1-2b — the QC holds tab narrowed to the receipt.
       'qc-receipt': [`/inbound?tab=qc-holds&grnId=${GRN}`, `/inbound?tab=qc-holds&grnId=${GRN}`],
+      // Story 1-6c — Compliance → Licences.
+      'licence-expiry': ['/compliance?tab=licences', '/compliance?tab=licences'],
     };
     for (const [sourceType, entry] of Object.entries(ENTRIES)) {
       const [open, done] = expected[sourceType as NotificationEntry['sourceType']];
@@ -203,6 +230,12 @@ describe('click-through links', () => {
           expect(parseInboundTab(params)).toBe('qc-holds');
           expect(parseInboundQcGrn(params)).toBe(GRN);
         }
+        continue;
+      }
+      if (params.list === undefined && path === '/compliance') {
+        // page-tabs — a tab link (1-6c's Licences): not a drill, a tab Compliance knows.
+        expect(parseDrill('compliance', params)).toBeNull();
+        expect(COMPLIANCE_PAGE_TABS.parse(params)).toBe('licences');
         continue;
       }
       if (params.list === undefined) {
