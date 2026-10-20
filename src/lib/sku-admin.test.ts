@@ -108,9 +108,15 @@ describe('skuClassReason (the SKU class PATCH arms, branched on the code)', () =
       'Bin A-01-01 holds 3 each of SPICE-01; the chilled class would strand them.';
     expect(skuClassReason(problem('storage-class-conflict', 409, stranding))).toBe(stranding);
     const segregation =
-      'SPICE-01 (flammable) co-locates with OX-01 (oxidizer) in bin A-02-02 — relocate one first.';
+      'SKU "RICE-01" would conflict with stock it shares bins with: bin "A-02-02" (warehouse W1) co-locates with "BATT-9" (chemical: DG 9) — "RICE-01" (food: packaged-dry-grocery) must be kept apart from it: food never shares a bin with a chemical — relocate the stock or release the holds first.';
     expect(skuClassReason(problem('hazard-segregation-conflict', 409, segregation))).toBe(
       segregation,
+    );
+  });
+
+  test('story 1-6b: the hazard-segregation-conflict fallback names no single field — any goods-type edit can raise it', () => {
+    expect(skuClassReason(problem('hazard-segregation-conflict', 409))).toBe(
+      'This change conflicts with stock in the same bins — relocate it first.',
     );
   });
 

@@ -537,7 +537,7 @@ export const catalogControllerUpdateSkuStatus = <ThrowOnError extends boolean = 
 });
 
 /**
- * Returns the hazard segregation matrix — the vocabulary plus every incompatible unordered pair, fully expanded from the server's own predicate
+ * Returns the segregation matrix — the hazard vocabulary plus every incompatible unordered pair, fully expanded from the server's own predicate, and (1-6b) every goods-type co-location rule in check order
  */
 export const catalogControllerGetSegregationMatrix = <ThrowOnError extends boolean = false>(options: Options<CatalogControllerGetSegregationMatrixData, ThrowOnError>): RequestResult<CatalogControllerGetSegregationMatrixResponses, CatalogControllerGetSegregationMatrixErrors, ThrowOnError> => (options.client ?? client).get<CatalogControllerGetSegregationMatrixResponses, CatalogControllerGetSegregationMatrixErrors, ThrowOnError>({
     security: [{

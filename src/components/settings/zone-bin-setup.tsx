@@ -1248,6 +1248,12 @@ function rejectionReason(error: unknown, attemptedCode?: string, withClient = fa
       // backend's detail names the bin, its type and the clashing SKUs.
       case 'bin-occupancy-conflict':
         return error.detail ?? 'A bulk asset holds exactly one SKU — the target tank or silo already holds another.';
+      // Stories 12-2, 1-6b — the target holds goods the moved stock must be
+      // kept apart from (hazard classes, dangerous goods, food, allergens,
+      // scheduled drugs); the backend's detail names both SKUs, the facts
+      // that fired, the bin and the rule.
+      case 'bin-segregation-conflict':
+        return error.detail ?? 'The target bin holds goods the moved stock must be kept apart from — choose another bin.';
       case 'bin-full':
         return error.detail ?? 'The target bin is full — pick one with room.';
       case 'bin-blocked':

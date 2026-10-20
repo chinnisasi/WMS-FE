@@ -53,6 +53,36 @@ const INCOMPATIBLE: readonly { a: string; b: string }[] = [
   { a: 'gas', b: 'oxidizer' },
 ];
 
+/** The six rules exactly as the server serves them (story 1-6b, the BE e2e's verbatim list). */
+const RULES: readonly { code: string; description: string }[] = [
+  {
+    code: 'hazard-pair',
+    description:
+      'Hazard classes that react — the grid above — never share a bin. A DG subsidiary risk counts like its primary class.',
+  },
+  {
+    code: 'explosive-dg',
+    description:
+      'An explosive never shares a bin with any dangerous good, including DG classes with no hazard class (4, 5.2, 6.2, 7, 9, 8 none).',
+  },
+  {
+    code: 'food-chemical',
+    description:
+      'Food never shares a bin with a chemical — any SKU with a hazard class or a DG class that is not itself a food or drug.',
+  },
+  { code: 'drug-chemical', description: 'A scheduled drug never shares a bin with a chemical.' },
+  {
+    code: 'allergen-mismatch',
+    description:
+      'Two foods share a bin only when they declare the same allergens. No allergens entered counts as allergen-free.',
+  },
+  {
+    code: 'raw-ready-to-eat',
+    description:
+      'Raw meat, poultry and seafood never share a bin with dairy, ready-to-eat food, fresh produce, bakery and cereals, or infant food.',
+  },
+];
+
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -74,7 +104,7 @@ function stubRouter(matrixStatus: number, matrixBody: unknown): void {
 let view: Rendered | undefined;
 
 beforeEach(() => {
-  stubRouter(200, { classes: [...CLASSES], incompatible: INCOMPATIBLE });
+  stubRouter(200, { classes: [...CLASSES], incompatible: INCOMPATIBLE, rules: RULES });
   writeSession(SESSION);
 });
 
@@ -135,6 +165,42 @@ describe('SegregationMatrixCard: the grid equals the endpoint (story 12-7)', () 
     // table's Hazard column is where a null renders, never the grid).
     expect(rows.length).toBe(CLASSES.length);
     expect(headers.length - 1).toBe(CLASSES.length);
+    view.unmount();
+  });
+
+  test('story 1-6b: the server\'s rules render below the grid, in its order, verbatim, keyed on code', async () => {
+    const view = render(<SegregationMatrixCard />);
+    await settle();
+    const items = [...view.container.querySelectorAll('ol[aria-label="Segregation rules"] li')];
+    expect(items.map((li) => [li.getAttribute('data-rule'), li.textContent])).toEqual(
+      RULES.map((rule) => [rule.code, rule.description]),
+    );
+    // The list follows the grid.
+    const table = view.container.querySelector('table')!;
+    const list = view.container.querySelector('ol')!;
+    expect(table.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    view.unmount();
+  });
+
+  test('story 1-6b: a rule the server adds renders with no client change (nothing hardcoded)', async () => {
+    const extra = [...RULES, { code: 'future-rule', description: 'A rule this build has never seen.' }];
+    stubRouter(200, { classes: [...CLASSES], incompatible: INCOMPATIBLE, rules: extra });
+    const view = render(<SegregationMatrixCard />);
+    await settle();
+    const items = [...view.container.querySelectorAll('ol[aria-label="Segregation rules"] li')];
+    expect(items.map((li) => li.textContent)).toEqual(extra.map((rule) => rule.description));
+    view.unmount();
+  });
+
+  test('story 1-6b: the header says the grid covers hazard classes and the list the goods-type rules — never that a null-class SKU may sit beside anything', async () => {
+    const view = render(<SegregationMatrixCard />);
+    await settle();
+    const header = view.container.querySelector('section > div')!.textContent!.replace(/\s+/g, ' ');
+    expect(header).toBe(
+      'Segregation matrix' +
+        'Which goods may share a bin — the server\'s own segregation rules, read verbatim. The grid covers hazard classes: a cell marked NO means the two classes never co-locate. The list below it covers the goods-type rules — dangerous goods, food, allergens and scheduled drugs.',
+    );
+    expect(view.container.textContent).not.toContain('may sit beside anything');
     view.unmount();
   });
 

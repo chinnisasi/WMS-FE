@@ -1090,9 +1090,10 @@ describe('compliance and segregation wrappers (story 12-7)', () => {
 
   test('the segregation matrix read hits the tenant-scoped catalog path with no query', async () => {
     writeSession(SESSION);
-    stubFetch(200, { classes: ['explosive'], incompatible: [] });
+    const rules = [{ code: 'drug-chemical', description: 'A scheduled drug never shares a bin with a chemical.' }];
+    stubFetch(200, { classes: ['explosive'], incompatible: [], rules });
     const matrix = await fetchApiGetSegregationMatrix(SESSION.tenant.id);
-    expect(matrix).toEqual({ classes: ['explosive'], incompatible: [] });
+    expect(matrix).toEqual({ classes: ['explosive'], incompatible: [], rules });
     const url = new URL(lastRequest!.url);
     expect(url.pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/catalog/segregation-matrix`);
     expect(url.search).toBe('');

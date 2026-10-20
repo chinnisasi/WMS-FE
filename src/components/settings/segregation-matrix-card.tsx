@@ -9,17 +9,20 @@ import { useSegregationMatrix } from '@/lib/use-segregation-matrix';
 import { ReadFailure } from '@/components/outbound/shell';
 
 /**
- * The segregation matrix card (story 12-7) — a read-only 7×7 grid rendered
- * ENTIRELY from the endpoint (`GET /tenants/{t}/catalog/segregation-matrix`):
- * the grid equals the server's matrix exactly, the endpoint is the only
- * source, nothing hardcoded. The FE's compatibility test is dumb —
- * `compatible(a, b) = !incompatible.includes(pair)` — so widening the
- * backend's predicate flows here with nothing to drift.
+ * The segregation matrix card (story 12-7; the rules list, 1-6b) — a
+ * read-only 7×7 grid and a rule list rendered ENTIRELY from the endpoint
+ * (`GET /tenants/{t}/catalog/segregation-matrix`): the grid equals the
+ * server's hazard matrix exactly and the list is the server's `rules`, in
+ * its order, verbatim — the endpoint is the only source, nothing hardcoded.
+ * The FE's compatibility test is dumb — `compatible(a, b) =
+ * !incompatible.includes(pair)` — so widening the backend's predicate flows
+ * here with nothing to drift.
  *
- * Null is not on the grid: a null hazard class is not a class (the 12-2
- * narrowing) and carries no rule in either direction — the endpoint
- * enumerates no null pairs, and the SKU/Hazard columns are where a null
- * renders.
+ * The grid covers hazard classes only; the list covers the goods-type rules
+ * (explosives vs any dangerous good, food and scheduled drugs vs chemicals,
+ * allergens, raw vs ready-to-eat). A SKU with no hazard class is therefore
+ * NOT free to sit anywhere — its DG class, schedules, food category and
+ * allergens can still keep it apart (story 1-6b).
  */
 
 /**
@@ -60,9 +63,10 @@ function SegregationMatrixCardSessioned() {
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Segregation matrix</h2>
         <div className="text-(--muted-foreground)">
-          Which hazard classes may share a bin — the server&apos;s own segregation rule, read
-          verbatim. A cell marked <span className="font-mono">NO</span> means the two classes never
-          co-locate; a null-class SKU (no rule) may sit beside anything.
+          Which goods may share a bin — the server&apos;s own segregation rules, read verbatim. The
+          grid covers hazard classes: a cell marked <span className="font-mono">NO</span> means the
+          two classes never co-locate. The list below it covers the goods-type rules — dangerous
+          goods, food, allergens and scheduled drugs.
         </div>
       </div>
 
@@ -109,6 +113,13 @@ function SegregationMatrixCardSessioned() {
               ))}
             </tbody>
           </table>
+          <ol className="mt-3 flex list-decimal flex-col gap-1 pl-5" aria-label="Segregation rules">
+            {matrix.data.rules.map((rule) => (
+              <li key={rule.code} data-rule={rule.code}>
+                {rule.description}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
     </section>
