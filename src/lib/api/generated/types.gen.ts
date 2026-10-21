@@ -9142,6 +9142,59 @@ export type PortalOrderPageResponse = {
     nextCursor: string | null;
 };
 
+export type PortalOrderLineInputDto = {
+    /**
+     * One of this client's active SKUs (portal/skus) — never a kit
+     */
+    skuId: string;
+    /**
+     * Ordered quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    quantity: number;
+};
+
+export type PortalCreateOrderDto = {
+    /**
+     * The warehouse the order ships from (portal/warehouses)
+     */
+    warehouseId: string;
+    /**
+     * At least one line with one of this client's active SKUs
+     */
+    lines: Array<PortalOrderLineInputDto>;
+    /**
+     * Where the shipment goes — every field required except line2; the pincode is six digits, as text
+     */
+    destination: AddressDto;
+    /**
+     * The consignee's GSTIN, when the buyer is GST-registered (optional)
+     */
+    consigneeGstin?: string;
+    /**
+     * The GST-registered buyer's legal or trade name (optional, only alongside consigneeGstin, at most 100 characters — counted in code points after the trim, by the command). Trimmed; blank reads as absent.
+     */
+    consigneeLegalName?: string;
+};
+
+export type PortalPlacedOrderResponse = {
+    /**
+     * The new order — read it through portal/orders/{orderId}
+     */
+    orderId: string;
+    /**
+     * The warehouse the order was placed into
+     */
+    warehouseName: string;
+    /**
+     * Lines on the order
+     */
+    lineCount: number;
+    /**
+     * When the order was placed
+     */
+    placedAt: string;
+};
+
 export type PortalOrderComponentDto = {
     skuCode: string | null;
     skuName: string | null;
@@ -20701,6 +20754,75 @@ export type ReportingControllerClientServiceResponses = {
 
 export type ReportingControllerClientServiceResponse = ReportingControllerClientServiceResponses[keyof ReportingControllerClientServiceResponses];
 
+export type ReportingControllerDownloadRegisterData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        report: 'stock-on-hand' | 'inbound-register' | 'outbound-register' | 'ledger' | 'batch-ageing';
+    };
+    query: {
+        /**
+         * The file format: `csv` (UTF-8 with a BOM) or `xlsx` (one worksheet)
+         */
+        format: 'csv' | 'xlsx';
+        /**
+         * One client's rows only (an unknown or another tenant's id answers an empty file); absent means every client
+         */
+        clientId?: string;
+        /**
+         * First IST date (inclusive), YYYY-MM-DD — required by the inbound, outbound and ledger registers, refused by stock-on-hand and batch-ageing
+         */
+        from?: string;
+        /**
+         * Last IST date (inclusive), YYYY-MM-DD — the period is at most 366 days in all (inclusive)
+         */
+        to?: string;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/reports/{report}';
+};
+
+export type ReportingControllerDownloadRegisterErrors = {
+    /**
+     * An unknown report, a missing or unknown format, a malformed warehouseId or clientId, a dated register without from/to, a snapshot register given from/to, a from/to that is not a real YYYY-MM-DD date, from after to, or a period over 366 days (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such warehouse in this tenant (unknown-warehouse)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * More than 50,000 rows — narrow the filters (report-too-large)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The register did not finish within its 15 s budget, or 2 registers are already being prepared (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ReportingControllerDownloadRegisterError = ReportingControllerDownloadRegisterErrors[keyof ReportingControllerDownloadRegisterErrors];
+
+export type ReportingControllerDownloadRegisterResponses = {
+    /**
+     * The register file
+     */
+    200: Blob | File;
+};
+
+export type ReportingControllerDownloadRegisterResponse = ReportingControllerDownloadRegisterResponses[keyof ReportingControllerDownloadRegisterResponses];
+
 export type ReportingControllerAuditData = {
     body?: never;
     path: {
@@ -22970,6 +23092,66 @@ export type PortalControllerOrdersResponses = {
 };
 
 export type PortalControllerOrdersResponse = PortalControllerOrdersResponses[keyof PortalControllerOrdersResponses];
+
+export type PortalControllerPlaceOrderData = {
+    body: PortalCreateOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders';
+};
+
+export type PortalControllerPlaceOrderErrors = {
+    /**
+     * Missing (idempotency-key-required) or malformed (idempotency-key-invalid) Idempotency-Key; an invalid body — a clientId or a ratePaise, no lines or more than 200, an incomplete ship-to address, a malformed consignee GSTIN or legal name, or a quantity finer than its unit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a); or the user may not place orders for this client (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse is not the tenant's, or a line's SKU is unknown, not this client's, a kit or inactive (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Not enough stock at the warehouse for a line — nothing was placed (order-backorder-rejected, extensions.skuCodes naming the short SKUs); a licence for one of the products is not on file with the warehouse (licence-not-covered); a SKU was deactivated while the order was placed — refused even when its stock covered the line, the portal never sells down (sku-inactive); a SKU became a kit or left this client while the order was placed (order-catalog-changed); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The stock reservation store is unreachable — nothing was placed (reservation-store-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type PortalControllerPlaceOrderError = PortalControllerPlaceOrderErrors[keyof PortalControllerPlaceOrderErrors];
+
+export type PortalControllerPlaceOrderResponses = {
+    /**
+     * The placed order — its id, the warehouse name, the line count and when it was placed (a matching Idempotency-Key replays it)
+     */
+    201: PortalPlacedOrderResponse;
+};
+
+export type PortalControllerPlaceOrderResponse = PortalControllerPlaceOrderResponses[keyof PortalControllerPlaceOrderResponses];
 
 export type PortalControllerOrderData = {
     body?: never;

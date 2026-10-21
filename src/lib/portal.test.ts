@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from './api/client';
+import { MAX_ORDER_LINES } from './outbound-orders';
 import { drainPortalSkus } from './use-portal';
 import {
   isClientSuspended,
@@ -23,6 +24,13 @@ import {
   signInDestination,
   skuLabel,
   PORTAL_DEPARTED_MESSAGE,
+  availableHereLabel,
+  MAX_PORTAL_ORDER_LINES,
+  parsePortalOrderCreate,
+  placedOrderBanner,
+  portalInstantIst,
+  portalOrderReason,
+  type PortalOrderDraft,
 } from './portal';
 
 describe('portal routing (story 21-7)', () => {
@@ -195,5 +203,148 @@ describe('portalAsnReason (story 21-7b)', () => {
     expect(portalAsnReason(new ApiProblem('conflict', 409))).toBe('The same submission is still being processed — try again in a moment.');
     expect(portalAsnReason(new ApiProblem('something-new', 418))).toBe('The shipment notice was not sent (something-new).');
     expect(portalAsnReason(new TypeError('fetch failed'))).toBe('The API is unreachable — is wms-be running?');
+  });
+});
+
+// ── story 4-1a: placing an order ────────────────────────────────────────────
+
+describe('parsePortalOrderCreate (story 4-1a)', () => {
+  const W = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const S = '0198f7a2-1b3c-7d4e-8f90-0000000000b1';
+  const ADDRESS = { contactName: ' Asha ', phone: '+91 90000 00000', line1: '1 MG Road', line2: '', city: 'Bengaluru', state: 'Karnataka', pincode: '560001' };
+  const draft = (extra: Partial<PortalOrderDraft> = {}): PortalOrderDraft => ({
+    lines: [{ skuId: S, qty: '2.5' }],
+    destination: ADDRESS,
+    consigneeGstin: '',
+    consigneeLegalName: '',
+    ...extra,
+  });
+
+  test('the body is exactly {warehouseId, lines[{skuId, quantity}], destination} — no clientId, no ratePaise; blank GSTIN and name absent', () => {
+    const parsed = parsePortalOrderCreate(draft(), W);
+    expect(parsed.problem).toBeNull();
+    expect(parsed.body).toEqual({
+      warehouseId: W,
+      lines: [{ skuId: S, quantity: 2.5 }],
+      destination: { contactName: 'Asha', phone: '+91 90000 00000', line1: '1 MG Road', city: 'Bengaluru', state: 'Karnataka', pincode: '560001' },
+    });
+  });
+
+  test('a GSTIN is trimmed and upper-cased; the legal name rides only beside it', () => {
+    expect(parsePortalOrderCreate(draft({ consigneeGstin: ' 29aaacm4321k1z8 ', consigneeLegalName: ' Mysore Spices ' }), W).body).toMatchObject({
+      consigneeGstin: '29AAACM4321K1Z8',
+      consigneeLegalName: 'Mysore Spices',
+    });
+    expect(Object.keys(parsePortalOrderCreate(draft({ consigneeLegalName: 'Kept, not sent' }), W).body!)).not.toContain('consigneeLegalName');
+  });
+
+  test('MAX_PORTAL_ORDER_LINES is the staff order ceiling (the backend ArrayMaxSize both DTOs share)', () => {
+    expect(MAX_PORTAL_ORDER_LINES).toBe(MAX_ORDER_LINES);
+    expect(MAX_PORTAL_ORDER_LINES).toBe(200);
+  });
+
+  test("each line's quantity respects its SKU's declared precision, naming the line; a SKU missing from the options is the server's to judge", () => {
+    const skus = { [S]: { code: 'TEE-RED', uom: 'each', uomPrecision: 0 }, KG: { code: 'RICE', uom: 'kg', uomPrecision: 3 } };
+    expect(parsePortalOrderCreate(draft({ lines: [{ skuId: 'KG', qty: '2.5' }, { skuId: S, qty: '1.5' }] }), W, skus).problem).toBe(
+      'Line 2: TEE-RED is counted in each — whole numbers only (got 1.5).',
+    );
+    expect(parsePortalOrderCreate(draft({ lines: [{ skuId: 'KG', qty: '0.0001' }] }), W, skus).problem).toBe(
+      'Line 1: RICE is counted in kg — at most 3 decimal places (got 0.0001).',
+    );
+    expect(parsePortalOrderCreate(draft({ lines: [{ skuId: 'KG', qty: '2.125' }, { skuId: S, qty: '3' }] }), W, skus).problem).toBeNull();
+    expect(parsePortalOrderCreate(draft({ lines: [{ skuId: S, qty: '1.5' }] }), W).problem).toBeNull();
+  });
+
+  test('the problems, each sending nothing', () => {
+    expect(parsePortalOrderCreate(draft(), '').problem).toBe('Choose the warehouse the order ships from.');
+    expect(parsePortalOrderCreate(draft({ lines: [{ skuId: '', qty: '' }] }), W).problem).toBe('Add at least one line — a SKU and a quantity.');
+    expect(parsePortalOrderCreate(draft({ lines: [{ skuId: '', qty: '1' }] }), W).problem).toBe('Every line needs a SKU.');
+    for (const qty of ['0', '-1', '1e3', 'abc']) {
+      expect(parsePortalOrderCreate(draft({ lines: [{ skuId: S, qty }] }), W).problem).toBe('Every quantity is a decimal greater than zero.');
+    }
+    expect(parsePortalOrderCreate(draft({ lines: Array.from({ length: MAX_PORTAL_ORDER_LINES + 1 }, () => ({ skuId: S, qty: '1' })) }), W).problem).toBe(
+      `An order carries at most ${MAX_PORTAL_ORDER_LINES} lines.`,
+    );
+    expect(parsePortalOrderCreate(draft({ destination: { ...ADDRESS, pincode: '5600' } }), W).problem).not.toBeNull();
+    expect(parsePortalOrderCreate(draft({ consigneeGstin: 'NOT-A-GSTIN' }), W).problem).not.toBeNull();
+    for (const result of [parsePortalOrderCreate(draft(), ''), parsePortalOrderCreate(draft({ consigneeGstin: 'X' }), W)]) {
+      expect(result.body).toBeNull();
+    }
+  });
+});
+
+describe('the place-an-order helpers (story 4-1a)', () => {
+  const row = (skuId: string, warehouseId: string, onHand: number, allocated: number) => ({
+    skuId,
+    skuCode: 'X',
+    skuName: 'X',
+    baseUom: 'each',
+    warehouseId,
+    warehouseName: 'W',
+    onHand,
+    allocated,
+  });
+
+  test('availableHereLabel: on hand less allocated at the chosen warehouse, never negative; nothing to say without a SKU or a warehouse', () => {
+    const stock = [row('s-1', 'w-1', 10, 3), row('s-1', 'w-2', 1500, 0), row('s-2', 'w-1', 1, 4)];
+    expect(availableHereLabel(stock, 's-1', 'w-1', 'each')).toBe('on hand, not yet allocated: 7 each');
+    expect(availableHereLabel(stock, 's-1', 'w-2', 'each')).toBe('on hand, not yet allocated: 1,500 each');
+    expect(availableHereLabel(stock, 's-2', 'w-1', 'kg')).toBe('on hand, not yet allocated: 0 kg');
+    expect(availableHereLabel(stock, 's-3', 'w-1', undefined)).toBe('on hand, not yet allocated: 0');
+    expect(availableHereLabel(stock, '', 'w-1', 'each')).toBeNull();
+    expect(availableHereLabel(stock, 's-1', '', 'each')).toBeNull();
+  });
+
+  test('availableHereLabel: a TRUNCATED stock read with no row says nothing (never a false 0); a row it did read still shows', () => {
+    const stock = [row('s-1', 'w-1', 10, 3)];
+    expect(availableHereLabel(stock, 's-3', 'w-1', 'each', true)).toBeNull();
+    expect(availableHereLabel(stock, 's-1', 'w-1', 'each', true)).toBe('on hand, not yet allocated: 7 each');
+  });
+
+  test('placedOrderBanner: built from the response — the line count, the warehouse and the IST time', () => {
+    expect(placedOrderBanner({ orderId: 'o', warehouseName: 'Main', lineCount: 1, placedAt: '2026-10-21T20:00:00.000Z' })).toEqual({
+      word: 'Order placed',
+      // 20:00 UTC is 01:30 the NEXT day in IST.
+      reason: '1 line to Main (22 Oct 2026, 01:30 IST) — follow it in the list below.',
+    });
+    expect(portalInstantIst('not a date')).toBe('not a date');
+  });
+});
+
+describe('portalOrderReason (story 4-1a)', () => {
+  const problem = (code: string, status: number, extensions: Record<string, unknown> = {}) =>
+    new ApiProblem(code, status, 'SERVER DETAIL — reserved 3, site "WH-1"', 'Title', extensions);
+
+  test('a fixed sentence per code — never the server detail', () => {
+    const cases: [string, number, string][] = [
+      ['not-found', 404, 'A SKU or warehouse is no longer available — reload the form and pick again.'],
+      ['licence-not-covered', 409, 'A licence for one of these products is not on file with the warehouse — nothing was placed. Contact the warehouse.'],
+      ['sku-inactive', 409, 'A SKU on this order is no longer active with the warehouse — remove it and place the rest.'],
+      ['order-catalog-changed', 409, 'The warehouse changed one of these products while you ordered — nothing was placed. Reload the form and try again.'],
+      ['reservation-store-unavailable', 503, 'The warehouse could not check stock just now — nothing was placed. Try again in a moment.'],
+      ['conflict', 409, 'The same order is still being processed — try again in a moment.'],
+      ['idempotency-key-reuse', 422, 'This submission was already processed with different details — reload and try again.'],
+      ['validation-failed', 400, 'Check the quantities, the ship-to address and the buyer GSTIN, then try again.'],
+      ['client-suspended', 403, "Your company's portal access is suspended."],
+      ['client-departed', 403, "Your company's account with the warehouse has ended."],
+      ['role-denied', 403, 'This page is for client-portal users — sign in with your portal account.'],
+      ['permission-denied', 403, 'This page is for client-portal users — sign in with your portal account.'],
+      ['unauthenticated', 401, 'Your session expired — sign in again.'],
+      ['something-new', 409, 'The order was not placed (something-new).'],
+    ];
+    for (const [code, status, sentence] of cases) {
+      expect(portalOrderReason(problem(code, status))).toBe(sentence);
+    }
+  });
+
+  test('the shortage names the short SKUs from extensions.skuCodes', () => {
+    expect(portalOrderReason(problem('order-backorder-rejected', 409, { skuCodes: ['A-1', 'A-2'] }))).toBe(
+      'Not enough stock at this warehouse for A-1, A-2 — nothing was placed. Lower the quantities or choose another warehouse.',
+    );
+    expect(portalOrderReason(problem('order-backorder-rejected', 409))).toContain('for some lines');
+  });
+
+  test('the transport arm is the house unreachable copy', () => {
+    expect(portalOrderReason(new TypeError('fetch failed'))).toBe('The API is unreachable — is wms-be running?');
   });
 });

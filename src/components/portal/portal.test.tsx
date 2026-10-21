@@ -754,6 +754,351 @@ describe('Announce a shipment (story 21-7b)', () => {
   });
 });
 
+// ── Story 4-1a — placing an order from the portal ───────────────────────────
+
+describe('Place an order (4-1a)', () => {
+  const W1 = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const W2 = '0198f7a2-1b3c-7d4e-8f90-0000000000a2';
+  const SKU1 = '0198f7a2-1b3c-7d4e-8f90-0000000000b1';
+  const SKU2 = '0198f7a2-1b3c-7d4e-8f90-0000000000b2';
+  const sku = (skuId: string, skuCode: string, skuName: string, baseUom = 'each', uomPrecision = 0) => ({ skuId, skuCode, skuName, baseUom, uomPrecision });
+  const stockRow = (skuId: string, warehouseId: string, onHand: number, allocated: number) => ({
+    skuId,
+    skuCode: 'X',
+    skuName: 'X',
+    baseUom: 'each',
+    warehouseId,
+    warehouseName: warehouseId === W1 ? 'Main' : 'Annex',
+    onHand,
+    allocated,
+  });
+  const PLACED = { orderId: ORDER_ID, warehouseName: 'Main', lineCount: 1, placedAt: '2026-10-22T05:00:00.000Z' };
+
+  function formRoutes(): void {
+    routes = {
+      ...routes,
+      '/portal/warehouses': [
+        200,
+        {
+          items: [
+            { warehouseId: W2, warehouseName: 'Annex', city: 'Chennai' },
+            { warehouseId: W1, warehouseName: 'Main', city: 'Bengaluru' },
+          ],
+        },
+      ],
+      '/portal/skus': [200, { items: [sku(SKU1, 'TEE-RED', 'Red tee'), sku(SKU2, 'RICE', 'Basmati rice', 'kg', 3)], nextCursor: null }],
+      '/portal/stock': [200, { items: [stockRow(SKU1, W1, 10, 3), stockRow(SKU1, W2, 4, 0)], nextCursor: null }],
+    };
+  }
+
+  function setValue(element: HTMLInputElement | HTMLSelectElement, value: string): void {
+    const proto = element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+    act(() => {
+      setter.call(element, value);
+      element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    });
+  }
+
+  function find<T extends Element>(container: HTMLElement, selector: string): T {
+    const found = container.querySelector(selector);
+    expect(found).not.toBeNull();
+    return found as T;
+  }
+
+  function stateSelect(container: HTMLElement): HTMLSelectElement {
+    const found = [...container.querySelectorAll('select')].find((select) => select.options[0]?.textContent === 'Pick a state…');
+    expect(found).toBeDefined();
+    return found!;
+  }
+
+  async function openForm(): Promise<HTMLElement> {
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Place an order'));
+    await settle();
+    return view.container;
+  }
+
+  function fillAddress(container: HTMLElement): void {
+    setValue(find<HTMLInputElement>(container, 'input[placeholder="Priya Sharma"]'), 'Asha Rao');
+    setValue(find<HTMLInputElement>(container, 'input[placeholder="+91 98450 12345"]'), '+91 90000 00000');
+    setValue(find<HTMLInputElement>(container, 'input[placeholder="12, Peenya Industrial Area"]'), '1 MG Road');
+    setValue(find<HTMLInputElement>(container, 'input[placeholder="Bengaluru"]'), 'Bengaluru');
+    setValue(stateSelect(container), 'Karnataka');
+    setValue(find<HTMLInputElement>(container, 'input[placeholder="560066"]'), '560001');
+  }
+
+  async function submit(container: HTMLElement): Promise<void> {
+    const form = container.querySelector('form[aria-label="Place an order"]') as HTMLFormElement;
+    act(() => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+  }
+
+  async function fillAndSubmit(container: HTMLElement, opts: { skuId?: string; qty?: string; gstin?: string } = {}): Promise<void> {
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Warehouse"]'), W1);
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Line 1 SKU"]'), opts.skuId ?? SKU1);
+    setValue(find<HTMLInputElement>(container, '[aria-label="Line 1 quantity"]'), opts.qty ?? '2');
+    fillAddress(container);
+    if (opts.gstin !== undefined) setValue(find<HTMLInputElement>(container, 'input[placeholder="27AAPCD1234K1Z5"]'), opts.gstin);
+    await submit(container);
+  }
+
+  beforeEach(() => {
+    writeSession(PORTAL_SESSION);
+    formRoutes();
+  });
+
+  test('without orders.place the button and the form are absent (a client session that lost it reads its orders only)', async () => {
+    writeSession({ ...PORTAL_SESSION, user: { ...PORTAL_SESSION.user, role: 'accountant' } });
+    view = render(<PortalOrders />);
+    await settle();
+    expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Place an order')).toBe(false);
+    expect(view.container.querySelector('form[aria-label="Place an order"]')).toBeNull();
+    view.unmount();
+    // Meaningful: the client role is offered it, closed by default.
+    writeSession(PORTAL_SESSION);
+    view = render(<PortalOrders />);
+    await settle();
+    buttonNamed(view.container, 'Place an order');
+    expect(view.container.querySelector('form[aria-label="Place an order"]')).toBeNull();
+  });
+
+  test('the POST carries {warehouseId, lines[{skuId, quantity}], destination} — never a clientId or a ratePaise — with an Idempotency-Key; only portal routes', async () => {
+    postReplies = [[201, PLACED]];
+    const container = await openForm();
+    await fillAndSubmit(container);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.path).toBe(`/api/v1/tenants/${TENANT_ID}/portal/orders`);
+    expect(Object.keys(posts[0]!.body).sort()).toEqual(['destination', 'lines', 'warehouseId']);
+    expect(posts[0]!.body).toEqual({
+      warehouseId: W1,
+      lines: [{ skuId: SKU1, quantity: 2 }],
+      destination: { contactName: 'Asha Rao', phone: '+91 90000 00000', line1: '1 MG Road', city: 'Bengaluru', state: 'Karnataka', pincode: '560001' },
+    });
+    expect(JSON.stringify(posts[0]!.body)).not.toMatch(/clientId|ratePaise/);
+    expect(posts[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(requests.filter((r) => !r.includes(`/api/v1/tenants/${TENANT_ID}/portal/`))).toEqual([]);
+  });
+
+  test('a buyer GSTIN rides the body (upper-cased); a decimal quantity is sent as typed', async () => {
+    postReplies = [[201, PLACED]];
+    const container = await openForm();
+    await fillAndSubmit(container, { skuId: SKU2, qty: '2.5', gstin: '29aaacm4321k1z8' });
+    expect(posts[0]!.body.consigneeGstin).toBe('29AAACM4321K1Z8');
+    expect(posts[0]!.body.lines).toEqual([{ skuId: SKU2, quantity: 2.5 }]);
+  });
+
+  test('the key is reused on a retry of the unchanged draft, and cleared by an edit (a line or the address)', async () => {
+    postReplies = [
+      [503, { code: 'unavailable', status: 503, title: 'Down' }],
+      [503, { code: 'unavailable', status: 503, title: 'Down' }],
+      [503, { code: 'unavailable', status: 503, title: 'Down' }],
+      [503, { code: 'unavailable', status: 503, title: 'Down' }],
+    ];
+    const container = await openForm();
+    await fillAndSubmit(container);
+    await submit(container);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]!.key).toBe(posts[0]!.key);
+    setValue(find<HTMLInputElement>(container, '[aria-label="Line 1 quantity"]'), '3');
+    await submit(container);
+    expect(posts[2]!.key).not.toBe(posts[0]!.key);
+    setValue(find<HTMLInputElement>(container, 'input[placeholder="Bengaluru"]'), 'Mysuru');
+    await submit(container);
+    expect(posts[3]!.key).not.toBe(posts[2]!.key);
+  });
+
+  test('each line shows what is free at the CHOSEN warehouse (on hand less allocated) — a hint, never a gate', async () => {
+    const container = await openForm();
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Line 1 SKU"]'), SKU1);
+    expect(container.querySelector('[data-testid="line-hint"]')).toBeNull();
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Warehouse"]'), W1);
+    expect(find<HTMLElement>(container, '[data-testid="line-hint"]').textContent).toBe('on hand, not yet allocated: 7 each');
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Warehouse"]'), W2);
+    expect(find<HTMLElement>(container, '[data-testid="line-hint"]').textContent).toBe('on hand, not yet allocated: 4 each');
+    // A SKU with no stock row there has none.
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Line 1 SKU"]'), SKU2);
+    expect(find<HTMLElement>(container, '[data-testid="line-hint"]').textContent).toBe('on hand, not yet allocated: 0 kg');
+    // Never a gate: an order above the hint is still sent (the server rules).
+    postReplies = [[201, PLACED]];
+    await fillAndSubmit(container, { qty: '50' });
+    expect(posts).toHaveLength(1);
+  });
+
+  test('success shows "Order placed — N lines to {warehouse} ({placedAt IST})" and returns the list to page ONE, refetched', async () => {
+    const row = (id: string, ref: string) => ({ id, status: 'accepted', source: 'ingested', externalRef: ref, warehouseName: 'Main', destinationName: null, destinationCity: null, destinationPincode: null, lineCount: 1, createdAt: '2026-10-08T10:00:00.000Z' });
+    routes = {
+      ...routes,
+      '/portal/orders': [200, { items: [row('o-1', 'REF-PAGE-1')], nextCursor: 'ORD-PAGE-2' }],
+      '/portal/orders?cursor=ORD-PAGE-2': [200, { items: [row('o-2', 'REF-PAGE-2')], nextCursor: null }],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Next'));
+    await settle();
+    expect(view.container.textContent).toContain('REF-PAGE-2');
+    click(buttonNamed(view.container, 'Place an order'));
+    await settle();
+    postReplies = [[201, { ...PLACED, lineCount: 2 }]];
+    const listReads = () => urls.filter((url, i) => requests[i]!.startsWith('GET ') && /\/portal\/orders(\?|$)/.test(url));
+    const before = listReads().length;
+    await fillAndSubmit(view.container);
+    expect(view.container.textContent).toContain('Order placed');
+    expect(view.container.textContent).toContain('2 lines to Main (22 Oct 2026, 10:30 IST)');
+    expect(listReads()).toHaveLength(before + 1);
+    expect(listReads().at(-1)).not.toContain('cursor=');
+    expect(view.container.textContent).toContain('REF-PAGE-1');
+    expect(view.container.textContent).not.toContain('REF-PAGE-2');
+    expect(view.container.querySelector('form[aria-label="Place an order"]')).toBeNull();
+  });
+
+  test('Discard closes the form and drops the draft and its key: reopened, it is blank and the next POST mints a fresh key', async () => {
+    postReplies = [
+      [503, { code: 'unavailable', status: 503, title: 'Down' }],
+      [201, PLACED],
+    ];
+    const container = await openForm();
+    await fillAndSubmit(container);
+    click(buttonNamed(container, 'Discard'));
+    await settle();
+    expect(container.querySelector('form[aria-label="Place an order"]')).toBeNull();
+    click(buttonNamed(container, 'Place an order'));
+    await settle();
+    expect(find<HTMLInputElement>(container, '[aria-label="Line 1 quantity"]').value).toBe('');
+    await fillAndSubmit(container);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]!.key).not.toBe(posts[0]!.key);
+  });
+
+  test('a shortage names the short SKUs from extensions.skuCodes — never the detail — and re-reads the stock for the hints', async () => {
+    postReplies = [[409, { code: 'order-backorder-rejected', status: 409, title: 'Not enough stock', detail: 'SERVER WORDS reserved 3 of 7', skuCodes: ['TEE-RED'] }]];
+    const container = await openForm();
+    const stockReads = () => requests.filter((r) => r.startsWith('GET ') && r.endsWith('/portal/stock')).length;
+    const before = stockReads();
+    await fillAndSubmit(container);
+    expect(stockReads()).toBe(before + 1);
+    const alert = find<HTMLElement>(container, 'form [role="alert"]').textContent;
+    expect(alert).toBe('Not enough stock at this warehouse for TEE-RED — nothing was placed. Lower the quantities or choose another warehouse.');
+    expect(alert).not.toContain('SERVER WORDS');
+  });
+
+  test('the licence refusal is the generic sentence — never a site or a holder', async () => {
+    postReplies = [[409, { code: 'licence-not-covered', status: 409, title: 'Licence', detail: 'site "WH-1" lacks Form 20B' }]];
+    const container = await openForm();
+    await fillAndSubmit(container);
+    expect(find<HTMLElement>(container, 'form [role="alert"]').textContent).toBe(
+      'A licence for one of these products is not on file with the warehouse — nothing was placed. Contact the warehouse.',
+    );
+  });
+
+  test('a client parse problem sends nothing (no warehouse picked)', async () => {
+    const container = await openForm();
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Line 1 SKU"]'), SKU1);
+    setValue(find<HTMLInputElement>(container, '[aria-label="Line 1 quantity"]'), '1');
+    fillAddress(container);
+    await submit(container);
+    expect(posts).toHaveLength(0);
+    expect(find<HTMLElement>(container, 'form [role="alert"]').textContent).toBe('Choose the warehouse the order ships from.');
+  });
+
+  test('while the POST is in flight the fieldset is disabled and a second submit sends nothing', async () => {
+    let release!: () => void;
+    postHold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    postReplies = [[201, PLACED]];
+    const container = await openForm();
+    await fillAndSubmit(container);
+    expect(posts).toHaveLength(1);
+    const fieldset = container.querySelector('form[aria-label="Place an order"] fieldset') as HTMLFieldSetElement;
+    expect(fieldset.disabled).toBe(true);
+    expect(fieldset.contains(find<HTMLSelectElement>(container, '[aria-label="Line 1 SKU"]'))).toBe(true);
+    expect(fieldset.contains(buttonNamed(container, 'Discard'))).toBe(true);
+    await submit(container);
+    expect(posts).toHaveLength(1);
+    release();
+    await settle();
+    expect(container.textContent).toContain('Order placed');
+  });
+
+  test('a catalogue past the 20-page drain disables the order form with its own too-large sentence', async () => {
+    let page = 0;
+    const real = globalThis.fetch;
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      const request = input instanceof Request ? input : new Request(input.toString());
+      const { pathname } = new URL(request.url);
+      if (pathname.endsWith('/portal/skus')) {
+        page += 1;
+        return json(200, { items: [sku(`0198f7a2-1b3c-7d4e-8f90-${String(page).padStart(12, '0')}`, `SKU-${page}`, `Sku ${page}`)], nextCursor: `C-${page}` });
+      }
+      return real(input);
+    }) as unknown as typeof fetch);
+    const container = await openForm();
+    expect(page).toBe(20);
+    expect(container.textContent).toContain('Your catalogue is too large for this form — ask the warehouse to place this order for you.');
+    expect(container.querySelector('form[aria-label="Place an order"]')).toBeNull();
+  });
+
+  test('a single warehouse is chosen without touching the picker', async () => {
+    routes = { ...routes, '/portal/warehouses': [200, { items: [{ warehouseId: W1, warehouseName: 'Main', city: 'Bengaluru' }] }] };
+    postReplies = [[201, PLACED]];
+    const container = await openForm();
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Line 1 SKU"]'), SKU1);
+    setValue(find<HTMLInputElement>(container, '[aria-label="Line 1 quantity"]'), '1');
+    fillAddress(container);
+    await submit(container);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body.warehouseId).toBe(W1);
+  });
+
+  test('no warehouses: the form is disabled with the ask-the-warehouse sentence', async () => {
+    routes = { ...routes, '/portal/warehouses': [200, { items: [] }] };
+    const container = await openForm();
+    expect(container.textContent).toContain('No warehouses are set up yet — ask the warehouse');
+    expect(container.querySelector('form[aria-label="Place an order"]')).toBeNull();
+  });
+
+  test('a failed stock read shows ReadFailure with Retry beside the lines, and the order can still be placed', async () => {
+    routes = { ...routes, '/portal/stock': [503, { code: 'unavailable', status: 503, title: 'Down', detail: 'The stock read failed.' }] };
+    postReplies = [[201, PLACED]];
+    const container = await openForm();
+    const form = find<HTMLFormElement>(container, 'form[aria-label="Place an order"]');
+    expect(form.querySelector('[role="alert"]')!.textContent).toContain('The stock read failed.');
+    buttonNamed(container, 'Retry');
+    await fillAndSubmit(container);
+    expect(posts).toHaveLength(1);
+  });
+
+  test('a session gone at submit sends nothing and says so', async () => {
+    const container = await openForm();
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Warehouse"]'), W1);
+    setValue(find<HTMLSelectElement>(container, '[aria-label="Line 1 SKU"]'), SKU1);
+    setValue(find<HTMLInputElement>(container, '[aria-label="Line 1 quantity"]'), '1');
+    fillAddress(container);
+    clearSession();
+    await submit(container);
+    expect(posts).toHaveLength(0);
+    // (The form's reads lose their tenant with the session, so it falls back to its frame — which still says why.)
+    const alerts = [...container.querySelectorAll('[aria-label="Place an order"] [role="alert"]')].map((a) => a.textContent);
+    expect(alerts).toContain('Your session expired — sign in again.');
+  });
+
+  test('a quantity finer than its unit is named by line and sends nothing', async () => {
+    const container = await openForm();
+    await fillAndSubmit(container, { qty: '1.5' });
+    expect(posts).toHaveLength(0);
+    expect(find<HTMLElement>(container, 'form [role="alert"]').textContent).toBe('Line 1: TEE-RED is counted in each — whole numbers only (got 1.5).');
+  });
+
+  test('no SKUs: the form is disabled with the order sentence', async () => {
+    routes = { ...routes, '/portal/skus': [200, { items: [], nextCursor: null }] };
+    const container = await openForm();
+    expect(container.textContent).toContain('No active SKUs are set up for your company yet — ask the warehouse');
+    expect(container.querySelector('form[aria-label="Place an order"]')).toBeNull();
+  });
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 // Story 21-8 — the Service page.
 // ──────────────────────────────────────────────────────────────────────────

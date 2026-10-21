@@ -233,6 +233,26 @@ export function usePortalSkuOptions(): ResourceState<PortalSkuOptions> & Reloada
   );
 }
 
+/**
+ * Story 4-1a — every row of `portal/stock` (limit 100 a page, up to
+ * `PORTAL_SKU_MAX_PAGES` pages): the order form's "available here" hints.
+ * Past the cap the hints simply cover what was read (`truncated`) — they
+ * never gate the order.
+ */
+export function usePortalStockRows(): ResourceState<{ readonly rows: readonly PortalStockRowDto[]; readonly truncated: boolean }> & Reloadable {
+  return usePortalDetail('stock-rows', 'your stock', async (tenantId) => {
+    const rows: PortalStockRowDto[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < PORTAL_SKU_MAX_PAGES; page += 1) {
+      const result = await fetchApiPortalStock(tenantId, { limit: PORTAL_SKU_PAGE_LIMIT, ...cursorOption(cursor) });
+      rows.push(...result.items);
+      cursor = result.nextCursor ?? null;
+      if (cursor === null) return { rows, truncated: false };
+    }
+    return { rows, truncated: true };
+  });
+}
+
 /** The warehouses a client may announce into (the tenant's, by name). */
 export function usePortalWarehouses(): ResourceState<readonly PortalWarehouseDto[]> & Reloadable {
   return usePortalDetail('warehouses', 'the warehouses', async (tenantId) => (await fetchApiPortalWarehouses(tenantId)).items);
