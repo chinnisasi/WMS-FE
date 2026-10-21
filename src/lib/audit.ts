@@ -27,6 +27,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   audit_export: 'Audit export',
   batch_alert: 'Batch alert',
   bin: 'Bin',
+  // Story 3-1 — a bin-to-bin move (`stock.moved`).
+  bin_move: 'Bin move',
   carrier_connection: 'Carrier connection',
   catalog_import: 'Catalog import',
   channel_connection: 'Channel connection',

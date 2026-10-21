@@ -267,10 +267,15 @@ export function useStockList(
   };
 }
 
-/** One SKU's batches in a warehouse, FEFO — read only once a batch-tracked SKU is chosen. */
+/**
+ * One SKU's batches in a warehouse, FEFO — read only once a batch-tracked SKU
+ * is chosen. Story 3-1: `binId` narrows the on-hand to one bin (the move
+ * form's origin); the scope key carries it, so a bin switch refetches.
+ */
 export function useBatchList(
   warehouseId: string | null,
   skuId: string | null,
+  binId: string | null = null,
 ): ResourceState<readonly BatchListItemDto[]> & Reloadable {
   const tenantId = useTenantId();
   const [revision, setRevision] = useState(0);
@@ -278,14 +283,15 @@ export function useBatchList(
     key: string;
     state: ResourceState<readonly BatchListItemDto[]>;
   } | null>(null);
-  const key = tenantId === null || warehouseId === null || skuId === null ? null : `${tenantId}|${warehouseId}|${skuId}|${revision}`;
+  const key =
+    tenantId === null || warehouseId === null || skuId === null ? null : `${tenantId}|${warehouseId}|${skuId}|${binId ?? '*'}|${revision}`;
 
   useEffect(() => {
     if (key === null || tenantId === null || warehouseId === null || skuId === null) return;
     let cancelled = false;
     (async () => {
       try {
-        const list = await fetchApiListBatches(tenantId, warehouseId, skuId);
+        const list = await fetchApiListBatches(tenantId, warehouseId, skuId, binId === null ? undefined : { binId });
         if (!cancelled) setResult({ key, state: { state: 'ready', data: list.items } });
       } catch (error) {
         if (!cancelled) setResult({ key, state: { state: 'failed', reason: readReason(error, 'the batches') } });
@@ -294,7 +300,7 @@ export function useBatchList(
     return () => {
       cancelled = true;
     };
-  }, [key, tenantId, warehouseId, skuId]);
+  }, [key, tenantId, warehouseId, skuId, binId]);
 
   const reload = useCallback(() => setRevision((r) => r + 1), []);
   return { ...(result === null || result.key !== key ? ({ state: 'loading' } as const) : result.state), reload };

@@ -480,6 +480,8 @@ const GRN_LINES_GUIDANCE: readonly (readonly [RejectedGrnLineDto['code'], string
 export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
   // Story 2-3a — a refused device unload: Discard only; the web re-records it.
   if (entry.opType === 'gate-in.unload') return [gateInUnloadGuidance(entry.problemCode)];
+  // Story 3-1 — a refused handheld move: Apply re-runs it, or Discard.
+  if (entry.opType === 'stock.move') return [STOCK_MOVE_GUIDANCE];
   if (entry.opType === 'grn.shelf-life-refused') return [GRN_SHELF_LIFE_GUIDANCE];
   // Story 2-4a — the whole receipt was refused for the DAMAGED code collision.
   if (entry.opType === 'grn.submit' && entry.problemCode === 'damaged-bin-conflict') return [GRN_DAMAGED_BIN_CONFLICT_GUIDANCE];
@@ -708,6 +710,7 @@ export function rejectedOpSummary(
   if (entry.opType === 'grn.lines-refused' || isWaivableOpType(entry.opType)) return grnLinesRefusedSummary(entry, skuCode);
   if (isInactiveSkuFlag(entry)) return inactiveSkuReceivedSummary(entry, skuCode);
   if (entry.opType === 'gate-in.unload') return gateInUnloadSummary(entry);
+  if (entry.opType === 'stock.move') return stockMoveSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
   const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;
@@ -985,4 +988,70 @@ function gateInUnloadSummary(
     heading: phase === null ? `${gateIn} — unload not recorded` : `${gateIn} — unload ${phase} not recorded`,
     lines: [`${parts.join(' · ')} — ${problem}`],
   };
+}
+
+// ── story 3-1: a refused handheld move (a stock.move row) ───────────────────
+
+/**
+ * The remedy a `stock.move` row's reviewer reads. Apply re-runs the move as
+ * the handheld recorded it, every rule checked again (the target's gates, the
+ * origin's stock, the serials) under the op's own operator; when the floor no
+ * longer matches it — a gate refusal that still holds — Discard it and record
+ * a move or an adjustment on the web that matches the floor.
+ */
+export const STOCK_MOVE_GUIDANCE =
+  'Apply re-runs the move as recorded, every rule checked again. If the floor no longer matches it, discard this row and record a move or an adjustment on the Moves or Inventory page that matches the floor.';
+
+/** Why the move was refused, in words (the row's whole-op `problemCode`); an unknown code reads as itself. */
+export const STOCK_MOVE_PROBLEM_WORDS: Readonly<Record<string, string>> = {
+  'move-source-short': 'the origin bin held less than the move',
+  'bin-not-movable': 'a system bin on one end',
+  'bin-retired': 'a retired bin',
+  'bin-blocked': 'the target bin is blocked',
+  'bin-full': 'the target bin is full',
+  'bin-overweight': 'the target bin would be overweight',
+  'bin-volume-exceeded': 'the target bin would be over its volume',
+  'bin-item-oversize': 'the item does not fit the target bin',
+  'bin-storage-mismatch': "the target bin's storage class does not suit the SKU",
+  'bin-client-mismatch': 'the target bin is dedicated to another client',
+  'bin-segregation-conflict': 'the target bin holds goods that must be kept apart',
+  'bin-occupancy-conflict': 'the target bulk asset holds another SKU',
+  'move-scope-quarantined': 'the stock is under a reconcile quarantine',
+  'kit-cannot-hold-stock': 'a kit holds no stock',
+  'serial-elsewhere': 'a serial is in another bin',
+  'serial-unknown': 'a serial is unknown',
+  'not-found': 'a bin, SKU or batch no longer exists',
+  'role-denied': 'the operator may not move this stock',
+  'validation-failed': 'the move was malformed',
+  'operator-mismatch': 'captured by another operator',
+  'device-revoked': 'the device was revoked',
+};
+
+/**
+ * A `stock.move` row's summary: the quantity and SKU, the two bins (short ids
+ * — the payload carries no codes), the batch or serials, the reason and note,
+ * then the refusal in words. Read defensively (a stored row is data).
+ */
+function stockMoveSummary(
+  entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>,
+  skuCode: (skuId: string) => string | null,
+): { heading: string; lines: readonly string[] } {
+  const payload = entry.payload;
+  const skuId = typeof payload['skuId'] === 'string' ? payload['skuId'] : '';
+  const sku = skuCode(skuId) ?? (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
+  const qty = typeof payload['qty'] === 'number' ? String(payload['qty']) : '?';
+  const bin = (key: string): string => {
+    const id = payload[key];
+    return typeof id === 'string' && id !== '' ? `bin …${shortIdTail(id)}` : 'unknown bin';
+  };
+  const parts = [`${bin('fromBinId')} → ${bin('toBinId')}`];
+  if (typeof payload['batchCode'] === 'string') parts.push(`batch ${payload['batchCode']}`);
+  if (Array.isArray(payload['serials'])) {
+    const serials = (payload['serials'] as unknown[]).filter((serial): serial is string => typeof serial === 'string');
+    if (serials.length > 0) parts.push(`serials ${serials.join(', ')}`);
+  }
+  if (typeof payload['reasonCode'] === 'string') parts.push(`reason ${payload['reasonCode']}`);
+  if (typeof payload['note'] === 'string' && payload['note'] !== '') parts.push(`“${payload['note']}”`);
+  const problem = STOCK_MOVE_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return { heading: `${sku} × ${qty} — not moved`, lines: [`${parts.join(' · ')} — ${problem}`] };
 }

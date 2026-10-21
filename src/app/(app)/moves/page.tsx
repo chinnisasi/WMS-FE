@@ -1,12 +1,8 @@
-import { SurfacePlaceholder } from '@/components/shell/surface-placeholder';
+import { MovesScreen } from '@/components/moves/moves-screen';
 
 export const metadata = { title: 'Moves' };
 
+/** Story 3-1 — the Moves page: the move form and the recent moves (`components/moves/`). */
 export default function MovesPage() {
-  return (
-    <SurfacePlaceholder
-      title="Moves"
-      description="IA skeleton surface — functionality lands in a later story."
-    />
-  );
+  return <MovesScreen />;
 }

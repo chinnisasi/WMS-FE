@@ -216,6 +216,11 @@ export const CAPABILITIES = [
   // driver's full phone reaches only a holder (decision 10). The ops grant is
   // derived below — never hand-copied.
   'gate.manage',
+  // Story 3-1 — the bin-to-bin move (the Moves page form and the handheld's
+  // `stock.move`). Owner + Ops Manager + OPERATOR — moving stock along the
+  // shelves is floor work. Gates the Moves page's form only; every member
+  // reads the recent moves. The ops grant is derived below.
+  'stock.move',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -289,6 +294,8 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     // Story 2-3a — the gate desk and the dock: record the gate-in, its
     // unload and its gate-out.
     'gate.manage',
+    // Story 3-1 — the floor moves stock between bins.
+    'stock.move',
   ],
   // Story 8-2b: read-only except the e-way paperwork (finance work); story
   // 21-3: and the client rate cards (finance work); story 21-5: and the

@@ -399,6 +399,29 @@ export type BinListResponse = {
     nextCursor: string | null;
 };
 
+export type BinLabelsRequestDto = {
+    /**
+     * The bins to print (distinct ids of this warehouse). Send this or `zoneId`, never both.
+     */
+    binIds?: Array<string>;
+    /**
+     * Print every printable bin of this zone (retired and system bins are skipped). Send this or `binIds`, never both.
+     */
+    zoneId?: string;
+    /**
+     * `zpl` (Zebra thermal, 203 dpi) or `pdf`
+     */
+    format: 'zpl' | 'pdf';
+    /**
+     * `label` — one label per page or per ^XA…^XZ (default); `a4` — a 3 × 8 sheet of 70 × 36 mm cells (PDF only)
+     */
+    layout?: 'label' | 'a4';
+    /**
+     * The label size in inches (`label` layout only; sending it with `a4` is a 400)
+     */
+    size?: '4x2' | '2x1';
+};
+
 export type PatchBinDto = {
     /**
      * true blocks the bin (broken); false unblocks. Mutually exclusive with the capacity attributes.
@@ -1354,7 +1377,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move';
     /**
      * The replay fate the server refused with
      */
@@ -1430,7 +1453,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -1768,13 +1791,17 @@ export type LedgerReferenceDocDto = {
      */
     kind: string;
     /**
-     * Machine reason for the correction (e.g. stock-count) — manual-adjustment arm only
+     * Machine reason — the correction reason on the manual-adjustment arm (e.g. stock-count), the mismatch reason on the putaway arm, and (story 3-1) the move reason on the bin-move arm (consolidate, re-slot, make-room, found-misplaced, client-request, other)
      */
     reasonCode?: string;
     /**
-     * The Ops Manager's note, carried verbatim — manual-adjustment arm only
+     * The note carried verbatim — the Ops Manager's note on the manual-adjustment arm; (story 3-1) the operator's note on the bin-move arm, present only when one was given (required with the reason `other`)
      */
     note?: string;
+    /**
+     * Story 3-1 — the bin-to-bin move the event belongs to (bin-move arm only); a serial move writes one event per unit under one moveId
+     */
+    moveId?: string;
     /**
      * The recorded reason when a draw overrode the FEFO default batch (absent on every other adjustment)
      */
@@ -4080,6 +4107,10 @@ export type CatalogSnapshotSkuDto = {
      * Story 1-6a: the dangerous-goods identity, null when the SKU is not a dangerous good
      */
     dg: CatalogSnapshotDgDto | null;
+    /**
+     * Story 3-1: the SKU is a kit (a kit holds no stock — the handheld refuses a move of it offline). An older server omits it; the device reads absence as false
+     */
+    isKit?: boolean;
 };
 
 export type CatalogSnapshotPoDto = {
@@ -4469,6 +4500,14 @@ export type CatalogOpenGateInDto = {
     documents: Array<CatalogOpenGateInDocumentDto>;
 };
 
+export type CatalogMoveReasonDto = {
+    code: 'consolidate' | 're-slot' | 'make-room' | 'found-misplaced' | 'client-request' | 'other';
+    /**
+     * The reason needs a note beside it (the reason `other`)
+     */
+    noteRequired: boolean;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -4532,6 +4571,10 @@ export type CatalogSnapshotResponse = {
      * Story 2-4a (additive): the short reason vocabulary — the Short control's gate, as receiptDamageReasons
      */
     receiptShortReasons: Array<'not-shipped' | 'short-packed' | 'lost-in-transit' | 'other'>;
+    /**
+     * Story 3-1 (additive): the bin-to-bin move's reason vocabulary, in order — the handheld's reason chips. A reason with noteRequired needs a note (up to 200 characters). An older server omits it, and the handheld then offers no Move stock
+     */
+    moveReasons: Array<CatalogMoveReasonDto>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -6043,6 +6086,73 @@ export type ConfirmInboundDto = {
      * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
      */
     occurredAt?: string;
+};
+
+export type MoveStockDto = {
+    skuId: string;
+    /**
+     * The origin bin — the units leave it
+     */
+    fromBinId: string;
+    /**
+     * The target bin — the units land in it (a different bin of the same warehouse)
+     */
+    toBinId: string;
+    /**
+     * Quantity to move. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded. On a serial-tracked SKU it equals the number of serials.
+     */
+    qty: number;
+    /**
+     * The batch CODE moved — required for a batch-tracked SKU (unknown → 404 not-found), refused on an untracked one and beside serials (a serial move derives each serial's batch)
+     */
+    batchCode?: string | null;
+    /**
+     * The serial numbers moved — required for a serial-tracked SKU, one per unit, distinct, at most 500
+     */
+    serials?: Array<string> | null;
+    /**
+     * Why the stock moved; `other` needs a note
+     */
+    reasonCode: 'consolidate' | 're-slot' | 'make-room' | 'found-misplaced' | 'client-request' | 'other';
+    /**
+     * Up to 200 characters, trimmed; required with the reason `other`
+     */
+    note?: string | null;
+    /**
+     * Handheld only — the op's business time (ISO-8601 UTC, Z-suffixed), required there; a web session sending it is refused 400 (a web move happens now)
+     */
+    occurredAt?: string;
+};
+
+export type MoveEventDto = {
+    seq: number;
+    skuId: string;
+    /**
+     * The event's magnitude in BASE UoM
+     */
+    quantity: number;
+    fromBinId: string;
+    toBinId: string;
+    /**
+     * The catalog batch id (null on an untracked SKU)
+     */
+    batchRef: string | null;
+    /**
+     * The catalog serial id (one event per serial unit)
+     */
+    serialRef: string | null;
+    /**
+     * ISO-8601 UTC business time — the handheld's confirm time, or the commit time on the web
+     */
+    occurredAt: string;
+};
+
+export type MoveStockResponse = {
+    /**
+     * The move — every event carries it on referenceDoc.moveId
+     */
+    moveId: string;
+    events: Array<MoveEventDto>;
 };
 
 export type CancelTransferDto = {
@@ -7652,7 +7762,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -7679,7 +7789,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -10509,6 +10619,53 @@ export type TenancyControllerGenerateBinGridResponses = {
 
 export type TenancyControllerGenerateBinGridResponse = TenancyControllerGenerateBinGridResponses[keyof TenancyControllerGenerateBinGridResponses];
 
+export type TenancyControllerPrintBinLabelsData = {
+    body: BinLabelsRequestDto;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/labels';
+};
+
+export type TenancyControllerPrintBinLabelsErrors = {
+    /**
+     * Invalid body (validation-failed): both or neither of binIds/zoneId, more than 1000 or duplicate ids, size with the a4 layout, the a4 layout with zpl, or a malformed warehouseId
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks labels.execute (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse, zone or a listed bin is not in this tenant and warehouse (not-found), or the zone has no printable bin (no-bins-to-print)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A listed bin is retired (bin-retired) or a system bin (bin-not-printable); a code is not barcodable — non-ASCII, a control character, a leading or trailing space (bin-code-not-barcodable); a code too long for the size or A4 cell at a 2-dot bar (bin-code-too-long-for-label) — each with `binCodes`; or the zone has more than 1000 printable bins (too-many-labels, with `count`)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerPrintBinLabelsError = TenancyControllerPrintBinLabelsErrors[keyof TenancyControllerPrintBinLabelsErrors];
+
+export type TenancyControllerPrintBinLabelsResponses = {
+    /**
+     * The labels: ZPL as `text/plain; charset=us-ascii`, or a PDF
+     */
+    200: Blob | File;
+};
+
+export type TenancyControllerPrintBinLabelsResponse = TenancyControllerPrintBinLabelsResponses[keyof TenancyControllerPrintBinLabelsResponses];
+
 export type TenancyControllerSetBinBlockedData = {
     body: PatchBinDto;
     headers: {
@@ -13131,7 +13288,7 @@ export type InventoryControllerListEventsData = {
         /**
          * Story 9-1 — only events of these types (repeatable: `?type=a&type=b`; one value is a one-element list). An unknown type is refused (400 validation-failed naming the known set)
          */
-        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged'>;
+        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged' | 'stock.moved'>;
         /**
          * Story 9-1 — only events RECORDED at or after this instant (`recorded_at` — the server stamp, never the device `occurred_at`). ISO-8601 with a zone designator
          */
@@ -17750,6 +17907,63 @@ export type MovementsControllerConfirmInboundResponses = {
 
 export type MovementsControllerConfirmInboundResponse = MovementsControllerConfirmInboundResponses[keyof MovementsControllerConfirmInboundResponses];
 
+export type MovementsControllerMoveStockData = {
+    body: MoveStockDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/inventory/moves';
+};
+
+export type MovementsControllerMoveStockErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — the same bin on both ends, qty not equal to the serial count, a duplicate serial, more than 500 serials, a batchCode beside serials, a reason outside the vocabulary or `other` without a note, a note over 200 characters, occurredAt sent from the web or missing/malformed on the handheld, a batch missing on a batch-tracked SKU or sent for an untracked one, serials missing on a serial-tracked SKU or sent for another, a catch-weight SKU, or a quantity finer than the SKU's unit allows (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token of either family, or a device token without a badge-in session (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), an unknown or revoked device (device-revoked), the caller lacks stock.move (role-denied), or the origin or target bin is secure/cage-class and the actor lacks secure.move (role-denied, FR-42)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse, the SKU, either bin (in this warehouse) or the batch does not exist (not-found), or a serial number is unknown for the SKU (serial-unknown)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A system bin on either end (bin-not-movable), a retired origin or target (bin-retired), the target blocked or refused by a placement gate (bin-blocked, bin-storage-mismatch, bin-client-mismatch, bin-segregation-conflict, bin-occupancy-conflict, bin-full, bin-overweight, bin-volume-exceeded, bin-item-oversize), an open reconcile quarantine on the origin or target scope (move-scope-quarantined), a kit SKU (kit-cannot-hold-stock), the origin holding less than the move (move-source-short), a serial located in another bin (serial-elsewhere), the op captured by another operator (operator-mismatch), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerMoveStockError = MovementsControllerMoveStockErrors[keyof MovementsControllerMoveStockErrors];
+
+export type MovementsControllerMoveStockResponses = {
+    /**
+     * Moved: the move id and its events (the idempotency snapshot)
+     */
+    201: MoveStockResponse;
+};
+
+export type MovementsControllerMoveStockResponse = MovementsControllerMoveStockResponses[keyof MovementsControllerMoveStockResponses];
+
 export type MovementsControllerCancelTransferData = {
     body: CancelTransferDto;
     headers: {
@@ -20184,7 +20398,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
