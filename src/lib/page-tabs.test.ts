@@ -35,6 +35,26 @@ describe('page-tabs — the shared definition', () => {
     expect(DEMO.href('second')).toBe('/demo?tab=second');
   });
 
+  test('story 2-3a — a named default that is not the first tab: it is the bare route; the first tab gets ?tab=; an unknown default throws', () => {
+    const named = definePageTabs({
+      route: '/demo',
+      label: 'Demo lists',
+      tabs: [
+        { id: 'first', label: 'First' },
+        { id: 'second', label: 'Second' },
+      ],
+      defaultTab: 'second',
+    });
+    expect(named.defaultTab).toBe('second');
+    expect(named.href('second')).toBe('/demo');
+    expect(named.href('first')).toBe('/demo?tab=first');
+    expect(named.initial(null, null)).toBe('second');
+    expect(named.parse({ tab: 'first' })).toBe('first');
+    expect(() =>
+      definePageTabs({ route: '/demo', label: 'x', tabs: [{ id: 'a', label: 'A' }], defaultTab: 'b' as 'a' }),
+    ).toThrow('not one of its tabs');
+  });
+
   test('parse: one known id; unknown, repeated or absent → null', () => {
     expect(DEMO.parse({ tab: 'second' })).toBe('second');
     expect(DEMO.parse({ tab: 'first' })).toBe('first');
@@ -55,7 +75,7 @@ describe('page-tabs — the shared definition', () => {
   });
 
   test('a tab link is a plain visit, never a drill', () => {
-    const defs: readonly PageTabs<string>[] = [OUTBOUND_PAGE_TABS, REPLENISHMENT_PAGE_TABS, COMPLIANCE_PAGE_TABS, SETTINGS_PAGE_TABS, INVENTORY_PAGE_TABS];
+    const defs: readonly PageTabs<string>[] = [INBOUND_PAGE_TABS, OUTBOUND_PAGE_TABS, REPLENISHMENT_PAGE_TABS, COMPLIANCE_PAGE_TABS, SETTINGS_PAGE_TABS, INVENTORY_PAGE_TABS];
     for (const def of defs) {
       for (const t of def.tabs) {
         const url = new URL(`http://x${def.href(t.id)}`);

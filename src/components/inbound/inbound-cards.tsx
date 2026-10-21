@@ -38,6 +38,7 @@ import { clientCell, showClients, skuDisplayLabel } from '@/lib/clients';
 import { readyClients } from '@/lib/use-clients';
 import { clientFilterForDrill, clientFilterKey, hiddenByClientFilterNote } from '@/lib/active-client';
 import { poCreatedOutcome } from '@/lib/purchase-orders';
+import { grnGateInLabel } from '@/lib/gate-ins';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { ulid } from '@/lib/ulid';
 import { grnDocument, notifyInboundChanged } from '@/lib/asns';
@@ -66,6 +67,7 @@ import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-fil
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
+import { GateInsCard } from '@/components/inbound/gate-ins-card';
 import { PoCreateForm } from '@/components/inbound/po-create-form';
 import { ReadFailure, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
@@ -181,6 +183,10 @@ function InboundCardsSessioned({
         badge={(id) => <InboundTabCount tab={id} counts={tabCounts} />}
       />
       <PageTabPanel def={INBOUND_PAGE_TABS} active={tab}>
+        {/* Story 2-3a — every client's gate-ins (never client-filtered). */}
+        {tab === 'gate-ins' && (
+          <GateInsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+        )}
         {tab === 'pos' && <PurchaseOrdersCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />}
         {tab === 'asns' && (
           <AsnsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} warehouseCode={warehouse?.code ?? null} />
@@ -218,7 +224,11 @@ function InboundCardsSessioned({
   );
 }
 
-/** inbound-tabs — a tab's count pill; none on Goods receipts (history) or a failed read. */
+/**
+ * inbound-tabs — a tab's count pill; none on Goods receipts (history) or a
+ * failed read. Story 2-3a — Gate-in's pill (gate-ins not gated out) takes no
+ * client, so it shows even while the client filter is pending.
+ */
 function InboundTabCount({ tab, counts }: { tab: InboundTab; counts: InboundTabCounts }) {
   if (tab === 'grns') return null;
   const count = counts[tab];
@@ -493,6 +503,12 @@ function GoodsReceiptsCard({
           <span className="font-mono text-xs">{document.label}</span>
         );
       },
+    },
+    {
+      // Story 2-3a — the gate-in (vehicle visit) the receipt came off: `GI-x · vehicle`.
+      key: 'gateIn',
+      header: 'Gate-in',
+      render: (grn) => <span className="font-mono text-xs">{grnGateInLabel(grn)}</span>,
     },
     { key: 'lineCount', header: 'Lines', numeric: true },
     {

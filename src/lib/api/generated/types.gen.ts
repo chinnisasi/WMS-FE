@@ -1354,7 +1354,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload';
     /**
      * The replay fate the server refused with
      */
@@ -1430,7 +1430,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -3681,6 +3681,10 @@ export type SubmitGoodsReceiptDto = {
      */
     clientId?: string;
     /**
+     * Story 2-3a — the gate-in (the vehicle visit) this receipt came off. NEVER refused (decision 5): an unknown id, a non-uuid or another warehouse's gate-in books the receipt UNLINKED and the answer says why in `gateInLink`; a gated-out gate-in links. Absent: the receipt books exactly as before
+     */
+    gateInId?: string;
+    /**
      * Device time of the receipt (ISO-8601 UTC, Z-suffixed)
      */
     occurredAt: string;
@@ -3688,6 +3692,14 @@ export type SubmitGoodsReceiptDto = {
      * The physically received lines
      */
     lines: Array<GrnLineInputDto>;
+};
+
+export type GateInLinkDto = {
+    status: 'not-linked';
+    /**
+     * `unknown`: no such gate-in (or not a uuid); `other-warehouse`: it is another warehouse's
+     */
+    reason: 'unknown' | 'other-warehouse';
 };
 
 export type GrnLineDto = {
@@ -3823,6 +3835,18 @@ export type GoodsReceiptDto = {
     clientId?: string;
     blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other' | null;
     /**
+     * Story 2-3a — the gate-in the receipt is linked to; present only when linked
+     */
+    gateInId?: string;
+    /**
+     * Story 2-3a — the linked gate-in's code; present only when linked
+     */
+    gateInCode?: string;
+    /**
+     * Story 2-3a — present only when the receipt named a gate-in that did NOT link (it booked unlinked)
+     */
+    gateInLink?: GateInLinkDto;
+    /**
      * recorded (the v1 terminal state)
      */
     status: string;
@@ -3895,6 +3919,10 @@ export type RefusedReceiptDto = {
      * Story 1-6d — the op id of the `grn.licence-refused` review row, when one was raised
      */
     licenceReviewOpId?: string;
+    /**
+     * Story 2-3a — present only when the receipt named a gate-in that did not link (nothing was recorded, so nothing linked)
+     */
+    gateInLink?: GateInLinkDto;
 };
 
 export type GoodsReceiptResponse = {
@@ -4365,6 +4393,27 @@ export type CatalogSnapshotClientDto = {
     receivingPolicy?: CatalogClientReceivingPolicyDto;
 };
 
+export type CatalogOpenGateInDocumentDto = {
+    kind: 'invoice' | 'challan' | 'bill_of_entry';
+    number: string;
+};
+
+export type CatalogOpenGateInDto = {
+    id: string;
+    code: string;
+    vehicleNo: string | null;
+    handDelivery: boolean;
+    transporterLabel: string;
+    dockDoor: string | null;
+    status: 'gated_in' | 'unloading' | 'unloaded';
+    sealStatus: 'intact' | 'broken' | 'none';
+    /**
+     * ISO-8601 UTC, null until the unload started
+     */
+    unloadStartedAt: string | null;
+    documents: Array<CatalogOpenGateInDocumentDto>;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -4416,6 +4465,10 @@ export type CatalogSnapshotResponse = {
      * Story 1-1 (additive): every client referenced by a SKU or an open document of the snapshot — the names the device shows when a scan belongs to another client, and the blind receipt's client picker. A snapshot WITHOUT this field (an older server) puts the device in legacy mode: no picker, no clientId sent
      */
     clients: Array<CatalogSnapshotClientDto>;
+    /**
+     * Story 2-3a (additive): the warehouse's open gate-ins — not gated out, gated in within the last 7 days, at most 200, newest first (decision 15). The dock records their unload and receives against them. An older server omits it
+     */
+    openGateIns: Array<CatalogOpenGateInDto>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -4443,6 +4496,18 @@ export type GoodsReceiptEntryDto = {
      * Set only on a blind receipt
      */
     blindReasonCode: 'unannounced-delivery' | 'po-not-found' | 'other' | null;
+    /**
+     * Story 2-3a — the gate-in the receipt is linked to; present only when linked
+     */
+    gateInId?: string;
+    /**
+     * Story 2-3a — the linked gate-in's code
+     */
+    gateInCode?: string;
+    /**
+     * Story 2-3a — the linked gate-in's vehicle; present only when linked and the gate-in has one (a hand delivery has none)
+     */
+    vehicleNo?: string;
     /**
      * recorded (the v1 terminal state)
      */
@@ -4684,6 +4749,469 @@ export type QcHoldEntryDto = {
 export type QcHoldListResponse = {
     items: Array<QcHoldEntryDto>;
     nextCursor?: string | null;
+};
+
+export type GateInDocumentInputDto = {
+    /**
+     * The supplier document: an invoice, a delivery challan or a bill of entry
+     */
+    kind: 'invoice' | 'challan' | 'bill_of_entry';
+    /**
+     * The document number as printed (trimmed; a repeated kind + number on one gate-in is refused)
+     */
+    number: string;
+    /**
+     * The date printed on the document, a calendar date YYYY-MM-DD as typed (never an instant); not after today in IST
+     */
+    documentDate: string;
+    /**
+     * The inward e-way bill number — 12 digits, spaces ignored
+     */
+    ewayBillNo?: string | null;
+    /**
+     * The purchase order the document covers (any status, any client, this warehouse) — at most one of poId / asnId
+     */
+    poId?: string | null;
+    /**
+     * The advance shipment notice the document covers (any status, any client, this warehouse)
+     */
+    asnId?: string | null;
+};
+
+export type CreateGateInDto = {
+    /**
+     * Goods brought by hand — no vehicle; makes vehicleNo optional (decision 13). Absent = false
+     */
+    handDelivery?: boolean | null;
+    /**
+     * The registration number — uppercased, spaces, dots and hyphens stripped, then 4–15 letters and digits (BH-series and temporary plates fit). Required unless handDelivery
+     */
+    vehicleNo?: string | null;
+    /**
+     * The container number — at most 11 letters and digits (uppercased)
+     */
+    containerNo?: string | null;
+    /**
+     * An active partner holding the transporter role — exactly one of transporterPartnerId / transporterName (decision 4)
+     */
+    transporterPartnerId?: string | null;
+    /**
+     * The transporter typed by name (not in the partner master)
+     */
+    transporterName?: string | null;
+    /**
+     * The lorry receipt (LR) / consignment note number
+     */
+    lrNumber?: string | null;
+    driverName?: string | null;
+    /**
+     * The driver's phone — 7–15 digits, optionally led by +; spaces, hyphens, dots and brackets ignored. Personal data: masked on every read but the detail for a gate.manage holder, never in an event
+     */
+    driverPhone?: string | null;
+    /**
+     * The seal as found at the gate — a broken seal is flagged, never blocked (decision 8)
+     */
+    sealStatus: 'intact' | 'broken' | 'none';
+    /**
+     * The seal number(s), several comma-separated — required unless sealStatus is none, refused when none
+     */
+    sealNumber?: string | null;
+    /**
+     * Packages the paperwork declares — blank means not declared, and no mismatch flag is shown (decision 11)
+     */
+    packagesDeclared?: number | null;
+    /**
+     * The dock door, a typed code (the dock-door master is 2-3b)
+     */
+    dockDoor?: string | null;
+    /**
+     * When the vehicle gated in (ISO-8601 with a zone). Create: absent = now. Amend: absent = unchanged; a different time only while gated_in (409 gate-in-time-locked). More than 5 minutes ahead of the server clock is 400 time-in-future
+     */
+    gatedInAt?: string | null;
+    /**
+     * The supplier documents (0–20) — the full set (amend replaces it)
+     */
+    documents?: Array<GateInDocumentInputDto>;
+    /**
+     * The warehouse whose gate the vehicle came through
+     */
+    warehouseId: string;
+};
+
+export type GateInDocumentDto = {
+    id: string;
+    /**
+     * Its place on the gate-in (0-based)
+     */
+    position: number;
+    kind: 'invoice' | 'challan' | 'bill_of_entry';
+    number: string;
+    /**
+     * A calendar date YYYY-MM-DD
+     */
+    documentDate: string;
+    /**
+     * 12 digits
+     */
+    ewayBillNo: string | null;
+    poId: string | null;
+    asnId: string | null;
+};
+
+export type GateInDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * GI-<n>, unique per tenant
+     */
+    code: string;
+    status: 'gated_in' | 'unloading' | 'unloaded' | 'gated_out';
+    handDelivery: boolean;
+    /**
+     * Normalised (KA01AB1234); null on a hand delivery
+     */
+    vehicleNo: string | null;
+    containerNo: string | null;
+    transporterPartnerId: string | null;
+    transporterName: string | null;
+    /**
+     * The transporter partner as it was frozen at record time (the vendor snapshot shape, v1); null for a typed name
+     */
+    transporterSnapshot: VendorSnapshotDto | null;
+    /**
+     * The frozen partner's name, else the typed name
+     */
+    transporterLabel: string;
+    lrNumber: string | null;
+    driverName: string | null;
+    /**
+     * MASKED everywhere but the detail read for a gate.manage holder (decision 10)
+     */
+    driverPhone: string | null;
+    sealStatus: 'intact' | 'broken' | 'none';
+    sealNumber: string | null;
+    packagesDeclared: number | null;
+    /**
+     * Recorded with the unload end
+     */
+    packagesCounted: number | null;
+    dockDoor: string | null;
+    /**
+     * ISO-8601 UTC — entered at the gate (editable while gated_in)
+     */
+    gatedInAt: string;
+    /**
+     * ISO-8601 UTC — as recorded (a device time is taken as sent)
+     */
+    unloadStartedAt: string | null;
+    unloadEndedAt: string | null;
+    gatedOutAt: string | null;
+    recordedBy: string;
+    unloadStartedBy: string | null;
+    unloadEndedBy: string | null;
+    gatedOutBy: string | null;
+    createdAt: string;
+    updatedAt: string;
+    documents: Array<GateInDocumentDto>;
+};
+
+export type GateInResponse = {
+    gateIn: GateInDto;
+};
+
+export type GateInEntryDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * GI-<n>, unique per tenant
+     */
+    code: string;
+    status: 'gated_in' | 'unloading' | 'unloaded' | 'gated_out';
+    handDelivery: boolean;
+    /**
+     * Normalised (KA01AB1234); null on a hand delivery
+     */
+    vehicleNo: string | null;
+    containerNo: string | null;
+    transporterPartnerId: string | null;
+    transporterName: string | null;
+    /**
+     * The transporter partner as it was frozen at record time (the vendor snapshot shape, v1); null for a typed name
+     */
+    transporterSnapshot: VendorSnapshotDto | null;
+    /**
+     * The frozen partner's name, else the typed name
+     */
+    transporterLabel: string;
+    lrNumber: string | null;
+    driverName: string | null;
+    /**
+     * MASKED everywhere but the detail read for a gate.manage holder (decision 10)
+     */
+    driverPhone: string | null;
+    sealStatus: 'intact' | 'broken' | 'none';
+    sealNumber: string | null;
+    packagesDeclared: number | null;
+    /**
+     * Recorded with the unload end
+     */
+    packagesCounted: number | null;
+    dockDoor: string | null;
+    /**
+     * ISO-8601 UTC — entered at the gate (editable while gated_in)
+     */
+    gatedInAt: string;
+    /**
+     * ISO-8601 UTC — as recorded (a device time is taken as sent)
+     */
+    unloadStartedAt: string | null;
+    unloadEndedAt: string | null;
+    gatedOutAt: string | null;
+    recordedBy: string;
+    unloadStartedBy: string | null;
+    unloadEndedBy: string | null;
+    gatedOutBy: string | null;
+    createdAt: string;
+    updatedAt: string;
+    documentCount: number;
+    /**
+     * Goods receipts linked to this visit — any client, including receipts linked after the gate-out
+     */
+    receiptCount: number;
+    /**
+     * Counted against declared; null while either is missing (blank declared = no flag)
+     */
+    packagesFlag: 'short' | 'excess' | 'matches' | null;
+    /**
+     * |declared − counted| beside a flag
+     */
+    packagesDifference: number | null;
+    /**
+     * Not gated out and gated in more than 7 days ago (the device no longer offers it)
+     */
+    staleOpen: boolean;
+};
+
+export type GateInListResponse = {
+    items: Array<GateInEntryDto>;
+    nextCursor?: string | null;
+};
+
+export type GateInDetailDocumentDto = {
+    id: string;
+    /**
+     * Its place on the gate-in (0-based)
+     */
+    position: number;
+    kind: 'invoice' | 'challan' | 'bill_of_entry';
+    number: string;
+    /**
+     * A calendar date YYYY-MM-DD
+     */
+    documentDate: string;
+    /**
+     * 12 digits
+     */
+    ewayBillNo: string | null;
+    poId: string | null;
+    asnId: string | null;
+    /**
+     * The covered PO's code
+     */
+    poCode: string | null;
+    /**
+     * The covered ASN's code
+     */
+    asnCode: string | null;
+};
+
+export type GateInReceiptDocumentDto = {
+    kind: 'po' | 'asn' | 'blind';
+    /**
+     * The PO or ASN code; null on a blind receipt
+     */
+    code: string | null;
+};
+
+export type GateInReceiptDto = {
+    id: string;
+    code: string;
+    /**
+     * The receipt's client (null on an older unattributed receipt)
+     */
+    clientId: string | null;
+    document: GateInReceiptDocumentDto;
+};
+
+export type GateInDetailDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    /**
+     * GI-<n>, unique per tenant
+     */
+    code: string;
+    status: 'gated_in' | 'unloading' | 'unloaded' | 'gated_out';
+    handDelivery: boolean;
+    /**
+     * Normalised (KA01AB1234); null on a hand delivery
+     */
+    vehicleNo: string | null;
+    containerNo: string | null;
+    transporterPartnerId: string | null;
+    transporterName: string | null;
+    /**
+     * The transporter partner as it was frozen at record time (the vendor snapshot shape, v1); null for a typed name
+     */
+    transporterSnapshot: VendorSnapshotDto | null;
+    /**
+     * The frozen partner's name, else the typed name
+     */
+    transporterLabel: string;
+    lrNumber: string | null;
+    driverName: string | null;
+    /**
+     * MASKED everywhere but the detail read for a gate.manage holder (decision 10)
+     */
+    driverPhone: string | null;
+    sealStatus: 'intact' | 'broken' | 'none';
+    sealNumber: string | null;
+    packagesDeclared: number | null;
+    /**
+     * Recorded with the unload end
+     */
+    packagesCounted: number | null;
+    dockDoor: string | null;
+    /**
+     * ISO-8601 UTC — entered at the gate (editable while gated_in)
+     */
+    gatedInAt: string;
+    /**
+     * ISO-8601 UTC — as recorded (a device time is taken as sent)
+     */
+    unloadStartedAt: string | null;
+    unloadEndedAt: string | null;
+    gatedOutAt: string | null;
+    recordedBy: string;
+    unloadStartedBy: string | null;
+    unloadEndedBy: string | null;
+    gatedOutBy: string | null;
+    createdAt: string;
+    updatedAt: string;
+    documentCount: number;
+    /**
+     * Goods receipts linked to this visit — any client, including receipts linked after the gate-out
+     */
+    receiptCount: number;
+    /**
+     * Counted against declared; null while either is missing (blank declared = no flag)
+     */
+    packagesFlag: 'short' | 'excess' | 'matches' | null;
+    /**
+     * |declared − counted| beside a flag
+     */
+    packagesDifference: number | null;
+    /**
+     * Not gated out and gated in more than 7 days ago (the device no longer offers it)
+     */
+    staleOpen: boolean;
+    documents: Array<GateInDetailDocumentDto>;
+    /**
+     * The goods receipts linked to this visit, oldest first
+     */
+    receipts: Array<GateInReceiptDto>;
+};
+
+export type GateInDetailResponse = {
+    gateIn: GateInDetailDto;
+};
+
+export type AmendGateInDto = {
+    /**
+     * Goods brought by hand — no vehicle; makes vehicleNo optional (decision 13). Absent = false
+     */
+    handDelivery?: boolean | null;
+    /**
+     * The registration number — uppercased, spaces, dots and hyphens stripped, then 4–15 letters and digits (BH-series and temporary plates fit). Required unless handDelivery
+     */
+    vehicleNo?: string | null;
+    /**
+     * The container number — at most 11 letters and digits (uppercased)
+     */
+    containerNo?: string | null;
+    /**
+     * An active partner holding the transporter role — exactly one of transporterPartnerId / transporterName (decision 4)
+     */
+    transporterPartnerId?: string | null;
+    /**
+     * The transporter typed by name (not in the partner master)
+     */
+    transporterName?: string | null;
+    /**
+     * The lorry receipt (LR) / consignment note number
+     */
+    lrNumber?: string | null;
+    driverName?: string | null;
+    /**
+     * The driver's phone — 7–15 digits, optionally led by +; spaces, hyphens, dots and brackets ignored. Personal data: masked on every read but the detail for a gate.manage holder, never in an event
+     */
+    driverPhone?: string | null;
+    /**
+     * The seal as found at the gate — a broken seal is flagged, never blocked (decision 8)
+     */
+    sealStatus: 'intact' | 'broken' | 'none';
+    /**
+     * The seal number(s), several comma-separated — required unless sealStatus is none, refused when none
+     */
+    sealNumber?: string | null;
+    /**
+     * Packages the paperwork declares — blank means not declared, and no mismatch flag is shown (decision 11)
+     */
+    packagesDeclared?: number | null;
+    /**
+     * The dock door, a typed code (the dock-door master is 2-3b)
+     */
+    dockDoor?: string | null;
+    /**
+     * When the vehicle gated in (ISO-8601 with a zone). Create: absent = now. Amend: absent = unchanged; a different time only while gated_in (409 gate-in-time-locked). More than 5 minutes ahead of the server clock is 400 time-in-future
+     */
+    gatedInAt?: string | null;
+    /**
+     * The supplier documents (0–20) — the full set (amend replaces it)
+     */
+    documents?: Array<GateInDocumentInputDto>;
+};
+
+export type UnloadGateInDto = {
+    /**
+     * `start` records the unload start; `end` records its end with the packages counted
+     */
+    phase: 'start' | 'end';
+    /**
+     * When it happened (ISO-8601 with a zone). REQUIRED on the device route (minted at the press, taken as sent). Web: absent = now; more than 5 minutes ahead is 400 time-in-future, and before the gated-in time (or, for an end, the start) is 400 time-out-of-order
+     */
+    occurredAt?: string;
+    /**
+     * The packages counted off the vehicle — required with end, refused with start
+     */
+    packagesCounted?: number;
+};
+
+export type GateInUnloadResponse = {
+    /**
+     * false when every column this unload would fill was already recorded — the first record stands, nothing changed (the web reads "Already recorded")
+     */
+    applied: boolean;
+    gateIn: GateInDto;
+};
+
+export type GateOutDto = {
+    /**
+     * When the vehicle left (ISO-8601 with a zone); absent = now. Not before the gated-in time, not more than 5 minutes ahead
+     */
+    gatedOutAt?: string;
 };
 
 export type PlacePutawayDto = {
@@ -7013,7 +7541,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -7040,7 +7568,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -15525,6 +16053,377 @@ export type ReceivingControllerReleaseReceiptHoldsResponses = {
 
 export type ReceivingControllerReleaseReceiptHoldsResponse = ReceivingControllerReleaseReceiptHoldsResponses[keyof ReceivingControllerReleaseReceiptHoldsResponses];
 
+export type GateInControllerListData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query: {
+        /**
+         * The warehouse whose gate-ins to list (every client's — a truck can carry several)
+         */
+        warehouseId: string;
+        /**
+         * Only these statuses (repeat the parameter for several: ?status=gated_in&status=unloading)
+         */
+        status?: Array<'gated_in' | 'unloading' | 'unloaded' | 'gated_out'>;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/receiving/gate-ins';
+};
+
+export type GateInControllerListErrors = {
+    /**
+     * Malformed warehouseId, status, cursor or limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type GateInControllerListError = GateInControllerListErrors[keyof GateInControllerListErrors];
+
+export type GateInControllerListResponses = {
+    200: GateInListResponse;
+};
+
+export type GateInControllerListResponse = GateInControllerListResponses[keyof GateInControllerListResponses];
+
+export type GateInControllerCreateData = {
+    body: CreateGateInDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/gate-ins';
+};
+
+export type GateInControllerCreateErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a field the gate-in refuses — named in the detail: the vehicle (4–15 letters and digits; spaces, dots and hyphens are ignored; required unless a hand delivery), the container, both or neither transporter, the phone, the seal pairing, a package count, a document row (kind, number, a date after today in IST, a 12-digit e-way bill, PO and ASN together, a repeated kind + number) (validation-failed); a time more than 5 minutes ahead (time-in-future)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks gate.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse, the transporter partner, or a document's purchase order or ASN does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The partner lacks the transporter role (partner-not-transporter) or is inactive (transporter-inactive); a document's PO or ASN is another warehouse's (document-warehouse-mismatch); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type GateInControllerCreateError = GateInControllerCreateErrors[keyof GateInControllerCreateErrors];
+
+export type GateInControllerCreateResponses = {
+    /**
+     * The gate-in (the idempotency snapshot; the driver phone masked)
+     */
+    201: GateInResponse;
+};
+
+export type GateInControllerCreateResponse = GateInControllerCreateResponses[keyof GateInControllerCreateResponses];
+
+export type GateInControllerGetData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        gateInId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/gate-ins/{gateInId}';
+};
+
+export type GateInControllerGetErrors = {
+    /**
+     * Malformed gateInId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No gate-in with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type GateInControllerGetError = GateInControllerGetErrors[keyof GateInControllerGetErrors];
+
+export type GateInControllerGetResponses = {
+    200: GateInDetailResponse;
+};
+
+export type GateInControllerGetResponse = GateInControllerGetResponses[keyof GateInControllerGetResponses];
+
+export type GateInControllerAmendData = {
+    body: AmendGateInDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        gateInId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/gate-ins/{gateInId}';
+};
+
+export type GateInControllerAmendErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a field the gate-in refuses — named in the detail: the vehicle (4–15 letters and digits; spaces, dots and hyphens are ignored; required unless a hand delivery), the container, both or neither transporter, the phone, the seal pairing, a package count, a document row (kind, number, a date after today in IST, a 12-digit e-way bill, PO and ASN together, a repeated kind + number) (validation-failed); a time more than 5 minutes ahead (time-in-future); a malformed gateInId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks gate.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The gate-in, the (new) transporter partner, or a document's PO or ASN does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The gate-in is gated out (gate-in-closed); a different gated-in time once the unload started (gate-in-time-locked); a changed seal status, seal number or packages declared once the unload ended (gate-in-field-locked); a new transporter partner without the role (partner-not-transporter) or inactive (transporter-inactive); a document of another warehouse (document-warehouse-mismatch); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type GateInControllerAmendError = GateInControllerAmendErrors[keyof GateInControllerAmendErrors];
+
+export type GateInControllerAmendResponses = {
+    200: GateInResponse;
+};
+
+export type GateInControllerAmendResponse = GateInControllerAmendResponses[keyof GateInControllerAmendResponses];
+
+export type GateInControllerUnloadWebData = {
+    body: UnloadGateInDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        gateInId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/gate-ins/{gateInId}/unload';
+};
+
+export type GateInControllerUnloadWebErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an unknown phase, packagesCounted missing on end / present on start / out of range, a malformed occurredAt or gateInId (validation-failed); a time more than 5 minutes ahead (time-in-future); a time before the gated-in time or, for an end, the start, or after a recorded gate-out (time-out-of-order)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks gate.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No gate-in with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict) — never gate-in-closed: a gated-out visit still takes its unload
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type GateInControllerUnloadWebError = GateInControllerUnloadWebErrors[keyof GateInControllerUnloadWebErrors];
+
+export type GateInControllerUnloadWebResponses = {
+    /**
+     * `applied: false` when the phase was already recorded (the first record stands; nothing changed)
+     */
+    200: GateInUnloadResponse;
+};
+
+export type GateInControllerUnloadWebResponse = GateInControllerUnloadWebResponses[keyof GateInControllerUnloadWebResponses];
+
+export type GateInControllerUnloadDeviceData = {
+    body: UnloadGateInDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+        gateInId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/devices/gate-ins/{gateInId}/unload';
+};
+
+export type GateInControllerUnloadDeviceErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an unknown phase, occurredAt missing or malformed, packagesCounted missing on end / present on start / out of range, a malformed gateInId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked); the operator is not a floor role or lacks gate.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No gate-in with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The op's creator is not the badged operator (operator-mismatch), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type GateInControllerUnloadDeviceError = GateInControllerUnloadDeviceErrors[keyof GateInControllerUnloadDeviceErrors];
+
+export type GateInControllerUnloadDeviceResponses = {
+    /**
+     * `applied: false` when the phase was already recorded (the device settles it with a note)
+     */
+    200: GateInUnloadResponse;
+};
+
+export type GateInControllerUnloadDeviceResponse = GateInControllerUnloadDeviceResponses[keyof GateInControllerUnloadDeviceResponses];
+
+export type GateInControllerGateOutData = {
+    body: GateOutDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        gateInId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/gate-ins/{gateInId}/gate-out';
+};
+
+export type GateInControllerGateOutErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed gatedOutAt or gateInId (validation-failed); a time more than 5 minutes ahead (time-in-future); before the gated-in time, the unload start or the unload end (time-out-of-order)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks gate.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No gate-in with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Already gated out (gate-in-closed), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type GateInControllerGateOutError = GateInControllerGateOutErrors[keyof GateInControllerGateOutErrors];
+
+export type GateInControllerGateOutResponses = {
+    200: GateInResponse;
+};
+
+export type GateInControllerGateOutResponse = GateInControllerGateOutResponses[keyof GateInControllerGateOutResponses];
+
 export type PutawayControllerListPlacementsData = {
     body?: never;
     path: {
@@ -19124,7 +20023,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */

@@ -14,8 +14,9 @@ import {
 } from './inbound-tabs';
 
 describe('inbound-tabs', () => {
-  test('the five tabs, in page order, with the Purchase orders tab first', () => {
+  test('the six tabs, in page order — Gate-in first (story 2-3a), Purchase orders still the default', () => {
     expect(INBOUND_TABS.map((t) => t.label)).toEqual([
+      'Gate-in',
       'Purchase orders',
       'Advance shipment notices',
       'Goods receipts',
@@ -23,6 +24,17 @@ describe('inbound-tabs', () => {
       'QC holds',
     ]);
     expect(DEFAULT_INBOUND_TAB).toBe('pos');
+  });
+
+  test('story 2-3a (decision 9) — Gate-in is ?tab=gate-ins; the bare /inbound stays Purchase orders; every other pin unchanged', () => {
+    expect(inboundTabHref('gate-ins')).toBe('/inbound?tab=gate-ins');
+    expect(inboundTabHref('pos')).toBe('/inbound');
+    expect(inboundTabHref('asns')).toBe('/inbound?tab=asns');
+    expect(inboundTabHref('grns')).toBe('/inbound?tab=grns');
+    expect(inboundTabHref('putaway')).toBe('/inbound?tab=putaway');
+    expect(inboundTabHref('qc-holds')).toBe('/inbound?tab=qc-holds');
+    expect(parseInboundTab({ tab: 'gate-ins' })).toBe('gate-ins');
+    expect(initialInboundTab(null, 'gate-ins')).toBe('gate-ins');
   });
 
   test('?tab= parses a known id; anything else is ignored', () => {

@@ -18,6 +18,8 @@ import {
   rejectedOpPayloadBinId,
   rejectedOpSummary,
   rejectedOpGuidance,
+  GATE_IN_UNLOAD_GONE_GUIDANCE,
+  GATE_IN_UNLOAD_GUIDANCE,
   GRN_REFUSAL_LABEL,
   GRN_CLIENT_GUIDANCE,
   GRN_DEPARTED_GUIDANCE,
@@ -733,5 +735,43 @@ describe('story 1-6d — a grn.licence-refused row (owner-only Accept anyway)', 
     const denied = problem('role-denied', 403, 'Accepting goods without a valid licence is an owner decision.');
     expect(rejectedOpsResolveReason(denied, licenceRow)).toBe('Accepting goods without a valid licence is an owner decision.');
     expect(rejectedOpsResolveReason(denied, { opType: 'pick.record' })).toContain('cannot resolve');
+  });
+});
+
+describe('story 2-3a — a refused device gate-in unload (gate-in.unload)', () => {
+  const GATE_IN = '0198f7a2-1b3c-7d4e-8f90-0000000000c1';
+
+  test('Discard only, as the server says; the guidance points to the web', () => {
+    const row = { opType: 'gate-in.unload' as const, problemCode: 'not-found', payload: { gateInId: GATE_IN, phase: 'end', occurredAt: '2026-10-21T04:10:00.000Z', packagesCounted: 10 } };
+    expect(rejectedOpDecisions({ decisions: ['discard'], payload: row.payload })).toEqual(['discard']);
+    // A not-found refusal: the gate-in is gone — nothing to record on the web.
+    expect(rejectedOpGuidance(row)).toEqual([GATE_IN_UNLOAD_GONE_GUIDANCE]);
+    expect(GATE_IN_UNLOAD_GONE_GUIDANCE).toBe('The gate-in no longer exists — discard this row.');
+    for (const problemCode of ['validation-failed', 'role-denied']) {
+      expect(rejectedOpGuidance({ ...row, problemCode })).toEqual([GATE_IN_UNLOAD_GUIDANCE]);
+    }
+    expect(GATE_IN_UNLOAD_GUIDANCE).toContain('Inbound → Gate-in');
+  });
+
+  test('the summary names the gate-in by its id tail, the phase, the IST time, the count and the refusal', () => {
+    expect(
+      rejectedOpSummary({ opType: 'gate-in.unload', problemCode: 'not-found', payload: { gateInId: GATE_IN, phase: 'end', occurredAt: '2026-10-21T04:10:00.000Z', packagesCounted: 10 } }),
+    ).toEqual({
+      heading: 'gate-in …000000c1 — unload end not recorded',
+      lines: ['Unload end · at 21 Oct 2026, 09:40 IST · 10 packages counted — gate-in not found'],
+    });
+    expect(
+      rejectedOpSummary({ opType: 'gate-in.unload', problemCode: 'role-denied', payload: { gateInId: GATE_IN, phase: 'start', occurredAt: '2026-10-21T04:10:00.000Z' } }),
+    ).toEqual({
+      heading: 'gate-in …000000c1 — unload start not recorded',
+      lines: ['Unload start · at 21 Oct 2026, 09:40 IST — the operator may not record gate-ins'],
+    });
+  });
+
+  test('a malformed stored payload still summarises (read defensively), an unknown code prints as itself', () => {
+    expect(rejectedOpSummary({ opType: 'gate-in.unload', problemCode: 'weird-code', payload: {} })).toEqual({
+      heading: 'unknown gate-in — unload not recorded',
+      lines: ['Unload — weird-code'],
+    });
   });
 });

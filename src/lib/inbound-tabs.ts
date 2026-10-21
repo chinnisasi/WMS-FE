@@ -9,6 +9,10 @@ import { definePageTabs } from '@/lib/page-tabs';
  * Inbound's own.
  */
 export const INBOUND_TABS = [
+  // Story 2-3a — the gate-in (the vehicle visit) comes first in the order of
+  // the work, but the page still opens on Purchase orders (decision 9):
+  // Gate-in is reached at `?tab=gate-ins`.
+  { id: 'gate-ins', label: 'Gate-in' },
   { id: 'pos', label: 'Purchase orders' },
   { id: 'asns', label: 'Advance shipment notices' },
   { id: 'grns', label: 'Goods receipts' },
@@ -24,6 +28,9 @@ export const INBOUND_PAGE_TABS = definePageTabs<InboundTab>({
   tabs: INBOUND_TABS,
   // A 9-1b drill opens on its own list's tab.
   drillTabs: { grns: 'grns', putaway: 'putaway' },
+  // Decision 9 — the bare `/inbound` stays Purchase orders (every existing
+  // link and pin is unchanged); Gate-in is `?tab=gate-ins`.
+  defaultTab: 'pos',
 });
 
 export const DEFAULT_INBOUND_TAB: InboundTab = INBOUND_PAGE_TABS.defaultTab;
@@ -33,8 +40,9 @@ export function parseInboundTab(params: SearchParamsRecord): InboundTab | null {
 }
 
 /**
- * The link that opens Inbound on one tab (the shared href rule: the first
- * tab is the bare `/inbound`). `notifications.ts` links QC holds with it.
+ * The link that opens Inbound on one tab (the shared href rule: the default
+ * tab, Purchase orders, is the bare `/inbound`). `notifications.ts` links QC
+ * holds with it.
  */
 export function inboundTabHref(tab: InboundTab): string {
   return INBOUND_PAGE_TABS.href(tab);
@@ -43,7 +51,7 @@ export function inboundTabHref(tab: InboundTab): string {
 /**
  * The tab a page opens on: a 9-1b drill names its own list's tab
  * (`list=grns` → Goods receipts, `list=putaway` → Awaiting putaway);
- * otherwise the `?tab=` pick, else the first tab.
+ * otherwise the `?tab=` pick, else the default tab (Purchase orders).
  */
 export function initialInboundTab(drill: ParsedDrill, tab: InboundTab | null): InboundTab {
   return INBOUND_PAGE_TABS.initial(drill, tab);
@@ -57,7 +65,15 @@ export function initialInboundTab(drill: ParsedDrill, tab: InboundTab | null): I
  * one page at the route's maximum size; a full page with more behind it
  * reads "N+" — never a misleadingly small number.
  */
-export type CountedInboundTab = Exclude<InboundTab, 'grns'>;
+export type CountedInboundTab = Exclude<InboundTab, 'grns' | 'gate-ins'>;
+
+/**
+ * Story 2-3a — every tab with a pill: the client-filtered counts above, plus
+ * Gate-in, whose count (gate-ins not gated out, one multi-status read) takes
+ * NO client — a truck can carry several — and so renders even while the
+ * client filter is pending.
+ */
+export type PilledInboundTab = CountedInboundTab | 'gate-ins';
 
 export interface TabCount {
   readonly count: number;

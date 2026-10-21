@@ -208,6 +208,14 @@ export const CAPABILITIES = [
   // OWNER_ONLY_CAPABILITIES) — the legal basis for holding drugs and food is
   // the owner's. Every staff session reads the licences and the gaps.
   'licences.manage',
+  // Story 2-3a — the gate-in (one inbound vehicle visit): record it at the
+  // gate, amend it, record its unload (the web, and the handheld's
+  // `gate-in.unload`) and gate it out. Owner + Ops Manager + OPERATOR — the
+  // gate desk and the dock are floor work. Gates the Inbound Gate-in tab's
+  // Record button and row actions; every member reads gate-ins, and the
+  // driver's full phone reaches only a holder (decision 10). The ops grant is
+  // derived below — never hand-copied.
+  'gate.manage',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -278,6 +286,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     // inbox tab's op; the floor-verb pattern — `putaway.execute`'s
     // rationale). Planning stays above: an operator never schedules counts.
     'counts.execute',
+    // Story 2-3a — the gate desk and the dock: record the gate-in, its
+    // unload and its gate-out.
+    'gate.manage',
   ],
   // Story 8-2b: read-only except the e-way paperwork (finance work); story
   // 21-3: and the client rate cards (finance work); story 21-5: and the

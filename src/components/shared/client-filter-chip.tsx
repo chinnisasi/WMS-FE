@@ -49,12 +49,19 @@ export function ClientFilterChip({
  * generation or the manifest builder) says "All clients", so the viewer
  * never reads it as the chosen client's. Nothing while no client is active.
  */
-export function AllClientsNote({ active }: { active: ActiveClient }) {
+export function AllClientsNote({
+  active,
+  title = NOT_FILTERED_BY_CLIENT,
+}: {
+  active: ActiveClient;
+  /** Story 2-3a — why this section is unfiltered (the gate-in: a truck can carry several clients). */
+  title?: string;
+}) {
   if (active.state !== 'client') return null;
   return (
     <span
       data-testid="all-clients-note"
-      title={NOT_FILTERED_BY_CLIENT}
+      title={title}
       className="w-fit rounded-md border border-(--border) px-2 py-0.5 text-xs text-(--muted-foreground)"
     >
       {ALL_CLIENTS}

@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import {
   fetchApiListAsns,
+  fetchApiListGateIns,
   fetchApiListPurchaseOrders,
   fetchApiListPutawayTasks,
   fetchApiListQcHolds,
@@ -11,14 +12,15 @@ import {
 import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
 import { INBOUND_CHANGED_EVENT } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { sumTabCounts, type CountedInboundTab, type TabCount } from '@/lib/inbound-tabs';
+import { GATE_IN_PAGE_LIMIT, OPEN_GATE_IN_STATUSES } from '@/lib/gate-ins';
+import { sumTabCounts, type CountedInboundTab, type PilledInboundTab, type TabCount } from '@/lib/inbound-tabs';
 
 /** The routes' page-size ceilings (`inbound.dto.ts`, `qc.dto.ts`). */
 const PO_PAGE = 200;
 const ASN_PAGE = 100;
 const QC_PAGE = 200;
 
-export type InboundTabCounts = Partial<Record<CountedInboundTab, TabCount>>;
+export type InboundTabCounts = Partial<Record<PilledInboundTab, TabCount>>;
 
 const page = (items: readonly unknown[], nextCursor: string | null | undefined): TabCount => ({
   count: items.length,
@@ -96,5 +98,28 @@ export function useInboundTabCounts(
     };
   }, [tenantId, warehouseId, clientId, scope]);
 
-  return result !== null && result.scope === scope ? result.counts : {};
+  // Story 2-3a — the Gate-in count: gate-ins not gated out, from ONE
+  // multi-status read (`status=gated_in&status=unloading&status=unloaded`,
+  // the route's 200 ceiling, "N+" past it). It takes no client — a truck
+  // can carry several — so it is scoped and fetched apart from the
+  // client-filtered counts and renders while the client filter is pending.
+  const gateInScope = tenantId === null || warehouseId === null ? null : `${tenantId}|${warehouseId}|${revision}`;
+  const [gateIns, setGateIns] = useState<{ scope: string; count: TabCount } | null>(null);
+  useEffect(() => {
+    if (tenantId === null || warehouseId === null || gateInScope === null) return;
+    let cancelled = false;
+    fetchApiListGateIns(tenantId, warehouseId, { status: OPEN_GATE_IN_STATUSES, limit: GATE_IN_PAGE_LIMIT }).then(
+      (r) => {
+        if (!cancelled) setGateIns({ scope: gateInScope, count: page(r.items, r.nextCursor) });
+      },
+      // A failed read shows no pill — never a wrong "0".
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, warehouseId, gateInScope]);
+
+  const counts = result !== null && result.scope === scope ? result.counts : {};
+  return gateIns !== null && gateIns.scope === gateInScope ? { ...counts, 'gate-ins': gateIns.count } : counts;
 }
