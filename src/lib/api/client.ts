@@ -65,6 +65,12 @@ import {
   inboundControllerCloseAsn,
   inboundControllerCreateAsn,
   inboundControllerCreatePurchaseOrder,
+  gateInControllerAmend,
+  gateInControllerCreate,
+  gateInControllerGateOut,
+  gateInControllerGet,
+  gateInControllerList,
+  gateInControllerUnloadWeb,
   inboundControllerImportAsns,
   inboundControllerGetAsn,
   inboundControllerGetPurchaseOrder,
@@ -390,6 +396,14 @@ import type {
   AsnResponse,
   CreateAsnDto,
   CreatePurchaseOrderDto,
+  AmendGateInDto,
+  CreateGateInDto,
+  GateInDetailResponse,
+  GateInListResponse,
+  GateInResponse,
+  GateInUnloadResponse,
+  GateOutDto,
+  UnloadGateInDto,
   RegisterTenantDto,
   RejectedOpListResponse,
   RejectedOpResolveResponse,
@@ -2551,6 +2565,130 @@ export async function fetchApiCreatePurchaseOrder(
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
   });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 2-3a — the gate-in statuses (`GATE_IN_STATUSES`). */
+export type GateInStatus = GateInListResponse['items'][number]['status'];
+
+/**
+ * Story 2-3a — records a gate-in (`gate.manage`): one inbound vehicle visit.
+ * The key is per draft (reused on a retry of the unchanged draft).
+ */
+export async function fetchApiCreateGateIn(
+  tenantId: string,
+  body: CreateGateInDto,
+  idempotencyKey: string,
+): Promise<GateInResponse> {
+  const { data, error } = await gateInControllerCreate({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-3a — amends a gate-in: a FULL replacement of the header (a blank
+ * optional becomes null) and of the document set; `gatedInAt` absent leaves
+ * the time unchanged.
+ */
+export async function fetchApiAmendGateIn(
+  tenantId: string,
+  gateInId: string,
+  body: AmendGateInDto,
+  idempotencyKey: string,
+): Promise<GateInResponse> {
+  const { data, error } = await gateInControllerAmend({
+    path: { tenantId, gateInId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-3a — records the unload start, or its end with the packages counted
+ * (the WEB route). `applied: false` means the first record stands and
+ * nothing changed — never a success.
+ */
+export async function fetchApiUnloadGateIn(
+  tenantId: string,
+  gateInId: string,
+  body: UnloadGateInDto,
+  idempotencyKey: string,
+): Promise<GateInUnloadResponse> {
+  const { data, error } = await gateInControllerUnloadWeb({
+    path: { tenantId, gateInId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 2-3a — gates a gate-in out (closes the visit; no further edits). */
+export async function fetchApiGateOutGateIn(
+  tenantId: string,
+  gateInId: string,
+  body: GateOutDto,
+  idempotencyKey: string,
+): Promise<GateInResponse> {
+  const { data, error } = await gateInControllerGateOut({
+    path: { tenantId, gateInId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-3a — one warehouse's gate-ins, newest `gatedInAt` first. `status`
+ * repeats on the wire (`?status=gated_in&status=unloading`); no client filter
+ * (a truck can carry several clients).
+ */
+export async function fetchApiListGateIns(
+  tenantId: string,
+  warehouseId: string,
+  options?: { status?: readonly GateInStatus[]; cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<GateInListResponse> {
+  const { data, error } = await gateInControllerList({
+    path: { tenantId },
+    query: {
+      warehouseId,
+      ...(options?.status === undefined || options.status.length === 0 ? {} : { status: [...options.status] }),
+      ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+      ...(options?.limit === undefined ? {} : { limit: options.limit }),
+    },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 2-3a — one gate-in with its documents (PO/ASN codes) and its linked receipts. */
+export async function fetchApiGetGateIn(
+  tenantId: string,
+  gateInId: string,
+  options?: { signal?: AbortSignal },
+): Promise<GateInDetailResponse> {
+  const { data, error } = await gateInControllerGet({ path: { tenantId, gateInId }, signal: options?.signal });
   if (error || !data) {
     throw unwrapError(error, 400);
   }

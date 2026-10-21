@@ -28,6 +28,12 @@ import {
   fetchApiAmendAsn,
   fetchApiCreateAsn,
   fetchApiCreatePurchaseOrder,
+  fetchApiAmendGateIn,
+  fetchApiCreateGateIn,
+  fetchApiGateOutGateIn,
+  fetchApiGetGateIn,
+  fetchApiListGateIns,
+  fetchApiUnloadGateIn,
   fetchApiCancelReturn,
   fetchApiCreateReturn,
   fetchApiGetReturn,
@@ -2734,4 +2740,97 @@ describe('client filter on the list wrappers (story 1-5a)', () => {
       clearSession();
     });
   }
+});
+
+describe('gate-in wrappers (story 2-3a)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const T = SESSION.tenant.id;
+  const W = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const G = '0198f7a2-1b3c-7d4e-8f90-0000000000c1';
+  const base = `/api/v1/tenants/${T}/receiving/gate-ins`;
+  const GATE_IN = { id: G, code: 'GI-0001', status: 'gated_in', documents: [] };
+
+  test('create POSTs the body with the Idempotency-Key, no query', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { gateIn: GATE_IN });
+    const body = { warehouseId: W, vehicleNo: 'KA01AB1234', transporterName: 'VRL', sealStatus: 'none' as const, documents: [] };
+    const res = await fetchApiCreateGateIn(T, body, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(base);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    expect(res.gateIn.code).toBe('GI-0001');
+    clearSession();
+  });
+
+  test('amend PATCHes the full replacement to the gate-in', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { gateIn: GATE_IN });
+    const body = { vehicleNo: 'KA01AB1234', transporterName: 'VRL', sealStatus: 'none' as const, driverPhone: null, documents: [] };
+    await fetchApiAmendGateIn(T, G, body, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/${G}`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    clearSession();
+  });
+
+  test('unload POSTs to the WEB route (never the device one) with the phase body', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { applied: false, gateIn: GATE_IN });
+    const body = { phase: 'end' as const, occurredAt: '2026-10-21T04:10:00.000Z', packagesCounted: 10 };
+    const res = await fetchApiUnloadGateIn(T, G, body, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/${G}/unload`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    expect(res.applied).toBe(false);
+    clearSession();
+  });
+
+  test('gate-out POSTs the time with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { gateIn: GATE_IN });
+    await fetchApiGateOutGateIn(T, G, { gatedOutAt: '2026-10-21T06:00:00.000Z' }, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/${G}/gate-out`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ gatedOutAt: '2026-10-21T06:00:00.000Z' });
+    clearSession();
+  });
+
+  test('the list sends the warehouse always, each status as its own repeated parameter, cursor and limit only when set — never a clientId', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListGateIns(T, W);
+    let url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(base);
+    expect([...url.searchParams.keys()]).toEqual(['warehouseId']);
+    expect(url.searchParams.get('warehouseId')).toBe(W);
+    await fetchApiListGateIns(T, W, { status: ['gated_in', 'unloading', 'unloaded'], limit: 200, cursor: 'c1' });
+    url = new URL(lastRequest!.url);
+    expect(url.searchParams.getAll('status')).toEqual(['gated_in', 'unloading', 'unloaded']);
+    expect(url.searchParams.get('limit')).toBe('200');
+    expect(url.searchParams.get('cursor')).toBe('c1');
+    expect(url.searchParams.has('clientId')).toBe(false);
+    clearSession();
+  });
+
+  test('the detail GETs one gate-in', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { gateIn: { ...GATE_IN, receipts: [] } });
+    const res = await fetchApiGetGateIn(T, G);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/${G}`);
+    expect(res.gateIn.code).toBe('GI-0001');
+    clearSession();
+  });
+
+  test('a refusal is an ApiProblem carrying its code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { code: 'gate-in-closed', status: 409, detail: 'GI-0001 is gated out.' });
+    await expect(fetchApiGateOutGateIn(T, G, {}, KEY)).rejects.toMatchObject({ code: 'gate-in-closed', status: 409 });
+    clearSession();
+  });
 });

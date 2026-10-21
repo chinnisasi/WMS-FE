@@ -8,6 +8,7 @@ import type {
 } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { shortIdTail } from '@/lib/audit';
+import { istDateTimeLabel } from '@/lib/audit-exports';
 import { RETURN_CONDITION_LABEL } from '@/lib/returns';
 
 /**
@@ -466,6 +467,8 @@ const GRN_LINES_GUIDANCE: readonly (readonly [RejectedGrnLineDto['code'], string
  * otherwise.
  */
 export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
+  // Story 2-3a — a refused device unload: Discard only; the web re-records it.
+  if (entry.opType === 'gate-in.unload') return [gateInUnloadGuidance(entry.problemCode)];
   if (entry.opType === 'grn.shelf-life-refused') return [GRN_SHELF_LIFE_GUIDANCE];
   if (entry.opType === 'grn.licence-refused') return [GRN_LICENCE_GUIDANCE];
   // Story 1-4b — one line per inactive SKU the receipt booked.
@@ -653,6 +656,7 @@ export function rejectedOpSummary(
   // Story 1-6d — so has a `grn.licence-refused` row (its lines and their `missing`).
   if (entry.opType === 'grn.lines-refused' || isWaivableOpType(entry.opType)) return grnLinesRefusedSummary(entry, skuCode);
   if (isInactiveSkuFlag(entry)) return inactiveSkuReceivedSummary(entry, skuCode);
+  if (entry.opType === 'gate-in.unload') return gateInUnloadSummary(entry);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
   const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;
@@ -876,4 +880,56 @@ function inactiveSkuReceivedSummary(
   });
   const count = lines.length;
   return { heading: `${grn} — ${count} line${count === 1 ? '' : 's'} of inactive SKUs booked`, lines: rendered };
+}
+
+// ── story 2-3a: a refused device gate-in unload (a gate-in.unload row) ───────
+
+/**
+ * The remedy a `gate-in.unload` row's reviewer reads (Discard only — the row
+ * re-applies nothing): the dock's unload was refused on replay (an unknown
+ * gate-in, a malformed body, an operator without `gate.manage`), so the
+ * unload is recorded again from the web.
+ */
+export const GATE_IN_UNLOAD_GUIDANCE =
+  'Record the unload on the web from Inbound → Gate-in, then discard this row.';
+
+/** A `not-found` refusal: the gate-in is gone, so there is nothing to record against. */
+export const GATE_IN_UNLOAD_GONE_GUIDANCE = 'The gate-in no longer exists — discard this row.';
+
+/** The guidance by the row's problem code (a vanished gate-in cannot take a web unload). */
+export function gateInUnloadGuidance(problemCode: string): string {
+  return problemCode === 'not-found' ? GATE_IN_UNLOAD_GONE_GUIDANCE : GATE_IN_UNLOAD_GUIDANCE;
+}
+
+/** Why the device unload was refused, in words (the row's whole-op `problemCode`). */
+const GATE_IN_UNLOAD_PROBLEM_WORDS: Readonly<Record<string, string>> = {
+  'not-found': 'gate-in not found',
+  'validation-failed': 'the unload was malformed',
+  'role-denied': 'the operator may not record gate-ins',
+  'permission-denied': 'the operator may not record gate-ins',
+};
+
+/**
+ * A `gate-in.unload` row's summary: the gate-in (a short form of its id — the
+ * device payload carries no code), the phase, the device time in IST and, for
+ * an end, the packages counted; then the refusal in words. The payload is the
+ * device's own body, read defensively (a stored row is data).
+ */
+function gateInUnloadSummary(
+  entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>,
+): { heading: string; lines: readonly string[] } {
+  const payload = entry.payload;
+  const gateInId = typeof payload['gateInId'] === 'string' ? payload['gateInId'] : null;
+  const gateIn = gateInId === null ? 'unknown gate-in' : `gate-in …${shortIdTail(gateInId)}`;
+  const phase = payload['phase'] === 'start' ? 'start' : payload['phase'] === 'end' ? 'end' : null;
+  const occurredAt = typeof payload['occurredAt'] === 'string' && !Number.isNaN(Date.parse(payload['occurredAt'])) ? payload['occurredAt'] : null;
+  const counted = typeof payload['packagesCounted'] === 'number' ? payload['packagesCounted'] : null;
+  const parts = [phase === null ? 'Unload' : phase === 'start' ? 'Unload start' : 'Unload end'];
+  if (occurredAt !== null) parts.push(`at ${istDateTimeLabel(occurredAt)} IST`);
+  if (phase === 'end' && counted !== null) parts.push(`${counted} package${counted === 1 ? '' : 's'} counted`);
+  const problem = GATE_IN_UNLOAD_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return {
+    heading: phase === null ? `${gateIn} — unload not recorded` : `${gateIn} — unload ${phase} not recorded`,
+    lines: [`${parts.join(' · ')} — ${problem}`],
+  };
 }

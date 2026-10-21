@@ -32,6 +32,15 @@ const primaryButtonClass =
  * under the confirmation, in a `role="alert"` region, and the row stays open
  * for a retry (`onRejected` is not called for it). `null` falls back to
  * `onRejected`.
+ *
+ * Story 2-3a — an optional draft: `fields` (inputs the confirmation freezes —
+ * the gate-in unload's time and count) render inside the row, disabled while
+ * a request is in flight, and `draft` is their serialised value. The key is
+ * bound to the draft it was minted for: an edit (a different `draft`) mints a
+ * fresh key on the next press, so a retry of the UNCHANGED draft replays and
+ * a changed body never reuses a key (the backend's 422). `confirmDisabled`
+ * holds the button while the draft does not parse. Callers that pass none of
+ * these are unchanged.
  */
 export function ConfirmRow<T>({
   question,
@@ -44,6 +53,9 @@ export function ConfirmRow<T>({
   onClose,
   keepLabel = 'Keep',
   detail,
+  fields,
+  draft,
+  confirmDisabled = false,
 }: {
   question: string;
   confirmLabel: string;
@@ -56,22 +68,28 @@ export function ConfirmRow<T>({
   onClose: () => void;
   keepLabel?: string;
   detail?: (error: unknown) => ReactNode | null;
+  /** Story 2-3a — inputs the confirmation freezes (rendered inside the row). */
+  fields?: ReactNode;
+  /** Story 2-3a — the fields' serialised value: the key is reused only for the same draft. */
+  draft?: string;
+  confirmDisabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [shown, setShown] = useState<ReactNode | null>(null);
-  const keyRef = useRef<string | null>(null);
+  const keyRef = useRef<{ key: string; draft: string | undefined } | null>(null);
   const inFlight = useRef(false);
 
   async function confirm() {
-    if (inFlight.current) return;
+    if (inFlight.current || confirmDisabled) return;
     const session = readSession();
     if (session === null) return;
     inFlight.current = true;
     setBusy(true);
-    keyRef.current ??= ulid();
+    // Per confirmation, bound to its draft: an edited draft is a new body.
+    if (keyRef.current === null || keyRef.current.draft !== draft) keyRef.current = { key: ulid(), draft };
     setShown(null);
     try {
-      const result = await run(keyRef.current, session.tenant.id);
+      const result = await run(keyRef.current.key, session.tenant.id);
       onDone(result);
     } catch (error) {
       const structured = detail === undefined ? null : detail(error);
@@ -89,7 +107,13 @@ export function ConfirmRow<T>({
   return (
     <div role="group" aria-label={ariaLabel} className="flex flex-wrap items-center gap-2">
       <span>{question}</span>
-      <button type="button" disabled={busy} onClick={confirm} className={primaryButtonClass}>
+      {fields !== undefined && (
+        // Frozen while in flight: an edit now would not change the request that still lands.
+        <fieldset disabled={busy} className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0">
+          {fields}
+        </fieldset>
+      )}
+      <button type="button" disabled={busy || confirmDisabled} onClick={confirm} className={primaryButtonClass}>
         {confirmLabel}
       </button>
       {/* Disabled in flight: a "Keep" pressed now would not stop a request that still lands. */}

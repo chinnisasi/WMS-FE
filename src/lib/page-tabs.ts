@@ -10,9 +10,11 @@ import type { DrillList, ParsedDrill, SearchParamsRecord } from '@/lib/drill';
  * `?tab=<id>` opens a tab — a notification's click-through, a shared link,
  * a reload. It is not a drill key: a link carrying it has no `list`, so
  * `parseDrill` reads it as a plain visit, and a drill link never carries
- * one. Anything but one known id is ignored (the page opens on its first
- * tab). One href rule everywhere: the first tab is the bare route, every
- * other tab is `?tab=<id>` — one URL per view.
+ * one. Anything but one known id is ignored (the page opens on its default
+ * tab). One href rule everywhere: the default tab is the bare route, every
+ * other tab is `?tab=<id>` — one URL per view. The default is the first tab
+ * unless the page names another (story 2-3a: Inbound lists Gate-in first but
+ * still opens on Purchase orders).
  *
  * Pure, so the server `page.tsx` parses with the same definition the client
  * tab bar renders from (`components/shared/page-tabs.tsx`).
@@ -31,7 +33,7 @@ export interface PageTabs<T extends string> {
   /** The tablist's `aria-label` — one per page, so a section's own tabs stay distinguishable. */
   readonly label: string;
   readonly tabs: readonly PageTab<T>[];
-  /** The first tab — the bare route. */
+  /** The default tab — the bare route: the first tab unless the definition names another. */
   readonly defaultTab: T;
   /** The tab a drill on each list opens on. */
   readonly drillTabs: Readonly<Partial<Record<DrillList, T>>>;
@@ -48,16 +50,22 @@ export function definePageTabs<const T extends string>({
   tabs,
   label,
   drillTabs = {},
+  defaultTab: namedDefault,
 }: {
   route: string;
   tabs: readonly PageTab<T>[];
   label: string;
   drillTabs?: Readonly<Partial<Record<DrillList, T>>>;
+  /** Story 2-3a — the tab the bare route opens on, when it is not the first. */
+  defaultTab?: NoInfer<T>;
 }): PageTabs<T> {
   const first = tabs[0];
   if (first === undefined) throw new Error(`definePageTabs(${route}): no tabs`);
-  const defaultTab = first.id;
   const ids: readonly string[] = tabs.map((tab) => tab.id);
+  if (namedDefault !== undefined && !ids.includes(namedDefault)) {
+    throw new Error(`definePageTabs(${route}): the default tab "${namedDefault}" is not one of its tabs`);
+  }
+  const defaultTab = namedDefault ?? first.id;
   const href = (tab: T) => (tab === defaultTab ? route : `${route}?tab=${tab}`);
   return {
     id: route.replace(/^\//, '').replace(/\//g, '-'),
