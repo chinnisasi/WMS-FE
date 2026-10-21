@@ -760,3 +760,160 @@ describe('story 1-5a — the client filter', () => {
     expect(chip()).toBeNull();
   });
 });
+
+describe('story 2-4a — the damaged write-off', () => {
+  const BIN_DMG = '0198f7a2-1b3c-7d4e-8f90-00000000b009';
+  const DAMAGED_SPF = stockRow('s-9', BIN_DMG, 'DAMAGED', SKU_SPF, 6, true);
+  const DAMAGED_SERUM = stockRow('s-10', BIN_DMG, 'DAMAGED', SKU_SERUM, 4, true);
+  let posted: { pathname: string; body: Record<string, unknown>; key: string | null }[] = [];
+
+  /** The router, plus DAMAGED rows in the stock read and a recorder for the adjustment POSTs. */
+  function withDamaged(answer: () => Response): void {
+    const routed = globalThis.fetch;
+    posted = [];
+    overrides.push({
+      match: (pathname) => pathname.endsWith('/inventory/stock'),
+      respond: () => json(200, { items: [...STOCK, DAMAGED_SPF, DAMAGED_SERUM], nextCursor: null }),
+    });
+    stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init);
+      const url = new URL(request.url);
+      if (request.method === 'POST' && url.pathname === `/api/v1/tenants/${T}/inventory/adjustments`) {
+        posted.push({ pathname: url.pathname, body: (await request.clone().json()) as Record<string, unknown>, key: request.headers.get('Idempotency-Key') });
+        return answer();
+      }
+      return routed(request);
+    }) as unknown as typeof fetch);
+  }
+
+  async function type(selector: string, value: string): Promise<void> {
+    const element = panel().querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+    const proto =
+      element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(element, value);
+      element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    });
+  }
+
+  async function submitWriteOff(): Promise<void> {
+    const form = panel().querySelector('form[data-testid="write-off"]') as HTMLFormElement;
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+  }
+
+  test('a DAMAGED row is labelled and offers Write off; the write-off sends a NEGATIVE damaged adjustment and re-reads', async () => {
+    withDamaged(() => json(201, { event: { id: 'e-1', type: 'stock.adjusted' }, onHand: { quantity: 2 } }));
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(panelText()).toContain('Damaged (not sellable)');
+    const offers = ([...panel().querySelectorAll('button')] as HTMLButtonElement[]).filter((b) => b.textContent === 'Write off');
+    expect(offers).toHaveLength(2); // the two DAMAGED rows only
+    const readsBefore = stockReads().length;
+    await click(offers[0]!);
+    await type('input[aria-label="Quantity to write off"]', '4');
+    await submitWriteOff();
+    // The note is required — nothing was sent.
+    expect(posted).toHaveLength(0);
+    expect(panelText()).toContain('Add a note');
+    await type('textarea[aria-label="Write-off note"]', 'Crushed cartons scrapped');
+    await submitWriteOff();
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.body).toEqual({
+      warehouseId: WH,
+      skuId: SKU_SPF,
+      binId: BIN_DMG,
+      quantityDelta: -4,
+      reasonCode: 'damaged',
+      note: 'Crushed cartons scrapped',
+    });
+    expect(posted[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(panelText()).toContain('Written off');
+    expect(stockReads().length).toBeGreaterThan(readsBefore);
+  });
+
+  test('a batch-tracked SKU lists the bin’s batches (binId sent) and writes off one batch with the override reason', async () => {
+    withDamaged(() => json(201, { event: { id: 'e-2', type: 'stock.adjusted' }, onHand: { quantity: 0 } }));
+    view = render(<InventoryScreen />);
+    await settle();
+    const offers = ([...panel().querySelectorAll('button')] as HTMLButtonElement[]).filter((b) => b.textContent === 'Write off');
+    await click(offers[1]!); // the serum row (batch-tracked)
+    const batchRead = batchListReads().at(-1)!;
+    expect(batchRead.params).toEqual({ skuId: SKU_SERUM, binId: BIN_DMG });
+    // Only batches holding stock are offered (LOT-B is at 0).
+    const options = [...panel().querySelectorAll('select option')].map((o) => o.textContent ?? '');
+    expect(options.some((o) => o.startsWith('LOT-A'))).toBe(true);
+    expect(options.some((o) => o.startsWith('LOT-B'))).toBe(false);
+    await type('select', 'LOT-A');
+    await type('input[aria-label="Quantity to write off"]', '3');
+    await type('textarea[aria-label="Write-off note"]', 'Leaking bottles');
+    await submitWriteOff();
+    expect(posted[0]!.body).toMatchObject({ quantityDelta: -3, batch: { code: 'LOT-A', overrideReason: 'damaged write-off' } });
+  });
+
+  test('over the threshold (202): Pending approval, with a link to the approval queue', async () => {
+    withDamaged(() => json(202, { pendingAdjustment: { id: 'p-1', status: 'pending' } }));
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(([...panel().querySelectorAll('button')] as HTMLButtonElement[]).find((b) => b.textContent === 'Write off')!);
+    await type('input[aria-label="Quantity to write off"]', '5');
+    await type('textarea[aria-label="Write-off note"]', 'Water damage');
+    await submitWriteOff();
+    expect(panelText()).toContain('Pending approval');
+    const link = panel().querySelector('a[href="/conflicts?queue=adjustment-pendings"]');
+    expect(link?.textContent).toBe('Open the approval queue');
+  });
+
+  test('a refusal is worded by code, and the retry of the SAME draft reuses the key', async () => {
+    let calls = 0;
+    withDamaged(() => {
+      calls += 1;
+      return problem(400, 'damaged-bin-write-off-only');
+    });
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(([...panel().querySelectorAll('button')] as HTMLButtonElement[]).find((b) => b.textContent === 'Write off')!);
+    await type('input[aria-label="Quantity to write off"]', '1');
+    await type('textarea[aria-label="Write-off note"]', 'Scrap');
+    await submitWriteOff();
+    await submitWriteOff();
+    expect(calls).toBe(2);
+    expect(posted[0]!.key).toBe(posted[1]!.key);
+    expect(panelText()).toContain('The DAMAGED bin only takes a write-off');
+    // An edit renews the key.
+    await type('input[aria-label="Quantity to write off"]', '2');
+    await submitWriteOff();
+    expect(posted[2]!.key).not.toBe(posted[1]!.key);
+  });
+
+  test('EC6: a warehouse switch closes an open write-off and drops the last outcome banner', async () => {
+    withDamaged(() => json(201, { event: { id: 'e-9', type: 'stock.adjusted' }, onHand: { quantity: 1 } }));
+    view = render(<InventoryScreen />);
+    await settle();
+    const offer = () => ([...panel().querySelectorAll('button')] as HTMLButtonElement[]).filter((b) => b.textContent === 'Write off');
+    await click(offer()[0]!);
+    await type('input[aria-label="Quantity to write off"]', '1');
+    await type('textarea[aria-label="Write-off note"]', 'Scrap');
+    await submitWriteOff();
+    expect(panelText()).toContain('Written off');
+    await click(offer()[1]!);
+    expect(panel().querySelector('form[data-testid="write-off"]')).not.toBeNull();
+    await act(async () => {
+      writeActiveWarehouseId(T, WH2);
+    });
+    await settle();
+    expect(panel().querySelector('form[data-testid="write-off"]')).toBeNull();
+    expect(panelText()).not.toContain('Written off');
+  });
+
+  test('a role without stock.adjust sees the DAMAGED rows but no Write off', async () => {
+    writeSession({ ...session(), user: { ...session().user, role: 'accountant' } } as StoredSession);
+    withDamaged(() => json(201, {}));
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(panelText()).toContain('Damaged (not sellable)');
+    expect(([...panel().querySelectorAll('button')] as HTMLButtonElement[]).some((b) => b.textContent === 'Write off')).toBe(false);
+  });
+});

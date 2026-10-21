@@ -4,6 +4,8 @@ import { ApiProblem } from '@/lib/api/client';
 import type { CountVarianceEntryResponseDto } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from './outbound-orders';
 import {
+  GRN_DAMAGED_BIN_CONFLICT_GUIDANCE,
+  grnLineQuantityWords,
   MAX_CONSIDERED_EVENT_SEQS,
   RETURN_RECEIVE_REVIEW_GUIDANCE,
   RETURN_RECAPTURE_GUIDANCE,
@@ -773,5 +775,39 @@ describe('story 2-3a — a refused device gate-in unload (gate-in.unload)', () =
       heading: 'unknown gate-in — unload not recorded',
       lines: ['Unload — weird-code'],
     });
+  });
+});
+
+describe('story 2-4a — damaged and short on GRN review rows', () => {
+  test('a line without damage or short reads "× qty" exactly as before; with either, three parts — never "× 0"', () => {
+    expect(grnLineQuantityWords({ qty: 3 })).toBe('× 3');
+    expect(grnLineQuantityWords({ qty: 3, damagedQty: 0, shortQty: 0 })).toBe('× 3');
+    expect(grnLineQuantityWords({ qty: 3, damagedQty: 1, damageReasonCode: 'wet', shortQty: 2, shortReasonCode: 'not-shipped' })).toBe(
+      'good 3 · damaged 1 (wet) · short 2 (not shipped)',
+    );
+    expect(grnLineQuantityWords({ qty: 0, damagedQty: 4, damageReasonCode: 'torn-packaging' })).toBe('good 0 · damaged 4 (torn packaging)');
+  });
+
+  test('a refused-lines row renders the three parts in its line', () => {
+    const summary = rejectedOpSummary({
+      opType: 'grn.lines-refused',
+      problemCode: 'sku-client-mismatch',
+      payload: {
+        grnCode: 'GRN-0007',
+        clientLabel: 'Acme',
+        lines: [{ skuId: 's-1', qty: 3, damagedQty: 1, damageReasonCode: 'crushed', batchCode: null }],
+        refusals: [{ lineIndex: 0, skuId: 's-1', skuCode: 'TEA', reason: 'sku-client-mismatch', skuClientLabel: 'Beta' }],
+      },
+    });
+    expect(summary?.lines).toEqual(["TEA good 3 · damaged 1 (crushed) — another client's SKU (Beta)"]);
+  });
+
+  test('a device grn.submit refused with damaged-bin-conflict reads the retire-then-apply remedy', () => {
+    expect(rejectedOpGuidance({ opType: 'grn.submit', problemCode: 'damaged-bin-conflict', payload: {} })).toEqual([GRN_DAMAGED_BIN_CONFLICT_GUIDANCE]);
+    // CR1 — pinned: an administrator's re-code, never a retire (a retire frees nothing).
+    expect(GRN_DAMAGED_BIN_CONFLICT_GUIDANCE).toBe(
+      'A zone or bin coded DAMAGED blocks the system damaged bin, so this receipt booked nothing. An administrator must re-code that location (migration 0087 re-codes such locations); then apply this row to receive it again.',
+    );
+    expect(GRN_DAMAGED_BIN_CONFLICT_GUIDANCE).not.toMatch(/retire/i);
   });
 });

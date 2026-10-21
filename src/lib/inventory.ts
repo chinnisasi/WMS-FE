@@ -14,7 +14,7 @@ import type { ResourceState } from '@/lib/resource-state';
 /**
  * The system bins in words. The codes are the backend's own constants
  * (`wms-be src/modules/tenancy/receiving-bin.ts`: RECEIVING, QC-HOLD,
- * IN-TRANSIT, RETURNS). Stock in them is real stock in the building, so the
+ * IN-TRANSIT, RETURNS, DAMAGED). Stock in them is real stock in the building, so the
  * rows are shown — labelled, never hidden (totals must agree with the ledger).
  */
 export const SYSTEM_BIN_LABEL: Readonly<Record<string, string>> = {
@@ -22,6 +22,8 @@ export const SYSTEM_BIN_LABEL: Readonly<Record<string, string>> = {
   'QC-HOLD': 'QC hold (not sellable)',
   RETURNS: 'Returns',
   'IN-TRANSIT': 'In transit',
+  // Story 2-4a — units received damaged: on hand, not sellable, leave only by a write-off.
+  DAMAGED: 'Damaged (not sellable)',
 };
 
 /**

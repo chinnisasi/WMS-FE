@@ -9,6 +9,7 @@ import { fetchApiPlaceQcHold, fetchApiReleaseQcHold, fetchApiReleaseReceiptQcHol
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import {
   useBinCodeMap,
+  useBinMetaMap,
   useGoodsReceipts,
   usePurchaseOrders,
   useQcHolds,
@@ -39,6 +40,8 @@ import { readyClients } from '@/lib/use-clients';
 import { clientFilterForDrill, clientFilterKey, hiddenByClientFilterNote } from '@/lib/active-client';
 import { poCreatedOutcome } from '@/lib/purchase-orders';
 import { grnGateInLabel } from '@/lib/gate-ins';
+import { grnDamagedSuffix, grnLineAppliedLabel, grnLineConditionLabel, grnShortSuffix } from '@/lib/grn-lines';
+import { useGoodsReceiptLines } from '@/lib/use-grn-lines';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { ulid } from '@/lib/ulid';
 import { grnDocument, notifyInboundChanged } from '@/lib/asns';
@@ -61,7 +64,7 @@ import {
 } from '@/lib/inbound-tabs';
 import { useInboundTabCounts, type InboundTabCounts } from '@/lib/use-inbound-tab-counts';
 
-import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
@@ -469,6 +472,11 @@ function GoodsReceiptsCard({
   clearHref?: string;
 }) {
   const grns = useGoodsReceipts(warehouseId, active.filter, drill);
+  // Story 2-4a — the expanded row (one at a time), keyed to its warehouse
+  // (guide §1.5): a warehouse switch closes it.
+  const [expandedFor, setExpandedFor] = useState<{ warehouseId: string | null; grnId: string } | null>(null);
+  const expandedId = expandedFor !== null && expandedFor.warehouseId === warehouseId ? expandedFor.grnId : null;
+  const skuMap = useSkuMap();
   // Story 1-1 — the receipt's client (the PO's, the ASN's, or a blind
   // receipt's chosen one), shown once the tenant holds more than its own
   // client. An older receipt the backfill could not attribute reads "—".
@@ -480,7 +488,23 @@ function GoodsReceiptsCard({
   );
 
   const columns: readonly DataTableColumn<GoodsReceiptEntryDto>[] = [
-    { key: 'code', header: 'GRN code', render: (grn) => <span className="font-mono text-xs">{grn.code}</span> },
+    {
+      // Story 2-4a — the code opens the receipt's lines (good / damaged / short).
+      key: 'code',
+      header: 'GRN code',
+      render: (grn) => (
+        <button
+          type="button"
+          aria-expanded={expandedId === grn.id}
+          aria-controls={expandedRowId(grn.id)}
+          aria-label={`${expandedId === grn.id ? 'Hide' : 'Show'} the lines of ${grn.code}`}
+          onClick={() => setExpandedFor(expandedId === grn.id ? null : { warehouseId, grnId: grn.id })}
+          className="font-mono text-xs text-(--primary) underline underline-offset-2"
+        >
+          {grn.code}
+        </button>
+      ),
+    },
     ...(showClients(clients)
       ? [
           {
@@ -515,18 +539,22 @@ function GoodsReceiptsCard({
       key: 'units',
       header: 'Units',
       numeric: true,
-      render: (grn) =>
-        grn.appliedUnits === grn.totalUnits ? (
-          String(grn.totalUnits)
-        ) : (
-          // The excess is pending an over-receipt decision (Conflicts & Reviews).
-          <span>
-            {grn.appliedUnits}{' '}
-            <span className="text-(--muted-foreground)">
-              (+{grn.totalUnits - grn.appliedUnits} pending)
-            </span>
-          </span>
-        ),
+      render: (grn) => (
+        <span>
+          {grn.appliedUnits === grn.totalUnits ? (
+            String(grn.totalUnits)
+          ) : (
+            // The excess is pending an over-receipt decision (Conflicts & Reviews).
+            <>
+              {grn.appliedUnits}{' '}
+              <span className="text-(--muted-foreground)">(+{grn.totalUnits - grn.appliedUnits} pending)</span>
+            </>
+          )}
+          {/* Story 2-4a — damaged units went to the DAMAGED bin (not sellable); short is recorded only. */}
+          {grnDamagedSuffix(grn) !== '' && <span className="text-(--muted-foreground)">{grnDamagedSuffix(grn)}</span>}
+          {grnShortSuffix(grn) !== '' && <span className="text-(--muted-foreground)">{grnShortSuffix(grn)}</span>}
+        </span>
+      ),
     },
     {
       key: 'recordedAt',
@@ -559,7 +587,7 @@ function GoodsReceiptsCard({
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its receipts.'
-            : `${warehouseLabel} — newest first. Each receipt names its document — a PO, an ASN, or Blind; "(+N pending)" units wait on an over-receipt decision.`}
+            : `${warehouseLabel} — newest first. Each receipt names its document — a PO, an ASN, or Blind; "(+N pending)" units wait on an over-receipt decision; "+N damaged" units went to the DAMAGED bin (not sellable). Open a code for its lines.`}
         </div>
       </div>
 
@@ -573,6 +601,7 @@ function GoodsReceiptsCard({
           rows={grns.state === 'ready' ? grns.data.items : []}
           nextCursor={grns.state === 'ready' ? grns.data.nextCursor : null}
           onCursor={grns.onCursor}
+          renderExpanded={(grn) => (expandedId === grn.id ? <GoodsReceiptLinesPanel grnId={grn.id} skuMap={skuMap} /> : null)}
           emptyMessage={
             grns.state === 'loading'
               ? 'Loading receipts…'
@@ -585,6 +614,61 @@ function GoodsReceiptsCard({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * The SYSTEM bins a QC hold can never originate in (each a guaranteed 400 on
+ * the server — QC-HOLD, RETURNS, DAMAGED). Judged on the system flag AND the
+ * code: a user bin that happens to share a code stays holdable (story 2-4a,
+ * code review BH5/VG3).
+ */
+const NOT_HOLDABLE_SYSTEM_BIN_CODES: ReadonlySet<string> = new Set(['QC-HOLD', 'RETURNS', 'DAMAGED']);
+
+/** Whether a bin may be a QC hold's origin (a bin missing from the map — its zone failed to list — stays offered, as before). */
+function qcHoldableBin(bin: { readonly code: string; readonly systemOwned: boolean } | undefined): boolean {
+  if (bin === undefined) return true;
+  return !(bin.systemOwned && NOT_HOLDABLE_SYSTEM_BIN_CODES.has(bin.code));
+}
+
+/**
+ * Story 2-4a — the expanded GRN row: each line's SKU and batch, its good
+ * units (and what applied), and its damaged and short quantities with their
+ * reasons.
+ */
+function GoodsReceiptLinesPanel({
+  grnId,
+  skuMap,
+}: {
+  grnId: string;
+  skuMap: Readonly<Record<string, SkuResponse>> | null;
+}) {
+  const lines = useGoodsReceiptLines(grnId);
+  if (lines.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading the lines…</div>;
+  if (lines.state === 'failed') return <ReadFailure word="Receipt lines unavailable" reason={lines.reason} onRetry={lines.reload} />;
+  return (
+    <div className="flex flex-col gap-0.5 py-1 text-xs" data-testid={`grn-lines-${grnId}`}>
+      {lines.data.length === 0 ? (
+        <div className="text-(--muted-foreground)">No lines settled on this receipt.</div>
+      ) : (
+        lines.data.map((line) => {
+          const sku = skuMap?.[line.skuId] ?? null;
+          return (
+            <div key={line.id} data-testid="grn-line">
+              <span className="font-mono">{line.skuCode}</span> {line.skuName}
+              {line.batchCode !== null && (
+                <>
+                  {' '}
+                  · batch <span className="font-mono">{line.batchCode}</span>
+                </>
+              )}{' '}
+              · {grnLineConditionLabel(line, sku)}
+              {grnLineAppliedLabel(line, sku)}
+            </div>
+          );
+        })
+      )}
+    </div>
   );
 }
 
@@ -988,7 +1072,9 @@ function PlaceQcHoldForm({
   // its open-holds read is every client's, so the scope picker stays honest.
   const openHolds = useQcHolds(warehouseId, 'open', null);
   const skus = useSkuMap();
-  const bins = useBinCodeMap(warehouseId);
+  const binMeta = useBinMetaMap(warehouseId);
+  // Story 2-4a: the codes for display; the system flag decides what a hold may originate in.
+  const bins = binMeta === null ? null : Object.fromEntries(Object.entries(binMeta).map(([id, bin]) => [id, bin.code]));
   const [picked, setPicked] = useState<string>('');
   const [reason, setReason] = useState('');
   const [placing, setPlacing] = useState(false);
@@ -1016,7 +1102,9 @@ function PlaceQcHoldForm({
     scopesData === null || bins === null
       ? []
       : scopesData.rows.filter(
-          (row) => bins[row.binId] !== 'QC-HOLD' && !heldScopes.has(`${row.skuId}:${row.binId}`),
+          // Story 2-4a — nor the system DAMAGED bin (a guaranteed 400: damaged
+          // units leave only by a write-off).
+          (row) => qcHoldableBin(binMeta?.[row.binId]) && !heldScopes.has(`${row.skuId}:${row.binId}`),
         );
 
   async function submit() {

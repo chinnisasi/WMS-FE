@@ -440,6 +440,17 @@ export const GRN_SHELF_LIFE_GUIDANCE =
 export const GRN_LICENCE_GUIDANCE =
   'No valid client and site licence covered these goods on the receipt date: an owner can accept them anyway with a note saying why (they book as on any receipt), or discard this row and return the goods. Add or renew the licence under Compliance → Licences.';
 
+/**
+ * Story 2-4a — a device `grn.submit` refused whole with `damaged-bin-conflict`
+ * (defensive since code review CR1): a user zone or bin coded DAMAGED blocks
+ * the system damaged bin. Migration 0087 re-codes every such pre-rule
+ * location, and nothing in the product can — codes cannot be renamed and a
+ * retire frees nothing — so the remedy is an administrator's re-code, never a
+ * retire.
+ */
+export const GRN_DAMAGED_BIN_CONFLICT_GUIDANCE =
+  'A zone or bin coded DAMAGED blocks the system damaged bin, so this receipt booked nothing. An administrator must re-code that location (migration 0087 re-codes such locations); then apply this row to receive it again.';
+
 /** Story 1-6d — what a non-owner reads where the licence row's Accept anyway would be. */
 export const GRN_LICENCE_OWNER_ONLY = 'An owner can accept these';
 
@@ -470,6 +481,8 @@ export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'p
   // Story 2-3a — a refused device unload: Discard only; the web re-records it.
   if (entry.opType === 'gate-in.unload') return [gateInUnloadGuidance(entry.problemCode)];
   if (entry.opType === 'grn.shelf-life-refused') return [GRN_SHELF_LIFE_GUIDANCE];
+  // Story 2-4a — the whole receipt was refused for the DAMAGED code collision.
+  if (entry.opType === 'grn.submit' && entry.problemCode === 'damaged-bin-conflict') return [GRN_DAMAGED_BIN_CONFLICT_GUIDANCE];
   if (entry.opType === 'grn.licence-refused') return [GRN_LICENCE_GUIDANCE];
   // Story 1-4b — one line per inactive SKU the receipt booked.
   if (isInactiveSkuFlag(entry)) return inactiveSkuCodesOf(entry).map(inactiveSkuGuidance);
@@ -519,6 +532,45 @@ export function waivedRerunSummary(outcome: Record<string, unknown> | null): str
   return codes.length === 0 ? head : `${head}; ${refusedWords(codes)}`;
 }
 
+/** Story 2-4a — the damage reasons in words (the server's `DAMAGE_REASON_CODES`). */
+const DAMAGE_REASON_WORDS: Readonly<Record<string, string>> = {
+  crushed: 'crushed',
+  wet: 'wet',
+  'torn-packaging': 'torn packaging',
+  broken: 'broken',
+  leaking: 'leaking',
+  pest: 'pest',
+  other: 'other',
+};
+
+/** Story 2-4a — the short reasons in words (the server's `SHORT_REASON_CODES`). */
+const SHORT_REASON_WORDS: Readonly<Record<string, string>> = {
+  'not-shipped': 'not shipped',
+  'short-packed': 'short-packed',
+  'lost-in-transit': 'lost in transit',
+  other: 'other',
+};
+
+/**
+ * Story 2-4a — a stored GRN line's quantities in words. A line without
+ * damage or short reads `× 3` exactly as before (a pre-2-4a row is
+ * unchanged); a line carrying either reads `good 3 · damaged 1 (wet) · short
+ * 2 (not shipped)` — never `× 0` for an all-damaged line. Read defensively (a
+ * stored row is data).
+ */
+export function grnLineQuantityWords(item: Record<string, unknown>): string {
+  const qty = typeof item['qty'] === 'number' ? item['qty'] : '?';
+  const damaged = typeof item['damagedQty'] === 'number' && item['damagedQty'] > 0 ? item['damagedQty'] : null;
+  const short = typeof item['shortQty'] === 'number' && item['shortQty'] > 0 ? item['shortQty'] : null;
+  if (damaged === null && short === null) return `× ${qty}`;
+  const reason = (words: Readonly<Record<string, string>>, code: unknown) =>
+    typeof code === 'string' ? ` (${words[code] ?? code})` : '';
+  const parts = [`good ${qty}`];
+  if (damaged !== null) parts.push(`damaged ${damaged}${reason(DAMAGE_REASON_WORDS, item['damageReasonCode'])}`);
+  if (short !== null) parts.push(`short ${short}${reason(SHORT_REASON_WORDS, item['shortReasonCode'])}`);
+  return parts.join(' · ');
+}
+
 function grnRefusalWords(reason: string): string {
   return (GRN_REFUSAL_LABEL as Readonly<Record<string, string>>)[reason] ?? reason;
 }
@@ -548,8 +600,7 @@ function grnLinesRefusedSummary(
       (typeof refusal['skuCode'] === 'string' ? refusal['skuCode'] : null) ??
       skuLabel(skuId) ??
       (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
-    const qty = typeof item['qty'] === 'number' ? item['qty'] : '?';
-    const parts = [`${sku} × ${qty}`];
+    const parts = [`${sku} ${grnLineQuantityWords(item)}`];
     const batchCode = typeof refusal['batchCode'] === 'string' ? refusal['batchCode'] : item['batchCode'];
     if (typeof batchCode === 'string') parts.push(`batch ${batchCode}`);
     // Story 1-2b — the expiry the rule judged (the refusal's; else the line's own).
@@ -876,7 +927,9 @@ function inactiveSkuReceivedSummary(
       (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
     const qty = typeof line['qty'] === 'number' ? line['qty'] : '?';
     const uom = typeof line['uom'] === 'string' ? ` ${line['uom']}` : '';
-    return `${sku} × ${qty}${uom} — booked, SKU inactive`;
+    // Story 2-4a — a line that also booked damaged units into DAMAGED says so.
+    const damaged = typeof line['damagedQty'] === 'number' && line['damagedQty'] > 0 ? ` + ${line['damagedQty']}${uom} damaged` : '';
+    return `${sku} × ${qty}${uom}${damaged} — booked, SKU inactive`;
   });
   const count = lines.length;
   return { heading: `${grn} — ${count} line${count === 1 ? '' : 's'} of inactive SKUs booked`, lines: rendered };

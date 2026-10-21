@@ -1780,7 +1780,7 @@ export type LedgerReferenceDocDto = {
      */
     overrideReason?: string;
     /**
-     * The GRN the movement landed under (grn-receipt arm only)
+     * The GRN the movement landed under (grn-receipt arm only — a `grn.received` into Receiving, or (story 2-4a) a `grn.damaged` into the system DAMAGED bin)
      */
     grnId?: string;
     /**
@@ -1788,7 +1788,7 @@ export type LedgerReferenceDocDto = {
      */
     poId?: string;
     /**
-     * The exact PO line (grn-receipt arm only — absent on the blind arm and on an unmatched line)
+     * The exact PO line (grn-receipt arm only — absent on the blind arm, on an unmatched line and on every `grn.damaged` event: damaged units credit no document line)
      */
     poLineId?: string;
     /**
@@ -1799,6 +1799,10 @@ export type LedgerReferenceDocDto = {
      * Story 21-6 — the exact ASN line credited (grn-receipt arm only)
      */
     asnLineId?: string;
+    /**
+     * The GRN line the movement belongs to: on a `putaway.placed` event the line whose received stock moved; (story 2-4a) on a `grn.damaged` event the line whose damaged units were booked into DAMAGED. Absent on every `grn.received` event
+     */
+    grnLineId?: string;
     /**
      * Story 9-3a — the pending adjustment an approval posted this event for (manual-adjustment arm, approvals only)
      */
@@ -2013,7 +2017,7 @@ export type StockEntryDto = {
      */
     binCode?: string;
     /**
-     * Whether the bin is a system bin (RECEIVING, QC-HOLD, RETURNS, IN-TRANSIT) — present only under `order=location`
+     * Whether the bin is a system bin (RECEIVING, QC-HOLD, RETURNS, IN-TRANSIT, DAMAGED) — present only under `order=location`
      */
     binSystemOwned?: boolean;
 };
@@ -3650,9 +3654,25 @@ export type GrnLineInputDto = {
      */
     expiryDate?: string | null;
     /**
-     * Physically received quantity. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     * The GOOD units received (story 2-4a — damaged units go in damagedQty, never here; 0 on an all-damaged line, but every line needs qty + damagedQty > 0). A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     qty: number;
+    /**
+     * Story 2-4a — units that arrived DAMAGED, booked into the warehouse's system DAMAGED bin (not sellable) and never crediting the PO or ASN line. Needs damageReasonCode when > 0. Refused (400) on a serial-tracked or catch-weight SKU. Omit (or 0) when none
+     */
+    damagedQty?: number | null;
+    /**
+     * Story 2-4a — why the damaged units are damaged; given exactly when damagedQty > 0
+     */
+    damageReasonCode?: 'crushed' | 'wet' | 'torn-packaging' | 'broken' | 'leaking' | 'pest' | 'other' | null;
+    /**
+     * Story 2-4a — units the supplier's invoice or challan listed that never arrived, typed at the dock. Recorded on the line only — no stock and no effect on the PO or ASN. Needs shortReasonCode when > 0. Omit (or 0) when none
+     */
+    shortQty?: number | null;
+    /**
+     * Story 2-4a — why the units are short; given exactly when shortQty > 0
+     */
+    shortReasonCode?: 'not-shipped' | 'short-packed' | 'lost-in-transit' | 'other' | null;
     /**
      * Catch weight (story 10.3): one captured weight in whole GRAMS per physical unit on this line — required for a catch-weight-tracked SKU, refused for every other SKU, and exactly qty entries long. It is a per-unit actual weight, never a quantity and never the parcel weight pack records.
      */
@@ -3717,7 +3737,7 @@ export type GrnLineDto = {
     batchId: string | null;
     batchCode: string | null;
     /**
-     * Physical truth: everything that arrived
+     * The good units that arrived (story 2-4a — damaged units are damagedQty; 0 on an all-damaged line)
      */
     qty: number;
     /**
@@ -3732,6 +3752,22 @@ export type GrnLineDto = {
      * Story 1-2b — the part of appliedQty past the open quantity that booked at once within the client's receiving tolerance (no over-receipt). Present only when > 0
      */
     toleranceQty?: number;
+    /**
+     * Story 2-4a — the units that arrived damaged, booked into the system DAMAGED bin (not sellable). Present only when > 0
+     */
+    damagedQty?: number;
+    /**
+     * Story 2-4a — why; present only beside damagedQty
+     */
+    damageReasonCode?: 'crushed' | 'wet' | 'torn-packaging' | 'broken' | 'leaking' | 'pest' | 'other';
+    /**
+     * Story 2-4a — the units short against the supplier's document (recorded only). Present only when > 0
+     */
+    shortQty?: number;
+    /**
+     * Story 2-4a — why; present only beside shortQty
+     */
+    shortReasonCode?: 'not-shipped' | 'short-packed' | 'lost-in-transit' | 'other';
     /**
      * Catch weight (story 10.3): the handling units this line produced, in the order their weights were supplied — present only on a catch-weight line. These ids are what a unit label carries and what the pack bench scans back.
      */
@@ -3763,7 +3799,26 @@ export type RejectedGrnLineDto = {
      */
     asnLineId?: string;
     skuId: string;
+    /**
+     * The line's good units, as sent (story 2-4a — 0 on an all-damaged line)
+     */
     qty: number;
+    /**
+     * Story 2-4a — the refused line's damaged units, as sent (not booked — the line went to review whole). Present only when > 0
+     */
+    damagedQty?: number;
+    /**
+     * Story 2-4a — present only beside damagedQty
+     */
+    damageReasonCode?: 'crushed' | 'wet' | 'torn-packaging' | 'broken' | 'leaking' | 'pest' | 'other';
+    /**
+     * Story 2-4a — the refused line's short units, as sent. Present only when > 0
+     */
+    shortQty?: number;
+    /**
+     * Story 2-4a — present only beside shortQty
+     */
+    shortReasonCode?: 'not-shipped' | 'short-packed' | 'lost-in-transit' | 'other';
     /**
      * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only). Story 1-2a: `client-departed` — a line of ANY receipt whose SKU's client has departed; also to review (Discard only — re-receive after an owner reactivates the client). Story 1-2b — the expiry rules, each per line: `expiry-on-untracked`, `expiry-before-mfg`, `batch-expiry-mismatch`, `expiry-required` (review, Discard only) and `shelf-life-short` (its own review row — Accept anyway with a note, or Discard). Story 1-6d: `licence-not-covered` — licence enforcement is on and no valid client and site licence covers the line's drug or food goods on the receipt's IST date; its own review row (`grn.licence-refused` — an owner may accept it anyway with a note, or discard it)
      */
@@ -4469,6 +4524,14 @@ export type CatalogSnapshotResponse = {
      * Story 2-3a (additive): the warehouse's open gate-ins — not gated out, gated in within the last 7 days, at most 200, newest first (decision 15). The dock records their unload and receives against them. An older server omits it
      */
     openGateIns: Array<CatalogOpenGateInDto>;
+    /**
+     * Story 2-4a (additive): the damage reason vocabulary — the handheld shows its Damaged control only when the snapshot carries it (an older server omits it), and refuses to confirm a draft holding damage against a snapshot without it
+     */
+    receiptDamageReasons: Array<'crushed' | 'wet' | 'torn-packaging' | 'broken' | 'leaking' | 'pest' | 'other'>;
+    /**
+     * Story 2-4a (additive): the short reason vocabulary — the Short control's gate, as receiptDamageReasons
+     */
+    receiptShortReasons: Array<'not-shipped' | 'short-packed' | 'lost-in-transit' | 'other'>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -4526,13 +4589,21 @@ export type GoodsReceiptEntryDto = {
      */
     lineCount: number;
     /**
-     * Physical units across all lines
+     * The good units across all lines (story 2-4a — damaged units are damagedUnits)
      */
     totalUnits: number;
     /**
      * Units applied immediately (the excess pends)
      */
     appliedUnits: number;
+    /**
+     * Story 2-4a — the damaged units across all lines (booked into the system DAMAGED bin); 0 when none
+     */
+    damagedUnits: number;
+    /**
+     * Story 2-4a — the units short against the supplier's documents across all lines (recorded only); 0 when none
+     */
+    shortUnits: number;
     /**
      * Row creation time (the keyset cursor field), ISO-8601 UTC
      */
@@ -4542,6 +4613,46 @@ export type GoodsReceiptEntryDto = {
 export type GoodsReceiptListResponse = {
     items: Array<GoodsReceiptEntryDto>;
     nextCursor?: string | null;
+};
+
+export type GoodsReceiptLineEntryDto = {
+    id: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * The good units (0 on an all-damaged line)
+     */
+    qty: number;
+    /**
+     * The good units applied at once (the rest pended as an over-receipt)
+     */
+    appliedQty: number;
+    /**
+     * The damaged units, booked into the system DAMAGED bin — present only when > 0
+     */
+    damagedQty?: number;
+    /**
+     * Present only beside damagedQty
+     */
+    damageReasonCode?: 'crushed' | 'wet' | 'torn-packaging' | 'broken' | 'leaking' | 'pest' | 'other';
+    /**
+     * The units short against the supplier's document (recorded only) — present only when > 0
+     */
+    shortQty?: number;
+    /**
+     * Present only beside shortQty
+     */
+    shortReasonCode?: 'not-shipped' | 'short-packed' | 'lost-in-transit' | 'other';
+};
+
+export type GoodsReceiptLinesResponse = {
+    /**
+     * The GRN's lines, in receipt order
+     */
+    items: Array<GoodsReceiptLineEntryDto>;
 };
 
 export type OverReceiptDto = {
@@ -8317,6 +8428,10 @@ export type ReceiptLineRecordDto = {
      * Applied at once (the rest pended as an over-receipt), base units — a decimal string
      */
     appliedQty: string;
+    /**
+     * Story 2-4a — the units that arrived damaged on this line (booked into the system DAMAGED bin), base units — a decimal string; present only when > 0 (an all-damaged line is still a receipt line)
+     */
+    damagedQty?: string;
     actorId: string;
     /**
      * The actor's email; null when the user is unknown
@@ -10220,7 +10335,7 @@ export type TenancyControllerCreateZoneErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Zone code already exists in this warehouse (duplicate-zone-code names the code), or the code is RETURNS — reserved for the system returns zone (reserved-location-code, story 13-2)
+     * Zone code already exists in this warehouse (duplicate-zone-code names the code), or the code is RETURNS or DAMAGED — reserved for the system returns and damaged zones (reserved-location-code, stories 13-2 and 2-4a)
      */
     409: ProblemDetailsDto;
     /**
@@ -10322,7 +10437,7 @@ export type TenancyControllerCreateBinErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Bin code already exists in this warehouse (duplicate-bin-code names the code), the code is RETURNS — reserved for the system returns bin (reserved-location-code, story 13-2), or the dedicated client has departed (client-departed, story 1-5b)
+     * Bin code already exists in this warehouse (duplicate-bin-code names the code), the code is RETURNS or DAMAGED — reserved for the system returns and damaged bins (reserved-location-code, stories 13-2 and 2-4a), or the dedicated client has departed (client-departed, story 1-5b)
      */
     409: ProblemDetailsDto;
     /**
@@ -10377,7 +10492,7 @@ export type TenancyControllerGenerateBinGridErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A generated code collides (duplicate-bin-code names the first conflicting code; nothing committed), a generated code is RETURNS (reserved-location-code, story 13-2), or the dedicated client has departed (client-departed, story 1-5b)
+     * A generated code collides (duplicate-bin-code names the first conflicting code; nothing committed), a generated code is RETURNS or DAMAGED (reserved-location-code, stories 13-2 and 2-4a), or the dedicated client has departed (client-departed, story 1-5b)
      */
     409: ProblemDetailsDto;
     /**
@@ -12704,7 +12819,7 @@ export type InventoryControllerAdjustStockData = {
 
 export type InventoryControllerAdjustStockErrors = {
     /**
-     * Missing or malformed Idempotency-Key, invalid body, or a Story 2.4 batch/serial arm violation (validation-failed): batch/serials on an untracked SKU, a tracked movement missing its arm, malformed batch dates (or expiry preceding mfg), overrideReason on an intake or missing on an override draw, duplicate serials, a quantityDelta that does not equal the serial count, or a reasonCode outside the closed adjustment vocabulary
+     * Missing or malformed Idempotency-Key, invalid body, or a Story 2.4 batch/serial arm violation (validation-failed): batch/serials on an untracked SKU, a tracked movement missing its arm, malformed batch dates (or expiry preceding mfg), overrideReason on an intake or missing on an override draw, duplicate serials, a quantityDelta that does not equal the serial count, or a reasonCode outside the closed adjustment vocabulary; a retired bin (bin-retired), the system QC-hold or IN-TRANSIT bin (qc-bin-not-adjustable), the system RETURNS bin (returns-bin-not-adjustable), or — story 2-4a — anything but a negative write-off on the system DAMAGED bin (damaged-bin-write-off-only, also at a pend's approval)
      */
     400: ProblemDetailsDto;
     /**
@@ -12904,7 +13019,7 @@ export type InventoryControllerApproveAdjustmentData = {
 
 export type InventoryControllerApproveAdjustmentErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or a malformed pendingId (validation-failed)
+     * Missing or malformed Idempotency-Key, or a malformed pendingId (validation-failed); the stored adjustment fails a guard re-run at approval — e.g. (story 2-4a) anything but a negative write-off on the system DAMAGED bin (damaged-bin-write-off-only)
      */
     400: ProblemDetailsDto;
     /**
@@ -13016,7 +13131,7 @@ export type InventoryControllerListEventsData = {
         /**
          * Story 9-1 — only events of these types (repeatable: `?type=a&type=b`; one value is a one-element list). An unknown type is refused (400 validation-failed naming the known set)
          */
-        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received'>;
+        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged'>;
         /**
          * Story 9-1 — only events RECORDED at or after this instant (`recorded_at` — the server stamp, never the device `occurred_at`). ISO-8601 with a zone designator
          */
@@ -15570,7 +15685,7 @@ export type ReceivingControllerSubmitGoodsReceiptData = {
 
 export type ReceivingControllerSubmitGoodsReceiptErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or an invalid body (validation-failed) — story 1-1: a clientId beside a poId or an asnId
+     * Missing or malformed Idempotency-Key, or an invalid body (validation-failed) — story 1-1: a clientId beside a poId or an asnId; story 2-4a: a damaged or short quantity without its reason, a reason with 0 or outside its vocabulary, a negative or over-maximum quantity, a line with qty + damagedQty = 0, or damage on a serial-tracked or catch-weight SKU
      */
     400: ProblemDetailsDto;
     /**
@@ -15586,7 +15701,7 @@ export type ReceivingControllerSubmitGoodsReceiptErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The document belongs to another warehouse (document-warehouse-mismatch — checked before the document's status, so a closed or cancelled document of another warehouse answers this too), the document has a status receiving does not know (po-not-open / asn-not-open — DEFENSIVE since story 21-9: a closed PO or a cancelled/closed ASN no longer refuses, the receipt pends for approval), a GRN line names a kit SKU — a kit never receives stock (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
+     * The document belongs to another warehouse (document-warehouse-mismatch — checked before the document's status, so a closed or cancelled document of another warehouse answers this too), the document has a status receiving does not know (po-not-open / asn-not-open — DEFENSIVE since story 21-9: a closed PO or a cancelled/closed ASN no longer refuses, the receipt pends for approval), a GRN line names a kit SKU — a kit never receives stock (kit-cannot-hold-stock, naming it), a line carries damaged units and a user zone or bin coded DAMAGED blocks the system damaged bin (damaged-bin-conflict, story 2-4a), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -15652,6 +15767,52 @@ export type ReceivingControllerGetCatalogSnapshotResponses = {
 };
 
 export type ReceivingControllerGetCatalogSnapshotResponse = ReceivingControllerGetCatalogSnapshotResponses[keyof ReceivingControllerGetCatalogSnapshotResponses];
+
+export type ReceivingControllerListGoodsReceiptLinesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The goods receipt
+         */
+        grnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/lines';
+};
+
+export type ReceivingControllerListGoodsReceiptLinesErrors = {
+    /**
+     * Malformed grnId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such goods receipt in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReceivingControllerListGoodsReceiptLinesError = ReceivingControllerListGoodsReceiptLinesErrors[keyof ReceivingControllerListGoodsReceiptLinesErrors];
+
+export type ReceivingControllerListGoodsReceiptLinesResponses = {
+    /**
+     * The GRN's lines in receipt order
+     */
+    200: GoodsReceiptLinesResponse;
+};
+
+export type ReceivingControllerListGoodsReceiptLinesResponse = ReceivingControllerListGoodsReceiptLinesResponses[keyof ReceivingControllerListGoodsReceiptLinesResponses];
 
 export type ReceivingControllerListOverReceiptsData = {
     body?: never;

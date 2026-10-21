@@ -76,6 +76,7 @@ import {
   inboundControllerGetPurchaseOrder,
   inboundControllerListAsns,
   inboundControllerListPurchaseOrders,
+  inventoryControllerAdjustStock,
   inventoryControllerApproveAdjustment,
   partnersControllerCreatePartner,
   partnersControllerCreatePartnerLink,
@@ -110,6 +111,7 @@ import {
   outboundControllerListWaves,
   outboundControllerReleaseWave,
   receivingControllerApproveOverReceipt,
+  receivingControllerListGoodsReceiptLines,
   receivingControllerListGoodsReceipts,
   receivingControllerListOverReceipts,
   receivingControllerListQcHolds,
@@ -327,6 +329,7 @@ import type {
   InvoiceListResponse,
   InvoiceResponse,
   GenerateBinsDto,
+  GoodsReceiptLinesResponse,
   GoodsReceiptListResponse,
   HealthResponse,
   MergeBinDto,
@@ -365,6 +368,9 @@ import type {
   BatchAlertResponse,
   BatchDetailResponse,
   BatchListResponse,
+  StockAdjustmentDto,
+  StockAdjustmentPendingResponse,
+  StockAdjustmentResponse,
   ExpiryPolicyResponse,
   SuggestedPoListResponse,
   SubmitSuggestedPoResponse,
@@ -2974,11 +2980,13 @@ export async function fetchApiListBatches(
   tenantId: string,
   warehouseId: string,
   skuId: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; binId?: string },
 ): Promise<BatchListResponse> {
   const { data, error } = await inventoryControllerListBatches({
     path: { tenantId, warehouseId },
-    query: { skuId },
+    // Story 2-4a — `binId` narrows each batch's on-hand to one bin (the
+    // damaged write-off lists the DAMAGED bin's batches); absent = the warehouse.
+    query: options?.binId === undefined ? { skuId } : { skuId, binId: options.binId },
     signal: options?.signal,
   });
   if (error || !data) {
@@ -4875,4 +4883,45 @@ export async function fetchApiCancelReturn(
   });
   if (error || !data) throw unwrapError(error, 400);
   return data;
+}
+
+/**
+ * Story 2-4a — one goods receipt's lines (the expandable GRN row): SKU,
+ * batch, good and applied units, and the damaged and short quantities with
+ * their reasons. Any staff role.
+ */
+export async function fetchApiListGoodsReceiptLines(
+  tenantId: string,
+  grnId: string,
+  options?: { signal?: AbortSignal },
+): Promise<GoodsReceiptLinesResponse> {
+  const { data, error } = await receivingControllerListGoodsReceiptLines({ path: { tenantId, grnId }, signal: options?.signal });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-4a — a stock adjustment (`stock.adjust`), the web's first: the
+ * damaged write-off sends a NEGATIVE delta on the system DAMAGED bin. Keyed;
+ * answers the applied adjustment (201) or its pend (202, over the tenant's
+ * threshold) — told apart by `pendingAdjustment`.
+ */
+export async function fetchApiAdjustStock(
+  tenantId: string,
+  body: StockAdjustmentDto,
+  idempotencyKey: string,
+): Promise<{ kind: 'applied'; adjustment: StockAdjustmentResponse } | { kind: 'pending'; pending: StockAdjustmentPendingResponse }> {
+  const { data, error } = await inventoryControllerAdjustStock({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return 'pendingAdjustment' in data
+    ? { kind: 'pending', pending: data as StockAdjustmentPendingResponse }
+    : { kind: 'applied', adjustment: data as StockAdjustmentResponse };
 }

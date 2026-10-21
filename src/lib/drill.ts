@@ -76,6 +76,8 @@ export const LEDGER_EVENT_TYPES = [
   'transfer.outbound',
   'transfer.inbound',
   'return.received',
+  // Story 2-4a — a receipt's damaged units booked into the DAMAGED bin.
+  'grn.damaged',
 ] as const satisfies readonly LedgerEventType[];
 
 /** Record-typed: a new registry type must be labelled to compile. */
@@ -93,6 +95,7 @@ export const LEDGER_TYPE_LABEL: Readonly<Record<LedgerEventType, string>> = {
   'transfer.outbound': 'Transferred out',
   'transfer.inbound': 'Transferred in',
   'return.received': 'Return received',
+  'grn.damaged': 'Received damaged',
 };
 
 /** A ledger event's type as words; an unregistered type prints as itself. */

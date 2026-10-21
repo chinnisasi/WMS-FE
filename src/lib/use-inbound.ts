@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 import {
   fetchApiGetAsn,
@@ -783,12 +783,31 @@ export function useStockScopes(
  * own bin pages; both chains walk `fetchAllPages`.
  */
 export function useBinCodeMap(warehouseId: string | null): Readonly<Record<string, string>> | null {
+  const meta = useBinMetaMap(warehouseId);
+  return useMemo(
+    () => (meta === null ? null : Object.fromEntries(Object.entries(meta).map(([id, bin]) => [id, bin.code]))),
+    [meta],
+  );
+}
+
+/** One bin's code and system flag (story 2-4a — a system bin is told apart from a user bin with the same code). */
+export interface BinMeta {
+  readonly code: string;
+  readonly systemOwned: boolean;
+}
+
+/**
+ * The active warehouse's bin id → {code, systemOwned} map — the
+ * `useBinCodeMap` read with the system flag kept (story 2-4a: the QC hold
+ * picker excludes SYSTEM bins by code, never a user bin that shares one).
+ */
+export function useBinMetaMap(warehouseId: string | null): Readonly<Record<string, BinMeta>> | null {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
-  const [map, setMap] = useState<{ tenantId: string; warehouseId: string; map: Record<string, string> } | null>(
+  const [map, setMap] = useState<{ tenantId: string; warehouseId: string; map: Record<string, BinMeta> } | null>(
     null,
   );
 
@@ -800,14 +819,14 @@ export function useBinCodeMap(warehouseId: string | null): Readonly<Record<strin
         const zones = await fetchAllPages<ZoneResponse>((options) =>
           fetchApiListZones(tenantId, warehouseId, options),
         );
-        const binCode: Record<string, string> = {};
+        const binCode: Record<string, BinMeta> = {};
         await Promise.all(
           zones.map(async (zone) => {
             try {
               const bins = await fetchAllPages<BinResponse>((options) =>
                 fetchApiListBins(tenantId, warehouseId, zone.id, options),
               );
-              for (const bin of bins) binCode[bin.id] = bin.code;
+              for (const bin of bins) binCode[bin.id] = { code: bin.code, systemOwned: bin.systemOwned === true };
             } catch {
               // A zone that fails to list leaves its bins showing "—".
             }
