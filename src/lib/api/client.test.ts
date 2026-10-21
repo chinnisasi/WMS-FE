@@ -88,6 +88,12 @@ import {
   fetchApiListStock,
   fetchApiListPutawayTasks,
   fetchApiListVariances,
+  fetchApiListCountTasks,
+  fetchApiGetCountTask,
+  fetchApiCreateCounts,
+  fetchApiGetCountPolicies,
+  fetchApiUpsertCountPolicies,
+  fetchApiDeleteCountPolicy,
   fetchApiRejectAdjustmentPending,
   fetchApiResolveVariance,
   fetchApiDispatchOrder,
@@ -2904,5 +2910,85 @@ describe('story 2-4a — the GRN lines read, the batch list by bin, the stock ad
     expect(await fetchApiAdjustStock(T, body, KEY)).toEqual({ kind: 'pending', pending: { pendingAdjustment: { id: 'p-1' } } as never });
     stubFetch(400, { code: 'damaged-bin-write-off-only', title: 't', status: 400, detail: 'd' });
     await expect(fetchApiAdjustStock(T, body, KEY)).rejects.toMatchObject({ code: 'damaged-bin-write-off-only' });
+  });
+});
+
+/**
+ * Story 3-5a — the Counts surface's six wrappers: the list and detail reads
+ * (no clientId — the list is exempt from the client filter), the bulk
+ * create's two arms with the draft key, and the schedule's read, set and
+ * remove, each write with its key.
+ */
+describe('3-5a wrappers (count tasks, bulk create, count policies)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const W = '0198f7a2-1b3c-7d4e-8f90-778899aabbcc';
+  const TASK = '0198f7a2-1b3c-7d4e-8f90-5566778899aa';
+  const ZONE = '0198f7a2-1b3c-7d4e-8f90-8899aabbccdd';
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}`;
+
+  test('the list GET forwards its filters and cursor; a bare call sends no query', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListCountTasks(SESSION.tenant.id, { warehouseId: W, status: 'completed', origin: 'recount', cursor: 'c1', limit: 50 });
+    const url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`${base()}/movements/counts`);
+    expect(Object.fromEntries(url.searchParams)).toEqual({ warehouseId: W, status: 'completed', origin: 'recount', cursor: 'c1', limit: '50' });
+    expect(url.searchParams.has('clientId')).toBe(false);
+    await fetchApiListCountTasks(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    clearSession();
+  });
+
+  test('the detail GET hits the task path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { task: { id: TASK }, lines: [], variances: [], recountTaskId: null });
+    await fetchApiGetCountTask(SESSION.tenant.id, TASK);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/movements/counts/${TASK}`);
+    expect(lastRequest!.method).toBe('GET');
+    clearSession();
+  });
+
+  test('the bulk create POSTs exactly one of binIds / zoneId with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { created: [], skipped: [] });
+    await fetchApiCreateCounts(SESSION.tenant.id, { warehouseId: W, binIds: ['b1', 'b2'] }, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/movements/counts`);
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ warehouseId: W, binIds: ['b1', 'b2'] });
+    await fetchApiCreateCounts(SESSION.tenant.id, { warehouseId: W, zoneId: ZONE }, KEY);
+    expect(await lastRequest!.json()).toEqual({ warehouseId: W, zoneId: ZONE });
+    clearSession();
+  });
+
+  test('a 422 too-many-bins surfaces as an ApiProblem with its code', async () => {
+    writeSession(SESSION);
+    stubFetch(422, { code: 'too-many-bins', status: 422, title: 'Too many bins', detail: 'at most 500' });
+    try {
+      await fetchApiCreateCounts(SESSION.tenant.id, { warehouseId: W, zoneId: ZONE }, KEY);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiProblem);
+      expect((error as ApiProblem).code).toBe('too-many-bins');
+    }
+    clearSession();
+  });
+
+  test('the schedule: GET, PUT one class with the key, DELETE one class with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { policies: [] });
+    const path = `${base()}/movements/warehouses/${W}/count-policies`;
+    await fetchApiGetCountPolicies(SESSION.tenant.id, W);
+    expect(new URL(lastRequest!.url).pathname).toBe(path);
+    expect(lastRequest!.method).toBe('GET');
+    await fetchApiUpsertCountPolicies(SESSION.tenant.id, W, [{ abcClass: 'b', intervalDays: 7 }], KEY);
+    expect(lastRequest!.method).toBe('PUT');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ policies: [{ abcClass: 'b', intervalDays: 7 }] });
+    await fetchApiDeleteCountPolicy(SESSION.tenant.id, W, 'c', KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${path}/c`);
+    expect(lastRequest!.method).toBe('DELETE');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    clearSession();
   });
 });
