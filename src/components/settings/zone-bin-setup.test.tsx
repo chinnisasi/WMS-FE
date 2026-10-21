@@ -84,6 +84,15 @@ let nextCreateStatus = 201;
 let nextCreateBody: unknown = null;
 /** Story 1-5b — the bins list, overridable per test. */
 let binsItems: unknown[] | null = null;
+/** Story 2-10a — paged bins lists, by cursor ('' = the first page); null = `binsItems`. */
+let binsPages: Record<string, { items: unknown[]; nextCursor: string | null }> | null = null;
+/** Story 2-10a — the zones list, overridable per test. */
+let zonesItems: unknown[] | null = null;
+/** Story 2-10a — the next labels answer (a problem), else a ZPL file. */
+let nextLabelsStatus = 200;
+let nextLabelsBody: unknown = null;
+/** Story 2-10a — the warehouse code the list answers. */
+let warehouseCode = 'W1';
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -143,15 +152,24 @@ function stubRouter(): void {
     }
     if (method === 'GET' && pathname.endsWith('/warehouses')) {
       return json(200, {
-        items: [{ id: WAREHOUSE_ID, code: 'W1', name: 'Main', origin: {}, createdAt: '2026-09-01T00:00:00.000Z' }],
+        items: [{ id: WAREHOUSE_ID, code: warehouseCode, name: 'Main', origin: {}, createdAt: '2026-09-01T00:00:00.000Z' }],
         nextCursor: null,
       });
     }
     if (method === 'GET' && pathname.endsWith('/zones')) {
-      return json(200, { items: [{ id: ZONE_ID, code: 'A', name: 'Fast movers' }], nextCursor: null });
+      return json(200, { items: zonesItems ?? [{ id: ZONE_ID, code: 'A', name: 'Fast movers' }], nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith('/bins/grid')) {
       return json(400, { code: 'validation-failed', title: 'Validation failed', status: 400 });
+    }
+    if (method === 'POST' && pathname.endsWith('/bins/labels')) {
+      if (nextLabelsStatus !== 200) {
+        return new Response(JSON.stringify(nextLabelsBody), { status: nextLabelsStatus, headers: { 'content-type': 'application/problem+json' } });
+      }
+      return new Response('^XA\n^XZ\n', { status: 200, headers: { 'content-type': 'text/plain; charset=us-ascii' } });
+    }
+    if (method === 'GET' && pathname.endsWith('/bins') && binsPages !== null) {
+      return json(200, binsPages[url.searchParams.get('cursor') ?? ''] ?? { items: [], nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith('/bins')) {
       return json(200, { items: binsItems ?? [bin(), bin({ id: TANK_ID, code: 'A-01-02', type: 'tank', maxWeightGrams: 1000 })], nextCursor: null });
@@ -189,6 +207,11 @@ beforeEach(() => {
   nextCreateBody = null;
   clientsItems = [SELF_CLIENT];
   binsItems = null;
+  binsPages = null;
+  zonesItems = null;
+  nextLabelsStatus = 200;
+  nextLabelsBody = null;
+  warehouseCode = 'W1';
   stubRouter();
   writeSession(SESSION);
 });
@@ -715,5 +738,215 @@ describe('ZonesBinsSetup: dedicated client bins (story 1-5b)', () => {
     act(() => manual.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     await settle();
     expect(view.container.textContent).toContain('That warehouse, zone or client no longer exists');
+  });
+});
+
+/**
+ * Story 2-10a — bin labels. The claims a lib test cannot make: which rows can
+ * be ticked (and why not), the zone-scoped selection kept across pages and
+ * cleared on a zone switch, the page checkbox, the role gate, the body each
+ * print sends, the downloaded file's name, and a refusal rendering
+ * `extensions.binCodes` and never the server's detail.
+ */
+describe('ZonesBinsSetup: bin labels (story 2-10a)', () => {
+  const ZONE_B = '0198f7a2-1b3c-7d4e-8f90-999999999999';
+  const id = (n: number) => `0198f7a2-1b3c-7d4e-8f90-${String(n).padStart(12, '0')}`;
+  let downloads: { name: string; type: string }[] = [];
+  let originalCreate: typeof URL.createObjectURL;
+  let originalRevoke: typeof URL.revokeObjectURL;
+  let originalClick: () => void;
+
+  beforeEach(() => {
+    downloads = [];
+    originalCreate = URL.createObjectURL;
+    originalRevoke = URL.revokeObjectURL;
+    originalClick = HTMLAnchorElement.prototype.click;
+    const blobs = new Map<string, Blob>();
+    let n = 0;
+    URL.createObjectURL = ((blob: Blob) => {
+      const href = `blob:test/${n++}`;
+      blobs.set(href, blob);
+      return href;
+    }) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      downloads.push({ name: this.download, type: blobs.get(this.getAttribute('href') ?? '')!.type });
+    };
+  });
+
+  afterEach(() => {
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
+    HTMLAnchorElement.prototype.click = originalClick;
+  });
+
+  const button = (label: string | RegExp): HTMLButtonElement | undefined =>
+    [...view!.container.querySelectorAll('button')].find((b) =>
+      typeof label === 'string' ? b.textContent === label : label.test(b.textContent ?? ''),
+    );
+  const box = (code: string): HTMLInputElement =>
+    view!.container.querySelector(`input[aria-label="Print a label for ${code}"]`) as HTMLInputElement;
+  const pageBox = (): HTMLInputElement =>
+    view!.container.querySelector('input[aria-label="Tick every printable bin on this page"]') as HTMLInputElement;
+  const labelPosts = () => requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/bins/labels'));
+  async function click(el: HTMLElement | undefined): Promise<void> {
+    expect(el).toBeDefined();
+    act(() => el!.click());
+    await settle();
+  }
+
+  test('retired, system and unbarcodable rows cannot be ticked and say why; live rows can', async () => {
+    binsItems = [
+      bin(),
+      bin({ id: id(2), code: 'A-RET', retiredAt: '2026-10-01T00:00:00.000Z' }),
+      bin({ id: id(3), code: 'RECEIVING', systemOwned: true }),
+      bin({ id: id(4), code: 'Ä-01' }),
+    ];
+    view = await mount();
+    expect(box('A-01-01').disabled).toBe(false);
+    expect(box('A-RET').disabled).toBe(true);
+    expect(box('A-RET').title).toContain('Retired');
+    expect(box('RECEIVING').disabled).toBe(true);
+    expect(box('RECEIVING').title).toContain('System bin');
+    expect(box('Ä-01').disabled).toBe(true);
+    expect(box('Ä-01').title).toContain('barcode cannot carry');
+  });
+
+  test('the selection is kept across pages and the button counts it; the page box ticks only that page; a zone switch clears it', async () => {
+    zonesItems = [
+      { id: ZONE_ID, code: 'A', name: 'Fast movers' },
+      { id: ZONE_B, code: 'B', name: 'Bulk' },
+    ];
+    binsPages = {
+      '': { items: [bin({ id: id(1), code: 'A-1' }), bin({ id: id(2), code: 'A-2' }), bin({ id: id(3), code: 'A-R', retiredAt: '2026-10-01T00:00:00.000Z' })], nextCursor: 'p2' },
+      p2: { items: [bin({ id: id(4), code: 'A-3' })], nextCursor: null },
+    };
+    view = await mount();
+    expect(button('Print labels (0)')!.disabled).toBe(true);
+    await click(pageBox());
+    // Only the page's printable rows: A-1 and A-2, never the retired A-R.
+    expect(button('Print labels (2)')).toBeDefined();
+    expect(box('A-R').checked).toBe(false);
+    await click(button('Next'));
+    await click(box('A-3'));
+    expect(button('Print labels (3)')).toBeDefined();
+    await click(button('Print labels (3)'));
+    await click(button('Download labels'));
+    expect(labelPosts().at(-1)!.body).toEqual({ binIds: [id(1), id(2), id(4)], format: 'zpl', layout: 'label', size: '4x2' });
+
+    // A zone switch clears the selection.
+    const zoneSelect = [...view!.container.querySelectorAll('label')].find((l) => l.textContent!.startsWith('Zone bins'))!.querySelector('select')!;
+    setSelect(zoneSelect, ZONE_B);
+    await settle();
+    expect(button('Print labels (0)')).toBeDefined();
+  });
+
+  test('a zone print sends the zone, says it covers every page, and downloads under the IST-dated name', async () => {
+    view = await mount();
+    await click(button('Print zone labels'));
+    expect(view!.container.textContent).toContain('all pages of the list, not only the one shown');
+    expect(view!.container.textContent).toContain('Labels come out in bin-code order');
+    // PDF, then the A4 sheet.
+    const dialog = view!.container.querySelector('[role="dialog"]')!;
+    const [formatSelect, paperSelect] = [...dialog.querySelectorAll('select')];
+    setSelect(formatSelect!, 'pdf');
+    setSelect(paperSelect!, 'a4');
+    await click(button('Download labels'));
+    expect(labelPosts().at(-1)!.body).toEqual({ zoneId: ZONE_ID, format: 'pdf', layout: 'a4' });
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0]!.name).toMatch(/^bin-labels-W1-\d{8}\.pdf$/);
+    expect(view!.container.querySelector('[role="dialog"]')).toBeNull();
+    expect(view!.container.textContent).toContain('Labels ready');
+  });
+
+  test('"Print zone labels" stays enabled when the page shows no printable row — printable bins may be on a later page', async () => {
+    binsPages = {
+      '': { items: [bin({ retiredAt: '2026-10-01T00:00:00.000Z' }), bin({ id: id(3), code: 'QC-HOLD', systemOwned: true })], nextCursor: 'p2' },
+      p2: { items: [bin({ id: id(4), code: 'A-3' })], nextCursor: null },
+    };
+    view = await mount();
+    expect(button('Print zone labels')!.disabled).toBe(false);
+    await click(button('Print zone labels'));
+    await click(button('Download labels'));
+    expect(labelPosts().at(-1)!.body).toEqual({ zoneId: ZONE_ID, format: 'zpl', layout: 'label', size: '4x2' });
+  });
+
+  test('PDF → A4 → back to ZPL sends a ZPL 4x2 label body and downloads a .zpl', async () => {
+    view = await mount();
+    await click(button('Print zone labels'));
+    const dialog = view!.container.querySelector('[role="dialog"]')!;
+    const formatSelect = () => dialog.querySelectorAll('select')[0] as HTMLSelectElement;
+    const paperSelect = () => dialog.querySelectorAll('select')[1] as HTMLSelectElement;
+    setSelect(formatSelect(), 'pdf');
+    setSelect(paperSelect(), 'a4');
+    setSelect(formatSelect(), 'zpl');
+    expect([...paperSelect().querySelectorAll('option')].map((o) => o.value)).toEqual(['4x2', '2x1']);
+    await click(button('Download labels'));
+    expect(labelPosts().at(-1)!.body).toEqual({ zoneId: ZONE_ID, format: 'zpl', layout: 'label', size: '4x2' });
+    expect(downloads[0]!.name).toMatch(/^bin-labels-W1-\d{8}\.zpl$/);
+  });
+
+  test('more than 1000 ticked bins disables "Print labels" and names the limit', async () => {
+    const page = (from: number, count: number) => Array.from({ length: count }, (_v, i) => bin({ id: id(from + i), code: `L-${from + i}` }));
+    binsPages = { '': { items: page(1, 600), nextCursor: 'p2' }, p2: { items: page(601, 401), nextCursor: null } };
+    view = await mount();
+    await click(pageBox());
+    await click(button('Next'));
+    await click(pageBox());
+    expect(button('Print labels (1001)')!.disabled).toBe(true);
+    expect(view!.container.querySelector('[role="note"]')!.textContent).toBe('One print takes at most 1000 labels — untick some bins.');
+    await click(box('L-1001'));
+    expect(button('Print labels (1000)')!.disabled).toBe(false);
+    expect(view!.container.querySelector('[role="note"]')).toBeNull();
+  });
+
+  test('a ticked bin the refreshed list shows unprintable drops out of the selection', async () => {
+    view = await mount();
+    await click(box('A-01-01'));
+    expect(button('Print labels (1)')).toBeDefined();
+    // The bin is retired elsewhere; a reload (here, the block toggle's) shows it retired.
+    binsItems = [bin({ retiredAt: '2026-10-01T00:00:00.000Z' }), bin({ id: TANK_ID, code: 'A-01-02', type: 'tank', maxWeightGrams: 1000 })];
+    await click(button('Block'));
+    expect(box('A-01-01').disabled).toBe(true);
+    expect(button('Print labels (0)')!.disabled).toBe(true);
+    // The pruned set is what the next tick stores.
+    await click(box('A-01-02'));
+    await click(button('Print labels (1)'));
+    await click(button('Download labels'));
+    expect(labelPosts().at(-1)!.body).toEqual({ binIds: [TANK_ID], format: 'zpl', layout: 'label', size: '4x2' });
+  });
+
+  test('no print controls until the warehouse code is known (the file is named after it)', async () => {
+    warehouseCode = '';
+    view = await mount();
+    expect(box('A-01-01')).toBeNull();
+    expect(button(/^Print/)).toBeUndefined();
+  });
+
+  test('a refusal renders its copy and extensions.binCodes — never the detail — and the panel stays open', async () => {
+    view = await mount();
+    await click(box('A-01-01'));
+    await click(button('Print labels (1)'));
+    nextLabelsStatus = 422;
+    nextLabelsBody = { code: 'bin-code-too-long-for-label', status: 422, title: 'x', detail: 'SERVER PROSE', binCodes: ['A-01-01'] };
+    await click(button('Download labels'));
+    const alert = view!.container.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain('too long for this paper');
+    expect([...alert.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['A-01-01']);
+    expect(view!.container.textContent).not.toContain('SERVER PROSE');
+    expect(view!.container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(downloads).toHaveLength(0);
+  });
+
+  test('an accountant (no labels.execute) sees no checkboxes and no print buttons; an operator does', async () => {
+    writeSession({ ...SESSION, user: { id: 'u-1', email: 'priya@example.com', role: 'accountant', status: 'active' } });
+    view = await mount();
+    expect(box('A-01-01')).toBeNull();
+    expect(button(/^Print/)).toBeUndefined();
+    view.unmount();
+    writeSession({ ...SESSION, user: { id: 'u-1', email: 'priya@example.com', role: 'operator', status: 'active' } });
+    view = await mount();
+    expect(box('A-01-01')).not.toBeNull();
+    expect(button('Print zone labels')).toBeDefined();
   });
 });
