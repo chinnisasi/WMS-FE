@@ -127,7 +127,8 @@ export const EMPTY_AUDIT_FILTERS: AuditFilterDraft = { actor: '', actionPrefix: 
 /** The query a parsed draft sends (no cursor — the hook adds it). */
 export type AuditFilterQuery = Omit<AuditQuery, 'cursor' | 'limit'>;
 
-function isRealDate(value: string): boolean {
+/** A real `YYYY-MM-DD` calendar date (30 Feb is not). Exported for the PO form's expected date (story 2-1). */
+export function isRealDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const ms = Date.parse(`${value}T00:00:00Z`);
   return !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === value;

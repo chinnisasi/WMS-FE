@@ -6,6 +6,7 @@ import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { writeActiveWarehouseId } from '../../lib/warehouses';
+import { notifyInboundChanged } from '../../lib/asns';
 import { InboundCards } from './inbound-cards';
 
 /**
@@ -237,6 +238,25 @@ describe('Purchase orders — the vendor as the PO froze it (story 1-3)', () => 
       ['PO-0002', '—'],
     ]);
     expect(panel().textContent).not.toContain('Live Partner Name');
+  });
+});
+
+describe('Purchase orders — the list re-reads on INBOUND_CHANGED_EVENT (story 2-1)', () => {
+  // Load-bearing: after a PO create the card returns to page one with
+  // onCursor(null), which from page one changes nothing the fetch depends on
+  // — only this listener refetches the list.
+  test('notifyInboundChanged() re-reads the PO list from the server', async () => {
+    view = render(<InboundCards initialTab="pos" />);
+    await settle();
+    const listReads = () =>
+      requests.filter((r) => r.method === 'GET' && r.url.pathname === `/api/v1/tenants/${T}/warehouses/${WH}/inbound/purchase-orders` && !r.url.searchParams.has('status')).length;
+    const before = listReads();
+    expect(before).toBeGreaterThan(0);
+    await act(async () => {
+      notifyInboundChanged();
+    });
+    await settle();
+    expect(listReads()).toBe(before + 1);
   });
 });
 

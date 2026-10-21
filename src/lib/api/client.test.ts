@@ -27,6 +27,7 @@ import {
   fetchApiTransitionClientInvoice,
   fetchApiAmendAsn,
   fetchApiCreateAsn,
+  fetchApiCreatePurchaseOrder,
   fetchApiCancelReturn,
   fetchApiCreateReturn,
   fetchApiGetReturn,
@@ -2234,6 +2235,42 @@ describe('advance shipment notice wrappers (story 21-6)', () => {
     expect(new URL(lastRequest!.url).pathname).toBe(`${base}/inbound/asns`);
     expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
     expect(await lastRequest!.json()).toEqual(body);
+    clearSession();
+  });
+
+  // Story 2-1 — the PO create: the existing CreatePurchaseOrderDto as is
+  // (no clientId — the server derives it from the SKUs), the per-draft key.
+  test('PO create POSTs the CreatePurchaseOrderDto body with the Idempotency-Key — no clientId', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { purchaseOrder: { id: 'po-1', code: 'PO-1001', lines: [] } });
+    const body = {
+      warehouseId: WAREHOUSE_ID,
+      vendorId: 'v-1',
+      code: 'PO-1001',
+      lines: [{ skuId: SKU_ID, orderedQty: 10, unitCostPaise: 1250, expectedDate: '2026-10-24T18:30:00.000Z' }],
+    };
+    const res = await fetchApiCreatePurchaseOrder(SESSION.tenant.id, body, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/inbound/purchase-orders`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    const sent = (await lastRequest!.json()) as Record<string, unknown>;
+    expect(sent).toEqual(body);
+    expect('clientId' in sent).toBe(false);
+    expect(res.purchaseOrder.code).toBe('PO-1001');
+    clearSession();
+  });
+
+  test('the SKU list sends limit only when set (story 2-1: the PO form reads 200 a page)', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListSkus(SESSION.tenant.id, { clientId: CLIENT_ID, status: 'active', limit: 200 });
+    const params = new URL(lastRequest!.url).searchParams;
+    expect(params.get('limit')).toBe('200');
+    expect(params.get('clientId')).toBe(CLIENT_ID);
+    expect(params.get('status')).toBe('active');
+    await fetchApiListSkus(SESSION.tenant.id, { clientId: CLIENT_ID });
+    expect(new URL(lastRequest!.url).searchParams.has('limit')).toBe(false);
     clearSession();
   });
 
