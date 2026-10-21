@@ -64,6 +64,7 @@ import {
   fetchApiRateCardInForce,
   fetchApiClientUsage,
   fetchApiClientServiceReport,
+  fetchApiReportFile,
   fetchApiAuditTrail,
   fetchApiPortalService,
   fetchApiReplaceRateCardLines,
@@ -1996,6 +1997,34 @@ describe('rate-card wrappers (story 21-3)', () => {
       to: '2026-10-13T00:00:00+05:30',
       cursor: 'CURSOR-2',
     });
+    clearSession();
+  });
+
+  test('the register file (5-3a): GET …/warehouses/{w}/reports/{report} with only the set filters, no key, read as a Blob; a refusal is an ApiProblem', async () => {
+    writeSession(SESSION);
+    const WH = '0198f7a2-1b3c-7d4e-8f90-0000000000aa';
+    const CLIENT = '0198f7a2-1b3c-7d4e-8f90-cccccccccc0a';
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      lastRequest = input instanceof Request ? input : new Request(input.toString());
+      return new Response('\uFEFFwarehouse,zone\r\n', { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8' } });
+    }) as unknown as typeof fetch);
+    const blob = await fetchApiReportFile(SESSION.tenant.id, WH, 'stock-on-hand', { format: 'csv', clientId: null, period: null });
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/warehouses/${WH}/reports/stock-on-hand`);
+    expect([...new URL(lastRequest!.url).searchParams.entries()]).toEqual([['format', 'csv']]);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(blob).toBeInstanceOf(Blob);
+    expect(await blob.text()).toBe('\uFEFFwarehouse,zone\r\n');
+
+    await fetchApiReportFile(SESSION.tenant.id, WH, 'ledger', { format: 'xlsx', clientId: CLIENT, period: { from: '2026-09-01', to: '2026-09-30' } });
+    expect(Object.fromEntries(new URL(lastRequest!.url).searchParams)).toEqual({ format: 'xlsx', clientId: CLIENT, from: '2026-09-01', to: '2026-09-30' });
+
+    stubFetch(422, { code: 'report-too-large', status: 422, title: 'Register too large', detail: 'More than 50,000 rows.' });
+    const refused = await fetchApiReportFile(SESSION.tenant.id, WH, 'ledger', { format: 'csv', clientId: null, period: { from: '2026-09-01', to: '2026-09-30' } }).catch(
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(ApiProblem);
+    expect((refused as ApiProblem).code).toBe('report-too-large');
     clearSession();
   });
 

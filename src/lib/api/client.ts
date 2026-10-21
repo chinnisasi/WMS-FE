@@ -177,6 +177,7 @@ import {
   billingUsageControllerUsage,
   reportingControllerAudit,
   reportingControllerDownloadAuditExport,
+  reportingControllerDownloadRegister,
   inventoryControllerAcknowledgeChainBreak,
   inventoryControllerLedgerAnchors,
   inventoryControllerLedgerIntegrity,
@@ -239,6 +240,7 @@ import {
 import { refreshAccessToken } from '../session-refresh';
 import { API_BASE_URL as API_BASE_URL_VALUE } from './base-url';
 import type {
+  ReportingControllerDownloadRegisterData,
   PortalAsnDetailResponse,
   PortalAsnPageResponse,
   PortalAsnRowDto,
@@ -1871,6 +1873,38 @@ export async function fetchApiLedgerAnchors(
     throw unwrapError(error, response?.status ?? 400);
   }
   return data;
+}
+
+/** Story 5-3a — the five operational registers and the two file formats (the generated unions). */
+export type ReportName = ReportingControllerDownloadRegisterData['path']['report'];
+export type ReportFormat = ReportingControllerDownloadRegisterData['query']['format'];
+
+/**
+ * Story 5-3a — one operational register as a file, as a Blob (`parseAs:
+ * 'blob'`), saved byte for byte as the server built it (the bearer header
+ * rules out a plain link). Only the set filters are sent: `clientId` when a
+ * client is picked, `from`/`to` for a dated register. A refusal is still
+ * problem+json and becomes an `ApiProblem`.
+ */
+export async function fetchApiReportFile(
+  tenantId: string,
+  warehouseId: string,
+  report: ReportName,
+  query: { format: ReportFormat; clientId: string | null; period: { from: string; to: string } | null },
+): Promise<Blob> {
+  const { data, error, response } = await reportingControllerDownloadRegister({
+    path: { tenantId, warehouseId, report },
+    query: {
+      format: query.format,
+      ...(query.clientId === null ? {} : { clientId: query.clientId }),
+      ...(query.period === null ? {} : { from: query.period.from, to: query.period.to }),
+    },
+    parseAs: 'blob',
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data as unknown as Blob;
 }
 
 /**
