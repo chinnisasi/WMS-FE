@@ -58,11 +58,15 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 13-1 adds `returns.manage` (owner + ops_manager — return authorizations) — 43 became 44.
     // Story 1-6c adds `licences.manage` (owner-only — the drug and FSSAI licences) — 44 became 45.
     // Story 2-3a adds `gate.manage` (owner + ops_manager + operator — the gate-in) — 45 became 46.
-    // Story 3-1 adds `stock.move` (owner + ops_manager + operator — the bin-to-bin move) — 46 became 47.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(47);
+    // Story 3-1 adds `stock.move` (owner + ops_manager + operator — the bin-to-bin move) — 46 became 47;
+    // story 4-1a adds `orders.place` (owner + client — the portal order) — 47 became 48.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(48);
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'stock.move')),
     ).toEqual(['owner', 'ops_manager', 'operator']);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'orders.place')),
+    ).toEqual(['owner', 'client']);
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'gate.manage')),
     ).toEqual(['owner', 'ops_manager', 'operator']);
@@ -487,8 +491,13 @@ describe('roleHasCapability (fail-closed)', () => {
 });
 
 describe('the client-portal persona (story 21-7)', () => {
-  test('client holds exactly asn.announce (story 21-7b — the portal\'s one write)', () => {
-    expect([...ROLE_CAPABILITIES.client]).toEqual(['asn.announce']);
+  test('client holds exactly asn.announce and orders.place (story 21-7b — the announce; story 4-1a — the order)', () => {
+    expect([...ROLE_CAPABILITIES.client]).toEqual(['asn.announce', 'orders.place']);
+  });
+
+  test('story 4-1a: orders.place is held by owner and client only — never ops_manager (derived by exclusion), operator or accountant', () => {
+    const holders = (Object.keys(ROLE_CAPABILITIES) as UserRole[]).filter((role) => roleHasCapability(role, 'orders.place'));
+    expect(holders).toEqual(['owner', 'client']);
   });
 
   test('story 21-7b: asn.announce is held by owner and client only — never ops_manager (derived by exclusion), operator or accountant', () => {

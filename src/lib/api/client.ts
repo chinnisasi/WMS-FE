@@ -215,6 +215,7 @@ import {
   portalControllerMe,
   portalControllerOrder,
   portalControllerOrders,
+  portalControllerPlaceOrder,
   portalControllerPurchaseOrder,
   portalControllerPurchaseOrders,
   portalControllerSkus,
@@ -242,12 +243,14 @@ import type {
   PortalAsnPageResponse,
   PortalAsnRowDto,
   PortalCreateAsnDto,
+  PortalCreateOrderDto,
   PortalInvoiceDetailResponse,
   PortalInvoicePageResponse,
   PortalMeResponse,
   PortalOrderDetailResponse,
   PortalOrderPageResponse,
   PortalOrderRowDto,
+  PortalPlacedOrderResponse,
   PortalPurchaseOrderDetailResponse,
   PortalPurchaseOrderPageResponse,
   PortalPurchaseOrderRowDto,
@@ -4873,6 +4876,26 @@ export async function fetchApiPortalAnnounceAsn(
   idempotencyKey: string,
 ): Promise<PortalAsnDetailResponse> {
   const { data, error } = await portalControllerAnnounceAsn({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/**
+ * Story 4-1a — the portal's second write: places an outbound order for this
+ * client's own active SKUs (`orders.place`; the client is the session's,
+ * never the body's — and no line carries a rate). Answers
+ * `{orderId, warehouseName, lineCount, placedAt}`; the key is per draft.
+ */
+export async function fetchApiPortalPlaceOrder(
+  tenantId: string,
+  body: PortalCreateOrderDto,
+  idempotencyKey: string,
+): Promise<PortalPlacedOrderResponse> {
+  const { data, error } = await portalControllerPlaceOrder({
     path: { tenantId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },

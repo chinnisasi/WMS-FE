@@ -187,6 +187,12 @@ export const CAPABILITIES = [
   // everything — the fence keeps an owner off portal routes). NOT by the Ops
   // Manager (see OPS_EXCLUDED_CAPABILITIES) — staff key ASNs via `asn.manage`.
   'asn.announce',
+  // Story 4-1a — the client portal's second write: a client user places an
+  // outbound order for its OWN active SKUs from the portal Orders page (the
+  // client is the session's). Held by `client` (and by Owner, who holds
+  // everything — the fence keeps an owner off portal routes). NOT by the Ops
+  // Manager (see OPS_EXCLUDED_CAPABILITIES) — staff key orders via `orders.manage`.
+  'orders.place',
   // Story 9-3a — read the audit trail (the /reports Audit section, FR-28).
   // OWNER-ONLY (see OWNER_ONLY_CAPABILITIES): the trail names every member's
   // actions — the user-management rationale. A READ capability: the section
@@ -268,6 +274,9 @@ const OPS_EXCLUDED_CAPABILITIES: readonly Capability[] = [
   // Story 21-7b — the portal announce is the client persona's verb; the Ops
   // Manager keys ASNs through `asn.manage` and never holds this one.
   'asn.announce',
+  // Story 4-1a — the portal order, the same rationale: staff key orders
+  // through `orders.manage`.
+  'orders.place',
 ];
 
 export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>> = {
@@ -303,8 +312,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
   // client invoices and tax details (finance work).
   accountant: ['eway.manage', 'rates.manage', 'billing.invoice'],
   // Story 21-7 — the client-portal persona; 21-7 left it empty, story 21-7b
-  // grants exactly one write: announcing its own shipment from the portal.
-  client: ['asn.announce'],
+  // grants exactly one write: announcing its own shipment from the portal;
+  // story 4-1a adds placing its own order.
+  client: ['asn.announce', 'orders.place'],
 };
 
 /**

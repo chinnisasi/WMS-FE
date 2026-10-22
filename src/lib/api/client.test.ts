@@ -146,6 +146,7 @@ import {
   fetchApiPortalMe,
   fetchApiPortalOrder,
   fetchApiPortalOrders,
+  fetchApiPortalPlaceOrder,
   fetchApiPortalPurchaseOrder,
   fetchApiPortalPurchaseOrders,
   fetchApiPortalStock,
@@ -2401,6 +2402,22 @@ describe('portal wrappers (story 21-7)', () => {
     await call();
     expect(lastRequest!.method).toBe('GET');
     expect(new URL(lastRequest!.url).pathname).toEndWith(path);
+  });
+
+  test('story 4-1a — place an order: POST portal/orders with the key and the body as given (no clientId, no rate)', async () => {
+    const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+    const body = {
+      warehouseId: ID,
+      lines: [{ skuId: ID, quantity: 2.5 }],
+      destination: { contactName: 'Asha', phone: '+91 90000 00000', line1: '1 MG Road', city: 'Bengaluru', state: 'Karnataka', pincode: '560001' },
+    };
+    stubFetch(201, { orderId: ID, warehouseName: 'Main', lineCount: 1, placedAt: '2026-10-22T05:00:00.000Z' });
+    const placed = await fetchApiPortalPlaceOrder(T, body, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toEndWith(`/tenants/${T}/portal/orders`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    expect(placed).toEqual({ orderId: ID, warehouseName: 'Main', lineCount: 1, placedAt: '2026-10-22T05:00:00.000Z' });
   });
 
   test('a client-suspended refusal is thrown as ApiProblem AND announced on window', async () => {

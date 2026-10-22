@@ -9,6 +9,9 @@
 import { ApiProblem } from '@/lib/api/client';
 import type {
   PortalCreateAsnDto,
+  PortalCreateOrderDto,
+  PortalPlacedOrderResponse,
+  PortalStockRowDto,
   PortalInvoiceDetailResponse,
   PortalOrderRowDto,
   PortalAsnRowDto,
@@ -27,7 +30,17 @@ import {
   type AsnDraftLine,
   type LineOption,
 } from '@/lib/asns';
-import { ORDER_STATUS_LABEL, UNREACHABLE_REASON } from '@/lib/outbound-orders';
+import { parseQuantityInput } from '@/lib/format-quantity';
+import { parseGstinField } from '@/lib/gstin';
+import {
+  legalNameBody,
+  legalNameProblem,
+  MAX_ORDER_LINES,
+  ORDER_STATUS_LABEL,
+  parseDestinationFields,
+  UNREACHABLE_REASON,
+  type DestinationFields,
+} from '@/lib/outbound-orders';
 
 // ── routing ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +48,9 @@ import { ORDER_STATUS_LABEL, UNREACHABLE_REASON } from '@/lib/outbound-orders';
 export const PORTAL_HOME = '/portal/stock';
 /** Where a staff session lands after sign-in (unchanged by 21-7). */
 export const OPERATOR_HOME = '/settings';
+
+/** A portal session that is gone or expired (a 401, or no session at submit). */
+export const PORTAL_SESSION_EXPIRED = 'Your session expired — sign in again.';
 
 /** The suspended-access message the login page shows after a `client-suspended` refusal. */
 export const PORTAL_SUSPENDED_MESSAGE = "Your company's portal access is suspended.";
@@ -136,7 +152,7 @@ export function portalReadReason(error: unknown, subject: string): string {
       case 'client-departed':
         return PORTAL_DEPARTED_MESSAGE;
       case 'unauthenticated':
-        return 'Your session expired — sign in again.';
+        return PORTAL_SESSION_EXPIRED;
       case 'permission-denied':
       case 'role-denied':
         return 'This page is for client-portal users — sign in with your portal account.';
@@ -354,6 +370,171 @@ export function portalAsnReason(error: unknown): string {
         return 'The same submission is still being processed — try again in a moment.';
       default:
         return error.detail ?? `The shipment notice was not sent (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+// ── placing an order (story 4-1a) ───────────────────────────────────────────
+
+/** The backend's `@ArrayMaxSize` on a portal order's lines — the staff order's ceiling (`MAX_ORDER_LINES`), never a copy. */
+export const MAX_PORTAL_ORDER_LINES = MAX_ORDER_LINES;
+
+/** The order form's sentence when the client has no SKU to order (it is disabled). */
+export const PORTAL_ORDER_NO_SKUS_MESSAGE = 'No active SKUs are set up for your company yet — ask the warehouse';
+/** The order form's sentence when the tenant has no warehouse (it is disabled). */
+export const PORTAL_ORDER_NO_WAREHOUSES_MESSAGE = 'No warehouses are set up yet — ask the warehouse';
+/** The order form's sentence when the catalogue outgrows the drain (it is disabled). */
+export const PORTAL_ORDER_SKUS_TOO_MANY_MESSAGE =
+  'Your catalogue is too large for this form — ask the warehouse to place this order for you.';
+
+export interface PortalOrderDraft {
+  readonly lines: readonly AsnDraftLine[];
+  readonly destination: DestinationFields;
+  readonly consigneeGstin: string;
+  readonly consigneeLegalName: string;
+}
+
+/**
+ * The place-an-order body, or the first problem (nothing is sent while one
+ * stands): `{warehouseId, lines[{skuId, quantity}], destination,
+ * consigneeGstin?, consigneeLegalName?}` — NEVER a `clientId` (the client is
+ * the session's; the server refuses one) and never a `ratePaise` (a client
+ * does not price its own order; the server refuses one). Empty rows are
+ * dropped; quantities follow the decimal grammar and are never rounded (the
+ * server refuses a value finer than its unit, naming it).
+ */
+export function parsePortalOrderCreate(
+  draft: PortalOrderDraft,
+  warehouseId: string,
+  skus: Readonly<Record<string, Pick<LineOption, 'code' | 'uom' | 'uomPrecision'>>> = {},
+): { body: PortalCreateOrderDto | null; problem: string | null } {
+  if (warehouseId === '') return { body: null, problem: 'Choose the warehouse the order ships from.' };
+  const filled = draft.lines.filter((line) => line.skuId !== '' || line.qty.trim() !== '');
+  if (filled.length === 0) return { body: null, problem: 'Add at least one line — a SKU and a quantity.' };
+  if (filled.length > MAX_PORTAL_ORDER_LINES) {
+    return { body: null, problem: `An order carries at most ${MAX_PORTAL_ORDER_LINES} lines.` };
+  }
+  const lines: { skuId: string; quantity: number }[] = [];
+  for (const [index, line] of filled.entries()) {
+    if (line.skuId === '') return { body: null, problem: 'Every line needs a SKU.' };
+    const quantity = parseQuantityInput(line.qty);
+    if (quantity === null || quantity <= 0) return { body: null, problem: 'Every quantity is a decimal greater than zero.' };
+    // The SKU's declared precision (each = 0 places, kg = 3), named by line —
+    // never rounded; a SKU missing from the options is the server's to judge.
+    const option = skus[line.skuId];
+    const places = line.qty.trim().split('.')[1]?.length ?? 0;
+    if (option !== undefined && places > option.uomPrecision) {
+      const allowed = option.uomPrecision === 0 ? 'whole numbers only' : `at most ${option.uomPrecision} decimal place${option.uomPrecision === 1 ? '' : 's'}`;
+      return { body: null, problem: `Line ${index + 1}: ${option.code} is counted in ${option.uom} — ${allowed} (got ${line.qty.trim()}).` };
+    }
+    lines.push({ skuId: line.skuId, quantity });
+  }
+  const address = parseDestinationFields(draft.destination, 'destination');
+  if (address.problem !== null) return { body: null, problem: address.problem };
+  const buyer = parseGstinField(draft.consigneeGstin, 'Buyer GSTIN');
+  if (buyer.problem !== null) return { body: null, problem: buyer.problem };
+  const legalProblem = legalNameProblem(buyer.gstin, draft.consigneeLegalName);
+  if (legalProblem !== null) return { body: null, problem: legalProblem };
+  return {
+    body: {
+      warehouseId,
+      lines,
+      destination: address.destination!,
+      // Blank = absent: no key at all, never `''`.
+      ...(buyer.gstin === undefined ? {} : { consigneeGstin: buyer.gstin }),
+      // Sent only beside a GSTIN, and only when non-blank.
+      ...legalNameBody(buyer.gstin, draft.consigneeLegalName),
+    },
+    problem: null,
+  };
+}
+
+/** An instant as IST wall time with the date (`22 Oct 2026, 10:30 IST`), or the raw text when unparsable. */
+export function portalInstantIst(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const day = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+  const time = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
+  return `${day}, ${time} IST`;
+}
+
+/** The success banner: `{word: 'Order placed', reason: '2 lines to Main (22 Oct 2026, 10:30 IST)'}` — from the RESPONSE. */
+export function placedOrderBanner(placed: PortalPlacedOrderResponse): { word: string; reason: string } {
+  return {
+    word: 'Order placed',
+    reason: `${lineCountLabel(placed.lineCount)} to ${placed.warehouseName} (${portalInstantIst(placed.placedAt)}) — follow it in the list below.`,
+  };
+}
+
+/**
+ * The non-blocking per-line hint (decision 9): on hand less allocated at the
+ * chosen warehouse, from `portal/stock` — or null when there is nothing to
+ * say (no SKU, no warehouse, or a TRUNCATED stock read with no row for it: a
+ * missing row then proves nothing, so never a false 0). Worded as what it is
+ * — on hand counts receiving and QC too, so it is not a promise. Never a
+ * gate: the server's reservation is the ruling.
+ */
+export function availableHereLabel(
+  stock: readonly PortalStockRowDto[],
+  skuId: string,
+  warehouseId: string,
+  uom: string | undefined,
+  truncated = false,
+): string | null {
+  if (skuId === '' || warehouseId === '') return null;
+  const rows = stock.filter((row) => row.skuId === skuId && row.warehouseId === warehouseId);
+  if (rows.length === 0 && truncated) return null;
+  const free = rows.reduce((total, row) => total + Math.max(0, row.onHand - row.allocated), 0);
+  return `on hand, not yet allocated: ${portalQuantity(free)}${uom === undefined ? '' : ` ${uom}`}`;
+}
+
+/** The SKU codes a refusal names (`extensions.skuCodes`), else []. */
+function refusedSkuCodes(error: ApiProblem): string[] {
+  const codes = error.extensions['skuCodes'];
+  return Array.isArray(codes) ? codes.filter((code): code is string => typeof code === 'string') : [];
+}
+
+/**
+ * The place-an-order refusals, in portal words — a FIXED sentence per code,
+ * branching on the problem `code`, never on prose and never echoing
+ * `detail` (a portal sentence must not carry a reservation, a rate, a
+ * licence gap or another client). The shortage names the client's own short
+ * SKUs from `extensions.skuCodes`.
+ */
+export function portalOrderReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'client-suspended':
+      case 'client-departed':
+      case 'role-denied':
+      case 'permission-denied':
+      case 'unauthenticated':
+        return portalReadReason(error, 'This order');
+      case 'not-found':
+        return 'A SKU or warehouse is no longer available — reload the form and pick again.';
+      case 'order-backorder-rejected': {
+        const codes = refusedSkuCodes(error);
+        const named = codes.length === 0 ? 'some lines' : codes.join(', ');
+        return `Not enough stock at this warehouse for ${named} — nothing was placed. Lower the quantities or choose another warehouse.`;
+      }
+      case 'licence-not-covered':
+        return 'A licence for one of these products is not on file with the warehouse — nothing was placed. Contact the warehouse.';
+      case 'sku-inactive':
+        return 'A SKU on this order is no longer active with the warehouse — remove it and place the rest.';
+      case 'order-catalog-changed':
+        return 'The warehouse changed one of these products while you ordered — nothing was placed. Reload the form and try again.';
+      case 'reservation-store-unavailable':
+        return 'The warehouse could not check stock just now — nothing was placed. Try again in a moment.';
+      case 'validation-failed':
+        // A fixed portal sentence — never the server's validator wording.
+        return 'Check the quantities, the ship-to address and the buyer GSTIN, then try again.';
+      case 'idempotency-key-reuse':
+        return 'This submission was already processed with different details — reload and try again.';
+      case 'conflict':
+        return 'The same order is still being processed — try again in a moment.';
+      default:
+        return `The order was not placed (${error.code}).`;
     }
   }
   return UNREACHABLE_REASON;

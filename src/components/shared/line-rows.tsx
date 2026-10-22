@@ -22,6 +22,7 @@ export function LineRows<O extends LineOption>({
   skus,
   onChange,
   lockedIds,
+  hint,
 }: {
   lines: readonly AsnDraftLine[];
   options: readonly O[];
@@ -29,6 +30,11 @@ export function LineRows<O extends LineOption>({
   onChange: (next: AsnDraftLine[]) => void;
   /** Lines that have received stock: their SKU is fixed (the server refuses a change). */
   lockedIds?: ReadonlySet<string>;
+  /**
+   * Story 4-1a — an optional per-line note after the unit (the portal order
+   * form's "available here: N"). Absent — every other form — nothing renders.
+   */
+  hint?: (line: AsnDraftLine, index: number) => string | null;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -65,6 +71,14 @@ export function LineRows<O extends LineOption>({
               className={`${lineInputClass} w-28`}
             />
             {sku !== undefined && <span className="text-xs text-(--muted-foreground)">{sku.uom}</span>}
+            {(() => {
+              const note = hint?.(line, index) ?? null;
+              return note === null ? null : (
+                <span className="text-xs text-(--muted-foreground)" data-testid="line-hint">
+                  {note}
+                </span>
+              );
+            })()}
             {!locked && lines.length > 1 && (
               <button type="button" onClick={() => onChange(lines.filter((_, i) => i !== index))} className={lineButtonClass}>
                 Remove
