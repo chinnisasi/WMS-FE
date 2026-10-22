@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 
 import { describeDrill, drillBannerWord, UNSUPPORTED_DRILL_COPY, type Drill } from '@/lib/drill';
+import { useWarehouseBins } from '@/lib/use-inventory';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -37,12 +38,16 @@ export function DrillBanner({ drill, clearHref }: { drill: Drill; clearHref?: st
   const pathname = usePathname();
   const warehouses = useTenantWarehouses();
   const items = warehouses.state === 'ready' ? warehouses.data.items : null;
+  // Story 3-2a — a ledger drill on one bin names it by code (read only for that drill).
+  const binDrill = drill.list === 'ledger' && drill.binId !== undefined;
+  const bins = useWarehouseBins(binDrill ? drill.warehouseId : null);
+  const binCodes = bins.state === 'ready' ? Object.fromEntries(bins.data.map((bin) => [bin.id, bin.code])) : null;
   return (
     <div data-testid="drill-banner">
       <FeedbackBanner
         tone="warning"
         word={drillBannerWord(drill)}
-        reason={describeDrill(drill, items)}
+        reason={describeDrill(drill, items, binCodes)}
         action={
           <button type="button" className={buttonClass} onClick={() => router.push(clearHref ?? pathname)}>
             Clear

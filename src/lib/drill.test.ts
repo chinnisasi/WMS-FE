@@ -65,6 +65,12 @@ const DRILLS: readonly { name: string; apiPath: string; query: Record<string, st
     },
   },
   {
+    // Story 3-2a — the adjustment outcome's "See it in the ledger": SKU, bin and type.
+    name: 'a ledger drill by SKU and bin (an adjustment)',
+    apiPath: `${wh}/inventory/events`,
+    query: { type: 'stock.adjusted', skuId: '0198f7a2-1b3c-7d4e-8f90-00000000c001', binId: '0198f7a2-1b3c-7d4e-8f90-00000000b001' },
+  },
+  {
     name: 'a ledger drill with shortPick=false',
     apiPath: `${wh}/inventory/events`,
     query: { type: 'pick.picked', shortPick: 'false', to: TO },
@@ -365,6 +371,15 @@ describe('describeDrill — the banner sentence', () => {
     ],
   ])('%s', (_name, drill, expected) => {
     expect(describeDrill(drill, WAREHOUSES)).toBe(expected);
+  });
+
+  test('story 3-2a — a ledger drill on one bin names the bin by code when the bins are read, else its id tail', () => {
+    const BIN = '0198f7a2-1b3c-7d4e-8f90-00000000b001';
+    const SKU = '0198f7a2-1b3c-7d4e-8f90-00000000c001';
+    const drill: Drill = { list: 'ledger', warehouseId: W, type: ['stock.adjusted'], skuId: SKU, binId: BIN };
+    expect(describeDrill(drill, WAREHOUSES, { [BIN]: 'A-01-01' })).toBe('Ledger events · Stock adjusted · SKU 0198f7a2 · Bin A-01-01 · MAIN Chennai DC');
+    expect(describeDrill(drill, WAREHOUSES)).toBe('Ledger events · Stock adjusted · SKU 0198f7a2 · Bin 0000b001 · MAIN Chennai DC');
+    expect(describeDrill(drill, WAREHOUSES, {})).toBe('Ledger events · Stock adjusted · SKU 0198f7a2 · Bin 0000b001 · MAIN Chennai DC');
   });
 
   test('warehouseDisplayLabel — code and name, else the short id', () => {

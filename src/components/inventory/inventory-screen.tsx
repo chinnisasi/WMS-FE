@@ -5,6 +5,7 @@ import { Fragment, useState, useSyncExternalStore, type FormEvent, type ReactNod
 
 import type { BatchListItemDto, BinResponse, ClientDto, SkuResponse, StockEntryDto } from '@/lib/api/generated';
 import { clientFilterKey } from '@/lib/active-client';
+import { ADJUST_ROLE_DENIED, adjustOffered, type AdjustOutcome } from '@/lib/adjust';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { clientCell, showClients, skuDisplayLabel, skusOfClient, withSkuClient } from '@/lib/clients';
 import { ledgerTypeLabel, warehouseDisplayLabel, type DrillWarehouse } from '@/lib/drill';
@@ -35,6 +36,7 @@ import { istDateLabel } from '@/lib/audit-exports';
 import { ledgerBinsLabel, ledgerQuantityLabel, ledgerRecordedLabel } from '@/lib/ledger';
 import { INVENTORY_PAGE_TABS, type InventoryTab } from '@/lib/page-tabs';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
+import { useKits } from '@/lib/use-catalog';
 import { readyClients } from '@/lib/use-clients';
 import { useBatchList, useSkuCatalog, useStockList, useWarehouseBins } from '@/lib/use-inventory';
 import { useBatchDetail } from '@/lib/use-replenishment';
@@ -44,6 +46,7 @@ import { roleHasCapability } from '@/lib/users';
 import { writeOffOffered } from '@/lib/write-off';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
+import { AdjustBanner, AdjustForm } from '@/components/inventory/adjust-form';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { Ledger } from '@/components/inventory/ledger';
 import { WriteOffBanner, WriteOffPanel, type WriteOffResult } from '@/components/inventory/write-off';
@@ -57,9 +60,12 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
  * a bin or SKU code), **Batches** (a SKU's batches by expiry, each opening to
  * its bins and history) and **Ledger** (the existing timeline, undrilled).
  *
- * Read-only but for ONE write (story 2-4a): a role holding `stock.adjust`
- * can write off units from the system DAMAGED bin (`WriteOffPanel`). No
- * other adjust, move or hold here. It reads the active warehouse
+ * Two writes, both for a role holding `stock.adjust`: the 2-4a write-off of
+ * units in the system DAMAGED bin (`WriteOffPanel`), and — story 3-2a — the
+ * stock adjustment (`AdjustForm`): the **Adjust** tab (shown only to that
+ * role; a deep link without it reads "Your role cannot adjust stock") and an
+ * Adjust action on every eligible Stock row, an inline panel pre-filled for
+ * that bin and SKU. No move or hold here. It reads the active warehouse
  * (the sidebar switcher's pick, else the first). The warehouse gate wraps
  * Stock and Batches only — the Ledger owns its own warehouse resolution and
  * failure arms, so a failed warehouses read never shows twice.
@@ -87,20 +93,50 @@ export function InventoryScreen({ initialTab = null }: { initialTab?: InventoryT
   return <InventorySessioned initialTab={initialTab} />;
 }
 
+/** Story 3-2a — the tabs a role sees: Adjust only with `stock.adjust`. */
+export function inventoryVisibleTabs(canAdjust: boolean): readonly InventoryTab[] {
+  return INVENTORY_PAGE_TABS.tabs.map((t) => t.id).filter((id) => canAdjust || id !== 'adjust');
+}
+
 function InventorySessioned({ initialTab }: { initialTab: InventoryTab | null }) {
   // No drill on this page: ledger drills stay on /inventory/ledger.
   const [tab, selectTab] = usePageTab(INVENTORY_PAGE_TABS, INVENTORY_PAGE_TABS.initial(null, initialTab), false);
+  // Story 3-2a — the role through the subscription (the /me bootstrap rewrites it after mount).
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  const canAdjust = roleHasCapability(role, 'stock.adjust');
   return (
     <div className="flex flex-col gap-4">
-      <PageTabStrip def={INVENTORY_PAGE_TABS} active={tab} drilled={false} onSelect={selectTab} />
-      <PageTabPanel def={INVENTORY_PAGE_TABS} active={tab}>
-        {tab === 'ledger' ? <Ledger /> : <WarehouseGate tab={tab} />}
-      </PageTabPanel>
+      <PageTabStrip
+        def={INVENTORY_PAGE_TABS}
+        active={tab}
+        drilled={false}
+        onSelect={selectTab}
+        visibleTabs={inventoryVisibleTabs(canAdjust)}
+      />
+      {tab === 'adjust' && !canAdjust ? (
+        // A deep link to ?tab=adjust without the capability: no form, and no
+        // tabpanel — its tab is not in the bar, so the panel is a labelled region.
+        <div role="region" aria-label="Adjust" data-testid="adjust-denied-region">
+          <Section title="Adjust">
+            <div className="text-(--muted-foreground)" data-testid="adjust-denied">
+              {ADJUST_ROLE_DENIED}.
+            </div>
+          </Section>
+        </div>
+      ) : (
+        <PageTabPanel def={INVENTORY_PAGE_TABS} active={tab}>
+          {tab === 'ledger' ? <Ledger /> : <WarehouseGate tab={tab} />}
+        </PageTabPanel>
+      )}
     </div>
   );
 }
 
-const SECTION_TITLE: Record<Exclude<InventoryTab, 'ledger'>, string> = { stock: 'Stock', batches: 'Batches' };
+const SECTION_TITLE: Record<Exclude<InventoryTab, 'ledger'>, string> = { stock: 'Stock', batches: 'Batches', adjust: 'Adjust' };
 
 function WarehouseGate({ tab }: { tab: Exclude<InventoryTab, 'ledger'> }) {
   const title = SECTION_TITLE[tab];
@@ -146,6 +182,9 @@ function WarehouseGate({ tab }: { tab: Exclude<InventoryTab, 'ledger'> }) {
   // Keyed on the warehouse (and, for Stock, the active client): a switch
   // remounts the section, so the search and every loaded page go with it
   // (frontend guide §1.5).
+  if (tab === 'adjust') {
+    return <AdjustSection key={warehouseId} warehouseId={warehouseId} warehouses={items} refreshNote={refreshNote} active={active} />;
+  }
   return tab === 'stock' ? (
     <StockSection
       key={`${warehouseId}|${clientFilterKey(active.filter)}`}
@@ -348,6 +387,14 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
   // (WarehouseGate), so a switch remounts it (code review EC6, pinned).
   const [writeOffRowId, setWriteOffRowId] = useState<string | null>(null);
   const [writeOffResult, setWriteOffResult] = useState<WriteOffResult | null>(null);
+  // Story 3-2a — the row adjustment: one open panel at a time (a write-off
+  // or an adjustment), and the last outcome. Reset on a switch, as above.
+  // Kit-ness only matters to a role that can adjust: no read otherwise.
+  const kits = useKits(canAdjust);
+  // A row panel's request in flight disables every row action (one write at a time).
+  const [rowBusy, setRowBusy] = useState(false);
+  const [adjustRowId, setAdjustRowId] = useState<string | null>(null);
+  const [adjustResult, setAdjustResult] = useState<AdjustOutcome | null>(null);
 
   // Story 1-5a — under an active client the search resolves only that
   // client's SKU codes (the catalog read itself stays unfiltered).
@@ -379,6 +426,15 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
   };
 
   const skuOf = (row: StockEntryDto) => skuById?.[row.skuId] ?? null;
+  const binById: Readonly<Record<string, BinResponse>> =
+    bins.state === 'ready' ? Object.fromEntries(bins.data.map((bin) => [bin.id, bin])) : {};
+  const kitIds = kits.state === 'ready' ? new Set(Object.keys(kits.data)) : null;
+  /** Story 3-2a — decision 4: the row's bin and SKU pass `adjustOffered`, for a `stock.adjust` role. */
+  const adjustable = (row: StockEntryDto) => {
+    const sku = skuOf(row);
+    // Decided only once the kits read answers — a kit is never offered.
+    return canAdjust && sku !== null && kitIds !== null && adjustOffered(binById[row.binId], sku, kitIds);
+  };
   const columns: Column<StockEntryDto>[] = [];
   if (applied?.kind !== 'bin') {
     columns.push({
@@ -402,32 +458,74 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
   }
   columns.push({ key: 'quantity', header: 'On hand', numeric: true, render: (row) => quantityLabel(row.quantity, skuOf(row)) });
   // Story 2-4a — the Action column appears only when a listed row can be
-  // written off (a DAMAGED row and `stock.adjust`): every other table is
+  // written off (a DAMAGED row and `stock.adjust`) or — story 3-2a —
+  // adjusted (`adjustOffered`): a role without `stock.adjust` sees the table
   // exactly as before.
-  const anyWriteOff = stock.state === 'ready' && stock.data.rows.some((row) => writeOffOffered(row, canAdjust) && skuOf(row) !== null);
-  if (anyWriteOff) {
+  const writeOffable = (row: StockEntryDto) => writeOffOffered(row, canAdjust) && skuOf(row) !== null;
+  const anyAction = stock.state === 'ready' && stock.data.rows.some((row) => writeOffable(row) || adjustable(row));
+  if (anyAction) {
     columns.push({
       key: 'writeOff',
       header: 'Action',
       render: (row) =>
-        writeOffOffered(row, canAdjust) && skuOf(row) !== null ? (
+        writeOffable(row) ? (
           <button
             type="button"
             className={rowButtonClass}
             aria-expanded={writeOffRowId === row.id}
+            disabled={rowBusy}
             onClick={() => {
               setWriteOffResult(null);
+              setAdjustResult(null);
+              setAdjustRowId(null);
               setWriteOffRowId(writeOffRowId === row.id ? null : row.id);
             }}
           >
             Write off
           </button>
+        ) : adjustable(row) ? (
+          <button
+            type="button"
+            className={rowButtonClass}
+            aria-expanded={adjustRowId === row.id}
+            disabled={rowBusy}
+            onClick={() => {
+              setWriteOffResult(null);
+              setAdjustResult(null);
+              setWriteOffRowId(null);
+              setAdjustRowId(adjustRowId === row.id ? null : row.id);
+            }}
+          >
+            Adjust
+          </button>
         ) : null,
     });
   }
-  const writeOffExpanded = (row: StockEntryDto) => {
+  const rowExpanded = (row: StockEntryDto) => {
     const sku = skuOf(row);
-    if (writeOffRowId !== row.id || sku === null) return null;
+    if (sku === null) return null;
+    if (adjustRowId === row.id && adjustable(row)) {
+      const bin = binById[row.binId]!;
+      return (
+        <AdjustForm
+          key={row.id}
+          warehouseId={warehouseId}
+          bins={[bin]}
+          catalog={skus}
+          kits={kits}
+          clients={clients}
+          fixed={{ binId: row.binId, skuId: row.skuId, held: row.quantity }}
+          onClose={() => setAdjustRowId(null)}
+          onBusy={setRowBusy}
+          onDone={(result) => {
+            setAdjustRowId(null);
+            setAdjustResult(result);
+            stock.reload();
+          }}
+        />
+      );
+    }
+    if (writeOffRowId !== row.id) return null;
     return (
       <WriteOffPanel
         key={row.id}
@@ -435,6 +533,7 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
         row={row}
         sku={sku}
         onClose={() => setWriteOffRowId(null)}
+        onBusy={setRowBusy}
         onDone={(result) => {
           setWriteOffRowId(null);
           setWriteOffResult(result);
@@ -478,6 +577,12 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
           </button>
         )}
       </form>
+      {canAdjust && bins.state === 'failed' && (
+        // Story 3-2a — the row actions need the bins read: say so, never hide them silently.
+        <div data-testid="adjust-unavailable">
+          <ReadFailure word="Adjustments unavailable" reason="The bins could not be read, so no row can be adjusted — retry." onRetry={bins.reload} />
+        </div>
+      )}
       {availability.note !== null && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-(--muted-foreground)" data-testid="search-note">
           <span>{availability.note}</span>
@@ -507,6 +612,7 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
             </div>
           )}
           {writeOffResult !== null && <WriteOffBanner result={writeOffResult} />}
+          {adjustResult !== null && <AdjustBanner outcome={adjustResult} />}
           {stock.state === 'failed' ? (
             <ReadFailure word="Stock unavailable" reason={stock.reason} onRetry={stock.reload} />
           ) : (
@@ -516,7 +622,7 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
               emptyMessage={emptyMessage}
               skuSearch={applied?.kind === 'sku' ? applied : null}
               skuOfId={(id) => skuById?.[id] ?? null}
-              expanded={writeOffExpanded}
+              expanded={rowExpanded}
             />
           )}
         </>
@@ -538,7 +644,7 @@ function StockRowsView({
   emptyMessage: string;
   skuSearch: { id: string; code: string } | null;
   skuOfId: (id: string) => SkuResponse | null;
-  /** Story 2-4a — the write-off panel under its DAMAGED row. */
+  /** Story 2-4a — the write-off panel under its DAMAGED row; story 3-2a — the adjustment panel under its row. */
   expanded?: (row: StockEntryDto) => ReactNode;
 }) {
   if (stock.state === 'loading') {
@@ -587,6 +693,40 @@ function StockRowsView({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Adjust (story 3-2a)                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The Adjust tab: the blank adjustment form (the bin, Add or Remove, then the
+ * SKU) for the active warehouse. Reached only past the role guard
+ * (`InventorySessioned`). Write-side, so never client-filtered — it says
+ * "All clients" while a client is active.
+ */
+function AdjustSection({ warehouseId, warehouses, refreshNote, active }: SectionProps) {
+  const bins = useWarehouseBins(warehouseId);
+  const skus = useSkuCatalog();
+  const kits = useKits();
+  const clients = readyClients(active.clients);
+  return (
+    <Section title="Adjust">
+      {refreshNote}
+      <AllClientsNote active={active} />
+      <div className="text-(--muted-foreground)">
+        {warehouseDisplayLabel(warehouses, warehouseId)} — add units found in a bin, or remove units that are gone. Over the
+        approval threshold an adjustment waits for an owner.
+      </div>
+      {bins.state === 'loading' ? (
+        <div className="text-(--muted-foreground)">Loading the bins…</div>
+      ) : bins.state === 'failed' ? (
+        <ReadFailure word="Bins unavailable" reason={bins.reason} onRetry={bins.reload} />
+      ) : (
+        <AdjustForm warehouseId={warehouseId} bins={bins.data} catalog={skus} kits={kits} clients={clients} />
+      )}
+    </Section>
   );
 }
 

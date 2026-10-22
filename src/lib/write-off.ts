@@ -1,6 +1,7 @@
 import type { BatchListItemDto, SkuResponse, StockAdjustmentDto } from '@/lib/api/generated';
 import { ApiProblem } from '@/lib/api/client';
-import { formatQuantity, parseQuantityInput } from '@/lib/format-quantity';
+import { ADJUST_NOTE_MAX, ADJUSTMENT_PENDINGS_HREF as PENDINGS_HREF, parseAdjustQuantity } from '@/lib/adjust';
+import { formatQuantity } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
 /**
@@ -20,11 +21,11 @@ export const WRITE_OFF_REASON_CODE = 'damaged';
 /** The batch override reason a per-batch write-off sends (an explicit draw names its batch — FEFO skips expired ones). */
 export const WRITE_OFF_OVERRIDE_REASON = 'damaged write-off';
 
-/** The pending queue a 202 links to. */
-export const ADJUSTMENT_PENDINGS_HREF = '/conflicts?queue=adjustment-pendings';
+/** The pending queue a 202 links to (story 3-2a: shared with the stock adjustment, `lib/adjust.ts`). */
+export const ADJUSTMENT_PENDINGS_HREF = PENDINGS_HREF;
 
-/** The note bound — the adjustment DTO's `Length(1, 500)`. */
-export const WRITE_OFF_NOTE_MAX = 500;
+/** The note bound — the adjustment DTO's `Length(1, 500)` (story 3-2a: the shared `ADJUST_NOTE_MAX`). */
+export const WRITE_OFF_NOTE_MAX = ADJUST_NOTE_MAX;
 
 /** Whether a stock row offers "Write off": the system DAMAGED bin, and the role holds `stock.adjust`. */
 export function writeOffOffered(row: { readonly binCode?: string; readonly binSystemOwned?: boolean }, canAdjust: boolean): boolean {
@@ -65,20 +66,10 @@ export function parseWriteOff(args: {
   if (sku.batchTracked && draft.batchCode === null) {
     return { kind: 'refused', problem: `${sku.code} is batch-tracked — choose the batch to write off.` };
   }
-  const qty = parseQuantityInput(draft.quantity);
-  if (qty === null || qty <= 0) {
-    return { kind: 'refused', problem: 'Type how many units to write off — a positive number.' };
-  }
-  const places = Math.min(Math.max(Math.trunc(sku.uomPrecision), 0), 3);
-  if (Math.round(qty * 10 ** places) / 10 ** places !== qty) {
-    return {
-      kind: 'refused',
-      problem:
-        places === 0
-          ? `${sku.uom} counts in whole units — ${draft.quantity.trim()} is not one.`
-          : `${sku.uom} takes at most ${places} decimal place(s) — ${draft.quantity.trim()} has more.`,
-    };
-  }
+  // Story 3-2a — the shared quantity rule (the same words, the same precision refusal).
+  const parsed = parseAdjustQuantity(draft.quantity, sku, 'Type how many units to write off — a positive number.');
+  if (parsed.problem !== null) return { kind: 'refused', problem: parsed.problem };
+  const qty = parsed.qty;
   if (qty > args.available) {
     return {
       kind: 'refused',
