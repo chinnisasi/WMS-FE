@@ -47,5 +47,9 @@ describe('ledger cells', () => {
       'manual-adjustment · reason stock-count · “recount”',
     );
     expect(ledgerReferenceLabel({ kind: 'pick' })).toBe('pick');
+    // Story 3-1 — the bin-move arm: its reason, the move, the note.
+    expect(ledgerReferenceLabel({ kind: 'bin-move', moveId: '0198cccc-move', reasonCode: 'other', note: 'shelf collapsed' })).toBe(
+      'bin-move · reason other · move 0198cccc · “shelf collapsed”',
+    );
   });
 });

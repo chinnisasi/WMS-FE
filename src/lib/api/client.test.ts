@@ -84,6 +84,7 @@ import {
   fetchApiListAdjustmentPendings,
   fetchApiListLedgerEvents,
   fetchApiListBatches,
+  fetchApiMoveStock,
   fetchApiListStock,
   fetchApiListPutawayTasks,
   fetchApiListVariances,
@@ -2631,6 +2632,36 @@ describe('inventory-screen — the stock and batch list wrappers', () => {
   test('a refusal keeps its machine-readable code', async () => {
     stubFetch(400, { code: 'invalid-cursor', title: 'Malformed pagination cursor', status: 400, detail: 'd' });
     await expect(fetchApiListStock(T, W, { cursor: 'x', order: 'location' })).rejects.toMatchObject({ code: 'invalid-cursor' });
+  });
+
+  test('story 3-1 — the batch list narrows to one bin when binId is given (and only then)', async () => {
+    stubFetch(200, { items: [] });
+    await fetchApiListBatches(T, W, SKU, { binId: 'bin-1' });
+    const url = new URL(lastRequest!.url);
+    expect([...url.searchParams.entries()]).toEqual([
+      ['skuId', SKU],
+      ['binId', 'bin-1'],
+    ]);
+  });
+
+  test('story 3-1 — a move POSTs the body verbatim to the warehouse moves route under the Idempotency-Key', async () => {
+    stubFetch(201, { moveId: 'mv-1', events: [] });
+    const body = {
+      skuId: SKU,
+      fromBinId: 'bin-a',
+      toBinId: 'bin-b',
+      qty: 20,
+      batchCode: null,
+      serials: null,
+      reasonCode: 'consolidate' as const,
+      note: null,
+    };
+    const result = await fetchApiMoveStock(T, W, body, '01JZ3K8Q4M7N2P5R9S6T1V0MVE');
+    expect(result).toEqual({ moveId: 'mv-1', events: [] });
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${T}/warehouses/${W}/inventory/moves`);
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe('01JZ3K8Q4M7N2P5R9S6T1V0MVE');
+    expect(JSON.parse(await lastRequest!.text())).toEqual(body);
   });
 });
 

@@ -91,6 +91,7 @@ import {
   inventoryControllerListStock,
   inventoryControllerRejectAdjustment,
   movementsControllerListCountVariances,
+  movementsControllerMoveStock,
   movementsControllerResolveCountVariance,
   outboundControllerCancelOrder,
   outboundControllerCancelWave,
@@ -368,6 +369,8 @@ import type {
   BatchAlertResponse,
   BatchDetailResponse,
   BatchListResponse,
+  MoveStockDto,
+  MoveStockResponse,
   StockAdjustmentDto,
   StockAdjustmentPendingResponse,
   StockAdjustmentResponse,
@@ -2988,6 +2991,29 @@ export async function fetchApiListBatches(
     // damaged write-off lists the DAMAGED bin's batches); absent = the warehouse.
     query: options?.binId === undefined ? { skuId } : { skuId, binId: options.binId },
     signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 3-1 — move stock between two bins of one warehouse (`stock.move`).
+ * The key is per draft (reused on a retry of the unchanged draft, cleared on
+ * any edit — every field is in the server's hash). A web move sends no
+ * `occurredAt` (the server refuses it from a web session — the move happens now).
+ */
+export async function fetchApiMoveStock(
+  tenantId: string,
+  warehouseId: string,
+  body: MoveStockDto,
+  idempotencyKey: string,
+): Promise<MoveStockResponse> {
+  const { data, error } = await movementsControllerMoveStock({
+    path: { tenantId, warehouseId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
     throw unwrapError(error, 400);

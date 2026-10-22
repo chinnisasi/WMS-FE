@@ -73,6 +73,8 @@ export function ledgerReferenceLabel(doc: LedgerReferenceDocDto | null): string 
   if (doc.poLineId !== undefined) parts.push(`PO line ${shortId(doc.poLineId)}`);
   if (doc.asnId !== undefined) parts.push(`ASN ${shortId(doc.asnId)}`);
   if (doc.asnLineId !== undefined) parts.push(`ASN line ${shortId(doc.asnLineId)}`);
+  // Story 3-1 — the bin-to-bin move the event belongs to.
+  if (doc.moveId !== undefined) parts.push(`move ${shortId(doc.moveId)}`);
   if (doc.note !== undefined) parts.push(`“${doc.note}”`);
   return parts.join(' · ');
 }

@@ -22,6 +22,7 @@ import {
   rejectedOpGuidance,
   GATE_IN_UNLOAD_GONE_GUIDANCE,
   GATE_IN_UNLOAD_GUIDANCE,
+  STOCK_MOVE_GUIDANCE,
   GRN_REFUSAL_LABEL,
   GRN_CLIENT_GUIDANCE,
   GRN_DEPARTED_GUIDANCE,
@@ -809,5 +810,45 @@ describe('story 2-4a — damaged and short on GRN review rows', () => {
       'A zone or bin coded DAMAGED blocks the system damaged bin, so this receipt booked nothing. An administrator must re-code that location (migration 0087 re-codes such locations); then apply this row to receive it again.',
     );
     expect(GRN_DAMAGED_BIN_CONFLICT_GUIDANCE).not.toMatch(/retire/i);
+  });
+});
+
+describe('story 3-1 — a refused handheld move (stock.move)', () => {
+  const payload = {
+    warehouseId: 'w',
+    skuId: '0198f7a2-1b3c-7d4e-8f90-0000000005c1',
+    fromBinId: '0198f7a2-1b3c-7d4e-8f90-00000000a001',
+    toBinId: '0198f7a2-1b3c-7d4e-8f90-00000000b002',
+    qty: 20,
+    batchCode: null,
+    serials: null,
+    reasonCode: 'consolidate',
+    note: null,
+    occurredAt: '2026-10-22T03:30:00.000Z',
+  };
+
+  test('Apply and Discard, as the server says; the guidance names the remedy', () => {
+    expect(rejectedOpDecisions({ decisions: ['apply', 'discard'], payload })).toEqual(['apply', 'discard']);
+    expect(rejectedOpGuidance({ opType: 'stock.move', problemCode: 'bin-blocked', payload })).toEqual([STOCK_MOVE_GUIDANCE]);
+    expect(STOCK_MOVE_GUIDANCE).toBe(
+      'Apply re-runs the move as recorded, every rule checked again. If the floor no longer matches it, discard this row and record a move or an adjustment on the Moves or Inventory page that matches the floor.',
+    );
+  });
+
+  test('the summary names the SKU, the quantity, both bins, the batch or serials, the reason and the refusal in words', () => {
+    expect(rejectedOpSummary({ opType: 'stock.move', problemCode: 'move-source-short', payload }, () => 'PLAIN')).toEqual({
+      heading: 'PLAIN × 20 — not moved',
+      lines: ['bin …0000a001 → bin …0000b002 · reason consolidate — the origin bin held less than the move'],
+    });
+    expect(
+      rejectedOpSummary({ opType: 'stock.move', problemCode: 'serial-elsewhere', payload: { ...payload, qty: 2, serials: ['S1', 'S2'], reasonCode: 'other', note: 'shelf' } }),
+    ).toEqual({
+      heading: 'SKU …000005c1 × 2 — not moved',
+      lines: ['bin …0000a001 → bin …0000b002 · serials S1, S2 · reason other · “shelf” — a serial is in another bin'],
+    });
+    expect(rejectedOpSummary({ opType: 'stock.move', problemCode: 'brand-new', payload: { batchCode: 'L1' } })).toEqual({
+      heading: 'unknown SKU × ? — not moved',
+      lines: ['unknown bin → unknown bin · batch L1 — brand-new'],
+    });
   });
 });

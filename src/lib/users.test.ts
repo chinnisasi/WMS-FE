@@ -58,7 +58,11 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 13-1 adds `returns.manage` (owner + ops_manager — return authorizations) — 43 became 44.
     // Story 1-6c adds `licences.manage` (owner-only — the drug and FSSAI licences) — 44 became 45.
     // Story 2-3a adds `gate.manage` (owner + ops_manager + operator — the gate-in) — 45 became 46.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(46);
+    // Story 3-1 adds `stock.move` (owner + ops_manager + operator — the bin-to-bin move) — 46 became 47.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(47);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'stock.move')),
+    ).toEqual(['owner', 'ops_manager', 'operator']);
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'gate.manage')),
     ).toEqual(['owner', 'ops_manager', 'operator']);
@@ -223,6 +227,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'returns.manage',
         // Story 2-3a — the gate-in (derived, never hand-copied).
         'gate.manage',
+        // Story 3-1 — the bin-to-bin move (derived, never hand-copied).
+        'stock.move',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -250,6 +256,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
       'counts.execute',
       // Story 2-3a — the gate desk and the dock record the gate-in.
       'gate.manage',
+      // Story 3-1 — the floor moves stock between bins.
+      'stock.move',
     ]);
     expect(roleHasCapability('operator', 'putaway.execute')).toBe(true);
     expect(roleHasCapability('operator', 'warehouse.create')).toBe(false);
