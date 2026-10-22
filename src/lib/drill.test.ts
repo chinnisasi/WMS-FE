@@ -377,9 +377,9 @@ describe('describeDrill — the banner sentence', () => {
     const BIN = '0198f7a2-1b3c-7d4e-8f90-00000000b001';
     const SKU = '0198f7a2-1b3c-7d4e-8f90-00000000c001';
     const drill: Drill = { list: 'ledger', warehouseId: W, type: ['stock.adjusted'], skuId: SKU, binId: BIN };
-    expect(describeDrill(drill, WAREHOUSES, { [BIN]: 'A-01-01' })).toBe('Ledger events · Stock adjusted · SKU 0198f7a2 · Bin A-01-01 · MAIN Chennai DC');
-    expect(describeDrill(drill, WAREHOUSES)).toBe('Ledger events · Stock adjusted · SKU 0198f7a2 · Bin 0000b001 · MAIN Chennai DC');
-    expect(describeDrill(drill, WAREHOUSES, {})).toBe('Ledger events · Stock adjusted · SKU 0198f7a2 · Bin 0000b001 · MAIN Chennai DC');
+    expect(describeDrill(drill, WAREHOUSES, { [BIN]: 'A-01-01' })).toBe('Ledger events · Stock adjusted · Bin A-01-01 · SKU 0198f7a2 · MAIN Chennai DC');
+    expect(describeDrill(drill, WAREHOUSES)).toBe('Ledger events · Stock adjusted · Bin 0000b001 · SKU 0198f7a2 · MAIN Chennai DC');
+    expect(describeDrill(drill, WAREHOUSES, {})).toBe('Ledger events · Stock adjusted · Bin 0000b001 · SKU 0198f7a2 · MAIN Chennai DC');
   });
 
   test('warehouseDisplayLabel — code and name, else the short id', () => {

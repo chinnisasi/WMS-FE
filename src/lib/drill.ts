@@ -570,8 +570,8 @@ export function describeDrill(
   if ('shortPick' in drill && drill.shortPick !== undefined) {
     parts.push(drill.shortPick ? 'Short-pick draws' : 'Not short-pick draws');
   }
-  if ('skuId' in drill && drill.skuId !== undefined) parts.push(`SKU ${drill.skuId.slice(0, 8)}`);
   if ('binId' in drill && drill.binId !== undefined) parts.push(`Bin ${binCodes?.[drill.binId] ?? drill.binId.slice(-8)}`);
+  if ('skuId' in drill && drill.skuId !== undefined) parts.push(`SKU ${drill.skuId.slice(0, 8)}`);
   if ('orderId' in drill && drill.orderId !== undefined) parts.push(`Order ${drill.orderId.slice(0, 8)}`);
   if ('from' in drill || 'to' in drill) {
     const from = 'from' in drill && drill.from !== undefined ? drillInstantLabel(drill.from) : null;
