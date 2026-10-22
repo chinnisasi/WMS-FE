@@ -119,7 +119,10 @@ describe('page-tabs — the pages', () => {
       ['stock', 'Stock'],
       ['batches', 'Batches'],
       ['ledger', 'Ledger'],
+      // Story 3-2a — the adjustment form (role-filtered by the screen).
+      ['adjust', 'Adjust'],
     ]);
+    expect(INVENTORY_PAGE_TABS.href('adjust')).toBe('/inventory?tab=adjust');
     expect(INVENTORY_PAGE_TABS.href('stock')).toBe('/inventory');
     expect(INVENTORY_PAGE_TABS.href('ledger')).toBe('/inventory?tab=ledger');
     // Story 3-5a — counts under Moves: Tasks (the bare route) and Schedule; no drill.

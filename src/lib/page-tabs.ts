@@ -133,7 +133,8 @@ export type ComplianceTab = (typeof COMPLIANCE_PAGE_TABS)['defaultTab'];
 
 /**
  * `/inventory` (inventory-screen, 2026-10-17) — Stock (on-hand per bin and
- * SKU), Batches (a SKU's batches by expiry) and the Ledger timeline. The page
+ * SKU), Batches (a SKU's batches by expiry), the Ledger timeline and — story
+ * 3-2a, `stock.adjust` only — Adjust (the stock adjustment form). The page
  * takes no drill: ledger drills stay on `/inventory/ledger`.
  */
 export const INVENTORY_PAGE_TABS = definePageTabs({
@@ -143,6 +144,9 @@ export const INVENTORY_PAGE_TABS = definePageTabs({
     { id: 'stock', label: 'Stock' },
     { id: 'batches', label: 'Batches' },
     { id: 'ledger', label: 'Ledger' },
+    // Story 3-2a — the stock adjustment form; shown only to a role holding
+    // `stock.adjust` (the screen passes a role-filtered `visibleTabs`).
+    { id: 'adjust', label: 'Adjust' },
   ],
 });
 export type InventoryTab = (typeof INVENTORY_PAGE_TABS)['defaultTab'];

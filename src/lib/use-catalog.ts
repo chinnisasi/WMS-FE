@@ -298,12 +298,15 @@ export function useCatalogSkus(): ResourceState<Readonly<Record<string, SkuRespo
  * marker and the kit editor's prefill. Kit-ness is DERIVED (the 11-4
  * no-flag decision): the marker is this join, never a field on the SKU.
  */
-export function useKits(): ResourceState<Readonly<Record<string, KitResponse>>> & Reloadable {
-  const tenantId = useSyncExternalStore(
+export function useKits(enabled = true): ResourceState<Readonly<Record<string, KitResponse>>> & Reloadable {
+  const sessionTenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
     () => null,
   );
+  // Story 3-2a — `enabled: false` reads nothing (and stays loading): the
+  // Stock tab needs kit-ness only for a role that can adjust.
+  const tenantId = enabled ? sessionTenantId : null;
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{
     tenantId: string;

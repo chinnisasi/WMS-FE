@@ -165,6 +165,8 @@ export interface LedgerDrill extends DrillWindow {
   /** One-element list (the route's `type` is repeatable; a drill names one). */
   readonly type?: readonly LedgerEventType[];
   readonly skuId?: string;
+  /** Story 3-2a — one bin (source or destination, the route's `binId`): an adjustment's "See it in the ledger". */
+  readonly binId?: string;
   readonly orderId?: string;
   readonly shortPick?: boolean;
   /** Story 9-3a — a document drill's kind (display-only; never sent). */
@@ -265,6 +267,8 @@ const SPECS: Readonly<Record<DrillList, ListSpec>> = {
       warehouseId: 'uuid',
       type: 'type',
       skuId: 'uuid',
+      // Story 3-2a — the adjustment outcome's ledger link narrows to its bin.
+      binId: 'uuid',
       orderId: 'uuid',
       shortPick: 'boolean',
       ...WINDOW,
@@ -535,7 +539,12 @@ export interface DrillWarehouse {
  * IST clock ("as of …" for a live drill), and the warehouse by name (its
  * short id when it is not in hand). Pure.
  */
-export function describeDrill(drill: Drill, warehouses: readonly DrillWarehouse[] | null): string {
+export function describeDrill(
+  drill: Drill,
+  warehouses: readonly DrillWarehouse[] | null,
+  /** Story 3-2a — the drilled warehouse's bin codes by id, when read; a bin falls back to its id tail. */
+  binCodes: Readonly<Record<string, string>> | null = null,
+): string {
   // Story 9-3a — a document drill names the document, then its warehouse.
   const document = ledgerDrillDocument(drill);
   if (document !== null) {
@@ -562,6 +571,7 @@ export function describeDrill(drill: Drill, warehouses: readonly DrillWarehouse[
   if ('shortPick' in drill && drill.shortPick !== undefined) {
     parts.push(drill.shortPick ? 'Short-pick draws' : 'Not short-pick draws');
   }
+  if ('binId' in drill && drill.binId !== undefined) parts.push(`Bin ${binCodes?.[drill.binId] ?? drill.binId.slice(-8)}`);
   if ('skuId' in drill && drill.skuId !== undefined) parts.push(`SKU ${drill.skuId.slice(0, 8)}`);
   // Story 4-1b — the order's short form is its id's LAST eight characters
   // (`shortOrderId`, the label rule's fallback), never the timestamp head.

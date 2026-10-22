@@ -47,12 +47,15 @@ export function WriteOffPanel({
   sku,
   onDone,
   onClose,
+  onBusy,
 }: {
   warehouseId: string;
   row: StockEntryDto;
   sku: SkuResponse;
   onDone: (result: WriteOffResult) => void;
   onClose: () => void;
+  /** Story 3-2a — the Stock section disables its row actions while this request is in flight. */
+  onBusy?: (busy: boolean) => void;
 }) {
   const tenantId = useSyncExternalStore(
     subscribeSession,
@@ -65,6 +68,9 @@ export function WriteOffPanel({
   // One key per submission: kept across a retry of the SAME draft, dropped on
   // any edit (another payload under the key would be a 422) and on success.
   const keyRef = useRef<string | null>(null);
+  // Story 3-2a — a synchronous re-entry guard: a pre-render double submit
+  // fires both handlers before `busy` renders (guide §2.1).
+  const inFlight = useRef(false);
   const batches = useDamagedBatches(sku.batchTracked ? tenantId : null, warehouseId, sku.id, row.binId);
 
   const edit = (patch: Partial<WriteOffDraft>) => {
@@ -79,14 +85,16 @@ export function WriteOffPanel({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (tenantId === null || busy) return;
+    if (tenantId === null || busy || inFlight.current) return;
     const parsed = parseWriteOff({ warehouseId, binId: row.binId, sku, draft, available });
     if (parsed.kind === 'refused') {
       setProblem(parsed.problem);
       return;
     }
     keyRef.current ??= ulid();
+    inFlight.current = true;
     setBusy(true);
+    onBusy?.(true);
     try {
       const answer = await fetchApiAdjustStock(tenantId, parsed.body, keyRef.current);
       keyRef.current = null;
@@ -96,7 +104,9 @@ export function WriteOffPanel({
     } catch (error) {
       setProblem(writeOffReason(error));
     } finally {
+      inFlight.current = false;
       setBusy(false);
+      onBusy?.(false);
     }
   }
 

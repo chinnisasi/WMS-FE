@@ -49,7 +49,7 @@ const WAREHOUSES = [
 ];
 
 function sku(id: string, code: string, name: string, batchTracked: boolean, uom = 'each', uomPrecision = 0) {
-  return { id, code, name, uom, uomPrecision, batchTracked, serialTracked: false, clientId: 'client-self' };
+  return { id, code, name, uom, uomPrecision, batchTracked, serialTracked: false, clientId: 'client-self', status: 'active' };
 }
 const SKUS = [
   sku(SKU_SERUM, 'GLOW-SERUM-30', 'Glow Serum 30ml', true),
@@ -115,6 +115,7 @@ function stubRouter(): void {
     if (pathname === `${base}/warehouses`) return json(200, { items: WAREHOUSES, nextCursor: null });
     if (pathname === `${base}/catalog/skus`) return json(200, { items: SKUS, nextCursor: null });
     if (pathname === `${base}/clients`) return json(200, { items: clients });
+    if (pathname === `${base}/catalog/kits`) return json(200, { items: [], nextCursor: null });
     if (pathname === `${base}/users`) return json(200, { items: [], nextCursor: null });
     if (/\/warehouses\/[^/]+\/zones$/.test(pathname)) return json(200, { items: [{ id: ZONE, code: 'D', name: 'Zone D' }], nextCursor: null });
     if (/\/zones\/[^/]+\/bins$/.test(pathname)) {
@@ -231,7 +232,8 @@ describe('the Inventory screen — Stock', () => {
     await settle();
 
     const tablist = view.container.querySelector('[role="tablist"][aria-label="Inventory lists"]')!;
-    expect([...tablist.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['Stock', 'Batches', 'Ledger']);
+    // Story 3-2a — the owner holds stock.adjust, so the Adjust tab shows.
+    expect([...tablist.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['Stock', 'Batches', 'Ledger', 'Adjust']);
     expect(tablist.querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('stock');
     expect(panel().querySelector('h2')?.textContent).toBe('Stock');
 
@@ -241,11 +243,12 @@ describe('the Inventory screen — Stock', () => {
     expect(stockReads(WH2)).toHaveLength(0);
 
     const rows = tableRows();
+    // Story 3-2a — the owner's Action column: Adjust on storage bins, nothing on RECEIVING.
     expect(rows.map(cellTexts)).toEqual([
-      ['D-01-01', 'GLOW-SERUM-30', 'Glow Serum 30ml', '297 each'],
-      ['D-01-02', 'GLOW-SPF50-50', 'Glow SPF50 50ml', '148 each'],
-      ['D-01-02', 'ROSE-OIL', 'Rose Oil', '2.500 litre'],
-      ['RECEIVINGReceiving (awaiting putaway)', 'GLOW-SERUM-30', 'Glow Serum 30ml', '3 each'],
+      ['D-01-01', 'GLOW-SERUM-30', 'Glow Serum 30ml', '297 each', 'Adjust'],
+      ['D-01-02', 'GLOW-SPF50-50', 'Glow SPF50 50ml', '148 each', 'Adjust'],
+      ['D-01-02', 'ROSE-OIL', 'Rose Oil', '2.500 litre', 'Adjust'],
+      ['RECEIVINGReceiving (awaiting putaway)', 'GLOW-SERUM-30', 'Glow Serum 30ml', '3 each', ''],
     ]);
     // Only the system bin is labelled; no id anywhere in the table.
     expect(panelText()).not.toContain(BIN_D1);
@@ -270,10 +273,10 @@ describe('the Inventory screen — Stock', () => {
     const last = stockReads().at(-1)!;
     expect(last.params).toEqual({ binId: BIN_D2, limit: '200', order: 'location', nonZero: 'true' });
     expect(panel().querySelector('[data-testid="search-summary"]')?.textContent).toBe('What is in bin D-01-02.');
-    expect([...panel().querySelectorAll('th')].map((th) => th.textContent)).toEqual(['SKU', 'Name', 'On hand']);
+    expect([...panel().querySelectorAll('th')].map((th) => th.textContent)).toEqual(['SKU', 'Name', 'On hand', 'Action']);
     expect(tableRows().map(cellTexts)).toEqual([
-      ['GLOW-SPF50-50', 'Glow SPF50 50ml', '148 each'],
-      ['ROSE-OIL', 'Rose Oil', '2.500 litre'],
+      ['GLOW-SPF50-50', 'Glow SPF50 50ml', '148 each', 'Adjust'],
+      ['ROSE-OIL', 'Rose Oil', '2.500 litre', 'Adjust'],
     ]);
     // Clear returns to the whole warehouse.
     await click(button('Clear'));
@@ -298,10 +301,10 @@ describe('the Inventory screen — Stock', () => {
     const skuReads = stockReads().filter((r) => r.params.skuId === SKU_SERUM);
     expect(skuReads.map((r) => r.params.cursor ?? null)).toEqual([null, 'page-2']);
     expect(skuReads.every((r) => r.params.order === 'location' && r.params.nonZero === 'true')).toBe(true);
-    expect([...panel().querySelectorAll('th')].map((th) => th.textContent)).toEqual(['Bin', 'On hand']);
+    expect([...panel().querySelectorAll('th')].map((th) => th.textContent)).toEqual(['Bin', 'On hand', 'Action']);
     expect(tableRows().map(cellTexts)).toEqual([
-      ['D-01-01', '297 each'],
-      ['RECEIVINGReceiving (awaiting putaway)', '3 each'],
+      ['D-01-01', '297 each', 'Adjust'],
+      ['RECEIVINGReceiving (awaiting putaway)', '3 each', ''],
     ]);
     expect(panel().querySelector('[data-testid="stock-total"]')?.textContent).toBe('300 each');
     expect(panelText()).toContain('Total across bins');
@@ -331,10 +334,11 @@ describe('the Inventory screen — Stock', () => {
     await settle();
     await search('GLOW-SERUM-30');
     const headers = [...panel().querySelectorAll('thead th')].map((th) => th.textContent);
-    expect(headers).toEqual(['Bin', 'Client', 'On hand']);
+    // Story 3-2a — the Action column follows On hand; the total stays under On hand.
+    expect(headers).toEqual(['Bin', 'Client', 'On hand', 'Action']);
     const footCells = [...panel().querySelectorAll('tfoot td')] as HTMLTableCellElement[];
-    expect(footCells.map((td) => td.textContent)).toEqual(['Total across bins', '300 each']);
-    expect(footCells[0]!.colSpan).toBe(headers.length - 1);
+    expect(footCells.map((td) => td.textContent)).toEqual(['Total across bins', '300 each', '']);
+    expect(footCells[0]!.colSpan).toBe(headers.length - 2);
   });
 
   test('a SKU walk stops at 50 pages and says the total is unavailable', async () => {
@@ -915,5 +919,574 @@ describe('story 2-4a — the damaged write-off', () => {
     await settle();
     expect(panelText()).toContain('Damaged (not sellable)');
     expect(([...panel().querySelectorAll('button')] as HTMLButtonElement[]).some((b) => b.textContent === 'Write off')).toBe(false);
+  });
+});
+
+/**
+ * Story 3-2a — the web stock adjustment: the Adjust row action (an inline
+ * panel pre-filled for the row's bin and SKU, success → banner + re-read),
+ * the Adjust tab (role-filtered, the blank form's pickers), the FEFO
+ * preview and its cap, the batch Add dates, the 202 threshold outcome, and
+ * the Idempotency-Key's lifetime.
+ */
+describe('story 3-2a — the stock adjustment', () => {
+  let posted: { body: Record<string, unknown>; key: string | null }[] = [];
+
+  /** The router plus a recorder for the adjustment POSTs, answered by `answer`. */
+  function withAdjust(answer: () => Response | Promise<Response>): void {
+    const routed = globalThis.fetch;
+    posted = [];
+    stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init);
+      const url = new URL(request.url);
+      if (request.method === 'POST' && url.pathname === `/api/v1/tenants/${T}/inventory/adjustments`) {
+        posted.push({ body: (await request.clone().json()) as Record<string, unknown>, key: request.headers.get('Idempotency-Key') });
+        return answer();
+      }
+      return routed(request);
+    }) as unknown as typeof fetch);
+  }
+
+  const applied = (delta: number) => () =>
+    json(201, {
+      event: { id: 'e-1', seq: 7, type: 'stock.adjusted', skuId: SKU_SPF, binId: BIN_D2, quantityDelta: delta, occurredAt: 'x', recordedAt: 'x' },
+      onHand: { quantity: 146 },
+    });
+
+  async function set(selector: string, value: string): Promise<void> {
+    const element = panel().querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
+    if (element === null) throw new Error(`No element ${selector}`);
+    const proto =
+      element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(element, value);
+      element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    });
+    await settle();
+  }
+
+  async function choose(label: string): Promise<void> {
+    const radio = panel().querySelector(`input[type="radio"][aria-label="${label}"]`) as HTMLInputElement | null;
+    if (radio === null) throw new Error(`No radio ${label}`);
+    await act(async () => {
+      radio.click();
+    });
+    await settle();
+  }
+
+  const form = () => panel().querySelector('form[data-testid="adjust-form"]') as HTMLFormElement | null;
+
+  async function submitAdjust(): Promise<void> {
+    await act(async () => {
+      form()!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+  }
+
+  const adjustButtons = () => ([...panel().querySelectorAll('button')] as HTMLButtonElement[]).filter((b) => b.textContent === 'Adjust');
+  /** The Stock row's Adjust for the row with this id. */
+  const adjustOn = (rowId: string) => panel().querySelector(`tr[data-row-id="${rowId}"] button`) as HTMLButtonElement;
+
+  test('the row action: Adjust on bin D-01-02 / SPF, Remove 2 damaged with a note → −2 sent, "Adjusted", the ledger link, the row re-read', async () => {
+    withAdjust(applied(-2));
+    view = render(<InventoryScreen />);
+    await settle();
+    // Every storage-bin row offers Adjust; RECEIVING does not (decision 4).
+    expect(adjustButtons()).toHaveLength(3);
+    expect(panel().querySelector('tr[data-row-id="s-4"] button')).toBeNull();
+    const readsBefore = stockReads().length;
+    await click(adjustOn('s-2'));
+    expect(form()).not.toBeNull();
+    expect(form()!.textContent).toContain('Adjust GLOW-SPF50-50 in D-01-02 — 148 each on hand');
+    // Pre-filled: no bin or SKU picker in the row panel.
+    expect(form()!.querySelector('select[aria-label="Bin"]')).toBeNull();
+    expect(form()!.querySelector('select[aria-label="SKU"]')).toBeNull();
+    await choose('Remove');
+    await set('input[aria-label="Quantity"]', '2');
+    await set('select[aria-label="Reason"]', 'damaged');
+    await set('textarea[aria-label="Note"]', 'Two crushed in the bin');
+    await submitAdjust();
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.body).toEqual({
+      warehouseId: WH,
+      skuId: SKU_SPF,
+      binId: BIN_D2,
+      quantityDelta: -2,
+      reasonCode: 'damaged',
+      note: 'Two crushed in the bin',
+    });
+    expect(posted[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    // onDone: the panel closes, the banner reads from the response, the list re-reads.
+    expect(form()).toBeNull();
+    const banner = panel().querySelector('[data-testid="adjust-outcome"]')!;
+    expect(banner.textContent).toContain('Adjusted');
+    expect(banner.textContent).toContain('GLOW-SPF50-50 −2 each in D-01-02.');
+    const link = banner.querySelector('a')!;
+    // `from` is a minute before the submit (decision 11's link, narrowed in time).
+    expect(link.getAttribute('href')).toMatch(
+      new RegExp(`^/inventory/ledger\\?list=ledger&warehouseId=${WH}&skuId=${SKU_SPF}&binId=${BIN_D2}&type=stock\\.adjusted&from=\\d{4}-\\d{2}-\\d{2}T`),
+    );
+    expect(stockReads().length).toBeGreaterThan(readsBefore);
+  });
+
+  test('over the threshold: Add 25 found → 202 "Pending approval — over the 10 threshold" with the queue link', async () => {
+    withAdjust(() => json(202, { pendingAdjustment: { id: 'p-1', quantityDelta: 25, thresholdQuantityAtRequest: 10, status: 'pending' } }));
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-2'));
+    await choose('Add');
+    await set('input[aria-label="Quantity"]', '25');
+    await set('select[aria-label="Reason"]', 'found');
+    await set('textarea[aria-label="Note"]', 'Found a carton behind the rack');
+    await submitAdjust();
+    expect(posted[0]!.body).toMatchObject({ quantityDelta: 25, reasonCode: 'found' });
+    const banner = panel().querySelector('[data-testid="adjust-outcome"]')!;
+    expect(banner.textContent).toContain('Pending approval');
+    expect(banner.textContent).toContain('Over the 10 threshold');
+    expect(banner.querySelector('a')!.getAttribute('href')).toBe('/conflicts?queue=adjustment-pendings');
+  });
+
+  test('the key: a retry of the same draft reuses it, an edit mints a new one, a double submit sends once', async () => {
+    let release: (() => void) | null = null;
+    let calls = 0;
+    withAdjust(() => {
+      calls += 1;
+      if (calls === 4) {
+        return new Promise<Response>((resolve) => {
+          release = () => resolve(applied(1)());
+        });
+      }
+      return problem(422, 'insufficient-on-hand');
+    });
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-2'));
+    await choose('Remove');
+    await set('input[aria-label="Quantity"]', '2');
+    await set('select[aria-label="Reason"]', 'shrinkage');
+    await set('textarea[aria-label="Note"]', 'Counted short');
+    await submitAdjust();
+    await submitAdjust();
+    expect(posted).toHaveLength(2);
+    expect(posted[1]!.key).toBe(posted[0]!.key);
+    expect(form()!.textContent).toContain('holds fewer units than that now');
+    // An edit renews the key.
+    await set('input[aria-label="Quantity"]', '1');
+    await submitAdjust();
+    expect(posted[2]!.key).not.toBe(posted[1]!.key);
+    // A double submit while the first is in flight sends one request.
+    await set('textarea[aria-label="Note"]', 'Counted short again');
+    await act(async () => {
+      form()!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form()!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(posted).toHaveLength(4);
+    await act(async () => {
+      release!();
+    });
+    await settle();
+    expect(panel().querySelector('[data-testid="adjust-outcome"]')?.textContent).toContain('Adjusted');
+  });
+
+  test('a batch-tracked Remove: the FEFO preview names LOT-A, the cap is its quantity, and no batch arm is sent', async () => {
+    withAdjust(applied(-2));
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-1')); // GLOW-SERUM-30 in D-01-01, batch-tracked
+    await choose('Remove');
+    expect(batchListReads().at(-1)!.params).toEqual({ skuId: SKU_SERUM, binId: BIN_D1 });
+    expect(panel().querySelector('[data-testid="fefo-preview"]')?.textContent).toBe('FEFO takes LOT-A (12 here).');
+    await set('input[aria-label="Quantity"]', '13');
+    await set('select[aria-label="Reason"]', 'damaged');
+    await set('textarea[aria-label="Note"]', 'Broken seals');
+    await submitAdjust();
+    expect(posted).toHaveLength(0);
+    expect(form()!.textContent).toContain('FEFO takes LOT-A (12 here) — remove at most 12, or pick a batch.');
+    await set('input[aria-label="Quantity"]', '2');
+    await submitAdjust();
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.body).toEqual({ warehouseId: WH, skuId: SKU_SERUM, binId: BIN_D1, quantityDelta: -2, reasonCode: 'damaged', note: 'Broken seals' });
+  });
+
+  test('a batch-tracked Remove with an override: the picked batch and its reason are sent', async () => {
+    withAdjust(applied(-1));
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-1'));
+    await choose('Remove');
+    await choose('Pick a batch');
+    // Only batches with stock in the bin are offered (LOT-B holds 0 there).
+    const options = [...panel().querySelectorAll('select[aria-label="Batch"] option')].map((o) => o.getAttribute('value'));
+    expect(options).toEqual(['', 'LOT-A']);
+    await set('select[aria-label="Batch"]', 'LOT-A');
+    await set('input[aria-label="Quantity"]', '1');
+    await set('select[aria-label="Reason"]', 'expired');
+    expect(panel().querySelector('[data-testid="reason-hint"]')?.textContent).toBe('FEFO skips expired batches — pick the batch');
+    await set('textarea[aria-label="Note"]', 'Expired lot');
+    await submitAdjust();
+    expect(posted).toHaveLength(0);
+    expect(form()!.textContent).toContain('an override needs a reason');
+    await set('input[aria-label="Override reason"]', 'The counted lot');
+    await submitAdjust();
+    expect(posted[0]!.body).toMatchObject({ quantityDelta: -1, batch: { code: 'LOT-A', overrideReason: 'The counted lot' } });
+  });
+
+  test('a batch-tracked Add: a new code sends its IST expiry as the Z instant; an existing code shows its dates and sends none', async () => {
+    withAdjust(applied(5));
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-1'));
+    await choose('Add');
+    await set('input[aria-label="Batch code"]', 'LOT-A');
+    expect(panel().querySelector('[data-testid="batch-dates"]')?.textContent).toContain('Existing batch — manufactured 01 Jan 2026, expires 01 Jan 2027. Its dates stay as recorded.');
+    expect(panel().querySelector('input[aria-label="Expires"]')).toBeNull();
+    await set('input[aria-label="Batch code"]', 'L9');
+    expect(panel().querySelector('[data-testid="batch-dates"]')).toBeNull();
+    await set('input[aria-label="Expires"]', '2027-03-31');
+    await set('input[aria-label="Quantity"]', '5');
+    await set('select[aria-label="Reason"]', 'found');
+    await set('textarea[aria-label="Note"]', 'Unlabelled carton');
+    await submitAdjust();
+    expect(posted[0]!.body).toMatchObject({ quantityDelta: 5, batch: { code: 'L9', expiryDate: '2027-03-30T18:30:00.000Z' } });
+  });
+
+  test('the Adjust tab: the bin picker skips system bins; a dedicated bin offers its client\'s active non-kit SKUs only', async () => {
+    const ACME = 'client-acme';
+    const SKU_ACME = '0198f7a2-1b3c-7d4e-8f90-00000000c0b1';
+    const SKU_KIT = '0198f7a2-1b3c-7d4e-8f90-00000000c0b2';
+    const SKU_OFF = '0198f7a2-1b3c-7d4e-8f90-00000000c0b3';
+    const active = (s: ReturnType<typeof sku>, clientId = 'client-self') => ({ ...s, status: 'active', clientId, catchWeightTracked: false, storageClass: 'ambient' });
+    overrides.push({
+      match: (p) => p === `/api/v1/tenants/${T}/catalog/skus`,
+      respond: () =>
+        json(200, {
+          items: [
+            ...SKUS.map((s) => active(s)),
+            active(sku(SKU_ACME, 'ACME-TEE', 'Acme Tee', false), ACME),
+            active(sku(SKU_KIT, 'ACME-BOX', 'Acme Box', false), ACME),
+            { ...active(sku(SKU_OFF, 'ACME-OLD', 'Acme Old', false), ACME), status: 'inactive' },
+          ],
+          nextCursor: null,
+        }),
+    });
+    overrides.push({
+      match: (p) => p === `/api/v1/tenants/${T}/catalog/kits`,
+      respond: () => json(200, { items: [{ skuId: SKU_KIT, code: 'ACME-BOX', name: 'Acme Box', components: [] }], nextCursor: null }),
+    });
+    overrides.push({
+      match: (p) => /\/zones\/[^/]+\/bins$/.test(p),
+      respond: () =>
+        json(200, {
+          items: [
+            { ...BINS[0], retiredAt: null, dedicatedClientId: null, storageClass: 'ambient' },
+            { ...BINS[1], retiredAt: null, dedicatedClientId: ACME, storageClass: 'ambient' },
+            { ...BINS[2], retiredAt: null, dedicatedClientId: null, storageClass: 'ambient' },
+          ],
+          nextCursor: null,
+        }),
+    });
+    withAdjust(applied(3));
+    view = render(<InventoryScreen initialTab="adjust" />);
+    await settle();
+    expect(view.container.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-tab')).toBe('adjust');
+    expect(panel().querySelector('h2')?.textContent).toBe('Adjust');
+    // Mounting the tab sends no write.
+    expect(posted).toHaveLength(0);
+    const binOptions = [...panel().querySelectorAll('select[aria-label="Bin"] option')].map((o) => o.textContent);
+    expect(binOptions).toEqual(['Pick the bin…', 'D-01-01', 'D-01-02']);
+    await set('select[aria-label="Bin"]', BIN_D2);
+    await choose('Add');
+    const skuOptions = [...panel().querySelectorAll('select[aria-label="SKU"] option')].map((o) => o.getAttribute('value'));
+    expect(skuOptions).toEqual(['', SKU_ACME]);
+    await set('select[aria-label="SKU"]', SKU_ACME);
+    await set('input[aria-label="Quantity"]', '3');
+    await set('select[aria-label="Reason"]', 'found');
+    await set('textarea[aria-label="Note"]', 'Found on the floor');
+    await submitAdjust();
+    expect(posted[0]!.body).toEqual({ warehouseId: WH, skuId: SKU_ACME, binId: BIN_D2, quantityDelta: 3, reasonCode: 'found', note: 'Found on the floor' });
+    // The tab keeps the form: the outcome shows in place and the draft clears (keeping the bin).
+    expect(panel().querySelector('[data-testid="adjust-outcome"]')?.textContent).toContain('Adjusted');
+    expect((panel().querySelector('select[aria-label="Bin"]') as HTMLSelectElement).value).toBe(BIN_D2);
+    expect((panel().querySelector('textarea[aria-label="Note"]') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  test('the Adjust tab, Remove: the SKU list is what the bin holds (the bin read)', async () => {
+    withAdjust(applied(-1));
+    view = render(<InventoryScreen initialTab="adjust" />);
+    await settle();
+    await set('select[aria-label="Bin"]', BIN_D2);
+    await choose('Remove');
+    expect(stockReads().at(-1)!.params).toEqual({ binId: BIN_D2, nonZero: 'true', limit: '200' });
+    const skuOptions = [...panel().querySelectorAll('select[aria-label="SKU"] option')].map((o) => o.textContent);
+    expect(skuOptions).toEqual(['Pick the SKU…', 'GLOW-SPF50-50 — 148 each here', 'ROSE-OIL — 2.500 litre here']);
+  });
+
+  test('an operator: no Adjust tab, a deep link to ?tab=adjust reads "Your role cannot adjust stock" with no form, and no row action', async () => {
+    writeSession({ ...session(), user: { ...session().user, role: 'operator' } } as StoredSession);
+    view = render(<InventoryScreen initialTab="adjust" />);
+    await settle();
+    const tabs = [...view.container.querySelectorAll('[role="tab"]')].map((t) => t.getAttribute('data-tab'));
+    expect(tabs).toEqual(['stock', 'batches', 'ledger']);
+    // No tabpanel whose tab is missing: a labelled region instead (aria-labelledby never dangles).
+    expect(view.container.querySelector('[role="tabpanel"]')).toBeNull();
+    const region = view.container.querySelector('[role="region"][aria-label="Adjust"]')!;
+    expect(region.querySelector('[data-testid="adjust-denied"]')?.textContent).toBe('Your role cannot adjust stock.');
+    expect(region.querySelector('form')).toBeNull();
+    view.unmount();
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(adjustButtons()).toHaveLength(0);
+    expect([...panel().querySelectorAll('th')].map((th) => th.textContent)).not.toContain('Action');
+    // Kit-ness is read only for a role that can adjust.
+    expect(requests.some((r) => r.pathname.endsWith('/catalog/kits'))).toBe(false);
+  });
+
+  test('the 2-4a write-off gains the in-flight guard: a double submit sends one write-off', async () => {
+    const BIN_DMG = '0198f7a2-1b3c-7d4e-8f90-00000000b009';
+    overrides.push({
+      match: (pathname) => pathname.endsWith('/inventory/stock'),
+      respond: () => json(200, { items: [...STOCK, stockRow('s-9', BIN_DMG, 'DAMAGED', SKU_SPF, 6, true)], nextCursor: null }),
+    });
+    withAdjust(() => new Promise<Response>((resolve) => setTimeout(() => resolve(json(201, { event: { quantityDelta: -1 }, onHand: {} })), 5)));
+    view = render(<InventoryScreen />);
+    await settle();
+    // The DAMAGED row offers Write off, never Adjust.
+    expect(panel().querySelector('tr[data-row-id="s-9"] button')?.textContent).toBe('Write off');
+    await click(panel().querySelector('tr[data-row-id="s-9"] button') as HTMLButtonElement);
+    await set('input[aria-label="Quantity to write off"]', '1');
+    await set('textarea[aria-label="Write-off note"]', 'Scrap');
+    const writeOff = panel().querySelector('form[data-testid="write-off"]') as HTMLFormElement;
+    await act(async () => {
+      writeOff.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      writeOff.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await settle();
+    expect(posted).toHaveLength(1);
+  });
+
+  test('while a row panel is sending, every row action is disabled', async () => {
+    let release: (() => void) | null = null;
+    withAdjust(() => new Promise<Response>((resolve) => {
+      release = () => resolve(applied(-1)());
+    }));
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-2'));
+    await choose('Remove');
+    await set('input[aria-label="Quantity"]', '1');
+    await set('select[aria-label="Reason"]', 'shrinkage');
+    await set('textarea[aria-label="Note"]', 'Short');
+    await act(async () => {
+      form()!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(adjustButtons().length).toBeGreaterThan(0);
+    expect(adjustButtons().every((b) => b.disabled)).toBe(true);
+    await act(async () => {
+      release!();
+    });
+    await settle();
+    expect(adjustButtons().every((b) => !b.disabled)).toBe(true);
+  });
+
+  test('a failed bins read says adjustments are unavailable, with Retry, instead of hiding the actions silently', async () => {
+    overrides.push({ match: (p) => /\/zones\/[^/]+\/bins$/.test(p), respond: () => problem(500, 'boom') });
+    view = render(<InventoryScreen />);
+    await settle();
+    const note = panel().querySelector('[data-testid="adjust-unavailable"]')!;
+    expect(note.textContent).toContain('Adjustments unavailable');
+    expect(note.querySelector('button')?.textContent).toBe('Retry');
+    expect(adjustButtons()).toHaveLength(0);
+  });
+
+  test('the Adjust tab, Remove success: the bin and its batches are re-read, "N here" updates, the draft keeps bin + direction, the next edit clears the banner', async () => {
+    let serumHere = 297;
+    overrides.push({
+      match: (p, q) => p.endsWith('/inventory/stock') && q.binId === BIN_D1,
+      respond: () => json(200, { items: [stockRow('s-1', BIN_D1, 'D-01-01', SKU_SERUM, serumHere)], nextCursor: null }),
+    });
+    withAdjust(() => {
+      serumHere = 295;
+      return applied(-2)();
+    });
+    view = render(<InventoryScreen initialTab="adjust" />);
+    await settle();
+    await set('select[aria-label="Bin"]', BIN_D1);
+    await choose('Remove');
+    expect([...panel().querySelectorAll('select[aria-label="SKU"] option')].map((o) => o.textContent)).toContain('GLOW-SERUM-30 — 297 each here');
+    await set('select[aria-label="SKU"]', SKU_SERUM);
+    await set('input[aria-label="Quantity"]', '2');
+    await set('select[aria-label="Reason"]', 'shrinkage');
+    await set('textarea[aria-label="Note"]', 'Counted short');
+    const stockBefore = stockReads().length;
+    const batchesBefore = batchListReads().length;
+    await submitAdjust();
+    expect(posted).toHaveLength(1);
+    expect(stockReads().length).toBeGreaterThan(stockBefore);
+    expect(batchListReads().length).toBeGreaterThanOrEqual(batchesBefore);
+    expect([...panel().querySelectorAll('select[aria-label="SKU"] option')].map((o) => o.textContent)).toContain('GLOW-SERUM-30 — 295 each here');
+    expect(panel().querySelector('[data-testid="adjust-outcome"]')?.textContent).toContain('Adjusted');
+    expect((panel().querySelector('select[aria-label="Bin"]') as HTMLSelectElement).value).toBe(BIN_D1);
+    expect((panel().querySelector('input[aria-label="Remove"]') as HTMLInputElement).checked).toBe(true);
+    // Picking the SKU again re-reads its batches (the FEFO preview's source) and clears the banner.
+    await set('select[aria-label="SKU"]', SKU_SERUM);
+    expect(batchListReads().length).toBeGreaterThan(batchesBefore);
+    expect(panel().querySelector('[data-testid="adjust-outcome"]')).toBeNull();
+  });
+
+  test('the Adjust tab, Remove: a bin with no stock and a bin past one read are both said', async () => {
+    overrides.push({
+      match: (p, q) => p.endsWith('/inventory/stock') && q.binId === BIN_D1,
+      respond: () => json(200, { items: [], nextCursor: null }),
+    });
+    overrides.push({
+      match: (p, q) => p.endsWith('/inventory/stock') && q.binId === BIN_D2,
+      respond: () => json(200, { items: [stockRow('s-2', BIN_D2, 'D-01-02', SKU_SPF, 148)], nextCursor: 'more' }),
+    });
+    view = render(<InventoryScreen initialTab="adjust" />);
+    await settle();
+    await set('select[aria-label="Bin"]', BIN_D1);
+    await choose('Remove');
+    expect(panelText()).toContain('D-01-01 holds no stock — choose Add, or pick another bin.');
+    await set('select[aria-label="Bin"]', BIN_D2);
+    expect(panelText()).toContain('This bin holds more SKUs than one read shows — the first 200 are listed.');
+  });
+
+  test('the Adjust tab, Add: the storage-class warning shows and does not block; catch-weight SKUs are not offered', async () => {
+    const SKU_ICE = '0198f7a2-1b3c-7d4e-8f90-00000000c0c1';
+    const SKU_FISH = '0198f7a2-1b3c-7d4e-8f90-00000000c0c2';
+    overrides.push({
+      match: (p) => p === `/api/v1/tenants/${T}/catalog/skus`,
+      respond: () =>
+        json(200, {
+          items: [
+            { ...sku(SKU_ICE, 'ICE-CREAM', 'Ice cream', false), storageClass: 'frozen', catchWeightTracked: false },
+            { ...sku(SKU_FISH, 'FISH', 'Fish', false, 'kg', 3), storageClass: 'ambient', catchWeightTracked: true },
+          ],
+          nextCursor: null,
+        }),
+    });
+    overrides.push({
+      match: (p) => /\/zones\/[^/]+\/bins$/.test(p),
+      respond: () => json(200, { items: [{ ...BINS[0], retiredAt: null, dedicatedClientId: null, storageClass: 'ambient' }], nextCursor: null }),
+    });
+    withAdjust(applied(1));
+    view = render(<InventoryScreen initialTab="adjust" />);
+    await settle();
+    await set('select[aria-label="Bin"]', BIN_D1);
+    await choose('Add');
+    expect([...panel().querySelectorAll('select[aria-label="SKU"] option')].map((o) => o.getAttribute('value'))).toEqual(['', SKU_ICE]);
+    await set('select[aria-label="SKU"]', SKU_ICE);
+    expect(panel().querySelector('[data-testid="class-warning"]')?.textContent).toContain('ICE-CREAM is frozen stock and D-01-01 is a ambient bin');
+    await set('input[aria-label="Quantity"]', '1');
+    await set('select[aria-label="Reason"]', 'found');
+    await set('textarea[aria-label="Note"]', 'Found');
+    await submitAdjust();
+    expect(posted).toHaveLength(1);
+  });
+
+  test('a FEFO tie names both batches in the preview', async () => {
+    overrides.push({
+      match: (p) => p.endsWith('/inventory/batches'),
+      respond: () =>
+        json(200, {
+          items: [
+            { id: BATCH_A, code: 'LOT-A', mfgDate: null, expiryDate: '2027-01-01T00:00:00.000Z', status: 'active', quantity: 4 },
+            { id: BATCH_B, code: 'LOT-B', mfgDate: null, expiryDate: '2027-01-01T00:00:00.000Z', status: 'active', quantity: 6 },
+          ],
+        }),
+    });
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-1'));
+    await choose('Remove');
+    expect(panel().querySelector('[data-testid="fefo-preview"]')?.textContent).toBe('FEFO takes LOT-A or LOT-B — same expiry (4 here).');
+  });
+
+  test('only an expired batch in the bin: FEFO is disabled, "Pick a batch" is forced, and the named batch is sent', async () => {
+    overrides.push({
+      match: (p) => p.endsWith('/inventory/batches'),
+      respond: () =>
+        json(200, { items: [{ id: BATCH_A, code: 'LOT-A', mfgDate: null, expiryDate: '2026-01-01T00:00:00.000Z', status: 'active', quantity: 12 }] }),
+    });
+    withAdjust(applied(-1));
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-1'));
+    await choose('Remove');
+    const fefoRadio = panel().querySelector('input[aria-label="FEFO batch"]') as HTMLInputElement;
+    expect(fefoRadio.disabled).toBe(true);
+    expect((panel().querySelector('input[aria-label="Pick a batch"]') as HTMLInputElement).checked).toBe(true);
+    expect(panel().querySelector('[data-testid="fefo-preview"]')?.textContent).toBe(
+      'No unexpired batch holds stock here — pick the batch to remove, with a reason.',
+    );
+    expect(panelText()).toContain('(expired)');
+    await set('select[aria-label="Batch"]', 'LOT-A');
+    await set('input[aria-label="Override reason"]', 'Expired lot scrapped');
+    await set('input[aria-label="Quantity"]', '1');
+    await set('select[aria-label="Reason"]', 'expired');
+    await set('textarea[aria-label="Note"]', 'Expired');
+    await submitAdjust();
+    expect(posted[0]!.body).toMatchObject({ quantityDelta: -1, batch: { code: 'LOT-A', overrideReason: 'Expired lot scrapped' } });
+  });
+
+  test('a named batch the server no longer has (404 "Batch not found") reads the batch sentence and re-reads the batches', async () => {
+    withAdjust(
+      () =>
+        new Response(JSON.stringify({ type: 'about:blank', title: 'Batch not found', status: 404, code: 'not-found', detail: 'x' }), {
+          status: 404,
+          headers: { 'content-type': 'application/problem+json' },
+        }),
+    );
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-1'));
+    await choose('Remove');
+    await choose('Pick a batch');
+    await set('select[aria-label="Batch"]', 'LOT-A');
+    await set('input[aria-label="Override reason"]', 'Counted lot');
+    await set('input[aria-label="Quantity"]', '1');
+    await set('select[aria-label="Reason"]', 'stock-count');
+    await set('textarea[aria-label="Note"]', 'Count');
+    const before = batchListReads().length;
+    await submitAdjust();
+    expect(form()!.textContent).toContain('Batch LOT-A no longer exists for this SKU — reload the batches and pick again.');
+    expect(batchListReads().length).toBeGreaterThan(before);
+  });
+
+  test('a failed batches read says so, with Retry, and sends nothing', async () => {
+    overrides.push({ match: (p) => p.endsWith('/inventory/batches'), respond: () => problem(500, 'boom') });
+    withAdjust(applied(-1));
+    view = render(<InventoryScreen />);
+    await settle();
+    await click(adjustOn('s-1'));
+    await choose('Remove');
+    expect(panelText()).toContain('The batches could not be read — retry.');
+    await set('input[aria-label="Quantity"]', '1');
+    await set('select[aria-label="Reason"]', 'damaged');
+    await set('textarea[aria-label="Note"]', 'x');
+    await submitAdjust();
+    expect(posted).toHaveLength(0);
+    expect(form()!.textContent).not.toContain('Still reading');
+  });
+
+  test('a kit or catch-weight row offers no Adjust', async () => {
+    overrides.push({
+      match: (p) => p === `/api/v1/tenants/${T}/catalog/kits`,
+      respond: () => json(200, { items: [{ skuId: SKU_SPF, code: 'GLOW-SPF50-50', name: 'kit', components: [] }], nextCursor: null }),
+    });
+    overrides.push({
+      match: (p) => p === `/api/v1/tenants/${T}/catalog/skus`,
+      respond: () => json(200, { items: SKUS.map((s) => (s.id === SKU_OIL ? { ...s, catchWeightTracked: true } : s)), nextCursor: null }),
+    });
+    view = render(<InventoryScreen />);
+    await settle();
+    expect(panel().querySelector('tr[data-row-id="s-1"] button')?.textContent).toBe('Adjust');
+    expect(panel().querySelector('tr[data-row-id="s-2"] button')).toBeNull(); // the kit
+    expect(panel().querySelector('tr[data-row-id="s-3"] button')).toBeNull(); // catch-weight
   });
 });

@@ -46,21 +46,29 @@ export function usePageTab<T extends string>(def: PageTabs<T>, initial: T, drill
   return [tab, select] as const;
 }
 
-/** The tab bar — the Conflicts tab pattern. `badge` adds a per-tab pill (Inbound's counts). */
+/**
+ * The tab bar — the Conflicts tab pattern. `badge` adds a per-tab pill
+ * (Inbound's counts). Story 3-2a — `visibleTabs`, when given, renders only
+ * those tabs (a role-filtered list: Inventory's Adjust for `stock.adjust`);
+ * absent, every tab renders exactly as before.
+ */
 export function PageTabBar<T extends string>({
   def,
   active,
   onSelect,
   badge,
+  visibleTabs,
 }: {
   def: PageTabs<T>;
   active: T;
   onSelect: (tab: T) => void;
   badge?: (tab: T) => ReactNode;
+  visibleTabs?: readonly T[];
 }): ReactNode {
+  const shown = visibleTabs === undefined ? def.tabs : def.tabs.filter((t) => visibleTabs.includes(t.id));
   return (
     <div className="flex flex-wrap gap-1 text-xs" role="tablist" aria-label={def.label}>
-      {def.tabs.map((t) => (
+      {shown.map((t) => (
         <button
           key={t.id}
           id={`${def.id}-tab-${t.id}`}
@@ -90,10 +98,12 @@ export function DrillPageTabBar<T extends string>({
   def,
   active,
   badge,
+  visibleTabs,
 }: {
   def: PageTabs<T>;
   active: T;
   badge?: (tab: T) => ReactNode;
+  visibleTabs?: readonly T[];
 }): ReactNode {
   const router = useRouter();
   return (
@@ -101,6 +111,7 @@ export function DrillPageTabBar<T extends string>({
       def={def}
       active={active}
       badge={badge}
+      visibleTabs={visibleTabs}
       onSelect={(next) => {
         if (next !== active) router.replace(def.href(next), { scroll: false });
       }}
@@ -115,17 +126,20 @@ export function PageTabStrip<T extends string>({
   drilled,
   onSelect,
   badge,
+  visibleTabs,
 }: {
   def: PageTabs<T>;
   active: T;
   drilled: boolean;
   onSelect: (tab: T) => void;
   badge?: (tab: T) => ReactNode;
+  /** Story 3-2a — a role-filtered tab list; absent renders every tab. */
+  visibleTabs?: readonly T[];
 }): ReactNode {
   return drilled ? (
-    <DrillPageTabBar def={def} active={active} badge={badge} />
+    <DrillPageTabBar def={def} active={active} badge={badge} visibleTabs={visibleTabs} />
   ) : (
-    <PageTabBar def={def} active={active} onSelect={onSelect} badge={badge} />
+    <PageTabBar def={def} active={active} onSelect={onSelect} badge={badge} visibleTabs={visibleTabs} />
   );
 }
 
