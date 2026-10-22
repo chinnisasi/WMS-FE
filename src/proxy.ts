@@ -46,6 +46,10 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except Next internals and static assets.
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
+  // Everything except Next internals, static assets and (story 6-2a) the
+  // runtime config script: the sign-in page loads `/runtime-config.js`
+  // before any session exists, and a redirect to `/login` would hand the
+  // browser HTML where it expects the API base. A literal, because Next reads
+  // the matcher statically.
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|runtime-config\\.js$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)'],
 };

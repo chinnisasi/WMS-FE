@@ -23,7 +23,8 @@ src/lib/api/        GENERATED typed client from wms-be's OpenAPI doc — never
 bun install
 bun run dev           # web on :3001 (api defaults to :3000)
 bun run build         # next build
-bun run start         # next start
+bun run start         # next start on ${PORT:-3001}
+docker build -t wms-fe .  # the production image (Next standalone on Node; story 6-2a)
 bun run lint          # eslint
 bun run test          # bun test (token/IA/cursor suites)
 bun run typecheck     # tsc --noEmit
@@ -38,10 +39,10 @@ Interaction contract: ⌘K palette (Esc closes, Enter commits, arrows select), E
 
 ## API contract (AD-8)
 
-- Consumes wms-be at `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:3000/api/v1`).
+- Consumes wms-be at the base `getApiBaseUrl()` resolves per call (story 6-2a): the runtime `WMS_API_BASE_URL` (served as `/runtime-config.js`), else `NEXT_PUBLIC_API_BASE_URL`, the build default (`http://localhost:3000/api/v1`).
 - Typed client is generated from wms-be's OpenAPI document: change the backend → `bun run openapi:export` there → `bun run api:generate` here → commit the regenerated `src/lib/api/generated/`.
 - There are no hand-written API types in this repo.
 
 ## Environment
 
-Copy `.env.example` → `.env.local`: `NEXT_PUBLIC_API_BASE_URL`.
+Copy `.env.example` → `.env.local`: `NEXT_PUBLIC_API_BASE_URL` (dev and build default). A deployed image takes `WMS_API_BASE_URL` (the browser's API base) and optionally `WMS_API_INTERNAL_BASE_URL` (the server's own) at run time — see the meta repo's `docs/design/DEPLOY.md`.

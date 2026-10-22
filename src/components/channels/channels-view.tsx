@@ -5,7 +5,6 @@ import { useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   ApiProblem,
-  API_BASE_URL,
   fetchApiConnectChannel,
   fetchApiDisconnectChannel,
   fetchApiListConnectionMappings,
@@ -15,6 +14,7 @@ import {
   fetchApiSetConnectionMappings,
   fetchApiUpdateChannelConnectionConfig,
 } from '@/lib/api/client';
+import { getApiBaseUrl } from '@/lib/api/base-url';
 import { skuInactiveMarker, withoutInactive } from '@/lib/sku-status';
 import type {
   ChannelBufferVerdictDto,
@@ -708,7 +708,7 @@ function WebhookUrlRows({
   return (
     <div className="flex flex-col gap-1 text-xs">
       {rows.map(({ endpoint, label }) => {
-        const url = webhookUrlFromBase(API_BASE_URL, tenantId, entry.provider, entry.id, endpoint);
+        const url = webhookUrlFromBase(getApiBaseUrl(), tenantId, entry.provider, entry.id, endpoint);
         if (url === null) return null; // an uncomposable base offers no row (triage row 47)
         return (
           <div key={endpoint} className="flex flex-wrap items-center gap-2">

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
-import { API_BASE_URL } from '../../lib/api/client';
+import { getApiBaseUrl } from '../../lib/api/base-url';
 import { webhookUrlFromBase } from '../../lib/channels';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -844,14 +844,14 @@ describe('ChannelsView: the ingest warehouse and webhook rows (story 7-2)', () =
   test('the webhook rows compose from the CONFIGURED API base — never the page origin — and Copy works', async () => {
     view = await mount();
     const expectedOrders = webhookUrlFromBase(
-      API_BASE_URL,
+      getApiBaseUrl(),
       TENANT_ID,
       'shopify',
       CONNECTION_ID,
       'orders',
     )!; // the test base is a valid URL — the composer composes it
     const expectedCancellations = webhookUrlFromBase(
-      API_BASE_URL,
+      getApiBaseUrl(),
       TENANT_ID,
       'shopify',
       CONNECTION_ID,
@@ -864,10 +864,10 @@ describe('ChannelsView: the ingest warehouse and webhook rows (story 7-2)', () =
       'input[aria-label="Order-cancellation webhook URL for Shopify"]',
     ) as HTMLInputElement;
     // The value IS the composer's answer against the configured base — the
-    // origin it carries is API_BASE_URL's, not the page's.
+    // origin it carries is the configured base's, not the page's.
     expect(ordersRow.value).toBe(expectedOrders);
     expect(cancellationsRow.value).toBe(expectedCancellations);
-    expect(new URL(ordersRow.value).origin).toBe(new URL(API_BASE_URL).origin);
+    expect(new URL(ordersRow.value).origin).toBe(new URL(getApiBaseUrl()).origin);
     expect(ordersRow.value).toContain(
       `/api/v1/tenants/${TENANT_ID}/webhooks/channels/shopify/${CONNECTION_ID}/orders`,
     );

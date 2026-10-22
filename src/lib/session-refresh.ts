@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '@/lib/api/base-url';
+import { getApiBaseUrl } from '@/lib/api/base-url';
 import { clearSession, readSession, writeSession } from '@/lib/auth';
 
 /**
@@ -18,7 +18,8 @@ import { clearSession, readSession, writeSession } from '@/lib/auth';
  * interceptors cannot recurse into themselves.
  */
 
-const SESSION_URL = `${API_BASE_URL}/tenants/session`;
+/** Resolved per call (story 6-2a, A7): the runtime config may differ from the build default. */
+const sessionUrl = (): string => `${getApiBaseUrl()}/tenants/session`;
 const LOCK_NAME = 'wms-session-refresh';
 
 let inFlight: Promise<boolean> | null = null;
@@ -54,7 +55,7 @@ async function runRefresh(tokenBefore: string | null): Promise<boolean> {
 
   let response: Response;
   try {
-    response = await fetch(`${SESSION_URL}/refresh`, {
+    response = await fetch(`${sessionUrl()}/refresh`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'X-WMS-Session': '1' },
@@ -106,7 +107,7 @@ async function reasonOf(response: Response): Promise<string | undefined> {
 export async function signOutEverywhere(): Promise<void> {
   const session = readSession();
   try {
-    await fetch(`${SESSION_URL}/sign-out`, {
+    await fetch(`${sessionUrl()}/sign-out`, {
       method: 'POST',
       credentials: 'include',
       headers: {

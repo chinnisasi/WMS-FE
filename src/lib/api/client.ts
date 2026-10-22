@@ -238,7 +238,7 @@ import {
   PORTAL_SUSPENDED_EVENT,
 } from '../auth';
 import { refreshAccessToken } from '../session-refresh';
-import { API_BASE_URL as API_BASE_URL_VALUE } from './base-url';
+import { getApiBaseUrl } from './base-url';
 import type {
   ReportingControllerDownloadRegisterData,
   PortalAsnDetailResponse,
@@ -480,22 +480,42 @@ import type {
 } from './generated/types.gen';
 
 /**
- * Configures the generated client once. The base URL points at wms-be's
- * `/api/v1` shell; every typed function lives in ./generated (AD-8 — no
- * hand-written API types anywhere in wms-fe).
+ * Configures the generated client. The base URL points at wms-be's `/api/v1`
+ * shell; every typed function lives in ./generated (AD-8 — no hand-written
+ * API types anywhere in wms-fe).
+ *
+ * Story 6-2a (A7) — the base is resolved at CALL time (`getApiBaseUrl()`,
+ * the runtime config first), never frozen when this module is imported: the
+ * generated client reads its config when each request starts, so every
+ * request method is wrapped to re-sync the base first. A changed base is
+ * applied with `setConfig` before that request builds its URL.
+ *
+ * Story 7-2: the same base is the ONE origin every surface composes absolute
+ * API URLs from — the channel webhook rows are built on `getApiBaseUrl()`,
+ * never on `window.location.origin` (bl-16: the backend the browser talks to
+ * — behind a proxy, on another host, a LAN box — can differ from the page).
  */
-const baseUrl = API_BASE_URL_VALUE;
+let configuredBaseUrl: string | undefined;
 
-// Story 7-2: the ONE origin every surface composes absolute API URLs from —
-// the channel webhook rows are built on this base, never on
-// `window.location.origin` (bl-16: the backend the browser talks to — behind
-// a proxy, on another host, a LAN box — is the base configured here; the page
-// origin can differ from it).
-export const API_BASE_URL = baseUrl;
+/** Applies the current API base to the generated client; returns it. */
+export function syncClientBaseUrl(): string {
+  const baseUrl = getApiBaseUrl();
+  if (baseUrl !== configuredBaseUrl) {
+    client.setConfig({ baseUrl });
+    configuredBaseUrl = baseUrl;
+  }
+  return baseUrl;
+}
 
-client.setConfig({
-  baseUrl,
-});
+const REQUEST_METHODS = ['connect', 'delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'request', 'trace'] as const;
+for (const method of REQUEST_METHODS) {
+  const original = client[method] as (...args: unknown[]) => unknown;
+  (client as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
+    syncClientBaseUrl();
+    return original(...args);
+  };
+}
+syncClientBaseUrl();
 
 /**
  * Attaches the stored session token to every request the browser makes.
