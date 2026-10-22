@@ -24,21 +24,28 @@ export function ServicePeriodInputs({
   to,
   onFrom,
   onTo,
+  labelPrefix = 'Report',
 }: {
   from: string;
   to: string;
   onFrom: (value: string) => void;
   onTo: (value: string) => void;
+  /**
+   * Story 5-3a — the inputs' accessible names are `<prefix> from` / `<prefix>
+   * to`, so two period pickers on one page never share a name (the registers
+   * pass "Register"). Default "Report" — the service report's names, unchanged.
+   */
+  labelPrefix?: string;
 }) {
   return (
     <>
       <label className="flex flex-col gap-1">
         <span className={serviceLabelClass}>From (IST)</span>
-        <input type="date" className={serviceInputClass} value={from} aria-label="Report from" onChange={(event) => onFrom(event.target.value)} />
+        <input type="date" className={serviceInputClass} value={from} aria-label={`${labelPrefix} from`} onChange={(event) => onFrom(event.target.value)} />
       </label>
       <label className="flex flex-col gap-1">
         <span className={serviceLabelClass}>To (IST)</span>
-        <input type="date" className={serviceInputClass} value={to} aria-label="Report to" onChange={(event) => onTo(event.target.value)} />
+        <input type="date" className={serviceInputClass} value={to} aria-label={`${labelPrefix} to`} onChange={(event) => onTo(event.target.value)} />
       </label>
     </>
   );
