@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { GeistSans } from 'geist/font/sans';
 
+import { RUNTIME_CONFIG_PATH } from '@/lib/api/base-url';
 import { THEME_STORAGE_KEY } from '@/lib/theme';
 
 import './globals.css';
@@ -36,6 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning className={GeistSans.variable}>
       <head>
+        {/* Story 6-2a (A7) — the runtime API base, before any app script runs
+            (blocking on purpose: `getApiBaseUrl()` reads what it assigns). */}
+        <script src={RUNTIME_CONFIG_PATH} />
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>
       <body className="font-sans antialiased">{children}</body>

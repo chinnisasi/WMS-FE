@@ -1,0 +1,16 @@
+# Story 6-2a — the build context is the source the image needs. No .env file
+# enters it: the API address is a RUN-time variable (WMS_API_BASE_URL).
+.git
+.github
+.env
+.env.*
+!.env.example
+node_modules
+.next
+out
+coverage
+*.log
+*.tsbuildinfo
+.DS_Store
+Dockerfile
+.dockerignore

@@ -1210,6 +1210,14 @@ export type HealthResponse = {
     time: string;
 };
 
+export type ReadinessResponse = {
+    status: 'ready';
+    /**
+     * The applied migration's tag, matched by its journal `when`; when the database is AHEAD of this image (old tasks during a roll), this image's newest tag
+     */
+    migration: string;
+};
+
 export type EchoResponse = {
     echoed: {
         [key: string]: unknown;
@@ -12525,6 +12533,28 @@ export type HealthControllerHealthResponses = {
 };
 
 export type HealthControllerHealthResponse = HealthControllerHealthResponses[keyof HealthControllerHealthResponses];
+
+export type HealthControllerReadyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/health/ready';
+};
+
+export type HealthControllerReadyErrors = {
+    /**
+     * Not ready (not-ready) — `failing` names the checks
+     */
+    503: ProblemDetailsDto;
+};
+
+export type HealthControllerReadyError = HealthControllerReadyErrors[keyof HealthControllerReadyErrors];
+
+export type HealthControllerReadyResponses = {
+    200: ReadinessResponse;
+};
+
+export type HealthControllerReadyResponse = HealthControllerReadyResponses[keyof HealthControllerReadyResponses];
 
 export type EchoControllerEchoData = {
     body: {

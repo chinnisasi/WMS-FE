@@ -4,14 +4,14 @@
   "private": true,
   "description": "WMS web dashboard — Next.js 16 App Router shell with the shared design-token layer",
   "engines": {
-    "bun": ">=1.2"
+    "bun": ">=1.4"
   },
-  "packageManager": "bun@1.2.20",
+  "packageManager": "bun@1.4.2",
   "scripts": {
     "preinstall": "node -e \"if (!/^bun\\//.test(process.env.npm_config_user_agent || '')) { console.error('This repo uses bun only — run bun install (never npm/yarn/pnpm).'); process.exit(1); }\"",
     "dev": "next dev -p 3001",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p ${PORT:-3001}",
     "lint": "eslint .",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
