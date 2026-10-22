@@ -4347,10 +4347,6 @@ export type CatalogCountTaskLineDto = {
     skuId: string;
     skuCode: string;
     skuName: string | null;
-    /**
-     * The expectation frozen at task start. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
-     */
-    expectedQuantity: number;
 };
 
 export type CatalogCountTaskDto = {
@@ -4369,7 +4365,7 @@ export type CatalogCountTaskDto = {
      */
     origin: 'on_demand' | 'scheduled' | 'recount';
     /**
-     * The bin state epoch FROZEN at task start — the submit quotes it back for the equality compare
+     * The bin state epoch FROZEN at task start — informational: the submit reads the epoch from the task row for the equality compare, never from the device
      */
     binStateEpoch: number | null;
     /**
@@ -4377,7 +4373,7 @@ export type CatalogCountTaskDto = {
      */
     createdAt: string;
     /**
-     * The FROZEN expectations — every line must be counted at submit
+     * The SKUs the task lists (blind — no expected quantity); every line must be counted at submit, and SKUs found in the bin may be added
      */
     lines: Array<CatalogCountTaskLineDto>;
 };
@@ -5961,6 +5957,63 @@ export type EditLicenceDto = {
     note?: string | null;
 };
 
+export type CountTaskResponseDto = {
+    id: string;
+    status: string;
+    warehouseId: string;
+    binId: string;
+    binCode: string;
+    origin: 'on_demand' | 'scheduled' | 'recount';
+    /**
+     * The bin state epoch FROZEN at task start
+     */
+    binStateEpoch: number | null;
+    /**
+     * Business time (ISO-8601 UTC)
+     */
+    createdAt: string;
+};
+
+export type CountTaskLineResponseDto = {
+    skuId: string;
+    /**
+     * The frozen expectation at task start. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    expectedQuantity: number;
+};
+
+export type CreateCountResponse = {
+    countTask: CountTaskResponseDto;
+    lines: Array<CountTaskLineResponseDto>;
+};
+
+export type BulkCreatedCountTaskDto = {
+    taskId: string;
+    binId: string;
+    binCode: string;
+    /**
+     * How many SKU lines the task froze
+     */
+    lineCount: number;
+};
+
+export type BulkSkippedCountBinDto = {
+    binId: string;
+    binCode: string;
+    /**
+     * count-task-open: the bin already has a pending count; system-bin / bin-retired: a listed bin that cannot be counted
+     */
+    reason: 'count-task-open' | 'system-bin' | 'bin-retired';
+};
+
+export type CreateCountsBulkResponse = {
+    /**
+     * One on-demand task per eligible bin — NOT pushed to handhelds
+     */
+    created: Array<BulkCreatedCountTaskDto>;
+    skipped: Array<BulkSkippedCountBinDto>;
+};
+
 export type TransferLineDto = {
     skuId: string;
     /**
@@ -6161,47 +6214,124 @@ export type CancelTransferDto = {
 
 export type CreateCountDto = {
     /**
-     * The warehouse holding the bin
+     * The warehouse holding the bin(s)
      */
     warehouseId: string;
     /**
-     * The bin to count (in that warehouse)
+     * The single bin to count (in that warehouse). Exactly one of binId, binIds, zoneId
      */
-    binId: string;
+    binId?: string;
+    /**
+     * Story 3-5a — count many bins at once (1–500, each named once). A bin with an open task, a system bin and a retired bin are skipped and listed; more than 500 is 400 validation-failed (a zone over 500 is 422 too-many-bins)
+     */
+    binIds?: Array<string>;
+    /**
+     * Story 3-5a — count every non-system, non-retired bin of one zone (at most 500; more is 422 too-many-bins). Bins with an open task are skipped and listed
+     */
+    zoneId?: string;
     /**
      * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
      */
     occurredAt?: string;
 };
 
-export type CountTaskResponseDto = {
+export type CountTaskListEntryDto = {
     id: string;
-    status: string;
     warehouseId: string;
     binId: string;
     binCode: string;
+    status: 'pending' | 'completed';
     origin: 'on_demand' | 'scheduled' | 'recount';
     /**
-     * The bin state epoch FROZEN at task start
+     * The planner; null = the system (scheduler or a recount)
+     */
+    createdBy: string | null;
+    createdAt: string;
+    completedBy: string | null;
+    completedAt: string | null;
+    lineCount: number;
+    varianceCount: number;
+    openVarianceCount: number;
+};
+
+export type CountTaskListResponse = {
+    items: Array<CountTaskListEntryDto>;
+    nextCursor?: string | null;
+};
+
+export type CountTaskDetailTaskDto = {
+    id: string;
+    warehouseId: string;
+    binId: string;
+    binCode: string;
+    status: 'pending' | 'completed';
+    origin: 'on_demand' | 'scheduled' | 'recount';
+    /**
+     * The bin state epoch frozen at task start
      */
     binStateEpoch: number | null;
-    /**
-     * Business time (ISO-8601 UTC)
-     */
+    createdBy: string | null;
     createdAt: string;
+    completedBy: string | null;
+    completedAt: string | null;
+    /**
+     * A movement moved the bin between task start and submit (OQ-2) — the submit minted a recount; false while pending
+     */
+    epochConflict: boolean;
 };
 
-export type CountTaskLineResponseDto = {
+export type CountTaskDetailLineDto = {
     skuId: string;
+    skuCode: string;
+    skuName: string | null;
     /**
-     * The frozen expectation at task start. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     * Frozen at task start (0 for a SKU found at submit). A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     expectedQuantity: number;
+    /**
+     * What the operator counted; null while the task is pending
+     */
+    countedQuantity: number | null;
 };
 
-export type CreateCountResponse = {
-    countTask: CountTaskResponseDto;
-    lines: Array<CountTaskLineResponseDto>;
+export type CountTaskDetailVarianceDto = {
+    id: string;
+    skuId: string;
+    /**
+     * Base units — what the count was compared against (a recount resolution rewrites it)
+     */
+    expectedQuantity: number;
+    /**
+     * Base units — what the operator counted
+     */
+    countedQuantity: number;
+    /**
+     * counted − expected (may be negative)
+     */
+    delta: number;
+    /**
+     * A movement moved the bin between task start and submit (OQ-2)
+     */
+    epochConflict: boolean;
+    status: 'open' | 'adjusted' | 'recounted';
+    /**
+     * The recount task a recount resolution minted
+     */
+    recountTaskId: string | null;
+};
+
+export type CountTaskDetailResponse = {
+    task: CountTaskDetailTaskDto;
+    lines: Array<CountTaskDetailLineDto>;
+    variances: Array<CountTaskDetailVarianceDto>;
+    /**
+     * The recount task a variance of this task names (the latest); null when none
+     */
+    recountTaskId: string | null;
+    /**
+     * The recount task the submit minted on an epoch conflict (OQ-2); null when none
+     */
+    conflictRecountTaskId: string | null;
 };
 
 export type SubmitCountLineDto = {
@@ -6235,23 +6365,14 @@ export type CountTaskSettledResponseDto = {
     epochConflict: boolean;
 };
 
-export type CountVarianceResponseDto = {
-    skuId: string;
-    expectedQuantity: number;
-    countedQuantity: number;
-    /**
-     * counted − expected (may be negative)
-     */
-    delta: number;
-    /**
-     * A movement moved the bin between task start and submit (OQ-2)
-     */
-    epochConflict: boolean;
-};
-
 export type SubmitCountResponse = {
     countTask: CountTaskSettledResponseDto;
-    variances: Array<CountVarianceResponseDto>;
+    /**
+     * Always empty (story 3-5a — counts are blind; a key stored before 3-5a is re-projected on replay). Read variances through the task detail on the web
+     */
+    variances: Array<{
+        [key: string]: never;
+    }>;
     /**
      * The auto-created recount task when the epoch conflicted (OQ-2)
      */
@@ -18021,6 +18142,64 @@ export type MovementsControllerCancelTransferResponses = {
 
 export type MovementsControllerCancelTransferResponse = MovementsControllerCancelTransferResponses[keyof MovementsControllerCancelTransferResponses];
 
+export type MovementsControllerListCountTasksData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Narrow to one warehouse
+         */
+        warehouseId?: string;
+        status?: 'pending' | 'completed';
+        origin?: 'on_demand' | 'scheduled' | 'recount';
+        /**
+         * Narrow to one bin
+         */
+        binId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/movements/counts';
+};
+
+export type MovementsControllerListCountTasksErrors = {
+    /**
+     * Malformed filter, cursor or out-of-range limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token (a device token is refused)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerListCountTasksError = MovementsControllerListCountTasksErrors[keyof MovementsControllerListCountTasksErrors];
+
+export type MovementsControllerListCountTasksResponses = {
+    /**
+     * The count-task page (newest first, keyset cursor)
+     */
+    200: CountTaskListResponse;
+};
+
+export type MovementsControllerListCountTasksResponse = MovementsControllerListCountTasksResponses[keyof MovementsControllerListCountTasksResponses];
+
 export type MovementsControllerCreateCountData = {
     body: CreateCountDto;
     headers: {
@@ -18041,7 +18220,7 @@ export type MovementsControllerCreateCountData = {
 
 export type MovementsControllerCreateCountErrors = {
     /**
-     * Missing or malformed Idempotency-Key, an invalid body, or a system bin (Receiving/QC-hold/In-Transit — counts target storage bins only) (validation-failed)
+     * Missing or malformed Idempotency-Key, an invalid body (not exactly one of binId/binIds/zoneId, a repeated bin), or a system bin on the single create (Receiving/QC-hold/In-Transit — counts target storage bins only) (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -18053,15 +18232,15 @@ export type MovementsControllerCreateCountErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * The warehouse or the bin does not exist in this tenant — including a bin deleted between the listing and the create (not-found)
+     * The warehouse, the zone or a bin does not exist in this tenant — including a bin deleted between the listing and the create (not-found)
      */
     404: ProblemDetailsDto;
     /**
-     * The bin already has a pending count task (count-task-open), or a concurrent idempotent request (conflict)
+     * The single bin already has a pending count task (count-task-open), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
-     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     * Idempotency key reused with a different payload (idempotency-key-reuse), or more than 500 bins named or in the zone (too-many-bins)
      */
     422: ProblemDetailsDto;
 };
@@ -18070,12 +18249,55 @@ export type MovementsControllerCreateCountError = MovementsControllerCreateCount
 
 export type MovementsControllerCreateCountResponses = {
     /**
-     * Count task pending (the idempotency snapshot)
+     * The idempotency snapshot: CreateCountResponse for binId (count task pending), CreateCountsBulkResponse for binIds/zoneId (created and skipped)
      */
-    201: CreateCountResponse;
+    201: CreateCountResponse | CreateCountsBulkResponse;
 };
 
 export type MovementsControllerCreateCountResponse = MovementsControllerCreateCountResponses[keyof MovementsControllerCreateCountResponses];
+
+export type MovementsControllerGetCountTaskData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        taskId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/counts/{taskId}';
+};
+
+export type MovementsControllerGetCountTaskErrors = {
+    /**
+     * Malformed taskId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token — a device token is refused (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or a role with neither counts.manage nor variances.resolve (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The count task does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerGetCountTaskError = MovementsControllerGetCountTaskErrors[keyof MovementsControllerGetCountTaskErrors];
+
+export type MovementsControllerGetCountTaskResponses = {
+    /**
+     * The count task detail
+     */
+    200: CountTaskDetailResponse;
+};
+
+export type MovementsControllerGetCountTaskResponse = MovementsControllerGetCountTaskResponses[keyof MovementsControllerGetCountTaskResponses];
 
 export type MovementsControllerSubmitCountData = {
     body: SubmitCountDto;
@@ -18098,7 +18320,7 @@ export type MovementsControllerSubmitCountData = {
 
 export type MovementsControllerSubmitCountErrors = {
     /**
-     * Missing or malformed Idempotency-Key, an invalid body, or a task line the body never counted (count-incomplete)
+     * Missing or malformed Idempotency-Key, an invalid body, a task line the body never counted (count-incomplete), or a found line (not on the task) of a kit or of a batch-, serial- or catch-weight-tracked SKU (count-found-sku-not-countable)
      */
     400: ProblemDetailsDto;
     /**
@@ -18133,6 +18355,49 @@ export type MovementsControllerSubmitCountResponses = {
 };
 
 export type MovementsControllerSubmitCountResponse = MovementsControllerSubmitCountResponses[keyof MovementsControllerSubmitCountResponses];
+
+export type MovementsControllerGetCountPoliciesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/warehouses/{warehouseId}/count-policies';
+};
+
+export type MovementsControllerGetCountPoliciesErrors = {
+    /**
+     * Malformed warehouseId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerGetCountPoliciesError = MovementsControllerGetCountPoliciesErrors[keyof MovementsControllerGetCountPoliciesErrors];
+
+export type MovementsControllerGetCountPoliciesResponses = {
+    /**
+     * The warehouse's policy set (possibly empty)
+     */
+    200: CountPoliciesResponse;
+};
+
+export type MovementsControllerGetCountPoliciesResponse = MovementsControllerGetCountPoliciesResponses[keyof MovementsControllerGetCountPoliciesResponses];
 
 export type MovementsControllerUpsertCountPoliciesData = {
     body: UpsertCountPoliciesDto;
@@ -18190,6 +18455,64 @@ export type MovementsControllerUpsertCountPoliciesResponses = {
 };
 
 export type MovementsControllerUpsertCountPoliciesResponse = MovementsControllerUpsertCountPoliciesResponses[keyof MovementsControllerUpsertCountPoliciesResponses];
+
+export type MovementsControllerDeleteCountPolicyData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        abcClass: 'a' | 'b' | 'c';
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/warehouses/{warehouseId}/count-policies/{abcClass}';
+};
+
+export type MovementsControllerDeleteCountPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed warehouseId, or an unknown ABC class (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks counts.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist, or it has no policy for this class (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different request (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerDeleteCountPolicyError = MovementsControllerDeleteCountPolicyErrors[keyof MovementsControllerDeleteCountPolicyErrors];
+
+export type MovementsControllerDeleteCountPolicyResponses = {
+    /**
+     * The warehouse's remaining policy set (the idempotency snapshot)
+     */
+    200: CountPoliciesResponse;
+};
+
+export type MovementsControllerDeleteCountPolicyResponse = MovementsControllerDeleteCountPolicyResponses[keyof MovementsControllerDeleteCountPolicyResponses];
 
 export type MovementsControllerGetVariancePolicyData = {
     body?: never;

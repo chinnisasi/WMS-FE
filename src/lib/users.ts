@@ -111,8 +111,9 @@ export const CAPABILITIES = [
   // `waves.manage` rationale). `counts.execute` is the floor verb —
   // submitting the counted quantities through the inbox Count tab, mirroring
   // `transfers.execute`/`picks.execute`: the operator counts what it walks.
-  // Neither has a web surface yet (counts run from mobile; the mirror stays
-  // in step with the backend so the drift guard keeps passing).
+  // Story 3-5a — `counts.manage` now has a web surface: `/moves/counts`
+  // (the bulk create and the schedule's set/remove). `counts.execute` stays
+  // handheld-only — the web never submits a count.
   'counts.manage',
   'counts.execute',
   // Story 5-4 — variances.resolve: the resolution verb for an open count

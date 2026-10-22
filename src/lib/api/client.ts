@@ -90,9 +90,15 @@ import {
   inventoryControllerListEvents,
   inventoryControllerListStock,
   inventoryControllerRejectAdjustment,
+  movementsControllerCreateCount,
+  movementsControllerDeleteCountPolicy,
+  movementsControllerGetCountPolicies,
+  movementsControllerGetCountTask,
+  movementsControllerListCountTasks,
   movementsControllerListCountVariances,
   movementsControllerMoveStock,
   movementsControllerResolveCountVariance,
+  movementsControllerUpsertCountPolicies,
   outboundControllerCancelOrder,
   outboundControllerCancelWave,
   outboundControllerCreateOrder,
@@ -310,6 +316,11 @@ import type {
   CreateWarehouseDto,
   CreateZoneDto,
   CountVarianceListResponse,
+  CountPoliciesResponse,
+  CountPolicyDto,
+  CountTaskDetailResponse,
+  CountTaskListResponse,
+  CreateCountsBulkResponse,
   DeviceListResponse,
   DeviceResponse,
   UserStatusResponse,
@@ -3903,6 +3914,120 @@ export async function fetchApiResolveVariance(
   const { data, error } = await movementsControllerResolveCountVariance({
     path: { tenantId, varianceId },
     body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 3-5a — the web count-task list: newest first, keyset cursor,
+ * warehouse/status/origin/bin filters. Exempt from the client filter (a bin
+ * may hold several clients' goods), so it takes no `clientId`. Carries no
+ * quantity — the detail does.
+ */
+export async function fetchApiListCountTasks(
+  tenantId: string,
+  options?: {
+    warehouseId?: string;
+    status?: 'pending' | 'completed';
+    origin?: 'on_demand' | 'scheduled' | 'recount';
+    binId?: string;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  },
+): Promise<CountTaskListResponse> {
+  const { data, error } = await movementsControllerListCountTasks({
+    path: { tenantId },
+    query: definedQuery({
+      warehouseId: options?.warehouseId,
+      status: options?.status,
+      origin: options?.origin,
+      binId: options?.binId,
+      cursor: options?.cursor,
+      limit: options?.limit,
+    }),
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-5a — one count task: expected beside counted, its variances and the recount a variance names. */
+export async function fetchApiGetCountTask(tenantId: string, taskId: string): Promise<CountTaskDetailResponse> {
+  const { data, error } = await movementsControllerGetCountTask({ path: { tenantId, taskId } });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 3-5a — the bulk on-demand create (`counts.manage`): many bins
+ * (`binIds`, 1–500) or a zone's countable bins (`zoneId`). The created tasks
+ * are not pushed to handhelds; bins with an open task (and listed system or
+ * retired bins) come back in `skipped`. The single-bin create (`binId`) has
+ * no web consumer, so this wrapper sends the bulk arms only. The key is the
+ * draft's (reused across retries of an unchanged selection).
+ */
+export async function fetchApiCreateCounts(
+  tenantId: string,
+  body: { warehouseId: string; binIds: readonly string[] } | { warehouseId: string; zoneId: string },
+  idempotencyKey: string,
+): Promise<CreateCountsBulkResponse> {
+  const { data, error } = await movementsControllerCreateCount({
+    path: { tenantId },
+    body: 'binIds' in body ? { warehouseId: body.warehouseId, binIds: [...body.binIds] } : { warehouseId: body.warehouseId, zoneId: body.zoneId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  // The 201 is oneOf the single and the bulk shapes; a bulk body only ever answers the bulk one.
+  return data as CreateCountsBulkResponse;
+}
+
+/** Story 3-5a — the warehouse's cycle-count schedule (any staff role). */
+export async function fetchApiGetCountPolicies(tenantId: string, warehouseId: string): Promise<CountPoliciesResponse> {
+  const { data, error } = await movementsControllerGetCountPolicies({ path: { tenantId, warehouseId } });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-5a — set (upsert) classes of the schedule (`counts.manage`); the answer is the whole set. */
+export async function fetchApiUpsertCountPolicies(
+  tenantId: string,
+  warehouseId: string,
+  policies: readonly CountPolicyDto[],
+  idempotencyKey: string,
+): Promise<CountPoliciesResponse> {
+  const { data, error } = await movementsControllerUpsertCountPolicies({
+    path: { tenantId, warehouseId },
+    body: { policies: policies.map((policy) => ({ abcClass: policy.abcClass, intervalDays: policy.intervalDays })) },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-5a — unschedule one class (`counts.manage`); the answer is the remaining set. */
+export async function fetchApiDeleteCountPolicy(
+  tenantId: string,
+  warehouseId: string,
+  abcClass: CountPolicyDto['abcClass'],
+  idempotencyKey: string,
+): Promise<CountPoliciesResponse> {
+  const { data, error } = await movementsControllerDeleteCountPolicy({
+    path: { tenantId, warehouseId, abcClass },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {

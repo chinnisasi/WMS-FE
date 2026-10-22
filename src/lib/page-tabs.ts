@@ -148,6 +148,20 @@ export const INVENTORY_PAGE_TABS = definePageTabs({
 export type InventoryTab = (typeof INVENTORY_PAGE_TABS)['defaultTab'];
 
 /**
+ * `/moves/counts` (story 3-5a) — cycle counts under Moves: the count tasks
+ * (list, detail, bulk create) and the per-warehouse ABC schedule.
+ */
+export const COUNTS_PAGE_TABS = definePageTabs({
+  route: '/moves/counts',
+  label: 'Count sections',
+  tabs: [
+    { id: 'tasks', label: 'Tasks' },
+    { id: 'schedule', label: 'Schedule' },
+  ],
+});
+export type CountsTab = (typeof COUNTS_PAGE_TABS)['defaultTab'];
+
+/**
  * `/settings` — grouped tabs (user decision, 2026-10-17): Warehouses
  * (create form, warehouse list, zones & bins), Catalog (import, products,
  * SKUs, segregation matrix), Clients (clients, rate cards), Partners (story
