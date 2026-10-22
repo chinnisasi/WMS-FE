@@ -228,6 +228,12 @@ export const CAPABILITIES = [
   // shelves is floor work. Gates the Moves page's form only; every member
   // reads the recent moves. The ops grant is derived below.
   'stock.move',
+  // Story 3-2b — REQUEST a stock adjustment: the handheld's Adjust screen. A
+  // holder of only this (the OPERATOR) always pends for the owner's approval;
+  // a holder of `stock.adjust` keeps the threshold rule. Owner + Ops Manager
+  // (derived below) + Operator. The web Adjust form still gates on
+  // `stock.adjust`, so an operator does not see it.
+  'stock.adjust.request',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -306,6 +312,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     'gate.manage',
     // Story 3-1 — the floor moves stock between bins.
     'stock.move',
+    // Story 3-2b — the floor requests an adjustment (always pended for the
+    // owner); never `stock.adjust` itself.
+    'stock.adjust.request',
   ],
   // Story 8-2b: read-only except the e-way paperwork (finance work); story
   // 21-3: and the client rate cards (finance work); story 21-5: and the

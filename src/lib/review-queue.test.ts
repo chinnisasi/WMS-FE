@@ -23,6 +23,7 @@ import {
   GATE_IN_UNLOAD_GONE_GUIDANCE,
   GATE_IN_UNLOAD_GUIDANCE,
   STOCK_MOVE_GUIDANCE,
+  STOCK_ADJUST_GUIDANCE,
   GRN_REFUSAL_LABEL,
   GRN_CLIENT_GUIDANCE,
   GRN_DEPARTED_GUIDANCE,
@@ -850,5 +851,62 @@ describe('story 3-1 — a refused handheld move (stock.move)', () => {
       heading: 'unknown SKU × ? — not moved',
       lines: ['unknown bin → unknown bin · batch L1 — brand-new'],
     });
+  });
+});
+
+describe('story 3-2b — a refused handheld adjustment (stock.adjust)', () => {
+  const payload = {
+    warehouseId: 'w',
+    binId: '0198f7a2-1b3c-7d4e-8f90-00000000a001',
+    skuId: '0198f7a2-1b3c-7d4e-8f90-0000000005c1',
+    quantityDelta: -2,
+    reasonCode: 'damaged',
+    note: 'crushed',
+    batch: null,
+    serials: null,
+    occurredAt: '2026-10-22T03:30:00.000Z',
+  };
+
+  test('Apply and Discard, as the server says; the guidance names the remedy', () => {
+    expect(rejectedOpDecisions({ decisions: ['apply', 'discard'], payload })).toEqual(['apply', 'discard']);
+    expect(rejectedOpGuidance({ opType: 'stock.adjust', problemCode: 'insufficient-on-hand', payload })).toEqual([STOCK_ADJUST_GUIDANCE]);
+  });
+
+  test('the summary names the signed quantity, the SKU, the bin, the batch (and its override) or serials, the reason, the note and the refusal in words', () => {
+    expect(rejectedOpSummary({ opType: 'stock.adjust', problemCode: 'insufficient-on-hand', payload }, () => 'PLAIN')).toEqual({
+      heading: 'PLAIN −2 — not adjusted',
+      lines: ['bin …0000a001 · reason damaged · “crushed” — the bin (or the batch) held less than the removal'],
+    });
+    expect(
+      rejectedOpSummary({
+        opType: 'stock.adjust',
+        problemCode: 'serial-elsewhere',
+        payload: { ...payload, quantityDelta: 2, batch: { code: 'L1', overrideReason: null }, serials: ['S1', 'S2'], reasonCode: 'found' },
+      }),
+    ).toEqual({
+      heading: 'SKU …000005c1 +2 — not adjusted',
+      lines: ['bin …0000a001 · batch L1 · serials S1, S2 · reason found · “crushed” — a serial is in another bin'],
+    });
+    expect(
+      rejectedOpSummary({ opType: 'stock.adjust', problemCode: 'brand-new', payload: { batch: { code: 'L2', overrideReason: 'crushed lot' } } }),
+    ).toEqual({ heading: 'unknown SKU ? — not adjusted', lines: ['unknown bin · batch L2 (instead of FEFO: crushed lot) — brand-new'] });
+  });
+
+  test('A3 — an applied row whose outcome is a pend reads "Sent for approval"; an applied 201 reads "Op applied"', () => {
+    const pended = rejectedOpResolvedOutcome({ opType: 'stock.adjust' }, 'applied', {
+      kind: 'applied',
+      command: 'stock.adjust',
+      snapshot: { pendingAdjustment: { id: 'p1', pendReason: 'approval-required' } },
+    });
+    expect(pended.word).toBe('Sent for approval');
+    expect(pended.reason).toContain('adjustment approval queue');
+    const applied = rejectedOpResolvedOutcome({ opType: 'stock.adjust' }, 'applied', {
+      kind: 'applied',
+      command: 'stock.adjust',
+      snapshot: { event: { id: 'e1' }, onHand: { quantity: 3 } },
+    });
+    expect(applied.word).toBe('Op applied');
+    // A move is never read as a pend.
+    expect(rejectedOpResolvedOutcome({ opType: 'stock.move' }, 'applied', { snapshot: { pendingAdjustment: {} } }).word).toBe('Op applied');
   });
 });

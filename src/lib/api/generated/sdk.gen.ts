@@ -943,10 +943,16 @@ export const devicesControllerResolveRejectedOp = <ThrowOnError extends boolean 
 });
 
 /**
- * Records a manual stock adjustment (one ledger event + on-hand projection in one commit; over a tenant approval threshold it PENDS instead — 202)
+ * Records a manual stock adjustment (one ledger event + on-hand projection in one commit; over a tenant approval threshold — or, story 3-2b, from a request-only holder — it PENDS instead: 202)
+ *
+ * Accepts EITHER session family on the one route (story 3-2b, the move's precedent): a web session, or a device badge-in session — the handheld's queued `stock.adjust` op (a bare enrollment credential → 401; an op captured by another operator → 409 operator-mismatch; `occurredAt` is required there). A holder of stock.adjust applies under the threshold and pends over it; a holder of only stock.adjust.request (the operator) always pends for the owner (pendReason 'approval-required').
  */
 export const inventoryControllerAdjustStock = <ThrowOnError extends boolean = false>(options: Options<InventoryControllerAdjustStockData, ThrowOnError>): RequestResult<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError> => (options.client ?? client).post<InventoryControllerAdjustStockResponses, InventoryControllerAdjustStockErrors, ThrowOnError>({
     security: [{
+            key: 'device',
+            scheme: 'bearer',
+            type: 'http'
+        }, {
             key: 'bearer',
             scheme: 'bearer',
             type: 'http'

@@ -482,6 +482,8 @@ export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'p
   if (entry.opType === 'gate-in.unload') return [gateInUnloadGuidance(entry.problemCode)];
   // Story 3-1 — a refused handheld move: Apply re-runs it, or Discard.
   if (entry.opType === 'stock.move') return [STOCK_MOVE_GUIDANCE];
+  // Story 3-2b — a refused handheld adjustment: Apply re-submits it, or Discard.
+  if (entry.opType === 'stock.adjust') return [STOCK_ADJUST_GUIDANCE];
   if (entry.opType === 'grn.shelf-life-refused') return [GRN_SHELF_LIFE_GUIDANCE];
   // Story 2-4a — the whole receipt was refused for the DAMAGED code collision.
   if (entry.opType === 'grn.submit' && entry.problemCode === 'damaged-bin-conflict') return [GRN_DAMAGED_BIN_CONFLICT_GUIDANCE];
@@ -711,6 +713,7 @@ export function rejectedOpSummary(
   if (isInactiveSkuFlag(entry)) return inactiveSkuReceivedSummary(entry, skuCode);
   if (entry.opType === 'gate-in.unload') return gateInUnloadSummary(entry);
   if (entry.opType === 'stock.move') return stockMoveSummary(entry, skuCode);
+  if (entry.opType === 'stock.adjust') return stockAdjustSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
   const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;
@@ -850,6 +853,16 @@ export function rejectedOpResolvedOutcome(
     const rerun = waivedRerunSummary(outcome ?? null);
     return { word: copy.outcomeWord, reason: (rerun === null ? copy.outcomeFallback : rerun) + copy.outcomeEnding };
   }
+  // Story 3-2b (A3) — an applied `stock.adjust` row re-ran as the op's own
+  // operator: a floor operator's request (or an over-threshold one) PENDS
+  // again, so the outcome holds the pend — say so, never "landed".
+  if (status === 'applied' && entry.opType === 'stock.adjust' && isPendOutcome(outcome)) {
+    return {
+      word: 'Sent for approval',
+      reason:
+        'The adjustment was re-submitted as the operator recorded it and now waits in the adjustment approval queue — stock is unchanged until an owner approves it.',
+    };
+  }
   if (status === 'applied') {
     return {
       word: 'Op applied',
@@ -866,6 +879,12 @@ export function rejectedOpResolvedOutcome(
     return { word: 'Acknowledged', reason: 'The flag is closed — the lines stay booked; nothing moved.' };
   }
   return { word: 'Discarded', reason: 'The op is retired with a discard marker — its refusal stays readable in the row.' };
+}
+
+/** Story 3-2b — the resolve outcome's snapshot is a 202 pend (`{ pendingAdjustment }`). */
+function isPendOutcome(outcome: Record<string, unknown> | null | undefined): boolean {
+  const snapshot = outcome?.['snapshot'];
+  return typeof snapshot === 'object' && snapshot !== null && 'pendingAdjustment' in snapshot;
 }
 
 // ── story 1-4b: the inactive-SKU flag (a grn.inactive-sku-received row) ─────
@@ -1054,4 +1073,73 @@ function stockMoveSummary(
   if (typeof payload['note'] === 'string' && payload['note'] !== '') parts.push(`“${payload['note']}”`);
   const problem = STOCK_MOVE_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
   return { heading: `${sku} × ${qty} — not moved`, lines: [`${parts.join(' · ')} — ${problem}`] };
+}
+
+// ── story 3-2b: a refused handheld adjustment (a stock.adjust row) ──────────
+
+/**
+ * The remedy a `stock.adjust` row's reviewer reads. Apply re-submits the
+ * adjustment as the handheld recorded it, every rule checked again, under the
+ * op's own operator — so a floor operator's request goes to the adjustment
+ * approval queue again rather than changing stock here. When the floor no
+ * longer matches it, Discard it and record the adjustment on the Inventory
+ * page.
+ */
+export const STOCK_ADJUST_GUIDANCE =
+  "Apply re-submits the adjustment as recorded, every rule checked again — a floor operator's request then waits in the adjustment approval queue. If the floor no longer matches it, discard this row and record the adjustment on the Inventory page.";
+
+/** Why the adjustment was refused, in words (the row's whole-op `problemCode`); an unknown code reads as itself. */
+export const STOCK_ADJUST_PROBLEM_WORDS: Readonly<Record<string, string>> = {
+  'insufficient-on-hand': 'the bin (or the batch) held less than the removal',
+  'serial-elsewhere': 'a serial is in another bin',
+  'duplicate-serial': 'a serial is already in a bin',
+  'serial-unknown': 'a serial is unknown',
+  'bin-retired': 'the bin is retired',
+  'qc-bin-not-adjustable': 'a QC-hold or in-transit bin is not adjusted by hand',
+  'returns-bin-not-adjustable': 'the Returns bin is not adjusted by hand',
+  'damaged-bin-write-off-only': 'the Damaged bin takes only a write-off',
+  'kit-cannot-hold-stock': 'a kit holds no stock',
+  'client-departed': "the SKU's client has departed",
+  'not-found': 'a bin, SKU or batch no longer exists',
+  'role-denied': 'the operator may not adjust stock',
+  'validation-failed': 'the adjustment was malformed',
+  conflict: 'the same adjustment was being processed twice',
+  'idempotency-key-reuse': 'the op id was reused with a different adjustment',
+  'operator-mismatch': 'captured by another operator',
+  'device-revoked': 'the device was revoked',
+};
+
+/**
+ * A `stock.adjust` row's summary: the signed quantity and SKU, the bin (a
+ * short id — the payload carries no code), the batch (or FEFO) and serials,
+ * the reason and note, then the refusal in words. Read defensively (a stored
+ * row is data).
+ */
+function stockAdjustSummary(
+  entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>,
+  skuCode: (skuId: string) => string | null,
+): { heading: string; lines: readonly string[] } {
+  const payload = entry.payload;
+  const skuId = typeof payload['skuId'] === 'string' ? payload['skuId'] : '';
+  const sku = skuCode(skuId) ?? (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
+  const delta = typeof payload['quantityDelta'] === 'number' ? payload['quantityDelta'] : null;
+  const signed = delta === null ? '?' : `${delta < 0 ? '−' : '+'}${Math.abs(delta)}`;
+  const binId = payload['binId'];
+  const parts = [typeof binId === 'string' && binId !== '' ? `bin …${shortIdTail(binId)}` : 'unknown bin'];
+  const batch = payload['batch'];
+  if (typeof batch === 'object' && batch !== null && typeof (batch as Record<string, unknown>)['code'] === 'string') {
+    const override = (batch as Record<string, unknown>)['overrideReason'];
+    parts.push(
+      `batch ${(batch as Record<string, unknown>)['code'] as string}` +
+        (typeof override === 'string' && override !== '' ? ` (instead of FEFO: ${override})` : ''),
+    );
+  }
+  if (Array.isArray(payload['serials'])) {
+    const serials = (payload['serials'] as unknown[]).filter((serial): serial is string => typeof serial === 'string');
+    if (serials.length > 0) parts.push(`serials ${serials.join(', ')}`);
+  }
+  if (typeof payload['reasonCode'] === 'string') parts.push(`reason ${payload['reasonCode']}`);
+  if (typeof payload['note'] === 'string' && payload['note'] !== '') parts.push(`“${payload['note']}”`);
+  const problem = STOCK_ADJUST_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return { heading: `${sku} ${signed} — not adjusted`, lines: [`${parts.join(' · ')} — ${problem}`] };
 }

@@ -12,6 +12,7 @@ import type { AdjustmentPendingEntryDto, SkuResponse } from '@/lib/api/generated
 import { readSession, subscribeSession } from '@/lib/auth';
 import { ledgerDocHref } from '@/lib/drill';
 import { quantityLabel } from '@/lib/format-quantity';
+import { pendReasonText, pendSourceText } from '@/lib/adjust';
 import { adjustmentDecisionReason } from '@/lib/review-queue';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -192,8 +193,9 @@ function AdjustmentPendingsQueueSessioned() {
         <h2 className="font-medium">Adjustment pendings</h2>
         <ClientFilterChip active={active} tenantName={active.tenantName} />
         <div className="text-(--muted-foreground)">
-          Stock adjustments that exceeded the tenant&apos;s approval threshold at request time
-          wait here — ATP unchanged while they pend. Approve re-executes the stored arms;
+          Stock adjustments that exceeded the tenant&apos;s approval threshold at request time,
+          and every adjustment a floor operator requested from a handheld (an operator may
+          request, never apply), wait here — ATP unchanged while they pend. Approve re-executes the stored arms;
           reject settles them unapplied — both audit-trailed.
         </div>
       </div>
@@ -338,9 +340,10 @@ function AdjustmentPendingCard({
         </div>
       )}
       <div className="text-xs text-(--muted-foreground)">
-        Requested by {requestedBy ?? 'unknown user'} ·{' '}
+        Requested by {requestedBy ?? 'unknown user'}
+        {pendSourceText(entry) !== null && <> {pendSourceText(entry)}</>} ·{' '}
         <time dateTime={entry.requestedAt}>{new Date(entry.requestedAt).toLocaleString()}</time>
-        {' '}· threshold {qty(entry.thresholdQuantityAtRequest)} frozen at request
+        {' '}· {pendReasonText(entry, qty)}
         {entry.status !== 'pending' && (
           <>
             {' '}· {entry.status} by {decidedBy ?? 'unknown user'}

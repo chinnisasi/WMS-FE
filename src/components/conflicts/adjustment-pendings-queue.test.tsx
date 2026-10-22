@@ -282,10 +282,27 @@ describe('AdjustmentPendingsQueue: the card and the read-only render (story 5-5)
     view = await mount(OPERATOR_SESSION);
     // The row still renders — pending rows are never hidden read-only or not.
     expect(view.container.textContent).toContain('SPICE-01');
-    expect(view.container.textContent).toContain('threshold 2 each frozen at request');
+    // Story 3-2b (A11) — the threshold context reads as one of the two pend
+    // reasons (the 5-5 words "threshold 2 each frozen at request" changed
+    // with the copy; the frozen threshold is still what it names).
+    expect(view.container.textContent).toContain('over the 2 each threshold, frozen at request');
     // The only buttons are the status tabs, never a decision affordance.
     const labels = [...view.container.querySelectorAll('button')].map((b) => b.textContent);
     expect(labels).toEqual(['Pending', 'Approved', 'Rejected']);
+  });
+});
+
+describe('AdjustmentPendingsQueue: a handheld request (story 3-2b)', () => {
+  test('an approval-required row from a handheld names the device and the reason, never a threshold', async () => {
+    pendingRows = [
+      pending({ pendReason: 'approval-required', thresholdQuantityAtRequest: null, sourceDeviceId: '0198f7a2-1b3c-7d4e-8f90-00000000d0c5' }),
+    ];
+    view = await mount();
+    const card = view.container.querySelector('article')!;
+    expect(card.textContent).toContain('from handheld …0000d0c5');
+    expect(card.textContent).toContain('approval required — the requester may only request adjustments');
+    expect(card.textContent).not.toContain('threshold,');
+    expect(view.container.textContent).toContain('every adjustment a floor operator requested from a handheld');
   });
 });
 

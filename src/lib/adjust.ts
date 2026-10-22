@@ -514,12 +514,51 @@ export function adjustOutcome(
     };
   }
   const pend = answer.pending.pendingAdjustment;
+  const what = `${sku.code} ${signedQuantityLabel(pend.quantityDelta, sku.uomPrecision)} ${sku.uom} in ${labels.binCode}`;
+  // Story 3-2b — a request-only holder's adjustment always pends, whatever
+  // its size (`approval-required`, possibly with no threshold at all); an
+  // older server sends no reason, and a threshold pend names its threshold.
+  if (pend.pendReason === 'approval-required' || pend.thresholdQuantityAtRequest === null) {
+    return {
+      tone: 'warning',
+      word: 'Sent for approval',
+      reason: `${what} waits for an owner's approval — your role can request adjustments, not apply them; stock is unchanged until then.`,
+      link: { href: ADJUSTMENT_PENDINGS_HREF, label: 'Open the approval queue' },
+    };
+  }
   return {
     tone: 'warning',
     word: 'Pending approval',
-    reason: `Over the ${formatQuantity(pend.thresholdQuantityAtRequest, sku.uomPrecision)} threshold — ${sku.code} ${signedQuantityLabel(pend.quantityDelta, sku.uomPrecision)} ${sku.uom} in ${labels.binCode} waits for an owner's approval; stock is unchanged until then.`,
+    reason: `Over the ${formatQuantity(pend.thresholdQuantityAtRequest, sku.uomPrecision)} threshold — ${what} waits for an owner's approval; stock is unchanged until then.`,
     link: { href: ADJUSTMENT_PENDINGS_HREF, label: 'Open the approval queue' },
   };
+}
+
+/**
+ * Story 3-2b — why a queued adjustment pended, for the approval card:
+ * `approval required` (the requester holds only `stock.adjust.request` — a
+ * floor operator's request, any size) or the threshold it crossed, frozen at
+ * request. A row from an older server (no reason) is a threshold pend — the
+ * only reason a row could pend before 3-2b.
+ */
+export function pendReasonText(
+  entry: { readonly pendReason?: 'threshold' | 'approval-required'; readonly thresholdQuantityAtRequest: number | null },
+  qty: (value: number) => string,
+): string {
+  if (entry.pendReason === 'approval-required' || entry.thresholdQuantityAtRequest === null) {
+    return 'approval required — the requester may only request adjustments';
+  }
+  return `over the ${qty(entry.thresholdQuantityAtRequest)} threshold, frozen at request`;
+}
+
+/**
+ * Story 3-2b — where the request came from: the handheld's id (its last eight
+ * characters — the device list is a settings read the queue does not load),
+ * or null from the web.
+ */
+export function pendSourceText(entry: { readonly sourceDeviceId?: string | null }): string | null {
+  const id = entry.sourceDeviceId ?? null;
+  return id === null ? null : `from handheld …${id.slice(-8)}`;
 }
 
 /**
