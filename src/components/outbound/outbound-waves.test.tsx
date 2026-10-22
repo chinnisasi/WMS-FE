@@ -148,6 +148,8 @@ let policyRows: unknown[] = [POLICY];
 let clientsBody: unknown[] | null = null;
 let waveDetail: unknown = WAVE_DETAIL;
 let skuClients: Record<string, string> = {};
+/** Story 4-1b: the generate picker's order page (empty unless a test fills it). */
+let pickerOrders: unknown[] = [];
 /** Answers the release POST; swapped to make the first attempt refuse. */
 let releaseResponder: () => { status: number; body: unknown } = () => ({
   status: 200,
@@ -213,7 +215,7 @@ function stubRouter(): void {
       return json(200, { items: clientsBody });
     }
     if (method === 'GET' && pathname.endsWith('/outbound/orders')) {
-      return json(200, { items: [], nextCursor: null });
+      return json(200, { items: pickerOrders, nextCursor: null });
     }
     // The wave-detail panel's SKU read (story 10.5): both fixture lines'
     // SKUs are kg at precision 3, so the expanded walk and the totals
@@ -256,6 +258,7 @@ beforeEach(() => {
   clientsBody = null;
   waveDetail = WAVE_DETAIL;
   skuClients = {};
+  pickerOrders = [];
   releaseResponder = () => ({
     status: 200,
     body: { wave: { ...wave({ status: 'released' }), picklists: [picklist({ status: 'ready' })] } },
@@ -702,6 +705,23 @@ describe('Waves: the client filter (story 1-5a)', () => {
     const orderReads = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/outbound/orders'));
     expect(orderReads.length).toBeGreaterThan(0);
     expect(orderReads.every((r) => !new URLSearchParams(r.search).has('clientId'))).toBe(true);
+  });
+
+  test('story 4-1b: the generate picker names an order by its label — its client number, the short id beside it', async () => {
+    const id = '0198f7a2-1b3c-7d4e-8f90-0000000a0042';
+    pickerOrders = [
+      { id, tenantId: TENANT_ID, warehouseId: 'wh-1', status: 'accepted', source: 'manual', integrationId: null, externalEventId: null, clientOrderRef: 'SO-1042', destination: null, clientId: 'c-self', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' },
+    ];
+    view = await mount('ops_manager');
+    const choose = [...view.container.querySelectorAll('label')].find((l) => l.textContent === 'Choose orders')!;
+    await act(async () => {
+      choose.querySelector('input')!.click();
+    });
+    await settle();
+    const item = [...view.container.querySelectorAll('li')].find((li) => li.querySelector('input[type="checkbox"]') !== null)!;
+    expect(item.textContent).toContain('SO-1042');
+    expect(item.textContent).toContain('000a0042');
+    expect(item.textContent).not.toContain(id);
   });
 
   test('a mixed wave’s detail names each order’s client', async () => {

@@ -3731,7 +3731,7 @@ export const portalControllerStock = <ThrowOnError extends boolean = false>(opti
 });
 
 /**
- * This client's orders, newest first (keyset), optionally one status
+ * This client's orders, newest first (keyset), optionally one status; story 4-1b: `reference` finds one by your order number or the channel's reference (exact)
  */
 export const portalControllerOrders = <ThrowOnError extends boolean = false>(options: Options<PortalControllerOrdersData, ThrowOnError>): RequestResult<PortalControllerOrdersResponses, PortalControllerOrdersErrors, ThrowOnError> => (options.client ?? client).get<PortalControllerOrdersResponses, PortalControllerOrdersErrors, ThrowOnError>({
     security: [{

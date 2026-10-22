@@ -73,7 +73,8 @@ describe('words', () => {
 
   test('the list cells: order reference else the order id; the lines summary; reasons with their notes', () => {
     expect(returnOrderLabel({ orderReference: 'SHOP-#1', orderId: 'o-1' })).toBe('SHOP-#1');
-    expect(returnOrderLabel({ orderReference: null, orderId: 'o-1' })).toBe('o-1');
+    // Story 4-1b — no reference: the order id's short form (its last 8 characters).
+    expect(returnOrderLabel({ orderReference: null, orderId: '0198f7a2-1b3c-7d4e-8f90-0000000000b1' })).toBe('000000b1');
     const lines = [
       { skuId: 'a', authorizedQty: 2 },
       { skuId: 'b', authorizedQty: 1.25 },

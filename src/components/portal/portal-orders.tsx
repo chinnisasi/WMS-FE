@@ -33,8 +33,9 @@ import { roleHasCapability } from '@/lib/users';
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { LineRows } from '@/components/shared/line-rows';
+import { OrderSearch } from '@/components/shared/order-search';
 import { ShipToFieldset } from '@/components/shared/ship-to-fieldset';
-import { ReadFailure, Section, buttonClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
+import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
 import { WarehousesFailure } from '@/components/shared/warehouses-failure';
 
 /**
@@ -50,7 +51,9 @@ import { WarehousesFailure } from '@/components/shared/warehouses-failure';
  * (`portal/stock`) as a non-blocking hint.
  */
 export function PortalOrders() {
-  const orders = usePortalOrders(null);
+  // Story 4-1b — the exact-match search over this company's own orders (null: none).
+  const [reference, setReference] = useState<string | null>(null);
+  const orders = usePortalOrders(null, reference);
   const [openId, setOpenId] = useState<string | null>(null);
   // Subscribed, never a bare readSession() at render.
   const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
@@ -111,6 +114,8 @@ export function PortalOrders() {
             setPlacing(false);
             setPlaced(order);
             setOpenId(null);
+            // Story 4-1b — the new order must be visible: drop any search.
+            setReference(null);
             // The new order is newest: back to page one, and refetch.
             orders.reset();
             setPageEpoch((epoch) => epoch + 1);
@@ -118,16 +123,34 @@ export function PortalOrders() {
         />
       )}
       {placed !== null && <FeedbackBanner tone="accepted" {...placedOrderBanner(placed)} />}
+      <OrderSearch
+        // Remounted when the search changes from outside (a placed order clears it), so the box never shows a stale query.
+        key={JSON.stringify(reference)}
+        applied={reference}
+        onSearch={(next) => {
+          // Story 4-1b — forget the current scope's cursor first, so no
+          // stale page-2 cursor is replayed when a search returns to it.
+          orders.reset();
+          setReference(next);
+          setOpenId(null);
+        }}
+        label="Find an order"
+        placeholder="Your order number or channel ref"
+      />
       {orders.state === 'loading' && <div className="text-(--muted-foreground)">Loading your orders…</div>}
       {orders.state === 'failed' && <ReadFailure word="Orders not loaded" reason={orders.reason} onRetry={orders.reload} />}
       {orders.state === 'ready' && (
         <DataTable<PortalOrderRowDto>
-          key={pageEpoch}
+          key={`${pageEpoch}|${JSON.stringify(reference)}`}
           columns={columns}
           rows={orders.data.items}
           nextCursor={orders.data.nextCursor}
           onCursor={orders.onCursor}
-          emptyMessage="No orders for your company yet."
+          emptyMessage={
+            reference === null
+              ? 'No orders for your company yet.'
+              : `None of your orders has the order number or channel reference "${reference}".`
+          }
           renderExpanded={(row) => (row.id === openId ? <OrderLines orderId={row.id} /> : null)}
         />
       )}
@@ -160,6 +183,8 @@ function PlaceOrderForm({
   const [destination, setDestination] = useState<DestinationFields>(emptyDestinationFields());
   const [consigneeGstin, setConsigneeGstin] = useState('');
   const [consigneeLegalName, setConsigneeLegalName] = useState('');
+  // Story 4-1b — "Your order number (optional)": in the request hash when sent.
+  const [clientOrderRef, setClientOrderRef] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -189,7 +214,7 @@ function PlaceOrderForm({
       setProblem(PORTAL_SESSION_EXPIRED);
       return;
     }
-    const parsed = parsePortalOrderCreate({ lines, destination, consigneeGstin, consigneeLegalName }, chosenWarehouse, byId);
+    const parsed = parsePortalOrderCreate({ lines, destination, consigneeGstin, consigneeLegalName, clientOrderRef }, chosenWarehouse, byId);
     if (parsed.body === null) {
       setProblem(parsed.problem);
       return;
@@ -204,7 +229,7 @@ function PlaceOrderForm({
       setIdempotencyKey(null);
       onPlaced(order);
     } catch (error) {
-      setProblem(portalOrderReason(error));
+      setProblem(portalOrderReason(error, parsed.body.clientOrderRef ?? null));
       // A shortage means the hints were stale: re-read the stock.
       if (error instanceof ApiProblem && error.code === 'order-backorder-rejected') stock.reload();
     } finally {
@@ -278,6 +303,19 @@ function PlaceOrderForm({
             ))}
           </select>
         </div>
+        <label className="flex flex-col gap-1 sm:max-w-md">
+          <span className={labelClass}>Your order number (optional)</span>
+          <input
+            className={inputClass}
+            value={clientOrderRef}
+            onChange={(event) => edit(setClientOrderRef)(event.target.value)}
+            placeholder="SO-1042"
+            autoComplete="off"
+          />
+          <span className="text-xs text-(--muted-foreground)">
+            Your own reference — shown on the order and searchable. Up to 64 letters, digits, spaces and punctuation.
+          </span>
+        </label>
         <LineRows<LineOption>
           lines={lines}
           options={options}

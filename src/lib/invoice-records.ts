@@ -10,6 +10,7 @@
  * Pure (no React): pinned by `invoice-records.test.ts`.
  */
 import { ApiProblem } from '@/lib/api/client';
+import { orderLabel } from '@/lib/orders';
 import type {
   ClientInvoiceDto,
   ClientInvoiceLineDto,
@@ -82,9 +83,19 @@ export function receiptDocumentLabel(record: { poCode: string | null; asnCode: s
   return record.blind ? 'Blind' : '—';
 }
 
-/** "Channel ref": the channel's event id, falling back to the order id (a manual order has no other reference). */
-export function orderRefLabel(ref: OrderRefDto): string {
+/** "Channel ref": the channel's event id, falling back to the order id (unchanged by 4-1b — the file's `channel_ref` keeps its values). */
+export function orderRefLabel(ref: Pick<OrderRefDto, 'externalEventId' | 'orderId'>): string {
   return ref.externalEventId ?? ref.orderId;
+}
+
+/**
+ * Story 4-1b — the "Order" column (and the file's appended `order`): the
+ * label rule — the client's own order number, else the channel's event id,
+ * else the order id's short form (`orderLabel`, `lib/orders.ts`). An older
+ * response lacking the number reads as none.
+ */
+export function orderRefOrderLabel(ref: Omit<OrderRefDto, 'clientOrderRef'> & { readonly clientOrderRef?: string | null }): string {
+  return orderLabel({ id: ref.orderId, clientOrderRef: ref.clientOrderRef ?? null, externalEventId: ref.externalEventId });
 }
 
 /** The record count noun of a line's kind. */
@@ -273,8 +284,9 @@ const HEADERS: Readonly<Record<LineRecordKind, readonly string[]>> = {
   // Story 21-6 — `asn` joins after `po` (a GRN books against one, the other, or neither).
   // …and `blind` after `asn` (yes/no — a row with neither code is not necessarily blind).
   'receipt-line': ['recorded_at_ist', 'ist_date', 'grn', 'po', 'asn', 'blind', 'warehouse', 'sku_code', 'sku_name', 'qty', 'applied_qty', 'actor'],
-  pick: ['picked_at_ist', 'ist_date', 'warehouse', 'channel_ref', 'order_id', 'sku_code', 'sku_name', 'qty', 'bin', 'actor'],
-  order: ['dispatched_at_ist', 'ist_date', 'warehouse', 'channel_ref', 'order_id', 'lines', 'carrier', 'tracking', 'actor'],
+  // Story 4-1b — `order` (the order label rule) APPENDED; every earlier column, `channel_ref` included, unchanged.
+  pick: ['picked_at_ist', 'ist_date', 'warehouse', 'channel_ref', 'order_id', 'sku_code', 'sku_name', 'qty', 'bin', 'actor', 'order'],
+  order: ['dispatched_at_ist', 'ist_date', 'warehouse', 'channel_ref', 'order_id', 'lines', 'carrier', 'tracking', 'actor', 'order'],
   'storage-day': ['ist_date', 'warehouse', 'uom', 'on_hand'],
 };
 
@@ -309,6 +321,7 @@ function recordRow(record: LineRecord, pseudonyms: ReadonlyMap<string, string>):
         csvNumber(record.qty),
         csvField(record.binCode ?? ''),
         actor(record.actorId),
+        csvField(orderRefOrderLabel(record.orderRef)),
       ].join(',');
     case 'order':
       return [
@@ -321,6 +334,7 @@ function recordRow(record: LineRecord, pseudonyms: ReadonlyMap<string, string>):
         csvField(record.carrierName ?? ''),
         csvField(record.trackingNumber ?? ''),
         actor(record.actorId),
+        csvField(orderRefOrderLabel(record.orderRef)),
       ].join(',');
     case 'storage-day':
       return [csvField(record.date), csvField(record.warehouseCode), csvField(record.uom), csvNumber(record.onHand)].join(',');

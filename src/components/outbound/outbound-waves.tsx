@@ -12,6 +12,7 @@ import type { OrderEntryDto, PicklistDto, SkuResponse, WaveEntryDto, WavePolicyD
 import { sharedQuantityUom } from '@/lib/format-quantity';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import { filterPage, pageFilterCount, type Outcome } from '@/lib/outbound-orders';
+import { orderLabel, shortOrderId } from '@/lib/orders';
 import {
   cancelWaveOutcome,
   cancelWaveReason,
@@ -550,7 +551,11 @@ function WaveGenerateForm({
                           )
                         }
                       />
-                      <span className="font-mono">{order.id}</span>
+                      {/* Story 4-1b — the order label, the short id beside it. */}
+                      <span className="font-mono">{orderLabel(order)}</span>
+                      {orderLabel(order) !== shortOrderId(order.id) && (
+                        <span className="font-mono text-(--muted-foreground)">{shortOrderId(order.id)}</span>
+                      )}
                     </label>
                   </li>
                 ))}

@@ -36,6 +36,7 @@ import {
   destinationSummary,
   emptyDestinationFields,
   UNREACHABLE_REASON,
+  orderSearchEmptyMessage,
   type OrderStatus,
 } from './outbound-orders';
 
@@ -926,5 +927,31 @@ describe('createReason — story 21-2b', () => {
       'The order mixes SKUs of clients ACME, self',
     );
     expect(createReason(new ApiProblem('mixed-client', 409))).toMatch(/an order is for one client/);
+  });
+});
+
+describe('story 4-1b — the client order number on the staff surface', () => {
+  test('createOutcome names an order by its client number when it has one (both words); none keeps the plain words', () => {
+    const plain = order({ lines: [line({ qty: 10 })] });
+    expect(createOutcome({ ...plain, clientOrderRef: 'SO-1042' }, skuOf).word).toBe('Order SO-1042 accepted');
+    expect(createOutcome({ ...plain, clientOrderRef: null }, skuOf).word).toBe('Order accepted');
+    const short = order({ lines: [line({ qty: 8, reservedQty: 3, shortfallQty: 5, status: 'backordered' })] });
+    expect(createOutcome({ ...short, clientOrderRef: 'SO-1042' }, skuOf).word).toBe('SO-1042 accepted with a shortfall');
+  });
+
+  test('createReason: a duplicate shows the server sentence (it names the number and the search), else a fallback', () => {
+    const detail = 'SO-1042 is already used by another live order of this client — find it with the search, or use a different number (a cancelled order frees its number).';
+    expect(createReason(new ApiProblem('duplicate-client-order-ref', 409, detail))).toBe(detail);
+    expect(createReason(new ApiProblem('duplicate-client-order-ref', 409))).toContain('already used by another live order of this client');
+  });
+
+  test('orderSearchEmptyMessage: names the search and the warehouse; under a client filter, the client and the hint', () => {
+    expect(orderSearchEmptyMessage('SO-9', 'BLR-01 Whitefield', { state: 'all' }, 'Priya Spices')).toBe(
+      'No order in BLR-01 Whitefield has the order number or channel reference "SO-9" (a cancelled order\'s number is free for re-use and is not searched).',
+    );
+    const acme = { id: 'c-acme', code: 'ACME', name: 'Acme Foods', systemOwned: false, status: 'active' } as never;
+    expect(orderSearchEmptyMessage('SO-9', null, { state: 'client', client: acme }, 'Priya Spices')).toBe(
+      'No order in this warehouse has the order number or channel reference "SO-9" for ACME — Acme Foods — it may be another client\'s: show all clients to search them all.',
+    );
   });
 });

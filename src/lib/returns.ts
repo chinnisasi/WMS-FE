@@ -20,6 +20,7 @@ import type {
 import { formatQuantity, parseQuantityInput, quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
+import { shortOrderId } from '@/lib/orders';
 
 /**
  * Fired on `window` after a return mutation (create, cancel) so every returns
@@ -318,9 +319,13 @@ export function parseCancelReason(reason: string): { reason: string | null; prob
 
 // ── the list's cells ─────────────────────────────────────────────────────────
 
-/** The order column: its channel reference, else the order id as the Outbound list shows it. */
+/**
+ * The order column: the RMA's stored order reference (story 4-1b: the
+ * client's order number, else the channel's reference), else the order id's
+ * short form — the label rule's fallback, as the Outbound list shows it.
+ */
 export function returnOrderLabel(rma: Pick<ReturnAuthorizationDto, 'orderReference' | 'orderId'>): string {
-  return rma.orderReference ?? rma.orderId;
+  return rma.orderReference ?? shortOrderId(rma.orderId);
 }
 
 /**

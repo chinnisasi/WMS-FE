@@ -29,6 +29,7 @@ import {
   ORDER_STATUSES,
   orderSourceLabel,
   orderStatusLabel,
+  orderSearchEmptyMessage,
   orderTotalsLabel,
   pageFilterCount,
   parseDestinationFields,
@@ -40,6 +41,7 @@ import {
   type OrderStatus,
 } from '@/lib/outbound-orders';
 import { ledgerDocHref, type OrdersDrill } from '@/lib/drill';
+import { clientOrderRefBody, orderLabel, parseClientOrderRef, shortOrderId } from '@/lib/orders';
 import { useOrderDetail, useOutboundOrders, useOutboundSkus } from '@/lib/use-outbound-orders';
 import {
   clientCell,
@@ -66,6 +68,8 @@ import { canCreateReturn, RETURN_CREATED_REASON, returnCreatedWord } from '@/lib
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 // Story 4-1a — the Ship-to fieldset is shared with the portal's order form.
 import { ShipToFieldset } from '@/components/shared/ship-to-fieldset';
+// Story 4-1b — the exact-match search box, shared with the portal's list.
+import { OrderSearch } from '@/components/shared/order-search';
 import { HandlingBadges } from '@/components/shared/handling-badges';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { DrillBanner } from '@/components/shared/drill-banner';
@@ -129,11 +133,13 @@ export function OutboundOrders({
       <OrdersTable
         tenantId={tenantId}
         warehouseId={warehouseId}
+        warehouseLabel={warehouseLabel}
         canManageOrders={canManageOrders}
         canManageReturns={canManageReturns}
         drill={drill}
         clientFilter={active.filter}
         clientsState={active.clients}
+        active={active}
       />
     </Section>
   );
@@ -209,11 +215,14 @@ function OrderCreateForm({
   // invoice's buyer and the e-way bill's toTrdName. Offered once a buyer
   // GSTIN is typed; kept (not sent) while the GSTIN is blank.
   const [consigneeLegalName, setConsigneeLegalName] = useState('');
+  // Story 4-1b: the client's own order number (optional; blank sends no key).
+  const [clientOrderRef, setClientOrderRef] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
   const rateHelpId = useId();
+  const clientOrderRefHelpId = useId();
   const skuMap = skus.state === 'ready' ? skus.data : null;
   const skuList: readonly SkuResponse[] =
     skuMap === null ? [] : Object.values(skuMap).sort((a, b) => a.code.localeCompare(b.code));
@@ -285,6 +294,14 @@ function OrderCreateForm({
     setConsigneeLegalName(next);
   }
 
+  /** Story 4-1b — the client order number joins the backend's request hash
+   * when sent: an edit mints a fresh key, like every other field. */
+  function editClientOrderRef(next: string) {
+    pinClient();
+    setIdempotencyKey(null);
+    setClientOrderRef(next);
+  }
+
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const clientProblem = orderClientProblem(clients, clientId);
@@ -319,6 +336,13 @@ function OrderCreateForm({
       setOutcome({ tone: 'rejected', word: 'Not created', reason: legalProblem });
       return;
     }
+    // Story 4-1b — the client order number's shape, as the server reads it
+    // (trimmed; blank = absent), before any key is minted.
+    const own = parseClientOrderRef(clientOrderRef);
+    if (own.problem !== null) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: own.problem });
+      return;
+    }
     // Reused across retries of an unchanged draft; minted afresh otherwise.
     const key = idempotencyKey ?? ulid();
     setIdempotencyKey(key);
@@ -337,6 +361,8 @@ function OrderCreateForm({
           ...(buyer.gstin === undefined ? {} : { consigneeGstin: buyer.gstin }),
           // Sent only beside a GSTIN, and only when non-blank.
           ...legalNameBody(buyer.gstin, consigneeLegalName),
+          // Story 4-1b — only when given.
+          ...clientOrderRefBody(own.ref),
         },
         key,
       );
@@ -344,6 +370,7 @@ function OrderCreateForm({
       setDestination(emptyDestinationFields());
       setConsigneeGstin('');
       setConsigneeLegalName('');
+      setClientOrderRef('');
       setIdempotencyKey(null);
       setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId], parsed.lines));
       setHiddenNote(hiddenByClientFilterNote(active, order.clientId, allClients, tenantName));
@@ -432,6 +459,22 @@ function OrderCreateForm({
           )}
         </div>
       )}
+      {/* Story 4-1b — between Client and Ship-to: the client's own number,
+          unique among its live orders (the server's 409 names a clash). */}
+      <label className="flex flex-col gap-1 sm:max-w-md">
+        <span className={labelClass}>Client order number (optional)</span>
+        <input
+          className={inputClass}
+          value={clientOrderRef}
+          onChange={(e) => editClientOrderRef(e.target.value)}
+          placeholder="SO-1042"
+          aria-describedby={clientOrderRefHelpId}
+          autoComplete="off"
+        />
+        <span id={clientOrderRefHelpId} className="text-xs text-(--muted-foreground)">
+          The client&apos;s own reference — shown on the order and searchable. Up to 64 letters, digits, spaces and punctuation.
+        </span>
+      </label>
       <ShipToFieldset
         destination={destination}
         onDestination={editDestination}
@@ -558,14 +601,18 @@ function OrderCreateForm({
 function OrdersTable({
   tenantId,
   warehouseId,
+  warehouseLabel = null,
   canManageOrders,
   canManageReturns = false,
   drill,
   clientFilter,
   clientsState,
+  active,
 }: {
   tenantId: string;
   warehouseId: string;
+  /** Story 4-1b — names the warehouse in an empty search result. */
+  warehouseLabel?: string | null;
   canManageOrders: boolean;
   /** Story 13-1 — threaded down to the expanded detail's "Create return". */
   canManageReturns?: boolean;
@@ -574,8 +621,15 @@ function OrdersTable({
   clientFilter: ClientFilter;
   /** The screen's one clients read (the client column). */
   clientsState: ActiveClientState['clients'];
+  /** Story 4-1b — the active client, named in an empty search result. */
+  active?: ActiveClientState;
 }) {
-  const orders = useOutboundOrders(warehouseId, clientFilter, drill);
+  // Story 4-1b — the exact-match search (null: none). Hidden while drilled
+  // (the drill's rows are its tile's); a change returns the table to page one
+  // (the hook stamps its cursor with it, and it joins the table key).
+  const [reference, setReference] = useState<string | null>(null);
+  const searching = drill === null ? reference : null;
+  const orders = useOutboundOrders(warehouseId, clientFilter, drill, searching);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -645,7 +699,16 @@ function OrdersTable({
           <span aria-hidden className="text-(--muted-foreground)">
             {expandedId === order.id ? '▾' : '▸'}
           </span>
-          <span className="font-mono text-xs">{order.id}</span>
+          {/* Story 4-1b — the order's label (its client number, else its
+              channel reference, else its short id), the short id beneath. */}
+          <span className="flex flex-col">
+            <span className="font-mono text-xs" data-testid="order-label">
+              {orderLabel(order)}
+            </span>
+            <span className="font-mono text-[11px] text-(--muted-foreground)" title={order.id}>
+              {shortOrderId(order.id)}
+            </span>
+          </span>
         </button>
       ),
     },
@@ -726,6 +789,16 @@ function OrdersTable({
       {/* Drilled: no page-scoped status control — the server filtered. */}
       {drill === null && (
         <div className="flex flex-wrap items-end justify-between gap-2">
+          <OrderSearch
+            applied={reference}
+            onSearch={(next) => {
+              setReference(next);
+              setExpandedId(null);
+              orders.onCursor(null);
+            }}
+            label="Find an order by number"
+            placeholder="Client order no. or channel ref"
+          />
           <label className="flex flex-col gap-1">
             {/* The list API offers cursor + limit and nothing else — no status
                 filter, no sort, no search. Naming the scope in the control is
@@ -753,7 +826,7 @@ function OrdersTable({
       {confirmTarget !== null && (
         <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
           <div className="text-xs text-(--muted-foreground)">
-            Cancelling order <span className="font-mono">{confirmTarget.id}</span> releases every
+            Cancelling order <span className="font-mono">{orderLabel(confirmTarget)}</span> releases every
             reservation it still holds. A stock hold a picklist already claimed is refused by the
             server, and the order stays as it is.
           </div>
@@ -778,7 +851,7 @@ function OrdersTable({
       ) : (
         <DataTable<OrderEntryDto>
           // Story 1-5a — a client switch remounts the table (no Prev onto another client's cursor).
-          key={`${pageEpoch}|${clientFilterKey(drill === null ? clientFilter : null)}`}
+          key={`${pageEpoch}|${clientFilterKey(drill === null ? clientFilter : null)}|${JSON.stringify(searching)}`}
           columns={columns}
           rows={rows}
           nextCursor={orders.state === 'ready' ? orders.data.nextCursor : null}
@@ -792,7 +865,9 @@ function OrdersTable({
             orders.state === 'loading'
               ? 'Loading orders…'
               : loaded.length === 0
-                ? 'No orders in this warehouse yet.'
+                ? searching !== null
+                  ? orderSearchEmptyMessage(searching, warehouseLabel, active ?? { state: 'all' }, tenantName)
+                  : 'No orders in this warehouse yet.'
                 : 'No orders on this page match that status.'
           }
         />
@@ -862,12 +937,17 @@ export function OrderDetailPanel({
 
   return (
     <div className="flex flex-col gap-2">
+      {/* Story 4-1b — the order's header: its label, the full id beside it. */}
+      <header className="flex flex-wrap items-baseline gap-2" data-testid="order-detail-header">
+        <span className="font-mono text-sm font-medium">{orderLabel(detail.data)}</span>
+        <span className="font-mono text-xs text-(--muted-foreground)">{detail.data.id}</span>
+      </header>
       {warehouseId !== undefined && (
         // Story 9-3a — the order's pick, pack and dispatch events. The label
-        // is the order's real handle: its channel ref, else the id the list shows.
+        // is the order's real handle — story 4-1b: the order label rule.
         <div className="text-xs">
           <Link
-            href={ledgerDocHref('order', orderId, warehouseId, detail.data.externalEventId ?? orderId)}
+            href={ledgerDocHref('order', orderId, warehouseId, orderLabel(detail.data))}
             className="text-(--primary) underline underline-offset-2"
           >
             View ledger

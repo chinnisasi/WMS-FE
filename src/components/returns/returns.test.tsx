@@ -473,7 +473,9 @@ describe('returns.manage threading and gating, through the real surfaces (review
     writeSession(session(role));
     const rendered = render(<OutboundOrders tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH-1 Peenya" role={role} />);
     await settle();
-    await press([...rendered.container.querySelectorAll('button')].find((b) => b.textContent?.includes(ORDER_ID)));
+    // Story 4-1b — the row names the order by its label (no number, no
+    // channel ref: the id's last 8 characters), never the full id.
+    await press([...rendered.container.querySelectorAll('button')].find((b) => b.textContent?.includes(ORDER_ID.slice(-8))));
     return rendered;
   }
 
@@ -522,7 +524,8 @@ describe('the Returns list (story 13-1)', () => {
     listItems = [rma(), rma({ id: 'rma-2', code: 'RMA-0006', status: 'cancelled', orderReference: null, externalReference: null, cancelReason: 'kept it' })];
     view = await mountList('accountant', false);
     const text = view.container.textContent ?? '';
-    for (const expected of ['RMA-0007', 'SHOP-#1001', 'Open', '2 lines · 2 SKUs', 'CH-77', 'RMA-0006', ORDER_ID, 'Cancelled']) {
+    // Story 4-1b — an RMA with no order reference names the order by its short id (the label rule's fallback).
+    for (const expected of ['RMA-0007', 'SHOP-#1001', 'Open', '2 lines · 2 SKUs', 'CH-77', 'RMA-0006', ORDER_ID.slice(-8), 'Cancelled']) {
       expect(text).toContain(expected);
     }
     // No Cancel for a role without the capability.

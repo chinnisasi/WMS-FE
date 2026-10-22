@@ -359,6 +359,12 @@ describe('describeDrill — the banner sentence', () => {
       'Awaiting putaway · MAIN Chennai DC',
     ],
     [
+      // Story 4-1b — the order's short form is its id's LAST 8 characters (shortOrderId).
+      'an order drill names the order by its last 8 characters',
+      { list: 'ledger', warehouseId: W, orderId: '0198f7a2-1b3c-7d4e-8f90-0000000a0042' },
+      'Ledger events · Order 000a0042 · MAIN Chennai DC',
+    ],
+    [
       'a drill naming no warehouse',
       { list: 'invoices', from: FROM, to: TO },
       'Invoices · 06 Oct 2026, 00:00 – 06 Oct 2026, 15:30 IST · All warehouses',

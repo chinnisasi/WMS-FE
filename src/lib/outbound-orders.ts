@@ -3,6 +3,7 @@ import type { AddressDto, OrderDto, OrderEntryDto, OrderLineDto } from '@/lib/ap
 import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 import { parseRupees } from '@/lib/rupees';
 import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
+import { activeClientLabel, SHOW_ALL_CLIENTS, type ActiveClient } from '@/lib/active-client';
 
 /**
  * Pure copy and derivation for the Outbound orders surface (story 4.2b) —
@@ -272,15 +273,19 @@ export function createOutcome(
   const shared = sharedQuantityUom(order.lines, skuOf);
   const q = (value: number) => quantityLabel(value, shared);
   const notes = pricingNotes(order, sent);
+  // Story 4-1b — an order given a client number is named by it (absent on an
+  // older stored replay — read as none).
+  const own = order.clientOrderRef ?? null;
+  const named = own === null || own === '' ? null : own;
   if (totals.shortfallQty === 0) {
     return {
       tone: 'accepted',
-      word: 'Order accepted',
+      word: named === null ? 'Order accepted' : `Order ${named} accepted`,
       reason: `${totals.lines} ${totals.lines === 1 ? 'line' : 'lines'}, ${q(totals.qty)} reserved in full.${notes}`,
     };
   }
   const shortLines = order.lines.filter((line) => line.shortfallQty > 0);
-  const named = shortLines
+  const namedLines = shortLines
     .slice(0, MAX_NAMED_SHORT_LINES)
     // A short line is named per ITS OWN SKU's unit, even inside a mixed order
     // where the totals sentence had to stay unit-agnostic.
@@ -292,10 +297,10 @@ export function createOutcome(
   // An order carries up to 200 lines; naming them all would make the banner
   // a paragraph. The expanded row has the full per-line truth.
   const hidden = shortLines.length - MAX_NAMED_SHORT_LINES;
-  const short = hidden > 0 ? `${named} …and ${hidden} more` : named;
+  const short = hidden > 0 ? `${namedLines} …and ${hidden} more` : namedLines;
   return {
     tone: 'accepted',
-    word: 'Accepted with a shortfall',
+    word: named === null ? 'Accepted with a shortfall' : `${named} accepted with a shortfall`,
     reason: `${q(totals.reservedQty)} of ${q(totals.qty)} reserved; ${totals.backorderedLines} of ${totals.lines} lines backordered — ${short}.${notes}`,
   };
 }
@@ -365,6 +370,13 @@ export function createReason(error: unknown): string {
         return error.detail ?? licenceNotCoveredFallback(error.extensions['skuCodes']);
       case 'order-catalog-changed':
         return 'The catalog changed while the order was placed — nothing was created; submit again.';
+      // Story 4-1b — the client order number is taken by another live order
+      // of the client; the server's sentence names it and says how to find it.
+      case 'duplicate-client-order-ref':
+        return (
+          error.detail ??
+          'That client order number is already used by another live order of this client — find it with the search, or use a different number (a cancelled order frees its number).'
+        );
       case 'conflict':
         return 'The same submission is still in flight — retry to read the settled result.';
       case 'reservation-store-unavailable':
@@ -749,4 +761,24 @@ export function legalNameProblem(consigneeGstin: string | undefined, legalNameTe
     return `Buyer legal name is at most ${MAX_CONSIGNEE_LEGAL_NAME_LENGTH} characters (got ${length}).`;
   }
   return null;
+}
+
+/**
+ * Story 4-1b — the staff search's empty result: names the search, the
+ * warehouse and — under a client filter — the client, with the hint to
+ * search every client (the `hiddenByClientFilterNote` precedent: a filter
+ * that hides the answer must say so).
+ */
+export function orderSearchEmptyMessage(
+  reference: string,
+  warehouseLabel: string | null,
+  active: ActiveClient,
+  tenantName: string | null,
+): string {
+  const where = warehouseLabel === null ? 'this warehouse' : warehouseLabel;
+  const base = `No order in ${where} has the order number or channel reference "${reference}"`;
+  if (active.state === 'client') {
+    return `${base} for ${activeClientLabel(active.client, tenantName)} — it may be another client's: ${SHOW_ALL_CLIENTS.toLowerCase()} to search them all.`;
+  }
+  return `${base} (a cancelled order's number is free for re-use and is not searched).`;
 }

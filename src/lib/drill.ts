@@ -5,6 +5,7 @@ import type {
   ReceivingControllerListOverReceiptsData,
   ReplenishmentControllerListBatchAlertsData,
 } from '@/lib/api/generated';
+import { shortOrderId } from '@/lib/orders';
 
 /**
  * Story 9-1b — reading an Overview drill out of the URL.
@@ -562,7 +563,9 @@ export function describeDrill(drill: Drill, warehouses: readonly DrillWarehouse[
     parts.push(drill.shortPick ? 'Short-pick draws' : 'Not short-pick draws');
   }
   if ('skuId' in drill && drill.skuId !== undefined) parts.push(`SKU ${drill.skuId.slice(0, 8)}`);
-  if ('orderId' in drill && drill.orderId !== undefined) parts.push(`Order ${drill.orderId.slice(0, 8)}`);
+  // Story 4-1b — the order's short form is its id's LAST eight characters
+  // (`shortOrderId`, the label rule's fallback), never the timestamp head.
+  if ('orderId' in drill && drill.orderId !== undefined) parts.push(`Order ${shortOrderId(drill.orderId)}`);
   if ('from' in drill || 'to' in drill) {
     const from = 'from' in drill && drill.from !== undefined ? drillInstantLabel(drill.from) : null;
     const to = 'to' in drill && drill.to !== undefined ? drillInstantLabel(drill.to) : null;

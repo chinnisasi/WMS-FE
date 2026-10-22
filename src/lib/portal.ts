@@ -32,6 +32,7 @@ import {
 } from '@/lib/asns';
 import { parseQuantityInput } from '@/lib/format-quantity';
 import { parseGstinField } from '@/lib/gstin';
+import { clientOrderRefBody, parseClientOrderRef } from '@/lib/orders';
 import {
   legalNameBody,
   legalNameProblem,
@@ -217,8 +218,14 @@ export function orderDestination(order: Pick<PortalOrderRowDto, 'destinationName
   return parts.length === 0 ? '—' : parts.join(' · ');
 }
 
-/** Where the order came from: a channel's own reference, or "Manual". */
-export function orderReference(order: Pick<PortalOrderRowDto, 'source' | 'externalRef'>): string {
+/**
+ * The order's reference (story 4-1b's label rule, portal-shaped): the
+ * client's OWN order number, else the channel's reference, else "Manual" /
+ * "Channel" — never an internal id the client has never seen.
+ */
+export function orderReference(order: Pick<PortalOrderRowDto, 'source' | 'externalRef'> & { readonly clientOrderRef?: string | null }): string {
+  const own = order.clientOrderRef ?? null;
+  if (own !== null && own !== '') return own;
   if (order.externalRef !== null && order.externalRef !== '') return order.externalRef;
   return order.source === 'manual' ? 'Manual' : 'Channel';
 }
@@ -393,6 +400,8 @@ export interface PortalOrderDraft {
   readonly destination: DestinationFields;
   readonly consigneeGstin: string;
   readonly consigneeLegalName: string;
+  /** Story 4-1b — "Your order number (optional)"; blank sends no key. Optional so older drafts read as blank. */
+  readonly clientOrderRef?: string;
 }
 
 /**
@@ -436,6 +445,9 @@ export function parsePortalOrderCreate(
   if (buyer.problem !== null) return { body: null, problem: buyer.problem };
   const legalProblem = legalNameProblem(buyer.gstin, draft.consigneeLegalName);
   if (legalProblem !== null) return { body: null, problem: legalProblem };
+  // Story 4-1b — the order number's shape, as the server reads it (trimmed; blank = absent).
+  const own = parseClientOrderRef(draft.clientOrderRef ?? '', 'Your order number');
+  if (own.problem !== null) return { body: null, problem: own.problem };
   return {
     body: {
       warehouseId,
@@ -445,6 +457,8 @@ export function parsePortalOrderCreate(
       ...(buyer.gstin === undefined ? {} : { consigneeGstin: buyer.gstin }),
       // Sent only beside a GSTIN, and only when non-blank.
       ...legalNameBody(buyer.gstin, draft.consigneeLegalName),
+      // Story 4-1b — only when given.
+      ...clientOrderRefBody(own.ref),
     },
     problem: null,
   };
@@ -461,8 +475,10 @@ export function portalInstantIst(iso: string): string {
 
 /** The success banner: `{word: 'Order placed', reason: '2 lines to Main (22 Oct 2026, 10:30 IST)'}` — from the RESPONSE. */
 export function placedOrderBanner(placed: PortalPlacedOrderResponse): { word: string; reason: string } {
+  // Story 4-1b — named by the client's own number when it gave one (absent on an older replay).
+  const own = placed.clientOrderRef ?? null;
   return {
-    word: 'Order placed',
+    word: own === null || own === '' ? 'Order placed' : `Order ${own} placed`,
     reason: `${lineCountLabel(placed.lineCount)} to ${placed.warehouseName} (${portalInstantIst(placed.placedAt)}) — follow it in the list below.`,
   };
 }
@@ -502,7 +518,7 @@ function refusedSkuCodes(error: ApiProblem): string[] {
  * licence gap or another client). The shortage names the client's own short
  * SKUs from `extensions.skuCodes`.
  */
-export function portalOrderReason(error: unknown): string {
+export function portalOrderReason(error: unknown, clientOrderRef: string | null = null): string {
   if (error instanceof ApiProblem) {
     switch (error.code) {
       case 'client-suspended':
@@ -526,9 +542,14 @@ export function portalOrderReason(error: unknown): string {
         return 'The warehouse changed one of these products while you ordered — nothing was placed. Reload the form and try again.';
       case 'reservation-store-unavailable':
         return 'The warehouse could not check stock just now — nothing was placed. Try again in a moment.';
+      // Story 4-1b (decision 9) — the number is the user's own input, never the server's words.
+      case 'duplicate-client-order-ref':
+        return clientOrderRef === null
+          ? 'That order number is already used by one of your open orders — use a different number.'
+          : `Order number ${clientOrderRef} is already used by one of your open orders — use a different number.`;
       case 'validation-failed':
         // A fixed portal sentence — never the server's validator wording.
-        return 'Check the quantities, the ship-to address and the buyer GSTIN, then try again.';
+        return 'Check the quantities, the ship-to address, the buyer GSTIN and your order number, then try again.';
       case 'idempotency-key-reuse':
         return 'This submission was already processed with different details — reload and try again.';
       case 'conflict':

@@ -648,6 +648,15 @@ describe('the pipeline list', () => {
     expect(pages[1]!.search).toBe('?cursor=opaque-cursor');
   });
 
+  test('story 4-1b: a row is named by the order label — its client number, the short id beneath', async () => {
+    const id = '0198f7a2-1b3c-7d4e-8f90-0000000a0042';
+    listRows = () => [{ ...orderRow(id, 'accepted'), clientOrderRef: 'SO-1042' }];
+    view = await mount('operator');
+    expect([...view.container.querySelectorAll('[data-testid="order-label"]')].map((node) => node.textContent)).toEqual(['SO-1042']);
+    expect(text(view)).toContain('000a0042');
+    expect(text(view)).not.toContain(id);
+  });
+
   test('a dispatched row offers nothing — no pack, no dispatch, terminal note', async () => {
     view = await mount('operator');
     await expand(view, 'order-3');

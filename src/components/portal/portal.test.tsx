@@ -1097,6 +1097,89 @@ describe('Place an order (4-1a)', () => {
     expect(container.textContent).toContain('No active SKUs are set up for your company yet — ask the warehouse');
     expect(container.querySelector('form[aria-label="Place an order"]')).toBeNull();
   });
+
+  // ── story 4-1b: the client's own order number ──────────────────────────
+
+  test('story 4-1b: "Your order number" is sent trimmed only when given; the banner names the order by it', async () => {
+    postReplies = [[201, { ...PLACED, clientOrderRef: 'SO-7' }]];
+    const container = await openForm();
+    const ref = [...container.querySelectorAll('label')].find((label) => label.querySelector('span')?.textContent === 'Your order number (optional)')!.querySelector('input')!;
+    setValue(ref, '  SO-7 ');
+    await fillAndSubmit(container);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body.clientOrderRef).toBe('SO-7');
+    expect(view!.container.textContent).toContain('Order SO-7 placed');
+  });
+
+  test('story 4-1b: a blank number sends no key; a refused shape sends nothing; a 409 duplicate names the typed number', async () => {
+    postReplies = [[409, { code: 'duplicate-client-order-ref', status: 409, title: 'Taken', detail: 'SERVER WORDS' }]];
+    const container = await openForm();
+    const ref = () => [...container.querySelectorAll('label')].find((label) => label.querySelector('span')?.textContent === 'Your order number (optional)')!.querySelector('input')!;
+    setValue(ref(), 'SO-é');
+    await fillAndSubmit(container);
+    expect(posts).toHaveLength(0);
+    expect(container.textContent).toContain('Your order number takes plain letters, digits, spaces and punctuation only');
+    setValue(ref(), 'SO-1042');
+    await submit(container);
+    expect(posts).toHaveLength(1);
+    expect(container.textContent).toContain('Order number SO-1042 is already used by one of your open orders — use a different number.');
+    expect(container.textContent).not.toContain('SERVER WORDS');
+    postReplies = [[201, PLACED]];
+    setValue(ref(), '   ');
+    await submit(container);
+    expect(posts).toHaveLength(2);
+    expect('clientOrderRef' in posts[1]!.body).toBe(false);
+  });
+
+  test('story 4-1b: the Reference column reads the client number first; the search sends reference and Clear drops it', async () => {
+    const row = (id: string, clientOrderRef: string | null, externalRef: string | null) => ({ id, status: 'accepted', source: externalRef === null ? 'manual' : 'ingested', externalRef, clientOrderRef, warehouseName: 'Main', destinationName: null, destinationCity: null, destinationPincode: null, lineCount: 1, createdAt: '2026-10-08T10:00:00.000Z' });
+    routes = { ...routes, '/portal/orders': [200, { items: [row('o-1', 'SO-7', null), row('o-2', null, 'SHOP-9'), row('o-3', null, null)], nextCursor: null }] };
+    view = render(<PortalOrders />);
+    await settle();
+    const cells = [...view.container.querySelectorAll('tbody tr')].map((tr) => tr.querySelectorAll('td')[1]?.textContent);
+    expect(cells).toEqual(['SO-7', 'SHOP-9', 'Manual']);
+    const box = view.container.querySelector<HTMLInputElement>('form[role="search"] input')!;
+    setValue(box, ' SO-7 ');
+    act(() => void view!.container.querySelector('form[role="search"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(urls.filter((url) => /\/portal\/orders\?/.test(url)).at(-1)).toContain('reference=SO-7');
+    click(buttonNamed(view.container, 'Clear'));
+    await settle();
+    expect(urls.filter((url) => /\/portal\/orders(\?|$)/.test(url)).at(-1)).not.toContain('reference=');
+  });
+  test('story 4-1b: a search resets the cursor — Clear never replays the page-2 cursor of the list before it', async () => {
+    const row = (id: string) => ({ id, status: 'accepted', source: 'manual', externalRef: null, clientOrderRef: id, warehouseName: 'Main', destinationName: null, destinationCity: null, destinationPincode: null, lineCount: 1, createdAt: '2026-10-08T10:00:00.000Z' });
+    routes = { ...routes, '/portal/orders': [200, { items: [row('P1')], nextCursor: 'ORD-P2' }], '/portal/orders?cursor=ORD-P2': [200, { items: [row('P2')], nextCursor: null }] };
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Next'));
+    await settle();
+    expect(urls.at(-1)).toContain('cursor=ORD-P2');
+    setValue(view.container.querySelector<HTMLInputElement>('form[role="search"] input')!, 'SO-7');
+    act(() => void view!.container.querySelector('form[role="search"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    click(buttonNamed(view.container, 'Clear'));
+    await settle();
+    const last = urls.filter((url) => /\/portal\/orders(\?|$)/.test(url)).at(-1)!;
+    expect(last).not.toContain('cursor=');
+    expect(last).not.toContain('reference=');
+  });
+
+  test('story 4-1b: placing an order clears the active search, so the new order is visible', async () => {
+    postReplies = [[201, PLACED]];
+    view = render(<PortalOrders />);
+    await settle();
+    setValue(view.container.querySelector<HTMLInputElement>('form[role="search"] input')!, 'SO-7');
+    act(() => void view!.container.querySelector('form[role="search"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(urls.filter((url) => /\/portal\/orders\?/.test(url)).at(-1)).toContain('reference=SO-7');
+    click(buttonNamed(view.container, 'Place an order'));
+    await settle();
+    await fillAndSubmit(view.container);
+    const last = urls.filter((url) => /\/portal\/orders(\?|$)/.test(url)).at(-1)!;
+    expect(last).not.toContain('reference=');
+    expect(view.container.querySelector<HTMLInputElement>('form[role="search"] input')!.value).toBe('');
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────────

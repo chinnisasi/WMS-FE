@@ -159,9 +159,18 @@ export function usePortalStock() {
   );
 }
 
-export function usePortalOrders(status: PortalOrderRowDto['status'] | null) {
-  return usePortalList<PortalOrderRowDto>(`orders:${status ?? ''}`, 'your orders', (tenantId, cursor) =>
-    fetchApiPortalOrders(tenantId, { ...cursorOption(cursor), ...(status === null ? {} : { status }) }),
+/**
+ * Story 4-1b — `reference` (trimmed, non-blank, or null) is the exact-match
+ * search: part of the scope, so a new search starts on page one and a
+ * cursor from another search is never replayed.
+ */
+export function usePortalOrders(status: PortalOrderRowDto['status'] | null, reference: string | null = null) {
+  return usePortalList<PortalOrderRowDto>(`orders:${status ?? ''}:${JSON.stringify(reference)}`, 'your orders', (tenantId, cursor) =>
+    fetchApiPortalOrders(tenantId, {
+      ...cursorOption(cursor),
+      ...(status === null ? {} : { status }),
+      ...(reference === null ? {} : { reference }),
+    }),
   );
 }
 
