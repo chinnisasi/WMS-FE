@@ -491,7 +491,7 @@ import type {
  * applied with `setConfig` before that request builds its URL.
  *
  * Story 7-2: the same base is the ONE origin every surface composes absolute
- * API URLs from — the channel webhook rows are built on `getApiBaseUrl()`,
+ * API URLs from — the channel webhook rows are built on `getPublicApiBaseUrl()` (rendered: never the internal base, C7),
  * never on `window.location.origin` (bl-16: the backend the browser talks to
  * — behind a proxy, on another host, a LAN box — can differ from the page).
  */

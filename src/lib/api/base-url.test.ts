@@ -5,6 +5,7 @@ import {
   BUILD_API_BASE_URL,
   DEFAULT_API_BASE_URL,
   getApiBaseUrl,
+  getPublicApiBaseUrl,
   runtimeConfigFromEnv,
   runtimeConfigScript,
 } from './base-url';
@@ -65,11 +66,51 @@ describe('getApiBaseUrl', () => {
   });
 });
 
+describe('the public base for rendering vs the request base (C7)', () => {
+  test('on the server, a rendered URL uses WMS_API_BASE_URL — never the internal address; a request uses the internal one', () => {
+    stubGlobal('window', undefined);
+    const saved = { internal: process.env.WMS_API_INTERNAL_BASE_URL, public: process.env.WMS_API_BASE_URL };
+    try {
+      process.env.WMS_API_BASE_URL = 'https://api.public/api/v1';
+      process.env.WMS_API_INTERNAL_BASE_URL = 'http://api:3000/api/v1';
+      expect(getPublicApiBaseUrl()).toBe('https://api.public/api/v1');
+      expect(getApiBaseUrl()).toBe('http://api:3000/api/v1');
+      // An invalid internal value is ignored, never used.
+      process.env.WMS_API_INTERNAL_BASE_URL = 'api:3000';
+      expect(getApiBaseUrl()).toBe('https://api.public/api/v1');
+    } finally {
+      if (saved.internal === undefined) delete process.env.WMS_API_INTERNAL_BASE_URL;
+      else process.env.WMS_API_INTERNAL_BASE_URL = saved.internal;
+      if (saved.public === undefined) delete process.env.WMS_API_BASE_URL;
+      else process.env.WMS_API_BASE_URL = saved.public;
+    }
+  });
+
+  test('the server render and the browser agree on the public base (no hydration mismatch)', () => {
+    const saved = { internal: process.env.WMS_API_INTERNAL_BASE_URL, public: process.env.WMS_API_BASE_URL };
+    try {
+      process.env.WMS_API_BASE_URL = 'https://api.public/api/v1';
+      process.env.WMS_API_INTERNAL_BASE_URL = 'http://api:3000/api/v1';
+      stubGlobal('window', undefined);
+      const rendered = getPublicApiBaseUrl();
+      restoreGlobals();
+      window.__WMS_CONFIG__ = runtimeConfigFromEnv();
+      expect(getPublicApiBaseUrl()).toBe(rendered);
+    } finally {
+      if (saved.internal === undefined) delete process.env.WMS_API_INTERNAL_BASE_URL;
+      else process.env.WMS_API_INTERNAL_BASE_URL = saved.internal;
+      if (saved.public === undefined) delete process.env.WMS_API_BASE_URL;
+      else process.env.WMS_API_BASE_URL = saved.public;
+    }
+  });
+});
+
 describe('the runtime config script', () => {
   test('from the server env: WMS_API_BASE_URL, or nothing', () => {
     expect(runtimeConfigFromEnv({ WMS_API_BASE_URL: 'https://api.x/api/v1/' })).toEqual({ apiBaseUrl: 'https://api.x/api/v1' });
     expect(runtimeConfigFromEnv({})).toEqual({});
     expect(runtimeConfigFromEnv({ WMS_API_BASE_URL: '' })).toEqual({});
+    expect(runtimeConfigFromEnv({ WMS_API_BASE_URL: '/api/v1' })).toEqual({});
   });
 
   test('assigns window.__WMS_CONFIG__ with escaped JSON that round-trips — no value can close a script element', () => {

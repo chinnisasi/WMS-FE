@@ -12,7 +12,8 @@
  *   - on the server (a server component's fetch), `WMS_API_INTERNAL_BASE_URL`
  *     when set — the address the web task reaches the API at, which inside a
  *     container network can differ from the browser's — else
- *     `WMS_API_BASE_URL`;
+ *     `WMS_API_BASE_URL`. That internal address is for REQUESTS only:
+ *     anything rendered uses `getPublicApiBaseUrl()` (code review C7);
  *   - otherwise `NEXT_PUBLIC_API_BASE_URL`, the dev and build default (inlined
  *     at build time), else `http://localhost:3000/api/v1`.
  *
@@ -39,22 +40,54 @@ function trimmed(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
-export function getApiBaseUrl(): string {
+/** True for an absolute `http:` / `https:` URL (code review C6). */
+export function isAbsoluteHttpUrl(value: string | undefined): value is string {
+  if (value === undefined || value === '') return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The PUBLIC API base — the one the browser calls. Use it for anything that
+ * is RENDERED (a URL shown to the user, the channel webhook rows): the server
+ * render and the browser's hydration must agree, so the server never renders
+ * the internal address (code review C7).
+ */
+export function getPublicApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
     const runtime = window.__WMS_CONFIG__?.apiBaseUrl;
     if (typeof runtime === 'string' && runtime !== '') return trimmed(runtime);
     return trimmed(BUILD_API_BASE_URL);
   }
-  return trimmed(process.env.WMS_API_INTERNAL_BASE_URL || process.env.WMS_API_BASE_URL || BUILD_API_BASE_URL);
+  const configured = process.env.WMS_API_BASE_URL;
+  return trimmed(isAbsoluteHttpUrl(configured) ? configured : BUILD_API_BASE_URL);
+}
+
+/**
+ * The base a REQUEST goes to: in the browser the public base; on the server
+ * `WMS_API_INTERNAL_BASE_URL` first (the address the web task reaches the
+ * API at inside its network). Never render it — `getPublicApiBaseUrl()` is
+ * for rendering.
+ */
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') return getPublicApiBaseUrl();
+  const internal = process.env.WMS_API_INTERNAL_BASE_URL;
+  return isAbsoluteHttpUrl(internal) ? trimmed(internal) : getPublicApiBaseUrl();
 }
 
 /**
  * What `/runtime-config.js` hands the browser: the public API base from the
- * server's environment, or nothing (the browser then keeps the build default).
+ * server's environment — only when it parses as an absolute http(s) URL
+ * (C6) — or nothing (the browser then keeps the build default; the image's
+ * start refuses to run without a valid one, `scripts/start-standalone.mjs`).
  */
 export function runtimeConfigFromEnv(env: Record<string, string | undefined> = process.env): WmsRuntimeConfig {
   const apiBaseUrl = env.WMS_API_BASE_URL;
-  return apiBaseUrl ? { apiBaseUrl: trimmed(apiBaseUrl) } : {};
+  return isAbsoluteHttpUrl(apiBaseUrl) ? { apiBaseUrl: trimmed(apiBaseUrl) } : {};
 }
 
 /**

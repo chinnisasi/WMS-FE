@@ -236,6 +236,20 @@ describe('code review additions', () => {
     expect(calls[0]!.credentials).toBe('include');
   });
 
+  test('C20: refresh, sign-out and the request around them go to the RUNTIME base, full URL — never an import-time constant', async () => {
+    const base = 'https://api.runtime.example/api/v1';
+    stubGlobal('window', { dispatchEvent: () => true, __WMS_CONFIG__: { apiBaseUrl: base } });
+    writeSession(session({ expiresAt: Date.now() - 1_000 }));
+    scriptFetch([() => json(200, REFRESHED), () => json(200, WAREHOUSES), () => new Response(null, { status: 204 })]);
+    await fetchApiListWarehouses(TENANT);
+    await signOutEverywhere();
+    expect(calls.map((call) => call.url)).toEqual([
+      `${base}/tenants/session/refresh`,
+      `${base}/tenants/${TENANT}/warehouses`,
+      `${base}/tenants/session/sign-out`,
+    ]);
+  });
+
   test('a retried request that answers 401 session-ended still signs out with the reason', async () => {
     writeSession(session());
     scriptFetch([

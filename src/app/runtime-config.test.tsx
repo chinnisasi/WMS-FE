@@ -39,6 +39,17 @@ describe('/runtime-config.js', () => {
   });
 });
 
+describe('/runtime-config.js emits only an absolute http(s) URL (C6)', () => {
+  test('a relative, schemeless or non-http value is never served — the browser keeps the build default', async () => {
+    for (const bad of ['/api/v1', 'api.x/api/v1', 'javascript:alert(1)', 'ftp://api.x', ' ']) {
+      process.env.WMS_API_BASE_URL = bad;
+      expect(await GET().text()).toBe('window.__WMS_CONFIG__ = {};\n');
+    }
+    process.env.WMS_API_BASE_URL = 'http://localhost:3000/api/v1';
+    expect(await GET().text()).toContain('"apiBaseUrl":"http://localhost:3000/api/v1"');
+  });
+});
+
 describe('the root layout', () => {
   test('loads the runtime config with a blocking script, first in <head>', () => {
     const html = renderToStaticMarkup(<RootLayout>{null}</RootLayout>);

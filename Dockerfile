@@ -35,6 +35,8 @@ ENV NODE_ENV=production \
 
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
+# Code review C6: the start refuses an unset or non-http(s) WMS_API_BASE_URL.
+COPY --from=build --chown=node:node /app/scripts/start-standalone.mjs ./start-standalone.mjs
 
 # Non-root: the base image's `node` user (uid 1000).
 USER node
@@ -43,4 +45,4 @@ EXPOSE 3001
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/runtime-config.js').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "server.js"]
+CMD ["node", "start-standalone.mjs"]
