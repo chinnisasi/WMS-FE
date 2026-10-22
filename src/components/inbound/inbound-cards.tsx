@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -70,6 +70,8 @@ import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-fil
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
+import { QcInspectDialog } from '@/components/inbound/qc-inspect-dialog';
+import { inspectedResultLabel, inspectionSummary } from '@/lib/qc-inspection';
 import { GateInsCard } from '@/components/inbound/gate-ins-card';
 import { PoCreateForm } from '@/components/inbound/po-create-form';
 import { ReadFailure, Section } from '@/components/shared/surface';
@@ -772,7 +774,8 @@ function PutawayCard({
  * fresh ULID Idempotency-Key so a double click replays, never duplicates.
  * Mobile is untouched — the hold is a web Ops-Manager action, no new task.
  */
-const holdTabs = ['open', 'released'] as const;
+// Story 2-8a — Closed covers both closed states (released and inspected).
+const holdTabs = ['open', 'closed'] as const;
 type HoldTab = (typeof holdTabs)[number];
 
 type HoldOutcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
@@ -817,6 +820,22 @@ function QcHoldsCard({
 
   const [outcome, setOutcome] = useState<HoldOutcome>(null);
   const [releasingId, setReleasingId] = useState<string | null>(null);
+  // Story 2-8a — the hold whose Inspect dialog is open (one at a time).
+  const [inspecting, setInspecting] = useState<QcHoldEntryDto | null>(null);
+  // The Inspect button that opened the dialog — focus returns to it on close.
+  const inspectTrigger = useRef<HTMLButtonElement | null>(null);
+  const returnFocus = useRef(false);
+  const closeInspect = () => {
+    returnFocus.current = true;
+    setInspecting(null);
+  };
+  // After the close renders (the trigger is enabled again), focus returns to it.
+  useEffect(() => {
+    if (inspecting === null && returnFocus.current) {
+      returnFocus.current = false;
+      inspectTrigger.current?.focus();
+    }
+  }, [inspecting]);
   // A pre-render double-click fires both handlers before the disabled state
   // renders — this synchronous re-entry guard makes the second click a
   // no-op instead of a NEW command whose fresh Idempotency-Key would 409
@@ -956,46 +975,81 @@ function QcHoldsCard({
     {
       key: 'release',
       header: 'Status',
-      render: (hold) =>
-        hold.status === 'released' ? (
-          <span className="text-(--muted-foreground)">
-            released
-            {hold.releasedAt !== null && (
-              <>
-                {' '}
-                <time dateTime={hold.releasedAt}>{new Date(hold.releasedAt).toLocaleString()}</time>
-              </>
-            )}
-          </span>
-        ) : canManage ? (
-          <div className="flex flex-wrap gap-1">
-            <button
-              type="button"
-              disabled={releasingId === hold.id}
-              onClick={() => {
-                void release(hold);
-              }}
-              className="rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60"
-            >
-              Release
-            </button>
-            {hold.kind === 'receipt' && hold.grnId !== null && (
-              <button
-                type="button"
-                aria-label={`Release receipt ${hold.grnCode ?? ''}`.trim()}
-                disabled={releasingId === `grn:${hold.grnId}`}
-                onClick={() => {
-                  void releaseReceipt(hold.grnId!);
-                }}
-                className="rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60"
-              >
-                Release receipt
-              </button>
-            )}
-          </div>
-        ) : (
-          <span className="rounded-sm bg-(--muted) px-1.5 py-0.5 text-xs">open</span>
-        ),
+      render: (hold) => {
+        // Story 2-8a — an allowlist over the three states; actions on open holds only.
+        switch (hold.status) {
+          case 'released':
+            return (
+              <span className="text-(--muted-foreground)">
+                released
+                {hold.releasedAt !== null && (
+                  <>
+                    {' '}
+                    <time dateTime={hold.releasedAt}>{new Date(hold.releasedAt).toLocaleString()}</time>
+                  </>
+                )}
+              </span>
+            );
+          case 'inspected':
+            return (
+              <span className="text-(--muted-foreground)">
+                inspected · {inspectedResultLabel(hold, skus?.[hold.skuId]?.uomPrecision ?? 3)}
+                {hold.releasedAt !== null && (
+                  <>
+                    {' '}
+                    <time dateTime={hold.releasedAt}>{new Date(hold.releasedAt).toLocaleString()}</time>
+                  </>
+                )}
+              </span>
+            );
+          case 'open':
+            return canManage ? (
+              <div className="flex flex-wrap gap-1">
+                <button
+                  type="button"
+                  // Story 2-8a — not while this hold's Inspect dialog is open.
+                  disabled={releasingId === hold.id || inspecting?.id === hold.id}
+                  onClick={() => {
+                    void release(hold);
+                  }}
+                  className="rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60"
+                >
+                  Release
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Inspect ${skus?.[hold.skuId]?.code ?? 'hold'}`}
+                  disabled={inspecting?.id === hold.id}
+                  onClick={(event) => {
+                    inspectTrigger.current = event.currentTarget;
+                    setInspecting(hold);
+                    setOutcome(null);
+                  }}
+                  className="rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60"
+                >
+                  Inspect
+                </button>
+                {hold.kind === 'receipt' && hold.grnId !== null && (
+                  <button
+                    type="button"
+                    aria-label={`Release receipt ${hold.grnCode ?? ''}`.trim()}
+                    disabled={releasingId === `grn:${hold.grnId}`}
+                    onClick={() => {
+                      void releaseReceipt(hold.grnId!);
+                    }}
+                    className="rounded-sm border border-(--border) px-2 py-0.5 text-xs hover:bg-(--muted) disabled:opacity-60"
+                  >
+                    Release receipt
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="rounded-sm bg-(--muted) px-1.5 py-0.5 text-xs">open</span>
+            );
+          default:
+            return <span className="text-(--muted-foreground)">{String(hold.status)}</span>;
+        }
+      },
     },
   ];
 
@@ -1007,7 +1061,7 @@ function QcHoldsCard({
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its QC holds.'
-            : `${warehouseLabel} — a hold quarantines a (sku, bin) scope: the stock relocates into the warehouse's system QC-hold bin and drops out of ATP until released. A receipt of a client with QC on receipt holds each booked line on its own; Release receipt releases all of one receipt's.`}
+            : `${warehouseLabel} — a hold quarantines a (sku, bin) scope: the stock relocates into the warehouse's system QC-hold bin and drops out of ATP until released or inspected. Inspect records the outcome: passed units go back, failed units move to the DAMAGED bin with a reason. A receipt of a client with QC on receipt holds each booked line on its own; Release receipt releases all of one receipt's.`}
         </div>
       </div>
 
@@ -1023,7 +1077,7 @@ function QcHoldsCard({
               tab === s ? 'bg-(--muted) font-medium' : 'hover:bg-(--muted)'
             }`}
           >
-            {s === 'open' ? 'Open' : 'Released'}
+            {s === 'open' ? 'Open' : 'Closed'}
           </button>
         ))}
       </div>
@@ -1038,6 +1092,36 @@ function QcHoldsCard({
       )}
 
       {canManage && grnFilter === null && <PlaceQcHoldForm active={active} warehouseId={warehouseId} onPlaced={() => holds?.reload()} />}
+
+      {canManage && inspecting !== null && (
+        <QcInspectDialog
+          key={inspecting.id}
+          hold={inspecting}
+          sku={skus?.[inspecting.skuId] ?? null}
+          onClose={closeInspect}
+          onAlreadyClosed={() => {
+            closeInspect();
+            setOutcome({
+              tone: 'rejected',
+              word: 'Already closed',
+              reason: 'This hold was already released or inspected — the list is refreshed.',
+            });
+            holds?.reload();
+            notifyInboundChanged();
+          }}
+          onInspected={(response) => {
+            const precision = skus?.[inspecting.skuId]?.uomPrecision ?? 3;
+            closeInspect();
+            setOutcome({
+              tone: 'accepted',
+              word: 'QC hold inspected',
+              reason: `${inspectionSummary(response.inspection.passedQuantity, response.inspection.failedQuantity, precision)}. Passed units are back in the origin bin; failed units are in DAMAGED (not sellable, write-off only).`,
+            });
+            holds?.reload();
+            notifyInboundChanged();
+          }}
+        />
+      )}
 
       <DataTable<QcHoldEntryDto>
         // The filter is part of the table's identity: its Prev/Next stack

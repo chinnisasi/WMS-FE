@@ -615,9 +615,12 @@ export interface QcHoldsPage {
   nextCursor: string | null;
 }
 
+/** Story 2-8a — the list's status filter: one status, or `closed` (released or inspected — the Closed tab). */
+export type QcHoldStatusFilter = 'open' | 'released' | 'inspected' | 'closed';
+
 export function useQcHolds(
   warehouseId: string | null,
-  status: 'open' | 'released',
+  status: QcHoldStatusFilter,
   /**
    * Story 1-5a — the active-client filter. The QC-hold FORM's open-holds
    * read passes `null` (a write-side screen is never filtered, decision 10).
@@ -641,7 +644,7 @@ export function useQcHolds(
   const [requested, setRequested] = useState<{
     tenantId: string;
     warehouseId: string | null;
-    status: 'open' | 'released';
+    status: QcHoldStatusFilter;
     grnId: string | null;
     clientId: string | null; clientEpoch: number;
     cursor: string | null;
@@ -661,7 +664,7 @@ export function useQcHolds(
   const [page, setPage] = useState<{
     tenantId: string;
     warehouseId: string | null;
-    status: 'open' | 'released';
+    status: QcHoldStatusFilter;
     grnId: string | null;
     clientId: string | null;
     requested: string | null;

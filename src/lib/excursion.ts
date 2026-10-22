@@ -72,5 +72,16 @@ export function excursionResolveReason(error: unknown): string {
  */
 export function holdLabel(hold: QcHoldDto | undefined): string {
   if (hold === undefined) return 'disposed';
-  return hold.status === 'open' ? 'held' : 'released';
+  // Story 2-8a — an allowlist over the statuses: an excursion's hold may
+  // close by an inspection outcome as well as a release.
+  switch (hold.status) {
+    case 'open':
+      return 'held';
+    case 'released':
+      return 'released';
+    case 'inspected':
+      return 'inspected';
+    default:
+      return 'disposed';
+  }
 }

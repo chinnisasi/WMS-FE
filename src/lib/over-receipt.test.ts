@@ -94,7 +94,17 @@ describe('qcReason (the story 3.4 hold/release problem-code strings)', () => {
       'An open QC hold already covers this scope — release it first.',
     );
     expect(qcReason(new ApiProblem('qc-hold-released', 409))).toBe(
-      'This hold was already released — refresh the list.',
+      'This hold is already closed (released or inspected) — refresh the list.',
+    );
+    // Story 2-8a — the inspection's two new refusals: the server's detail verbatim, else a fixed sentence.
+    expect(qcReason(new ApiProblem('qc-inspection-mismatch', 422, 'Batch "b" holds 10, but passed + failed is 9.'))).toBe(
+      'Batch "b" holds 10, but passed + failed is 9.',
+    );
+    expect(qcReason(new ApiProblem('qc-inspection-mismatch', 422))).toBe(
+      'The quantities no longer match the held stock — close and reopen the inspection.',
+    );
+    expect(qcReason(new ApiProblem('damaged-bin-conflict', 409))).toBe(
+      'A user location holds the DAMAGED code — failed units cannot be booked until it is re-coded.',
     );
     expect(qcReason(new ApiProblem('qc-hold-origin-bin-gone', 409))).toBe(
       'The origin bin no longer exists, so the stock cannot return to it — the hold stays open.',
@@ -103,7 +113,7 @@ describe('qcReason (the story 3.4 hold/release problem-code strings)', () => {
       'This hold no longer exists — refresh the list.',
     );
     expect(qcReason(new ApiProblem('role-denied', 403))).toBe(
-      'Your role cannot place or release QC holds.',
+      'Your role cannot place, release or inspect QC holds.',
     );
     expect(qcReason(new ApiProblem('idempotency-key-reuse', 422))).toBe(
       'This action was already processed.',
@@ -213,7 +223,7 @@ describe('story 1-2b — receipt holds', () => {
     );
     expect(releaseReceiptReason(new ApiProblem('qc-hold-released', 409))).toBe('This receipt has no open QC hold left — refresh the list.');
     expect(releaseReceiptReason(new ApiProblem('not-found', 404))).toBe('This goods receipt no longer exists — refresh the list.');
-    expect(releaseReceiptReason(new ApiProblem('role-denied', 403))).toBe('Your role cannot place or release QC holds.');
+    expect(releaseReceiptReason(new ApiProblem('role-denied', 403))).toBe('Your role cannot place, release or inspect QC holds.');
     expect(releaseReceiptReason(new ApiProblem('qc-hold-origin-bin-gone', 409))).toBe(
       'The origin bin no longer exists, so the stock cannot return to it — the hold stays open.',
     );

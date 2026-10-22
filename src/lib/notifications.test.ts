@@ -138,6 +138,9 @@ describe('notification copy', () => {
     const one = { ...ENTRIES['qc-receipt'], warehouseId: null, summary: { grnId: GRN, grnCode: 'GRN-0007', count: 1 } } as NotificationEntry;
     expect(notificationDescription(one, LOOKUPS)).toBe('GRN-0007: 1 line held for QC on receipt');
     expect(notificationResolvedLabel(resolved(ENTRIES['qc-receipt'], 'released'))).toBe('Resolved · released');
+    // Story 2-8a — a placement whose last hold closed by inspection; a manual hold inspected.
+    expect(notificationResolvedLabel(resolved(ENTRIES['qc-receipt'], 'inspected'))).toBe('Resolved · inspected');
+    expect(notificationResolvedLabel(resolved(ENTRIES['qc-hold'], 'inspected'))).toBe('Resolved · inspected');
   });
 
   test('the licence expiry (1-6c): the expired state, a head-office and a site licence; it resolves renewed, withdrawn or expired', () => {

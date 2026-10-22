@@ -8,6 +8,8 @@ import { render, type Rendered } from '../../lib/test/render';
 import { writeActiveWarehouseId } from '../../lib/warehouses';
 import { notifyInboundChanged } from '../../lib/asns';
 import { InboundCards } from './inbound-cards';
+import { QcInspectDialog } from './qc-inspect-dialog';
+import type { QcHoldEntryDto } from '../../lib/api/generated';
 
 /**
  * Story 1-1 on the Inbound page, driven through a stubbed `fetch`:
@@ -140,9 +142,36 @@ function stubRouter(): void {
       const grnId = url.searchParams.get('grnId');
       const status = url.searchParams.get('status');
       return json(200, {
-        items: qcHolds.filter((h) => (grnId === null || h['grnId'] === grnId) && (status === null || h['status'] === status)),
+        items: qcHolds.filter(
+          (h) =>
+            (grnId === null || h['grnId'] === grnId) &&
+            (status === null || h['status'] === status || (status === 'closed' && h['status'] !== 'open')),
+        ),
         nextCursor: null,
       });
+    }
+    // Story 2-8a — one hold's detail (its held arms) and the inspect command.
+    const inspectMatch = pathname.match(/\/receiving\/qc-holds\/([^/]+)\/inspect$/);
+    if (inspectMatch !== null && request.method.toUpperCase() === 'POST') {
+      const id = inspectMatch[1]!;
+      if (inspectMode.length > 0) {
+        const mode = inspectMode.shift()!;
+        if (mode === 'fail') return json(503, { code: 'service-unavailable', title: 'Down', status: 503, detail: 'Try again.' });
+        return json(409, { code: 'qc-hold-released', title: 'Closed', status: 409, detail: 'already closed (inspected)' });
+      }
+      const lines = (body as { lines: { batchId: string | null; passed: number; failed: { reason: string; quantity: number }[] }[] }).lines;
+      const passed = lines.reduce((sum, line) => sum + line.passed, 0);
+      const failed = lines.reduce((sum, line) => sum + line.failed.reduce((s2, f) => s2 + f.quantity, 0), 0);
+      qcHolds = qcHolds.map((h) => (h['id'] === id ? { ...h, status: 'inspected', releasedBy: 'u-1', releasedAt: '2026-10-20T05:00:00.000Z', failedQuantity: failed } : h));
+      return json(200, {
+        qcHold: { ...qcHolds.find((h) => h['id'] === id), status: 'inspected' },
+        inspection: { id: 'insp-1', holdId: id, note: null, inspectedBy: 'u-1', inspectedAt: '2026-10-20T05:00:00.000Z', passedQuantity: passed, failedQuantity: failed, lines: [] },
+      });
+    }
+    const detailMatch = pathname.match(/\/receiving\/qc-holds\/([^/]+)$/);
+    if (detailMatch !== null && detailMatch[1] !== 'release-receipt' && request.method.toUpperCase() === 'GET') {
+      const id = detailMatch[1]!;
+      return json(200, { qcHold: qcHolds.find((h) => h['id'] === id), arms: qcArms, inspection: null });
     }
     if (pathname === `${base}/receiving/qc-holds/release-receipt`) {
       const released = qcHolds.filter((h) => h['grnId'] === (body as { grnId: string }).grnId && h['status'] === 'open');
@@ -200,6 +229,11 @@ function stubRouter(): void {
   }) as unknown as typeof fetch);
 }
 
+/** Story 2-8a — the held arms the detail read answers for any hold. */
+let qcArms: Record<string, unknown>[] = [];
+/** Story 2-8a — scripted answers for the next inspect POSTs (then the normal 200). */
+let inspectMode: ('fail' | 'closed')[] = [];
+
 /** Story 2-4a — the QC hold picker's stock rows and bins (empty unless a test sets them). */
 let qcStock: Record<string, unknown>[] = [];
 let qcBins: Record<string, unknown>[] = [];
@@ -212,6 +246,8 @@ beforeEach(() => {
   clientsMode = 'ok';
   requests = [];
   qcHolds = [];
+  qcArms = [{ batchId: 'b-1', batchCode: 'LOT-7', expiryDate: '2099-12-31', quantity: 12 }];
+  inspectMode = [];
   qcStock = [];
   qcBins = [];
   role = 'owner';
@@ -389,6 +425,7 @@ describe('QC holds — receipt holds (story 1-2b)', () => {
     expect(column('Kind')).toEqual(['Auto · QC on receipt']);
     expect([...panel().querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Release receipt');
     expect([...panel().querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Release');
+    expect([...panel().querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Inspect');
   });
 
   test('the GRN filter: clicking a receipt\'s code narrows the read to its grnId; Show all holds clears it', async () => {
@@ -606,5 +643,212 @@ describe('the QC hold picker skips the SYSTEM bins a hold cannot originate in (s
     const select = view.container.querySelector('select[aria-label="Stock scope (SKU at bin)"]') as HTMLSelectElement;
     const offered = [...select.querySelectorAll('option')].map((o) => o.value).filter((v) => v !== '');
     expect(offered).toEqual(['s-acme:b-a', 's-acme:b-udmg']);
+  });
+});
+
+function setValue(element: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: string): void {
+  act(() => {
+    const proto =
+      element instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : element instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(element, value);
+    element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+  });
+}
+
+describe('QC holds — the inspection outcome (story 2-8a)', () => {
+  const dialog = () => panel().querySelector('[role="dialog"][aria-label="Inspect QC hold"]') as HTMLElement | null;
+  const button = (root: HTMLElement, text: string) => [...root.querySelectorAll('button')].find((b) => b.textContent === text) as HTMLButtonElement | undefined;
+  const statusCells = () => {
+    const index = headers().indexOf('Status');
+    return rows().map((cells) => cells[index]);
+  };
+
+  test('the tabs are Open and Closed; Closed reads status=closed and shows a released and an inspected hold with its result', async () => {
+    qcHolds = [
+      hold('h-open'),
+      hold('h-rel', { status: 'released', releasedBy: 'u-1', releasedAt: '2026-10-19T06:00:00.000Z' }),
+      hold('h-insp', { status: 'inspected', releasedBy: 'u-1', releasedAt: '2026-10-19T07:00:00.000Z', heldQty: 10, failedQuantity: 3 }),
+    ];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    const tabs = [...panel().querySelectorAll('[role="tablist"][aria-label="QC hold status"] button')].map((b) => b.textContent);
+    expect(tabs).toEqual(['Open', 'Closed']);
+    expect(rows()).toHaveLength(1);
+    await act(async () => {
+      button(panel(), 'Closed')!.click();
+    });
+    await settle();
+    const closedRead = requests.filter((r) => r.method === 'GET' && r.url.pathname.endsWith('/receiving/qc-holds') && !r.url.searchParams.has('limit')).at(-1)!;
+    expect(closedRead.url.searchParams.get('status')).toBe('closed');
+    const cells = statusCells();
+    expect(cells).toHaveLength(2);
+    expect(cells[0]).toContain('released');
+    expect(cells[1]).toContain('inspected · 7 pass, 3 fail → DAMAGED');
+    // No action on a closed hold.
+    expect(button(panel(), 'Inspect')).toBeUndefined();
+    expect(button(panel(), 'Release')).toBeUndefined();
+  });
+
+  test('Inspect: the arms load with Passed = held; a failure needs a reason; the POST carries the lines and a fresh key; the outcome names the split', async () => {
+    qcHolds = [hold('h-1')];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    await act(async () => {
+      button(panel(), 'Inspect')!.click();
+    });
+    await settle();
+    const d = dialog()!;
+    expect(d).not.toBeNull();
+    expect(requests.some((r) => r.method === 'GET' && r.url.pathname.endsWith('/receiving/qc-holds/h-1'))).toBe(true);
+    const passed = d.querySelector('input[aria-label="Passed LOT-7"]') as HTMLInputElement;
+    expect(passed.value).toBe('12');
+    expect(d.textContent).toContain('12 pass, 0 fail → DAMAGED');
+    setValue(passed, '9');
+    await settle();
+    expect(d.textContent).toContain('9 pass, 3 fail → DAMAGED');
+    const reason = d.querySelector('select[aria-label="Fail reason LOT-7"]') as HTMLSelectElement;
+    expect(reason).not.toBeNull();
+    // No reason yet: refused in the dialog, nothing sent.
+    await act(async () => {
+      button(d, 'Record inspection')!.click();
+    });
+    await settle();
+    expect(d.textContent).toContain('Pick why 3 of LOT-7 failed');
+    expect(requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+    setValue(reason, 'damaged');
+    await settle();
+    await act(async () => {
+      const record = button(dialog()!, 'Record inspection')!;
+      record.click();
+      record.click();
+    });
+    await settle();
+    const posts = requests.filter((r) => r.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url.pathname).toBe(`/api/v1/tenants/${T}/receiving/qc-holds/h-1/inspect`);
+    expect(posts[0]!.body).toEqual({ lines: [{ batchId: 'b-1', passed: 9, failed: [{ reason: 'damaged', quantity: 3 }] }] });
+    expect(posts[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(dialog()).toBeNull();
+    expect(panel().textContent).toContain('QC hold inspected');
+    expect(panel().textContent).toContain('9 pass, 3 fail → DAMAGED');
+    // The open list re-read: the inspected hold left it.
+    expect(panel().textContent).toContain('No open holds.');
+  });
+
+  test('passing an EXPIRED batch warns and never blocks', async () => {
+    qcArms = [{ batchId: 'b-1', batchCode: 'LOT-7', expiryDate: '2020-01-31', quantity: 12 }];
+    qcHolds = [hold('h-1')];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    await act(async () => {
+      button(panel(), 'Inspect')!.click();
+    });
+    await settle();
+    expect(dialog()!.textContent).toContain('Batch LOT-7 expired on 2020-01-31');
+    await act(async () => {
+      button(dialog()!, 'Record inspection')!.click();
+    });
+    await settle();
+    const posts = requests.filter((r) => r.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body).toEqual({ lines: [{ batchId: 'b-1', passed: 12, failed: [] }] });
+  });
+
+  test('one key per draft: a retry of the same body reuses it; an edit mints a new one', async () => {
+    inspectMode = ['fail', 'fail'];
+    qcHolds = [hold('h-1')];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    await act(async () => {
+      button(panel(), 'Inspect')!.click();
+    });
+    await settle();
+    const record = async () => {
+      await act(async () => {
+        button(dialog()!, 'Record inspection')!.click();
+      });
+      await settle();
+    };
+    await record();
+    await record();
+    const posts = () => requests.filter((r) => r.method === 'POST');
+    expect(posts()).toHaveLength(2);
+    expect(posts()[1]!.key).toBe(posts()[0]!.key);
+    setValue(dialog()!.querySelector('input[aria-label="Passed LOT-7"]') as HTMLInputElement, '11');
+    setValue(dialog()!.querySelector('select[aria-label="Fail reason LOT-7"]') as HTMLSelectElement, 'expired');
+    await settle();
+    await record();
+    expect(posts()).toHaveLength(3);
+    expect(posts()[2]!.key).not.toBe(posts()[0]!.key);
+    expect(dialog()).toBeNull();
+  });
+
+  test('409 qc-hold-released (closed elsewhere, or a lost first answer) closes the dialog and reloads the list', async () => {
+    inspectMode = ['closed'];
+    qcHolds = [hold('h-1')];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    await act(async () => {
+      button(panel(), 'Inspect')!.click();
+    });
+    await settle();
+    const reads = () => requests.filter((r) => r.method === 'GET' && r.url.pathname.endsWith('/receiving/qc-holds') && !r.url.searchParams.has('limit')).length;
+    const before = reads();
+    await act(async () => {
+      button(dialog()!, 'Record inspection')!.click();
+    });
+    await settle();
+    expect(dialog()).toBeNull();
+    expect(reads()).toBeGreaterThan(before);
+    expect(panel().textContent).toContain('already released or inspected');
+  });
+
+  test('while a hold\'s dialog is open its Release is disabled; Escape closes it and focus returns to Inspect', async () => {
+    qcHolds = [hold('h-1')];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    const inspectButton = button(panel(), 'Inspect')!;
+    await act(async () => {
+      inspectButton.click();
+    });
+    await settle();
+    expect(dialog()!.getAttribute('aria-modal')).toBe('true');
+    expect(document.activeElement).toBe(dialog()!.querySelector('input[aria-label="Passed LOT-7"]'));
+    expect(button(panel(), 'Release')!.disabled).toBe(true);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await settle();
+    expect(dialog()).toBeNull();
+    expect(button(panel(), 'Release')!.disabled).toBe(false);
+    expect(document.activeElement).toBe(button(panel(), 'Inspect') ?? null);
+  });
+
+  test('a hold with no held stock says so and sends nothing', async () => {
+    qcArms = [];
+    qcHolds = [hold('h-1')];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    await act(async () => {
+      button(panel(), 'Inspect')!.click();
+    });
+    await settle();
+    expect(dialog()!.textContent).toContain('This hold has no held stock to inspect.');
+    expect(button(dialog()!, 'Record inspection')!.disabled).toBe(true);
+    expect(requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+  });
+
+  test('no session at mount: the dialog says the session expired instead of loading forever', async () => {
+    clearSession();
+    const hold1 = hold('h-1') as unknown as QcHoldEntryDto;
+    view = render(<QcInspectDialog hold={hold1} sku={null} onClose={() => undefined} onInspected={() => undefined} onAlreadyClosed={() => undefined} />);
+    await settle();
+    const d = view.container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(d.textContent).toContain('Your session expired — sign in again.');
+    expect(d.textContent).not.toContain('Loading');
   });
 });
