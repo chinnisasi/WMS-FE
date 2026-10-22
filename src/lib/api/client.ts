@@ -135,6 +135,7 @@ import {
   tenancyControllerCreateZone,
   tenancyControllerGenerateBinGrid,
   tenancyControllerListBins,
+  tenancyControllerPrintBinLabels,
   tenancyControllerListWarehouses,
   tenancyControllerListZones,
   tenancyControllerMergeBin,
@@ -285,6 +286,7 @@ import type {
   AdjustmentDecisionResponse,
   AdjustmentPendingListResponse,
   BinGridResponse,
+  BinLabelsRequestDto,
   BinListResponse,
   BinMergeResponse,
   BinResponse,
@@ -880,6 +882,26 @@ export async function fetchApiGenerateBinGrid(
   });
   if (error || !data) {
     throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-10a — bin labels as a file (ZPL `text/plain` or a PDF), as a Blob
+ * (`parseAs: 'blob'`, the audit-export file pattern). A refusal is still
+ * problem+json and becomes an `ApiProblem` — the listing arms carry
+ * `extensions.binCodes`, `too-many-labels` carries `extensions.count`. The
+ * server's filename is not readable cross-origin; the caller names the file
+ * (`binLabelsFilename`).
+ */
+export async function fetchApiBinLabels(tenantId: string, warehouseId: string, body: BinLabelsRequestDto): Promise<Blob> {
+  const { data, error, response } = await tenancyControllerPrintBinLabels({
+    path: { tenantId, warehouseId },
+    body,
+    parseAs: 'blob',
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
   }
   return data;
 }

@@ -43,6 +43,8 @@ import { FeedbackBanner } from '@/components/feedback/banner';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
 import { Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
+import { BinLabelsDialog, type BinLabelsTarget } from '@/components/settings/BinLabelsDialog';
+import { MAX_LABELS_PER_PRINT, binPrintBlock } from '@/lib/bin-labels';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -167,6 +169,8 @@ function ZonesBinsSetupSessioned() {
   const canCreateBin = roleHasCapability(role, 'bin.create');
   const canBlockBin = roleHasCapability(role, 'bin.block');
   const canRetireBin = roleHasCapability(role, 'bin.retire');
+  // Story 2-10a — printing bin labels (owner, ops manager, operator).
+  const canPrintLabels = roleHasCapability(role, 'labels.execute');
 
   return (
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
@@ -244,6 +248,8 @@ function ZonesBinsSetupSessioned() {
             bins={bins}
             canBlockBin={canBlockBin}
             canRetireBin={canRetireBin}
+            canPrintLabels={canPrintLabels}
+            warehouseCode={warehouse?.code ?? ''}
             clients={clientList}
           />
         </>
@@ -718,6 +724,8 @@ function ZoneBinsTable({
   bins,
   canBlockBin,
   canRetireBin,
+  canPrintLabels,
+  warehouseCode,
   clients,
 }: {
   tenantId: string;
@@ -730,6 +738,10 @@ function ZoneBinsTable({
   canBlockBin: boolean;
   /** Story 3.6: merge/retire render only for `bin.retire` roles. */
   canRetireBin: boolean;
+  /** Story 2-10a: the label checkboxes and print buttons render only for `labels.execute` roles. */
+  canPrintLabels: boolean;
+  /** Story 2-10a: the warehouse code, for the label file's name. */
+  warehouseCode: string;
   /** Story 1-5b — the clients of a multi-client tenant, else null (no column, no panel). */
   clients: readonly ClientDto[] | null;
 }) {
@@ -773,6 +785,53 @@ function ZoneBinsTable({
   // The picker's fetch sequence — a rapid second pick supersedes the first
   // fetch, so a stale response must never win the race into state.
   const mergeFetchSeq = useRef(0);
+  // Story 2-10a — the label selection, scoped to the zone it was made in: a
+  // zone switch reads as an empty selection (derived, no effect), while
+  // paging inside the zone keeps it. `printTarget` opens the print panel.
+  const [labelSelection, setLabelSelection] = useState<{ zoneId: string | null; ids: ReadonlySet<string> }>({
+    zoneId: null,
+    ids: new Set(),
+  });
+  const pageRows = bins?.items ?? [];
+  // A ticked bin the refreshed page now shows unprintable (retired, merged
+  // away, a code a barcode cannot carry) drops out of the selection; the next
+  // tick or untick stores the pruned set.
+  const blockedOnPage = new Set(pageRows.filter((bin) => binPrintBlock(bin) !== null).map((bin) => bin.id));
+  const selectedIds: ReadonlySet<string> =
+    labelSelection.zoneId === selectedZoneId
+      ? new Set([...labelSelection.ids].filter((id) => !blockedOnPage.has(id)))
+      : new Set<string>();
+  const overLimit = selectedIds.size > MAX_LABELS_PER_PRINT;
+  const [printPanel, setPrintPanel] = useState<{ zoneId: string | null; target: BinLabelsTarget } | null>(null);
+  // The panel belongs to the zone it was opened in — a zone switch closes it.
+  const printTarget = printPanel !== null && printPanel.zoneId === selectedZoneId ? printPanel.target : null;
+  const setPrintTarget = (target: BinLabelsTarget | null) =>
+    setPrintPanel(target === null ? null : { zoneId: selectedZoneId, target });
+  const printableOnPage = pageRows.filter((bin) => binPrintBlock(bin) === null);
+  const pageAllSelected = printableOnPage.length > 0 && printableOnPage.every((bin) => selectedIds.has(bin.id));
+  const selectedZone = zones.find((zone) => zone.id === selectedZoneId);
+
+  function setSelected(next: Set<string>) {
+    setLabelSelection({ zoneId: selectedZoneId, ids: next });
+    setPrintTarget(null);
+  }
+
+  function toggleLabel(binId: string) {
+    const next = new Set(selectedIds);
+    if (next.has(binId)) next.delete(binId);
+    else next.add(binId);
+    setSelected(next);
+  }
+
+  /** The page checkbox: ticks (or unticks) only THIS page's printable rows. */
+  function togglePage() {
+    const next = new Set(selectedIds);
+    for (const bin of printableOnPage) {
+      if (pageAllSelected) next.delete(bin.id);
+      else next.add(bin.id);
+    }
+    setSelected(next);
+  }
 
   /** Story 12-7 — the Edit-class PATCH: the structure arm carries
    * `{ storageClass }` ONLY. A stranding change is refused 409
@@ -959,8 +1018,28 @@ function ZoneBinsTable({
     })();
   }
 
+  // The file is named after the warehouse code: no code yet, no print controls.
+  const showLabels = canPrintLabels && warehouseCode !== '';
   const canOperate = canBlockBin || canRetireBin || canEditClass;
+  const labelColumn: DataTableColumn<BinResponse> = {
+    key: 'label',
+    header: '',
+    render: (bin) => {
+      const block = binPrintBlock(bin);
+      return (
+        <input
+          type="checkbox"
+          aria-label={`Print a label for ${bin.code}`}
+          title={block ?? `Print a label for ${bin.code}`}
+          disabled={block !== null}
+          checked={block === null && selectedIds.has(bin.id)}
+          onChange={() => toggleLabel(bin.id)}
+        />
+      );
+    },
+  };
   const columns: readonly DataTableColumn<BinResponse>[] = [
+    ...(showLabels ? [labelColumn] : []),
     ...binColumns,
     // Story 1-5b — the dedicated client, resolved over ALL clients.
     ...(clients === null
@@ -1076,6 +1155,62 @@ function ZoneBinsTable({
   return (
     <div className="flex flex-col gap-2">
       <ZonePicker zones={zones} value={selectedZoneId} onChange={(id) => onSelectZone(id)} label="Zone bins" />
+      {showLabels && selectedZoneId !== null && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <label className="flex items-center gap-1.5">
+            <input
+              type="checkbox"
+              aria-label="Tick every printable bin on this page"
+              disabled={printableOnPage.length === 0}
+              checked={pageAllSelected}
+              onChange={() => togglePage()}
+            />
+            <span className="text-(--muted-foreground)">This page</span>
+          </label>
+          <button
+            type="button"
+            disabled={selectedIds.size === 0 || overLimit}
+            onClick={() => {
+              setPrintTarget({ kind: 'bins', binIds: [...selectedIds] });
+              setOutcome(null);
+            }}
+            className="rounded-sm border border-(--border) px-2 py-1 hover:bg-(--muted) disabled:opacity-40"
+          >
+            Print labels ({selectedIds.size})
+          </button>
+          {overLimit && (
+            <span role="note" className="text-(--destructive)">
+              One print takes at most {MAX_LABELS_PER_PRINT} labels — untick some bins.
+            </span>
+          )}
+          {/* Enabled for any zone: printable bins may sit on a later page;
+              the server answers a truly empty zone with no-bins-to-print. */}
+          <button
+            type="button"
+            onClick={() => {
+              setPrintTarget({ kind: 'zone', zoneId: selectedZoneId, zoneCode: selectedZone?.code ?? '' });
+              setOutcome(null);
+            }}
+            className="rounded-sm border border-(--border) px-2 py-1 hover:bg-(--muted) disabled:opacity-40"
+          >
+            Print zone labels
+          </button>
+        </div>
+      )}
+      {showLabels && printTarget !== null && (
+        <BinLabelsDialog
+          key={printTarget.kind === 'zone' ? `zone-${printTarget.zoneId}` : `bins-${printTarget.binIds.join(',')}`}
+          tenantId={tenantId}
+          warehouseId={warehouseId}
+          warehouseCode={warehouseCode}
+          target={printTarget}
+          onClose={() => setPrintTarget(null)}
+          onPrinted={(summary) => {
+            setPrintTarget(null);
+            setOutcome({ tone: 'accepted', word: 'Labels ready', reason: summary });
+          }}
+        />
+      )}
       {classEditingBin !== null && (
         <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
           <div className="text-xs text-(--muted-foreground)">
