@@ -10,6 +10,11 @@ const nextConfig: NextConfig = {
   // baked in — `/runtime-config.js` serves it from `WMS_API_BASE_URL` at run
   // time, so one image serves every environment.
   output: 'standalone',
+  // Story 5-1a — the accept-invite URL carries a one-time token: the page
+  // never leaks it in a Referer (the page's metadata says the same).
+  async headers() {
+    return [{ source: '/accept-invite', headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }] }];
+  },
 };
 
 export default nextConfig;

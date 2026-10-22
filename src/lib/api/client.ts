@@ -159,6 +159,7 @@ import {
   usersControllerDeactivateUser,
   usersControllerReactivateUser,
   usersControllerUnlockUser,
+  usersControllerResendInvite,
   usersControllerResetSecondFactor,
   usersControllerSecondFactorBackupCodes,
   usersControllerSecondFactorConfirm,
@@ -2263,6 +2264,25 @@ export async function fetchApiSetUserActive(
 ): Promise<UserStatusResponse> {
   const options = { path: { tenantId, userId }, headers: { 'Idempotency-Key': idempotencyKey } };
   const { data, error } = active ? await usersControllerReactivateUser(options) : await usersControllerDeactivateUser(options);
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 5-1a — sends an invited user a new invitation (`users.invite`, owner):
+ * a fresh token and link (the old link stops working) and a new invite email.
+ */
+export async function fetchApiResendInvite(
+  tenantId: string,
+  userId: string,
+  idempotencyKey: string,
+): Promise<InviteUserResponse> {
+  const { data, error } = await usersControllerResendInvite({
+    path: { tenantId, userId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
   if (error || !data) {
     throw unwrapError(error, 400);
   }

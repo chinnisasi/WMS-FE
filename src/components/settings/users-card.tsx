@@ -1,22 +1,28 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   ApiProblem,
   fetchApiInviteUser,
+  fetchApiResendInvite,
   fetchApiResetSecondFactor,
   fetchApiSetUserActive,
   fetchApiSetUserRole,
   fetchApiUnlockUser,
 } from '@/lib/api/client';
-import type { ClientDto, UserResponse } from '@/lib/api/generated';
+import type { ClientDto, UserListItemResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
   ASSIGNABLE_ROLES,
+  INVITE_EMAIL_POLL_MS,
   inviteBody,
+  inviteEmailWords,
+  inviteLinkNote,
+  inviteLinkOf,
   inviteRoleOptions,
   notifyUsersChanged,
+  shouldPollInviteEmails,
   portalInviteClients,
   roleHasCapability,
   type UserRole,
@@ -52,13 +58,21 @@ const ROLE_LABELS: Readonly<Record<UserRole, string>> = {
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
 
+/** Story 5-1a — a fresh one-time link and the line about its email. */
+type InviteLink = { link: string; note: string };
+
+/** The users list's row: the user, plus (owner only) its latest invite email. */
+type UserRow = UserListItemResponse;
+
 /**
  * Users & roles (story 1.5), a Settings sub-card. The list is a read — open
  * to every tenant member. The invite form and the inline role changes render
  * only for roles holding `users.invite` / `users.role_change` (hide surfaces,
  * never "blocked" screens — the backend's DB-read authority still gates every
- * command). A successful invite surfaces the one-time invite link for the
- * owner to share out-of-band (no email delivery).
+ * command). A successful invite surfaces the one-time invite link (story
+ * 5-1a: the backend's `inviteUrl`, the same link the invite email carries)
+ * with a line saying what happened to the email; invited rows show the
+ * email's status to the owner, and Resend invite mints a fresh link.
  */
 export function UsersCard() {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
@@ -89,7 +103,7 @@ function UsersCardSessioned() {
   const clients = readyClients(useClients());
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The invite response's one-time link, kept visible until the next action.
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<InviteLink | null>(null);
   // Story 6-1b — a reset's one-time enrolment code, shown once (with Copy).
   const [enrolmentCode, setEnrolmentCode] = useState<{ email: string; code: string; expiresAt: string } | null>(null);
 
@@ -98,7 +112,28 @@ function UsersCardSessioned() {
   // Story 6-1a — which row's confirmation is open (`${action}-${userId}`).
   const [confirming, setConfirming] = useState<string | null>(null);
 
-  const columns: readonly DataTableColumn<UserResponse>[] = [
+  // Story 5-1a (decision 8) — while an invited row's email is queued or
+  // sending, re-read the list every 5 s, for at most 60 s from the first
+  // in-flight read; a new invite or resend starts a fresh window.
+  const pollingSince = useRef<number | null>(null);
+  const reload = users?.reload;
+  const items = users?.items;
+  useEffect(() => {
+    if (items === undefined || reload === undefined) return;
+    const now = Date.now();
+    if (!shouldPollInviteEmails(items, pollingSince.current, now)) {
+      if (!items.some((row) => row.inviteEmail?.status === 'pending' || row.inviteEmail?.status === 'sending')) pollingSince.current = null;
+      return;
+    }
+    pollingSince.current ??= now;
+    const timer = setTimeout(reload, INVITE_EMAIL_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [items, reload]);
+  const restartPolling = () => {
+    pollingSince.current = null;
+  };
+
+  const columns: readonly DataTableColumn<UserRow>[] = [
     { key: 'email', header: 'Email' },
     {
       key: 'role',
@@ -124,21 +159,27 @@ function UsersCardSessioned() {
       // holders (it would tell anyone else which owners lack it).
       render: (user) => <UserStatusBadges user={user} showSecondFactor={canChangeRole} />,
     },
-    // Story 6-1a — offboarding and unlock, for `users.role_change` holders.
-    ...(canChangeRole
+    // Story 6-1a — offboarding and unlock, for `users.role_change` holders;
+    // story 5-1a — Resend invite, for `users.invite` holders.
+    ...(canChangeRole || canInvite
       ? [
           {
             key: 'actions',
             header: '',
-            render: (user: UserResponse) => (
+            render: (user: UserRow) => (
               <UserActions
                 user={user}
                 isSelf={user.id === selfId}
+                canChangeRole={canChangeRole}
+                canInvite={canInvite}
                 confirming={confirming}
                 setConfirming={setConfirming}
                 onDone={(next, link) => {
                   setOutcome(next);
-                  if (link !== undefined) setInviteLink(link);
+                  if (link !== undefined) {
+                    setInviteLink(link);
+                    restartPolling();
+                  }
                   users?.reload();
                   notifyUsersChanged();
                 }}
@@ -149,7 +190,7 @@ function UsersCardSessioned() {
                 }}
               />
             ),
-          } satisfies DataTableColumn<UserResponse>,
+          } satisfies DataTableColumn<UserRow>,
         ]
       : []),
   ];
@@ -169,6 +210,7 @@ function UsersCardSessioned() {
           onInvited={(link) => {
             setInviteLink(link);
             setOutcome(null);
+            restartPolling();
             // The invited user is a new row — refresh the table now instead
             // of waiting for an unrelated refetch.
             users?.reload();
@@ -178,28 +220,27 @@ function UsersCardSessioned() {
       )}
 
       {inviteLink !== null && (
-        <div className="flex flex-col gap-1 rounded-sm border border-(--border) bg-(--muted) p-2">
+        <div data-testid="invite-link" className="flex flex-col gap-1 rounded-sm border border-(--border) bg-(--muted) p-2">
           <div className="text-xs font-medium">One-time invite link (valid 7 days):</div>
           <div className="flex items-center gap-2">
             <input
               readOnly
-              value={inviteLink}
+              value={inviteLink.link}
+              aria-label="One-time invite link"
               onFocus={(e) => e.target.select()}
               className={`${inputClass} font-mono text-xs`}
             />
             <button
               type="button"
               onClick={() => {
-                void navigator.clipboard?.writeText(inviteLink);
+                void navigator.clipboard?.writeText(inviteLink.link);
               }}
               className="shrink-0 rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted)"
             >
               Copy
             </button>
           </div>
-          <div className="text-xs text-(--muted-foreground)">
-            Share it out-of-band — it works once, then expires.
-          </div>
+          <div className="text-xs text-(--muted-foreground)">{inviteLink.note}</div>
         </div>
       )}
 
@@ -229,7 +270,7 @@ function UsersCardSessioned() {
         </div>
       )}
 
-      <DataTable<UserResponse>
+      <DataTable<UserRow>
         columns={columns}
         rows={users?.items ?? []}
         nextCursor={users?.nextCursor ?? null}
@@ -247,7 +288,7 @@ function InviteForm({
   onInvited,
   clients,
 }: {
-  onInvited: (link: string) => void;
+  onInvited: (link: InviteLink) => void;
   clients: readonly ClientDto[] | null;
 }) {
   const [email, setEmail] = useState('');
@@ -272,10 +313,10 @@ function InviteForm({
     try {
       const invited = await fetchApiInviteUser(session.tenant.id, body, ulid());
       setEmail('');
-      const url = new URL('/accept-invite', window.location.origin);
-      url.searchParams.set('tenant', session.tenant.id);
-      url.searchParams.set('token', invited.inviteToken);
-      onInvited(url.toString());
+      onInvited({
+        link: inviteLinkOf(invited, session.tenant.id, window.location.origin),
+        note: inviteLinkNote(invited.user.email, invited.inviteEmail?.status),
+      });
     } catch (error) {
       setRejection(rejectionReason(error));
     } finally {
@@ -349,12 +390,14 @@ function InviteForm({
 const chipClass = 'rounded-full border px-2 py-0.5 text-xs';
 
 /** Story 6-1a — `lockedUntil` in the future reads "Locked" (words, not colour alone). */
-export function isSignInLocked(user: Pick<UserResponse, 'lockedUntil'>, now = Date.now()): boolean {
+export function isSignInLocked(user: Pick<UserRow, 'lockedUntil'>, now = Date.now()): boolean {
   return typeof user.lockedUntil === 'string' && Date.parse(user.lockedUntil) > now;
 }
 
-function UserStatusBadges({ user, showSecondFactor }: { user: UserResponse; showSecondFactor: boolean }) {
+function UserStatusBadges({ user, showSecondFactor }: { user: UserRow; showSecondFactor: boolean }) {
   const chip = showSecondFactor ? secondFactorChip(user.secondFactorEnabled) : null;
+  // Story 5-1a — the invite email's status, on an invited row (the field is the owner's only).
+  const emailWords = user.status === 'invited' ? inviteEmailWords(user.inviteEmail?.status) : null;
   return (
     <span className="flex flex-wrap gap-1">
       {user.status === 'invited' ? (
@@ -374,26 +417,35 @@ function UserStatusBadges({ user, showSecondFactor }: { user: UserResponse; show
           {chip}
         </span>
       )}
+      {emailWords !== null && (
+        <span data-testid="invite-email-status" className="text-xs text-(--muted-foreground)">
+          {emailWords}
+        </span>
+      )}
     </span>
   );
 }
 
 const rowButtonClass = 'rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40';
 
-/** Story 6-1a — Deactivate / Reactivate / Unlock for one user row, each behind a confirmation. */
+/** Story 6-1a — Deactivate / Reactivate / Unlock (and 5-1a's Resend invite) for one user row, each behind a confirmation. */
 function UserActions({
   user,
   isSelf,
+  canChangeRole,
+  canInvite,
   confirming,
   setConfirming,
   onDone,
   onEnrolmentCode,
 }: {
-  user: UserResponse;
+  user: UserRow;
   isSelf: boolean;
+  canChangeRole: boolean;
+  canInvite: boolean;
   confirming: string | null;
   setConfirming: (value: string | null) => void;
-  onDone: (outcome: Outcome, inviteLink?: string) => void;
+  onDone: (outcome: Outcome, inviteLink?: InviteLink) => void;
   onEnrolmentCode: (shown: { email: string; code: string; expiresAt: string }) => void;
 }) {
   const open = (action: string) => setConfirming(`${action}-${user.id}`);
@@ -439,16 +491,43 @@ function UserActions({
         onDone={({ result, tenantId }) => {
           close();
           if (result.inviteToken !== undefined) {
-            const url = new URL('/accept-invite', window.location.origin);
-            url.searchParams.set('tenant', tenantId);
-            url.searchParams.set('token', result.inviteToken);
             onDone(
-              { tone: 'accepted', word: `${result.user.email} reactivated`, reason: 'They had not accepted their invite — share the new invite link below.' },
-              url.toString(),
+              { tone: 'accepted', word: `${result.user.email} reactivated`, reason: 'They had not accepted their invite — a new invitation link is below.' },
+              {
+                link: inviteLinkOf({ inviteToken: result.inviteToken, inviteUrl: result.inviteUrl }, tenantId, window.location.origin),
+                note: inviteLinkNote(result.user.email, result.inviteEmail?.status),
+              },
             );
             return;
           }
           onDone({ tone: 'accepted', word: `${result.user.email} reactivated`, reason: 'They can sign in again.' });
+        }}
+        onRejected={(reason) => {
+          close();
+          rejected(reason);
+        }}
+        onClose={close}
+      />
+    );
+  }
+  if (confirming === `resend-${user.id}`) {
+    return (
+      <ConfirmRow
+        key={`resend-${user.id}`}
+        question={`Send ${user.email} a new invitation? The link they have now stops working.`}
+        confirmLabel="Resend invite"
+        ariaLabel={`Confirm resending the invitation to ${user.email}`}
+        run={(key, tenantId) => fetchApiResendInvite(tenantId, user.id, key).then((result) => ({ result, tenantId }))}
+        reason={rejectionReason}
+        onDone={({ result, tenantId }) => {
+          close();
+          onDone(
+            { tone: 'accepted', word: `New invitation for ${result.user.email}`, reason: 'The previous link no longer works.' },
+            {
+              link: inviteLinkOf(result, tenantId, window.location.origin),
+              note: inviteLinkNote(result.user.email, result.inviteEmail?.status),
+            },
+          );
         }}
         onRejected={(reason) => {
           close();
@@ -506,6 +585,21 @@ function UserActions({
   }
   return (
     <span className="flex flex-wrap gap-1">
+      {/* Story 5-1a — a fresh link and email for an invitation not yet accepted. */}
+      {canInvite && user.status === 'invited' && (
+        <button type="button" className={rowButtonClass} onClick={() => open('resend')}>
+          Resend invite
+        </button>
+      )}
+      {canChangeRole && <RoleChangeActions user={user} isSelf={isSelf} open={open} />}
+    </span>
+  );
+}
+
+/** Story 6-1a / 6-1b — the `users.role_change` buttons of a row. */
+function RoleChangeActions({ user, isSelf, open }: { user: UserRow; isSelf: boolean; open: (action: string) => void }) {
+  return (
+    <>
       {/* Story 6-1b — never on your own row (Security handles your own); also while a reset is pending (re-issue an expired code). */}
       {!isSelf && canResetSecondFactor(user) && (
         <button type="button" className={rowButtonClass} onClick={() => open('reset-2fa')}>
@@ -526,7 +620,7 @@ function UserActions({
           Deactivate
         </button>
       )}
-    </span>
+    </>
   );
 }
 
@@ -536,7 +630,7 @@ function RoleSelect({
   onDone,
   users,
 }: {
-  user: UserResponse;
+  user: UserRow;
   onDone: (outcome: Outcome) => void;
   users: ReturnType<typeof useUsers>;
 }) {
@@ -610,6 +704,8 @@ function rejectionReason(error: unknown): string {
         return error.detail ?? 'Check the entered values and try again.';
       case 'client-not-active':
         return error.detail ?? 'That client brand is not active — portal users are invited for an active client only.';
+      case 'user-not-invited':
+        return 'They are no longer an open invitation (already accepted, or deactivated) — refresh the page.';
       default:
         return error.detail ?? `Request failed (${error.code}).`;
     }

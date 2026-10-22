@@ -507,6 +507,10 @@ export type InviteUserDto = {
     clientId?: string;
 };
 
+export type InviteEmailStatusResponse = {
+    status: 'pending' | 'sending' | 'sent' | 'failed' | 'skipped' | 'expired' | 'cancelled';
+};
+
 export type InviteUserResponse = {
     user: UserResponse;
     /**
@@ -517,10 +521,54 @@ export type InviteUserResponse = {
      * One-time link expiry (7 days)
      */
     inviteExpiresAt: string;
+    /**
+     * Story 5-1a — the accept link, built from the server’s WEB_BASE_URL (the emailed link is the same string). Null when the server has no base URL configured — build it from the web origin
+     */
+    inviteUrl: string | null;
+    /**
+     * Story 5-1a — the invite email this request queued: `pending`, or `skipped` (email off, or outside the allowlist). Null on a replay of a response stored before 5-1a
+     */
+    inviteEmail: InviteEmailStatusResponse | null;
+};
+
+export type InviteEmailListStatusResponse = {
+    status: 'pending' | 'sending' | 'sent' | 'failed' | 'skipped' | 'expired' | 'cancelled';
+    /**
+     * When the status last changed
+     */
+    updatedAt: string;
+};
+
+export type UserListItemResponse = {
+    id: string;
+    email: string;
+    role: 'owner' | 'ops_manager' | 'operator' | 'accountant' | 'client';
+    status: 'invited' | 'active' | 'deactivated';
+    /**
+     * Story 21-7 — the client brand a client-portal user belongs to (role `client`); null for the tenant’s own staff
+     */
+    clientId: string | null;
+    createdAt: string;
+    /**
+     * Story 6-1a — sign-in is locked for this email (5 failed attempts from one address) until this instant; on the user list only, null or absent when not locked
+     */
+    lockedUntil?: string | null;
+    /**
+     * Story 6-1b — the user has two-factor sign-in set up; on the user list only (absent on stored invite / role-change snapshots)
+     */
+    secondFactorEnabled?: boolean;
+    /**
+     * Story 6-1b — an owner reset this user’s two-factor sign-in and they have not set it up again (an enrolment code is outstanding); on the user list only
+     */
+    secondFactorResetPending?: boolean;
+    /**
+     * Story 5-1a — for an `invited` user, the latest invite email’s status (null: none — invited before email existed; null for every other status). Present only when the caller holds users.invite
+     */
+    inviteEmail?: InviteEmailListStatusResponse | null;
 };
 
 export type UserListResponse = {
-    items: Array<UserResponse>;
+    items: Array<UserListItemResponse>;
     /**
      * Opaque keyset cursor
      */
@@ -538,6 +586,14 @@ export type UserStatusResponse = {
      */
     inviteToken?: string;
     inviteExpiresAt?: string;
+    /**
+     * Story 5-1a — beside `inviteToken` only: the accept link (built from the server’s WEB_BASE_URL; the emailed link is the same). Null when the server has no base URL configured — build it from the web origin
+     */
+    inviteUrl?: string | null;
+    /**
+     * Story 5-1a — beside `inviteToken` only: the reissued invite’s email. Null on a replay of a response stored before 5-1a
+     */
+    inviteEmail?: InviteEmailStatusResponse | null;
 };
 
 export type SecondFactorResetResponse = {
@@ -11338,6 +11394,60 @@ export type UsersControllerReactivateUserResponses = {
 };
 
 export type UsersControllerReactivateUserResponse = UsersControllerReactivateUserResponses[keyof UsersControllerReactivateUserResponses];
+
+export type UsersControllerResendInviteData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        userId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/users/{userId}/resend-invite';
+};
+
+export type UsersControllerResendInviteErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or malformed userId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks users.invite (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * User does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The user is not invited — already active, or deactivated (user-not-invited); a portal user whose client is not active (client-not-active); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type UsersControllerResendInviteError = UsersControllerResendInviteErrors[keyof UsersControllerResendInviteErrors];
+
+export type UsersControllerResendInviteResponses = {
+    200: InviteUserResponse;
+};
+
+export type UsersControllerResendInviteResponse = UsersControllerResendInviteResponses[keyof UsersControllerResendInviteResponses];
 
 export type UsersControllerUnlockUserData = {
     body?: never;

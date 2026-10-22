@@ -8,7 +8,7 @@
  * per-command DB read stays the only authority; a stale FE role at worst
  * shows a form whose submit answers 403 `role-denied`, never grants one.
  */
-import type { UserResponse } from '@/lib/api/generated';
+import type { InviteEmailStatusResponse, UserResponse } from '@/lib/api/generated';
 
 export type UserRole = UserResponse['role'];
 
@@ -368,4 +368,74 @@ export function inviteBody(
     return { body: null, problem: 'Pick the client brand this portal user belongs to.' };
   }
   return { body: { email, role, clientId }, problem: null };
+}
+
+// ── Story 5-1a — the invite email ────────────────────────────────────────────
+
+/** The backend's email statuses (`InviteEmailStatusResponse['status']`, generated). */
+export type InviteEmailStatus = InviteEmailStatusResponse['status'];
+
+/**
+ * The words an invite email's status reads as (decision 8). `sent` means the
+ * mail service accepted it — never "delivered" (no bounce intake yet);
+ * `skipped` (email off, or an address outside the allowlist) reads nothing:
+ * the link is the way. A `Record` over the generated union, so a new status
+ * fails to compile until it has words.
+ */
+export const INVITE_EMAIL_WORDS: Readonly<Record<InviteEmailStatus, string | null>> = {
+  pending: 'Queued to send…',
+  sending: 'Queued to send…',
+  sent: 'Sent to the mail service',
+  skipped: null,
+  failed: 'Not sent — resend or copy the link',
+  expired: 'Not sent — resend or copy the link',
+  cancelled: 'Not sent — resend or copy the link',
+};
+
+export function inviteEmailWords(status: InviteEmailStatus | null | undefined): string | null {
+  return status === null || status === undefined ? null : INVITE_EMAIL_WORDS[status];
+}
+
+/** `pending` / `sending`: the status will still change, so the list is worth re-reading. */
+export function inviteEmailInFlight(status: InviteEmailStatus | null | undefined): boolean {
+  return status === 'pending' || status === 'sending';
+}
+
+/** The list re-reads every 5 s while a row is in flight — for at most 60 s from the first in-flight read. */
+export const INVITE_EMAIL_POLL_MS = 5_000;
+export const INVITE_EMAIL_POLL_WINDOW_MS = 60_000;
+
+/** Whether to schedule another read: some row in flight, and the window not yet spent. */
+export function shouldPollInviteEmails(
+  rows: readonly { status: string; inviteEmail?: { status: InviteEmailStatus } | null }[],
+  pollingSince: number | null,
+  now: number,
+): boolean {
+  if (!rows.some((row) => row.status === 'invited' && inviteEmailInFlight(row.inviteEmail?.status))) return false;
+  return pollingSince === null || now - pollingSince < INVITE_EMAIL_POLL_WINDOW_MS;
+}
+
+/**
+ * The accept link to show: the backend's `inviteUrl` — the same string the
+ * email carries (decision 7) — else (a server with no `WEB_BASE_URL`, or a
+ * response stored before 5-1a) the link built from this origin.
+ */
+export function inviteLinkOf(
+  response: { inviteToken: string; inviteUrl?: string | null },
+  tenantId: string,
+  origin: string,
+): string {
+  if (typeof response.inviteUrl === 'string' && response.inviteUrl !== '') return response.inviteUrl;
+  const url = new URL('/accept-invite', origin);
+  url.searchParams.set('tenant', tenantId);
+  url.searchParams.set('token', response.inviteToken);
+  return url.toString();
+}
+
+/** The line shown with a fresh invite link, by what happened to its email. */
+export function inviteLinkNote(email: string, status: InviteEmailStatus | null | undefined): string {
+  if (inviteEmailInFlight(status)) return `An invitation email to ${email} is queued to send. You can also copy the link and share it yourself.`;
+  if (status === 'sent') return `An invitation email to ${email} was sent to the mail service. You can also copy the link.`;
+  if (status === 'failed' || status === 'expired' || status === 'cancelled') return `The invitation email to ${email} was not sent — copy the link and share it yourself.`;
+  return 'Share it out-of-band — it works once, then expires.';
 }
