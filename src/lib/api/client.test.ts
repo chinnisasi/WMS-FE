@@ -552,6 +552,17 @@ describe('outbound order wrappers (story 4.2b)', () => {
     clearSession();
   });
 
+  test('story 4-1b: the search rides as reference, beside the client filter and the cursor', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListOrders(SESSION.tenant.id, WAREHOUSE_ID, { reference: 'SO-1042', clientId: 'c-1', cursor: 'p2' });
+    const url = new URL(lastRequest!.url);
+    expect(url.searchParams.get('reference')).toBe('SO-1042');
+    expect(url.searchParams.get('clientId')).toBe('c-1');
+    expect(url.searchParams.get('cursor')).toBe('p2');
+    clearSession();
+  });
+
   test('the detail read hits the tenant-scoped order path', async () => {
     writeSession(SESSION);
     stubFetch(200, { order: { id: ORDER_ID, lines: [] } });
@@ -2418,6 +2429,16 @@ describe('portal wrappers (story 21-7)', () => {
     const url = new URL(lastRequest!.url);
     expect(url.searchParams.get('cursor')).toBe('abc');
     expect(url.searchParams.get('status')).toBe('dispatched');
+  });
+
+  test('story 4-1b: the orders search rides as reference — alone, or beside the cursor', async () => {
+    stubFetch(200, EMPTY_PAGE);
+    await fetchApiPortalOrders(T, { reference: 'SO-7' });
+    expect(new URL(lastRequest!.url).search).toBe('?reference=SO-7');
+    await fetchApiPortalOrders(T, { reference: 'SO-7', cursor: 'abc' });
+    const url = new URL(lastRequest!.url);
+    expect(url.searchParams.get('reference')).toBe('SO-7');
+    expect(url.searchParams.get('cursor')).toBe('abc');
   });
 
   test.each([

@@ -53,10 +53,18 @@ export function useOutboundOrders(
   /** Story 1-5a — the active-client filter; a drill ignores it (decision 11). */
   clientFilter: ClientFilter,
   drillProp: OrdersDrill | null = null,
+  /**
+   * Story 4-1b — the exact-match search (trimmed, non-blank, or null), sent
+   * as `reference`. Part of every scope stamp, so a new search reads page one
+   * and a cursor minted by another search is never replayed. A drill ignores
+   * it (the drill's rows are the tile's — the screen hides the box).
+   */
+  referenceProp: string | null = null,
 ): ResourceState<OutboundOrdersPage> &
   Reloadable & { readonly onCursor: (cursor: string | null) => void } {
   // Keyed on drillKey, not identity: an RSC refresh must not refetch.
   const drill = useKeyedDrill(drillProp);
+  const reference = drill === null ? referenceProp : null;
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -73,10 +81,11 @@ export function useOutboundOrders(
     tenantId: string;
     warehouseId: string;
     clientId: string | null; clientEpoch: number;
+    reference: string | null;
     cursor: string | null;
   } | null>(null);
   const activeCursor =
-    requested !== null && requested.tenantId === tenantId && requested.warehouseId === warehouseId && requested.clientId === clientId && requested.clientEpoch === clientEpoch
+    requested !== null && requested.tenantId === tenantId && requested.warehouseId === warehouseId && requested.clientId === clientId && requested.clientEpoch === clientEpoch && requested.reference === reference
       ? requested.cursor
       : null;
   const [revision, setRevision] = useState(0);
@@ -84,6 +93,7 @@ export function useOutboundOrders(
     tenantId: string;
     warehouseId: string;
     clientId: string | null;
+    reference: string | null;
     requested: string | null;
     state: ResourceState<OutboundOrdersPage>;
   } | null>(null);
@@ -104,7 +114,11 @@ export function useOutboundOrders(
             ? await fetchApiListOrders(
                 tenantId,
                 warehouseId,
-                { ...(clientId === null ? {} : { clientId }), ...(activeCursor === null ? {} : { cursor: activeCursor }) },
+                {
+                  ...(clientId === null ? {} : { clientId }),
+                  ...(reference === null ? {} : { reference }),
+                  ...(activeCursor === null ? {} : { cursor: activeCursor }),
+                },
               )
             : await fetchOrdersDrill(tenantId, drill, activeCursor);
         if (!cancelled) {
@@ -112,6 +126,7 @@ export function useOutboundOrders(
             tenantId,
             warehouseId,
             clientId,
+            reference,
             requested: activeCursor,
             state: {
               state: 'ready',
@@ -127,6 +142,7 @@ export function useOutboundOrders(
             tenantId,
             warehouseId,
             clientId,
+            reference,
             requested: activeCursor,
             state: { state: 'failed', reason: readReason(error, 'orders') },
           });
@@ -136,14 +152,14 @@ export function useOutboundOrders(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, clientId, pending, drill, activeCursor, revision]);
+  }, [tenantId, warehouseId, clientId, reference, pending, drill, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
       if (tenantId === null || warehouseId === null) return;
-      setRequested({ tenantId, warehouseId, clientId, clientEpoch, cursor });
+      setRequested({ tenantId, warehouseId, clientId, clientEpoch, reference, cursor });
     },
-    [tenantId, warehouseId, clientId, clientEpoch],
+    [tenantId, warehouseId, clientId, clientEpoch, reference],
   );
   const reload = useCallback(() => setRevision((r) => r + 1), []);
 
@@ -155,6 +171,7 @@ export function useOutboundOrders(
     result.tenantId !== tenantId ||
     result.warehouseId !== warehouseId ||
     result.clientId !== clientId ||
+    result.reference !== reference ||
     result.requested !== activeCursor;
 
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };

@@ -21,6 +21,7 @@ import {
   lineRecordsReason,
   needsInvoiceReload,
   orderRefLabel,
+  orderRefOrderLabel,
   pseudonymsOf,
   receiptDocumentLabel,
   reconcileNotice,
@@ -42,7 +43,7 @@ function pick(id: string, over: Partial<Extract<LineRecord, { kind: 'pick' }>> =
     pickedAt: '2026-09-16T20:00:00.123456Z',
     warehouseId: 'w1',
     warehouseCode: 'BLR1',
-    orderRef: { source: 'ingested', externalEventId: 'shopify-1', orderId: 'o-1' },
+    orderRef: { source: 'ingested', externalEventId: 'shopify-1', clientOrderRef: null, orderId: 'o-1' },
     skuId: 's1',
     skuCode: 'ACME-PC',
     skuName: 'Acme widget',
@@ -75,9 +76,17 @@ describe('instants: UTC on the wire, IST (+05:30) on screen and in the file', ()
 });
 
 describe('labels and banners', () => {
-  test('Channel ref falls back to the order id', () => {
-    expect(orderRefLabel({ source: 'ingested', externalEventId: 'shopify-1', orderId: 'o-1' })).toBe('shopify-1');
-    expect(orderRefLabel({ source: 'manual', externalEventId: null, orderId: 'o-1' })).toBe('o-1');
+  test('Channel ref falls back to the order id (unchanged by 4-1b)', () => {
+    expect(orderRefLabel({ externalEventId: 'shopify-1', orderId: 'o-1' })).toBe('shopify-1');
+    expect(orderRefLabel({ externalEventId: null, orderId: 'o-1' })).toBe('o-1');
+  });
+
+  test('the Order column (story 4-1b): the client order number, else the channel ref, else the id’s last 8 characters', () => {
+    expect(orderRefOrderLabel({ source: 'manual', externalEventId: null, clientOrderRef: 'SO-1042', orderId: 'o-1' })).toBe('SO-1042');
+    expect(orderRefOrderLabel({ source: 'ingested', externalEventId: 'shopify-1', clientOrderRef: null, orderId: 'o-1' })).toBe('shopify-1');
+    expect(orderRefOrderLabel({ source: 'manual', externalEventId: null, clientOrderRef: null, orderId: '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b' })).toBe('2e3f4a5b');
+    // An older response with no clientOrderRef key reads as none.
+    expect(orderRefOrderLabel({ source: 'manual', externalEventId: null, orderId: '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b' })).toBe('2e3f4a5b');
   });
 
   test('a reconciling summary raises no banner, on any status', () => {
@@ -206,7 +215,7 @@ describe('the export', () => {
   });
 
   test('the file: BOM, # header naming invoice/client/period/line/totals/reconciles, IST rows with a date column, pseudonyms (no email), plain numbers, the re-check footer', async () => {
-    const records = [pick('p1'), pick('p2', { actorEmail: null, orderRef: { source: 'manual', externalEventId: null, orderId: 'o-2' }, skuName: '=HYPERLINK("x")', qty: '-1' })];
+    const records = [pick('p1'), pick('p2', { actorEmail: null, orderRef: { source: 'manual', externalEventId: null, clientOrderRef: null, orderId: 'o-2' }, skuName: '=HYPERLINK("x")', qty: '-1' })];
     const pseudonyms = await pseudonymsOf(TENANT, records);
     const summary = { lineQuantity: '412', recordsQuantity: '412', reconciles: true };
     const text = buildLineRecordsCsv({
@@ -239,10 +248,10 @@ describe('the export', () => {
       '"# Reconciles: yes"',
       '"# Generated: 2026-10-07T10:00:00.000+05:30"',
     ]);
-    expect(lines[12]).toBe('picked_at_ist,ist_date,warehouse,channel_ref,order_id,sku_code,sku_name,qty,bin,actor');
+    expect(lines[12]).toBe('picked_at_ist,ist_date,warehouse,channel_ref,order_id,sku_code,sku_name,qty,bin,actor,order');
     const code = pseudonyms.get(ACTOR)!;
-    expect(lines[13]).toBe(`"2026-09-17T01:30:00.123456+05:30","2026-09-17","BLR1","shopify-1","o-1","ACME-PC","Acme widget",2.5,"A-01-01","${code}"`);
-    expect(lines[14]).toBe(`"2026-09-17T01:30:00.123456+05:30","2026-09-17","BLR1","o-2","o-2","ACME-PC","'=HYPERLINK(""x"")",-1,"A-01-01","${code}"`);
+    expect(lines[13]).toBe(`"2026-09-17T01:30:00.123456+05:30","2026-09-17","BLR1","shopify-1","o-1","ACME-PC","Acme widget",2.5,"A-01-01","${code}","shopify-1"`);
+    expect(lines[14]).toBe(`"2026-09-17T01:30:00.123456+05:30","2026-09-17","BLR1","o-2","o-2","ACME-PC","'=HYPERLINK(""x"")",-1,"A-01-01","${code}","o-2"`);
     expect(text).not.toContain('priya@example.com');
     expect(text).not.toContain(ACTOR);
     expect(lines.at(-1)).toBe('"# Re-checked at the end of the export: reconciles yes."');

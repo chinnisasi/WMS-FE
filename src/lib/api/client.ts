@@ -3110,12 +3110,15 @@ export async function fetchApiListOrders(
     to?: string;
     /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
     clientId?: string;
+    /** Story 4-1b — the exact-match search (a client order number or a channel reference); sent only when set. */
+    reference?: string;
     cursor?: string;
     limit?: number;
     signal?: AbortSignal;
   },
 ): Promise<OrderListResponse> {
   const query = definedQuery({
+    reference: options?.reference,
     status: options?.status,
     source: options?.source,
     backordered: options?.backordered,
@@ -4838,10 +4841,18 @@ export async function fetchApiPortalStock(tenantId: string, options?: PortalPage
 /** This client's orders, newest first; optionally one status. */
 export async function fetchApiPortalOrders(
   tenantId: string,
-  options?: PortalPageOptions & { status?: PortalOrderRowDto['status'] },
+  options?: PortalPageOptions & {
+    status?: PortalOrderRowDto['status'];
+    /** Story 4-1b — the exact-match search over this client's own orders; sent only when set. */
+    reference?: string;
+  },
 ): Promise<PortalOrderPageResponse> {
   const page = portalPageQuery(options);
-  const query = options?.status === undefined ? page : { ...page, status: options.status };
+  const filters = {
+    ...(options?.status === undefined ? {} : { status: options.status }),
+    ...(options?.reference === undefined ? {} : { reference: options.reference }),
+  };
+  const query = Object.keys(filters).length === 0 ? page : { ...page, ...filters };
   const { data, error } = await portalControllerOrders({ path: { tenantId }, query, signal: options?.signal });
   if (error || !data) throw portalError(error);
   return data;

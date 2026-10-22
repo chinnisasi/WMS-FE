@@ -2679,6 +2679,10 @@ export type CreateOrderDto = {
      * The GST-registered buyer's legal or trade name (story 8-1d), printed as the invoice's buyer and so the e-way bill's toTrdName; absent falls back to the destination contact name. Trimmed; blank reads as absent. Only alongside consigneeGstin and at most 100 characters (Unicode code points) — both refused by the command (400 validation-failed) behind its replay lookup.
      */
     consigneeLegalName?: string;
+    /**
+     * Story 4-1b — the client's own order number (optional; a manual order only — 400 beside source 'ingested'). Trimmed (the pattern is the trimmed value's); blank reads as absent. 1–64 printable ASCII characters (refused by the command, 400 validation-failed, behind its replay lookup); unique among the client's live orders (409 duplicate-client-order-ref — a cancelled order frees its number). Create-only.
+     */
+    clientOrderRef?: string;
 };
 
 export type OrderLineDto = {
@@ -2739,6 +2743,10 @@ export type OrderDto = {
      * Channel external event id (null on a manual order)
      */
     externalEventId: string | null;
+    /**
+     * Story 4-1b — the client's own order number (null when none was given). Absent only on a replayed response stored before 4-1b — read absent as null
+     */
+    clientOrderRef?: string | null;
     /**
      * Where the shipment goes (story 11-1); null on a pre-11.1 order row
      */
@@ -2846,6 +2854,10 @@ export type PackDto = {
     integrationId: string | null;
     externalEventId: string | null;
     /**
+     * Story 4-1b — the client's own order number (null when none was given). Absent only on a replayed response stored before 4-1b — read absent as null
+     */
+    clientOrderRef?: string | null;
+    /**
      * The operator who packed it
      */
     packedBy: string;
@@ -2917,6 +2929,10 @@ export type DispatchDto = {
     source: 'manual' | 'ingested';
     integrationId: string | null;
     externalEventId: string | null;
+    /**
+     * Story 4-1b — the client's own order number (null when none was given). Absent only on a replayed response stored before 4-1b — read absent as null
+     */
+    clientOrderRef?: string | null;
     /**
      * The operator who dispatched it
      */
@@ -3087,6 +3103,10 @@ export type OrderEntryDto = {
     source: 'manual' | 'ingested';
     integrationId: string | null;
     externalEventId: string | null;
+    /**
+     * Story 4-1b — the client's own order number; null when none was given (a live read — always present)
+     */
+    clientOrderRef: string | null;
     /**
      * Where the shipment goes (story 11-1); null on a pre-11.1 order row
      */
@@ -8676,9 +8696,13 @@ export type OrderRefDto = {
      */
     source: string | null;
     /**
-     * The channel's event id (the web labels it "Channel ref"); null on a manual order — there is no order number yet
+     * The channel's event id (the web labels it "Channel ref"); null on a manual order
      */
     externalEventId: string | null;
+    /**
+     * Story 4-1b — the client's own order number; null when none (or when the order row is missing)
+     */
+    clientOrderRef: string | null;
     orderId: string;
 };
 
@@ -9126,6 +9150,10 @@ export type PortalOrderRowDto = {
      * The sales channel's own order reference; null for a manual order
      */
     externalRef: string | null;
+    /**
+     * Story 4-1b — your own order number, as given when the order was placed; null when none was given
+     */
+    clientOrderRef: string | null;
     warehouseName: string;
     destinationName: string | null;
     destinationCity: string | null;
@@ -9174,6 +9202,10 @@ export type PortalCreateOrderDto = {
      * The GST-registered buyer's legal or trade name (optional, only alongside consigneeGstin, at most 100 characters — counted in code points after the trim, by the command). Trimmed; blank reads as absent.
      */
     consigneeLegalName?: string;
+    /**
+     * Story 4-1b — your own order number (optional). Trimmed (the pattern is the trimmed value's); blank reads as absent. 1–64 printable ASCII characters (400 validation-failed otherwise); must not be already used by another of your orders (409 duplicate-client-order-ref — a cancelled order frees its number).
+     */
+    clientOrderRef?: string;
 };
 
 export type PortalPlacedOrderResponse = {
@@ -9193,6 +9225,10 @@ export type PortalPlacedOrderResponse = {
      * When the order was placed
      */
     placedAt: string;
+    /**
+     * Story 4-1b — your order number as stored (trimmed); null when none was given. Absent only on a replay of an order placed before 4-1b — read absent as null
+     */
+    clientOrderRef?: string | null;
 };
 
 export type PortalOrderComponentDto = {
@@ -9225,6 +9261,10 @@ export type PortalOrderDetailResponse = {
      * The sales channel's own order reference; null for a manual order
      */
     externalRef: string | null;
+    /**
+     * Story 4-1b — your own order number, as given when the order was placed; null when none was given
+     */
+    clientOrderRef: string | null;
     warehouseName: string;
     destinationName: string | null;
     destinationCity: string | null;
@@ -10048,7 +10088,7 @@ export type ReturnAuthorizationDto = {
     status: 'open' | 'partially_received' | 'received' | 'cancelled';
     orderId: string;
     /**
-     * The order's channel reference at authorization (its external event id); null for a manual order
+     * The order's reference at authorization — story 4-1b: its client order number, else its channel reference (external event id); null when it has neither. An RMA created before 4-1b holds the channel reference only
      */
     orderReference: string | null;
     /**
@@ -10236,7 +10276,7 @@ export type ReturnableOrderDto = {
     status: string;
     warehouseId: string;
     /**
-     * The order's channel reference; null for a manual order
+     * Story 4-1b — the order's client order number, else its channel reference; null when it has neither
      */
     orderReference: string | null;
     /**
@@ -14601,7 +14641,7 @@ export type OutboundControllerCreateOrderData = {
 
 export type OutboundControllerCreateOrderErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or invalid body (validation-failed)
+     * Missing or malformed Idempotency-Key, or invalid body — story 4-1b: a clientOrderRef that is not 1–64 printable ASCII characters, or one on an ingested order (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -14617,7 +14657,7 @@ export type OutboundControllerCreateOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A concurrent idempotent request (conflict), or a concurrent first delivery of the same channel payload (conflict — retry to read the settled result); a line of an inactive SKU that stock does not cover in full — an inactive SKU sells down, never backorders (sku-inactive, naming extensions.skuCodes); a line SKU became a kit while the order was placed (order-catalog-changed — retry); story 1-6d: licence enforcement is on and no valid client and site licence covers a SKU (a line, a kit or a kit component) of drug or food goods at the warehouse today — nothing is created and every grant is released (licence-not-covered, the detail naming each SKU, its missing need and the holder, separated by "; ", and extensions.skuCodes)
+     * A concurrent idempotent request (conflict), or a concurrent first delivery of the same channel payload (conflict — retry to read the settled result); a line of an inactive SKU that stock does not cover in full — an inactive SKU sells down, never backorders (sku-inactive, naming extensions.skuCodes); a line SKU became a kit while the order was placed (order-catalog-changed — retry); story 1-6d: licence enforcement is on and no valid client and site licence covers a SKU (a line, a kit or a kit component) of drug or food goods at the warehouse today — nothing is created and every grant is released (licence-not-covered, the detail naming each SKU, its missing need and the holder, separated by "; ", and extensions.skuCodes); story 4-1b: the clientOrderRef is already used by another live order of the client — nothing is reserved (duplicate-client-order-ref)
      */
     409: ProblemDetailsDto;
     /**
@@ -15057,13 +15097,17 @@ export type OutboundControllerListOrdersData = {
          */
         cursor?: string;
         limit?: number;
+        /**
+         * Story 4-1b — an EXACT, case-sensitive match on the order's client order number (any status) OR its channel reference (externalEventId). Trimmed; blank is no search; over 200 characters (a channel reference's ceiling) is 400. Composes with every other filter, the client filter included
+         */
+        reference?: string;
     };
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/orders';
 };
 
 export type OutboundControllerListOrdersErrors = {
     /**
-     * Malformed cursor, out-of-range limit, an unknown status/source, a from/to that is not an ISO-8601 instant, from not before to, or a backordered flag other than true/false (invalid-cursor / validation-failed)
+     * Malformed cursor, out-of-range limit, an unknown status/source, a from/to that is not an ISO-8601 instant, from not before to, a backordered flag other than true/false, or a reference over 200 characters (invalid-cursor / validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -23066,6 +23110,10 @@ export type PortalControllerOrdersData = {
         cursor?: string;
         limit?: number;
         status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+        /**
+         * Story 4-1b — an EXACT, case-sensitive match on your order number (any status, cancelled included) or the sales channel's order reference. Trimmed; blank is no search; over 200 characters is 400. Only your own orders are ever searched
+         */
+        reference?: string;
     };
     url: '/tenants/{tenantId}/portal/orders';
 };
@@ -23113,7 +23161,7 @@ export type PortalControllerPlaceOrderData = {
 
 export type PortalControllerPlaceOrderErrors = {
     /**
-     * Missing (idempotency-key-required) or malformed (idempotency-key-invalid) Idempotency-Key; an invalid body — a clientId or a ratePaise, no lines or more than 200, an incomplete ship-to address, a malformed consignee GSTIN or legal name, or a quantity finer than its unit (validation-failed)
+     * Missing (idempotency-key-required) or malformed (idempotency-key-invalid) Idempotency-Key; an invalid body — a clientId or a ratePaise, no lines or more than 200, an incomplete ship-to address, a malformed consignee GSTIN or legal name, a quantity finer than its unit, or an order number that is not 1–64 printable ASCII characters (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -23129,7 +23177,7 @@ export type PortalControllerPlaceOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Not enough stock at the warehouse for a line — nothing was placed (order-backorder-rejected, extensions.skuCodes naming the short SKUs); a licence for one of the products is not on file with the warehouse (licence-not-covered); a SKU was deactivated while the order was placed — refused even when its stock covered the line, the portal never sells down (sku-inactive); a SKU became a kit or left this client while the order was placed (order-catalog-changed); or a concurrent idempotent request (conflict)
+     * Not enough stock at the warehouse for a line — nothing was placed (order-backorder-rejected, extensions.skuCodes naming the short SKUs); a licence for one of the products is not on file with the warehouse (licence-not-covered); a SKU was deactivated while the order was placed — refused even when its stock covered the line, the portal never sells down (sku-inactive); a SKU became a kit or left this client while the order was placed (order-catalog-changed); story 4-1b: the order number is already used by another of this client's orders (a cancelled order frees its number) — nothing was placed (duplicate-client-order-ref); or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**

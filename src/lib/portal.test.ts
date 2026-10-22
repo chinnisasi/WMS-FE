@@ -96,6 +96,10 @@ describe('portal figures', () => {
     expect(orderDestination({ destinationName: null, destinationCity: null, destinationPincode: null })).toBe('—');
     expect(orderReference({ source: 'ingested', externalRef: 'SHOP-1' })).toBe('SHOP-1');
     expect(orderReference({ source: 'manual', externalRef: null })).toBe('Manual');
+    // Story 4-1b — the client's own number wins, then the channel's; never an internal id.
+    expect(orderReference({ source: 'manual', externalRef: null, clientOrderRef: 'SO-7' })).toBe('SO-7');
+    expect(orderReference({ source: 'ingested', externalRef: 'SHOP-1', clientOrderRef: null })).toBe('SHOP-1');
+    expect(orderReference({ source: 'ingested', externalRef: null, clientOrderRef: '' })).toBe('Channel');
     expect(lineCountLabel(1)).toBe('1 line');
     expect(lineCountLabel(3)).toBe('3 lines');
     expect(skuLabel({ skuCode: null, skuName: null })).toBe('—');
@@ -238,6 +242,18 @@ describe('parsePortalOrderCreate (story 4-1a)', () => {
     expect(Object.keys(parsePortalOrderCreate(draft({ consigneeLegalName: 'Kept, not sent' }), W).body!)).not.toContain('consigneeLegalName');
   });
 
+  test('story 4-1b: the order number is trimmed and sent only when given; a shape the server refuses is a problem, nothing sent', () => {
+    expect(parsePortalOrderCreate(draft({ clientOrderRef: '  SO-7 ' }), W).body).toMatchObject({ clientOrderRef: 'SO-7' });
+    for (const blank of ['', '   ']) {
+      expect(Object.keys(parsePortalOrderCreate(draft({ clientOrderRef: blank }), W).body!)).not.toContain('clientOrderRef');
+    }
+    for (const bad of ['x'.repeat(65), 'SO\t7', 'SO-é']) {
+      const parsed = parsePortalOrderCreate(draft({ clientOrderRef: bad }), W);
+      expect(parsed.body).toBeNull();
+      expect(parsed.problem).toMatch(/^Your order number /);
+    }
+  });
+
   test('MAX_PORTAL_ORDER_LINES is the staff order ceiling (the backend ArrayMaxSize both DTOs share)', () => {
     expect(MAX_PORTAL_ORDER_LINES).toBe(MAX_ORDER_LINES);
     expect(MAX_PORTAL_ORDER_LINES).toBe(200);
@@ -307,6 +323,9 @@ describe('the place-an-order helpers (story 4-1a)', () => {
       // 20:00 UTC is 01:30 the NEXT day in IST.
       reason: '1 line to Main (22 Oct 2026, 01:30 IST) — follow it in the list below.',
     });
+    // Story 4-1b — named by the client's own number when it gave one.
+    expect(placedOrderBanner({ orderId: 'o', warehouseName: 'Main', lineCount: 1, placedAt: '2026-10-21T20:00:00.000Z', clientOrderRef: 'SO-7' }).word).toBe('Order SO-7 placed');
+    expect(placedOrderBanner({ orderId: 'o', warehouseName: 'Main', lineCount: 1, placedAt: '2026-10-21T20:00:00.000Z', clientOrderRef: null }).word).toBe('Order placed');
     expect(portalInstantIst('not a date')).toBe('not a date');
   });
 });
@@ -324,7 +343,9 @@ describe('portalOrderReason (story 4-1a)', () => {
       ['reservation-store-unavailable', 503, 'The warehouse could not check stock just now — nothing was placed. Try again in a moment.'],
       ['conflict', 409, 'The same order is still being processed — try again in a moment.'],
       ['idempotency-key-reuse', 422, 'This submission was already processed with different details — reload and try again.'],
-      ['validation-failed', 400, 'Check the quantities, the ship-to address and the buyer GSTIN, then try again.'],
+      // Story 4-1b — the fixed sentence now names the order number too.
+      ['validation-failed', 400, 'Check the quantities, the ship-to address, the buyer GSTIN and your order number, then try again.'],
+      ['duplicate-client-order-ref', 409, 'That order number is already used by one of your open orders — use a different number.'],
       ['client-suspended', 403, "Your company's portal access is suspended."],
       ['client-departed', 403, "Your company's account with the warehouse has ended."],
       ['role-denied', 403, 'This page is for client-portal users — sign in with your portal account.'],
@@ -342,6 +363,12 @@ describe('portalOrderReason (story 4-1a)', () => {
       'Not enough stock at this warehouse for A-1, A-2 — nothing was placed. Lower the quantities or choose another warehouse.',
     );
     expect(portalOrderReason(problem('order-backorder-rejected', 409))).toContain('for some lines');
+  });
+
+  test('story 4-1b: a duplicate order number echoes only what the user typed — never the server detail', () => {
+    expect(portalOrderReason(problem('duplicate-client-order-ref', 409), 'SO-7')).toBe(
+      'Order number SO-7 is already used by one of your open orders — use a different number.',
+    );
   });
 
   test('the transport arm is the house unreachable copy', () => {

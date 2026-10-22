@@ -51,6 +51,7 @@ import {
   type PipelineStatus,
 } from '@/lib/outbound-pack-dispatch';
 import { filterPage, lineQuantityLabel, orderStatusLabel, pageFilterCount, readReason } from '@/lib/outbound-orders';
+import { orderLabel, shortOrderId } from '@/lib/orders';
 import { useCarrierConnections, useManifests, useOrderRates, useOrderShipment } from '@/lib/use-outbound-labels';
 import { useOrderDetail, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { usePipelineOrders } from '@/lib/use-outbound-pack-dispatch';
@@ -176,7 +177,15 @@ function PackDispatchTable({
           <span aria-hidden className="text-(--muted-foreground)">
             {expandedId === order.id ? '▾' : '▸'}
           </span>
-          <span className="font-mono text-xs">{order.id}</span>
+          {/* Story 4-1b — the order label, the short id beneath. */}
+          <span className="flex flex-col">
+            <span className="font-mono text-xs" data-testid="order-label">
+              {orderLabel(order)}
+            </span>
+            <span className="font-mono text-[11px] text-(--muted-foreground)" title={order.id}>
+              {shortOrderId(order.id)}
+            </span>
+          </span>
         </button>
       ),
     },

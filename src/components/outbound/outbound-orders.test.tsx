@@ -128,6 +128,8 @@ function stubRouter(): void {
           source: 'manual',
           integrationId: null,
           externalEventId: null,
+          // Story 4-1b — echoed as the server stores it (trimmed by the form already).
+          clientOrderRef: (body.clientOrderRef as string | undefined) ?? null,
           destination: body.destination,
           ...(createdClientId === undefined ? {} : { clientId: createdClientId }),
           createdAt: '2026-10-03T00:00:00.000Z',
@@ -826,7 +828,7 @@ describe('OrderDetailPanel: "View ledger" (story 9-3a)', () => {
     };
   }
 
-  test('threaded the warehouse (from OrdersTable), it links the order\'s events in that warehouse, labelled by the order id', async () => {
+  test('threaded the warehouse (from OrdersTable), it links the order\'s events in that warehouse, labelled by the order label (story 4-1b: no number, no channel ref — the id\'s last 8 characters)', async () => {
     order = plainOrder();
     view = render(<OrderDetailPanel orderId={ORDER_ID} warehouseId={WAREHOUSE} />);
     await settle();
@@ -837,8 +839,18 @@ describe('OrderDetailPanel: "View ledger" (story 9-3a)', () => {
       warehouseId: WAREHOUSE,
       doc: 'order',
       orderId: ORDER_ID,
-      label: ORDER_ID,
+      // Story 4-1b — the order label rule (was the full id): its short form here.
+      label: '0000e001',
     });
+  });
+
+  test('story 4-1b: an order with a client number is labelled by it — the detail header and the ledger link', async () => {
+    order = { ...plainOrder(), clientOrderRef: 'SO-1042', externalEventId: 'AMZ-9' };
+    view = render(<OrderDetailPanel orderId={ORDER_ID} warehouseId={WAREHOUSE} />);
+    await settle();
+    expect(view.container.querySelector('[data-testid="order-detail-header"]')!.textContent).toBe(`SO-1042${ORDER_ID}`);
+    const link = [...view.container.querySelectorAll('a')].find((a) => a.textContent === 'View ledger');
+    expect(new URL(`http://x${link!.getAttribute('href')!}`).searchParams.get('label')).toBe('SO-1042');
   });
 
   test('an ingested order is labelled by its channel ref', async () => {
@@ -1208,5 +1220,132 @@ describe('OrderCreateForm: defaults to the active client (story 1-5a)', () => {
   test('without an active client the select still starts empty', async () => {
     view = await mountForm();
     expect(clientSelect(view.container)!.value).toBe('');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Story 4-1b: the client order number                                 */
+/* ------------------------------------------------------------------ */
+
+function searchInput(container: HTMLElement): HTMLInputElement {
+  const found = container.querySelector<HTMLInputElement>('form[role="search"] input');
+  expect(found).not.toBeNull();
+  return found!;
+}
+
+async function submitSearch(container: HTMLElement): Promise<void> {
+  const form = container.querySelector('form[role="search"]')!;
+  act(() => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await settle();
+}
+
+describe('the client order number (story 4-1b)', () => {
+  test('the create form sends it trimmed, names the order by it, and resets; blank sends no key', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Client order number (optional)'), '  SO-1042 ');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(1);
+    expect(creates[0]!.body.clientOrderRef).toBe('SO-1042');
+    expect(view.container.querySelector('[role="status"]')!.textContent).toContain('Order SO-1042 accepted');
+    expect(input(view.container, 'Client order number (optional)').value).toBe('');
+
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Client order number (optional)'), '   ');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(2);
+    expect('clientOrderRef' in creates[1]!.body).toBe(false);
+  });
+
+  test('a shape the server would refuse sends nothing and mints no key; an edit of the number mints a fresh key', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Client order number (optional)'), 'x'.repeat(65));
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(0);
+    expect(view.container.querySelector('[role="alert"]')!.textContent).toContain('Client order number is at most 64 characters');
+
+    createStatus = 503;
+    setInput(input(view.container, 'Client order number (optional)'), 'SO-1');
+    await submitCreate(view.container);
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(2);
+    expect(creates[1]!.key).toBe(creates[0]!.key);
+    setInput(input(view.container, 'Client order number (optional)'), 'SO-2');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(3);
+    expect(creates[2]!.key).not.toBe(creates[1]!.key);
+    expect(creates[2]!.body.clientOrderRef).toBe('SO-2');
+  });
+
+  test('the Order column shows the label (number, else channel ref, else short id) with the short id beneath', async () => {
+    ordersResponder = () => ({
+      items: [
+        { ...entry('0198f7a2-1b3c-7d4e-8f90-0000000a0001', 'c-self'), clientOrderRef: 'SO-1042' },
+        { ...entry('0198f7a2-1b3c-7d4e-8f90-0000000a0002', 'c-self'), source: 'ingested', integrationId: 'i-1', externalEventId: 'AMZ-9' },
+        entry('0198f7a2-1b3c-7d4e-8f90-0000000a0003', 'c-self'),
+      ],
+      nextCursor: null,
+    });
+    view = await mountForm();
+    const labels = [...view.container.querySelectorAll('[data-testid="order-label"]')].map((node) => node.textContent);
+    expect(labels).toEqual(['SO-1042', 'AMZ-9', '000a0003']);
+    expect(view.container.textContent).toContain('000a0001');
+  });
+
+  test('the search sends reference (trimmed), restarts from page one, and Clear drops it; an empty result names the warehouse', async () => {
+    ordersResponder = (url) => {
+      if (url.searchParams.get('reference') === 'SO-1042') return { items: [{ ...entry('found-1', 'c-self'), clientOrderRef: 'SO-1042' }], nextCursor: null };
+      if (url.searchParams.has('reference')) return { items: [], nextCursor: null };
+      if (url.searchParams.get('cursor') === 'p2') return { items: [entry('page-2', 'c-self')], nextCursor: null };
+      return { items: [entry('page-1', 'c-self')], nextCursor: 'p2' };
+    };
+    view = await mountForm();
+    act(() => button(view!.container, 'Next').click());
+    await settle();
+    expect(listUrls.at(-1)!.searchParams.get('cursor')).toBe('p2');
+
+    setInput(searchInput(view.container), '  SO-1042  ');
+    await submitSearch(view.container);
+    const searched = listUrls.at(-1)!;
+    expect(searched.searchParams.get('reference')).toBe('SO-1042');
+    expect(searched.searchParams.has('cursor')).toBe(false);
+    expect(button(view.container, 'Prev').disabled).toBe(true);
+    expect(view.container.textContent).toContain('SO-1042');
+    expect(view.container.textContent).not.toContain('page-2');
+
+    setInput(searchInput(view.container), 'NOPE-1');
+    await submitSearch(view.container);
+    expect(view.container.textContent).toContain('No order in BLR-01 Whitefield has the order number or channel reference "NOPE-1"');
+
+    act(() => button(view!.container, 'Clear').click());
+    await settle();
+    expect(listUrls.at(-1)!.searchParams.has('reference')).toBe(false);
+    expect(view.container.textContent).toContain('page-1');
+  });
+
+  test('over 200 characters is refused in the box — nothing is sent', async () => {
+    view = await mountForm();
+    const before = listUrls.length;
+    setInput(searchInput(view.container), 'x'.repeat(201));
+    await submitSearch(view.container);
+    expect(listUrls.length).toBe(before);
+    expect(view.container.querySelector('form[role="search"] [role="alert"]')!.textContent).toContain('at most 200 characters');
+  });
+
+  test('under a client filter, an empty search names the client and the show-all-clients hint', async () => {
+    clientsBody = [SELF_CLIENT, ACME_CLIENT];
+    writeActiveClientId(TENANT_ID, 'u-1', 'c-acme');
+    ordersResponder = (url) => (url.searchParams.has('reference') ? { items: [], nextCursor: null } : { items: [entry('acme-1', 'c-acme')], nextCursor: null });
+    view = await mountForm();
+    setInput(searchInput(view.container), 'SO-9');
+    await submitSearch(view.container);
+    const last = listUrls.at(-1)!;
+    expect(last.searchParams.get('clientId')).toBe('c-acme');
+    expect(last.searchParams.get('reference')).toBe('SO-9');
+    expect(view.container.textContent).toContain('for ACME — Acme Foods — it may be another client\'s: show all clients to search them all.');
   });
 });

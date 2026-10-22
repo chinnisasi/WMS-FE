@@ -20,6 +20,7 @@ import {
   lineRecordsReason,
   needsInvoiceReload,
   orderRefLabel,
+  orderRefOrderLabel,
   pseudonymsOf,
   receiptDocumentLabel,
   reconcileNotice,
@@ -278,6 +279,7 @@ function RecordsTable({
                 <th className={th}>Picked (IST)</th>
                 <th className={th}>Warehouse</th>
                 <th className={th}>Channel ref</th>
+                <th className={th}>Order</th>
                 <th className={th}>SKU</th>
                 <th className={thNum}>Qty</th>
                 <th className={th}>Bin</th>
@@ -289,6 +291,7 @@ function RecordsTable({
                 <th className={th}>First dispatched (IST)</th>
                 <th className={th}>Warehouse</th>
                 <th className={th}>Channel ref</th>
+                <th className={th}>Order</th>
                 <th className={thNum}>Lines</th>
                 <th className={th}>Carrier</th>
                 <th className={th}>Tracking</th>
@@ -332,6 +335,7 @@ function RecordsTable({
                     <td className={td}>{formatIstInstant(record.pickedAt)}</td>
                     <td className={td}>{record.warehouseCode}</td>
                     <td className={`${td} font-mono`}>{orderRefLabel(record.orderRef)}</td>
+                    <td className={`${td} font-mono`}>{orderRefOrderLabel(record.orderRef)}</td>
                     <td className={td}>
                       <span className="font-mono">{record.skuCode}</span> {record.skuName}
                     </td>
@@ -346,6 +350,7 @@ function RecordsTable({
                     <td className={td}>{formatIstInstant(record.dispatchedAt)}</td>
                     <td className={td}>{record.warehouseCode}</td>
                     <td className={`${td} font-mono`}>{orderRefLabel(record.orderRef)}</td>
+                    <td className={`${td} font-mono`}>{orderRefOrderLabel(record.orderRef)}</td>
                     <td className={tdNum}>{record.lines}</td>
                     <td className={td}>{record.carrierName ?? '—'}</td>
                     <td className={`${td} font-mono`}>{record.trackingNumber ?? '—'}</td>
