@@ -268,6 +268,8 @@ function RecordsTable({
                 <th className={th}>SKU</th>
                 <th className={thNum}>Received</th>
                 <th className={thNum}>Applied</th>
+                {/* Story 2-4a — an all-damaged line is still a billed receipt line; the drill shows why. */}
+                <th className={thNum}>Damaged</th>
                 <th className={th}>By</th>
               </>
             ) : null}
@@ -320,6 +322,7 @@ function RecordsTable({
                     </td>
                     <td className={tdNum}>{groupDecimal(record.qty)}</td>
                     <td className={tdNum}>{groupDecimal(record.appliedQty)}</td>
+                    <td className={tdNum}>{record.damagedQty === undefined ? '—' : groupDecimal(record.damagedQty)}</td>
                     <td className={td}>{actorLabel(record)}</td>
                   </tr>
                 );

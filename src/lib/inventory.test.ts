@@ -40,15 +40,19 @@ const LOADING: CodeMap = { state: 'loading' };
 const FAILED: CodeMap = { state: 'failed', reason: 'nope' };
 
 describe('SYSTEM_BIN_LABEL — system bins in words', () => {
-  test('the four backend system codes, each labelled', () => {
+  test('the five backend system codes, each labelled (story 2-4a adds DAMAGED)', () => {
     expect(SYSTEM_BIN_LABEL).toEqual({
       RECEIVING: 'Receiving (awaiting putaway)',
       'QC-HOLD': 'QC hold (not sellable)',
       RETURNS: 'Returns',
       'IN-TRANSIT': 'In transit',
+      DAMAGED: 'Damaged (not sellable)',
     });
     expect(systemBinLabel('RECEIVING', true)).toBe('Receiving (awaiting putaway)');
     expect(systemBinLabel('QC-HOLD', true)).toBe('QC hold (not sellable)');
+    expect(systemBinLabel('DAMAGED', true)).toBe('Damaged (not sellable)');
+    // A user bin coded DAMAGED (a pre-rule collision) is not the system bin.
+    expect(systemBinLabel('DAMAGED', false)).toBeNull();
   });
 
   test('only a system-owned bin is labelled; an unknown system code falls back', () => {

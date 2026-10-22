@@ -40,10 +40,13 @@ import { useBatchList, useSkuCatalog, useStockList, useWarehouseBins } from '@/l
 import { useBatchDetail } from '@/lib/use-replenishment';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
+import { roleHasCapability } from '@/lib/users';
+import { writeOffOffered } from '@/lib/write-off';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { Ledger } from '@/components/inventory/ledger';
+import { WriteOffBanner, WriteOffPanel, type WriteOffResult } from '@/components/inventory/write-off';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { buttonClass, inputClass, ReadFailure, rowButtonClass, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
@@ -54,7 +57,9 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
  * a bin or SKU code), **Batches** (a SKU's batches by expiry, each opening to
  * its bins and history) and **Ledger** (the existing timeline, undrilled).
  *
- * Read-only: no adjust, move or hold here. It reads the active warehouse
+ * Read-only but for ONE write (story 2-4a): a role holding `stock.adjust`
+ * can write off units from the system DAMAGED bin (`WriteOffPanel`). No
+ * other adjust, move or hold here. It reads the active warehouse
  * (the sidebar switcher's pick, else the first). The warehouse gate wraps
  * Stock and Batches only — the Ledger owns its own warehouse resolution and
  * failure arms, so a failed warehouses read never shows twice.
@@ -331,6 +336,18 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
   );
   const [draft, setDraft] = useState('');
   const [applied, setApplied] = useState<AppliedSearch | null>(null);
+  // Story 2-4a — the damaged write-off: the role through the subscription
+  // (the /me bootstrap rewrites it after mount), the open row, the outcome.
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  const canAdjust = roleHasCapability(role, 'stock.adjust');
+  // Both reset on a warehouse switch: this section is keyed on the warehouse
+  // (WarehouseGate), so a switch remounts it (code review EC6, pinned).
+  const [writeOffRowId, setWriteOffRowId] = useState<string | null>(null);
+  const [writeOffResult, setWriteOffResult] = useState<WriteOffResult | null>(null);
 
   // Story 1-5a — under an active client the search resolves only that
   // client's SKU codes (the catalog read itself stays unfiltered).
@@ -384,6 +401,48 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
     });
   }
   columns.push({ key: 'quantity', header: 'On hand', numeric: true, render: (row) => quantityLabel(row.quantity, skuOf(row)) });
+  // Story 2-4a — the Action column appears only when a listed row can be
+  // written off (a DAMAGED row and `stock.adjust`): every other table is
+  // exactly as before.
+  const anyWriteOff = stock.state === 'ready' && stock.data.rows.some((row) => writeOffOffered(row, canAdjust) && skuOf(row) !== null);
+  if (anyWriteOff) {
+    columns.push({
+      key: 'writeOff',
+      header: 'Action',
+      render: (row) =>
+        writeOffOffered(row, canAdjust) && skuOf(row) !== null ? (
+          <button
+            type="button"
+            className={rowButtonClass}
+            aria-expanded={writeOffRowId === row.id}
+            onClick={() => {
+              setWriteOffResult(null);
+              setWriteOffRowId(writeOffRowId === row.id ? null : row.id);
+            }}
+          >
+            Write off
+          </button>
+        ) : null,
+    });
+  }
+  const writeOffExpanded = (row: StockEntryDto) => {
+    const sku = skuOf(row);
+    if (writeOffRowId !== row.id || sku === null) return null;
+    return (
+      <WriteOffPanel
+        key={row.id}
+        warehouseId={warehouseId}
+        row={row}
+        sku={sku}
+        onClose={() => setWriteOffRowId(null)}
+        onDone={(result) => {
+          setWriteOffRowId(null);
+          setWriteOffResult(result);
+          stock.reload();
+        }}
+      />
+    );
+  };
 
   const warehouseLabel = warehouseDisplayLabel(warehouses, warehouseId);
   const emptyMessage =
@@ -447,6 +506,7 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
               {searchSummary(applied)}
             </div>
           )}
+          {writeOffResult !== null && <WriteOffBanner result={writeOffResult} />}
           {stock.state === 'failed' ? (
             <ReadFailure word="Stock unavailable" reason={stock.reason} onRetry={stock.reload} />
           ) : (
@@ -456,6 +516,7 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
               emptyMessage={emptyMessage}
               skuSearch={applied?.kind === 'sku' ? applied : null}
               skuOfId={(id) => skuById?.[id] ?? null}
+              expanded={writeOffExpanded}
             />
           )}
         </>
@@ -470,12 +531,15 @@ function StockRowsView({
   emptyMessage,
   skuSearch,
   skuOfId,
+  expanded,
 }: {
   stock: Exclude<ReturnType<typeof useStockList>, { state: 'failed' }>;
   columns: readonly Column<StockEntryDto>[];
   emptyMessage: string;
   skuSearch: { id: string; code: string } | null;
   skuOfId: (id: string) => SkuResponse | null;
+  /** Story 2-4a — the write-off panel under its DAMAGED row. */
+  expanded?: (row: StockEntryDto) => ReactNode;
 }) {
   if (stock.state === 'loading') {
     return <ListTable columns={columns} rows={[]} emptyMessage="Loading stock…" />;
@@ -491,23 +555,28 @@ function StockRowsView({
         : nextCursor === null
           ? totalAcrossBins(rows, skuOfId(skuSearch?.id ?? ''))
           : 'Loading every bin…';
+  const quantityIndex = Math.max(
+    0,
+    columns.findIndex((column) => column.key === 'quantity'),
+  );
   const footer =
     skuSearch !== null && rows.length > 0 ? (
       <tfoot>
         <tr className="h-10 border-t border-(--border) font-medium">
-          {/* The label spans every column but the last, so the total sits under On hand. */}
-          <td className="px-3" colSpan={columns.length - 1}>
+          {/* The label spans every column before On hand, so the total sits under it (story 2-4a: an Action column may follow). */}
+          <td className="px-3" colSpan={quantityIndex}>
             Total across bins
           </td>
           <td className="data px-3 text-right" data-testid="stock-total">
             {total}
           </td>
+          {columns.length - quantityIndex - 1 > 0 && <td colSpan={columns.length - quantityIndex - 1} />}
         </tr>
       </tfoot>
     ) : undefined;
   return (
     <div className="flex flex-col gap-2">
-      <ListTable columns={columns} rows={rows} emptyMessage={emptyMessage} footer={footer} />
+      <ListTable columns={columns} rows={rows} emptyMessage={emptyMessage} footer={footer} expanded={expanded} />
       {moreFailed !== null ? (
         <ReadFailure word="More stock unavailable" reason={moreFailed} onRetry={stock.reload} />
       ) : skuSearch === null && nextCursor !== null ? (

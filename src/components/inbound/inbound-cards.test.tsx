@@ -158,7 +158,10 @@ function stubRouter(): void {
       return json(200, { items: clients });
     }
     if (pathname === `${base}/warehouses/${WH}/inbound/asns`) return json(200, { items: [], nextCursor: null });
-    if (pathname === `${base}/warehouses/${WH}/inventory/stock`) return json(200, { items: [], nextCursor: null });
+    if (pathname === `${base}/warehouses/${WH}/inventory/stock`) return json(200, { items: qcStock, nextCursor: null });
+    // Story 2-4a — the QC hold picker's bin map (code + system flag).
+    if (pathname === `${base}/warehouses/${WH}/zones`) return json(200, { items: [{ id: 'z-1', code: 'Z', name: 'Z' }], nextCursor: null });
+    if (pathname === `${base}/warehouses/${WH}/zones/z-1/bins`) return json(200, { items: qcBins, nextCursor: null });
     // Story 1-3 — the PO list (headers) and detail (lines), and a partner list
     // whose LIVE name differs from the PO's frozen vendor snapshot.
     if (pathname === `${base}/warehouses/${WH}/inbound/purchase-orders`) return json(200, { items: purchaseOrders, nextCursor: null });
@@ -169,9 +172,18 @@ function stubRouter(): void {
     if (pathname === `${base}/partners`) {
       return json(200, { items: [{ id: 'v-1', code: 'V-1', name: 'Live Partner Name', roles: ['vendor'], status: 'active', links: [] }], nextCursor: null });
     }
+    // Story 2-4a — one GRN's lines (the expandable row).
+    if (pathname === `${base}/receiving/goods-receipts/g-1/lines`) {
+      return json(200, {
+        items: [
+          { id: 'gl-1', skuId: 's-acme', skuCode: 'TSHIRT-M', skuName: 'T-shirt M', batchId: null, batchCode: 'LOT-9', qty: 3, appliedQty: 3, damagedQty: 2, damageReasonCode: 'crushed', shortQty: 1, shortReasonCode: 'not-shipped' },
+          { id: 'gl-2', skuId: 's-beta', skuCode: 'TSHIRT-M', skuName: 'T-shirt M', batchId: null, batchCode: null, qty: 0, appliedQty: 0, damagedQty: 4, damageReasonCode: 'wet' },
+        ],
+      });
+    }
     if (pathname === `${base}/receiving/goods-receipts`) {
       return json(200, {
-        items: [grn('g-1', 'GRN-0001', 'c-acme'), grn('g-2', 'GRN-0002', 'c-self'), grn('g-3', 'GRN-0003')],
+        items: [{ ...grn('g-1', 'GRN-0001', 'c-acme'), damagedUnits: 6, shortUnits: 1 }, grn('g-2', 'GRN-0002', 'c-self'), grn('g-3', 'GRN-0003')],
         nextCursor: url.searchParams.has('cursor') ? null : grnNextCursor,
       });
     }
@@ -188,6 +200,10 @@ function stubRouter(): void {
   }) as unknown as typeof fetch);
 }
 
+/** Story 2-4a — the QC hold picker's stock rows and bins (empty unless a test sets them). */
+let qcStock: Record<string, unknown>[] = [];
+let qcBins: Record<string, unknown>[] = [];
+
 let view: Rendered | undefined;
 
 beforeEach(() => {
@@ -196,6 +212,8 @@ beforeEach(() => {
   clientsMode = 'ok';
   requests = [];
   qcHolds = [];
+  qcStock = [];
+  qcBins = [];
   role = 'owner';
   stubRouter();
   writeSession(SESSION);
@@ -549,4 +567,44 @@ describe('the client filter (story 1-5a)', () => {
     expect(chip()).toBeNull();
   });
 
+});
+
+describe('Goods receipts — damaged and short (story 2-4a)', () => {
+  test('the Units column adds "+N damaged" and the short; the code opens the lines: good / damaged (reason) / short (reason)', async () => {
+    view = render(<InboundCards initialTab="grns" />);
+    await settle();
+    const unitsColumn = headers().indexOf('Units');
+    expect(rows().map((cells) => cells[unitsColumn])).toEqual(['3 +6 damaged · 1 short', '3', '3']);
+    const toggle = view.container.querySelector('button[aria-label="Show the lines of GRN-0001"]') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => {
+      toggle.click();
+    });
+    await settle();
+    expect(requests.some((r) => r.url.pathname.endsWith('/receiving/goods-receipts/g-1/lines'))).toBe(true);
+    const lines = [...view.container.querySelectorAll('[data-testid="grn-line"]')].map((line) => line.textContent ?? '');
+    expect(lines).toEqual([
+      'TSHIRT-M T-shirt M · batch LOT-9 · good 3 · damaged 2 (Crushed) · short 1 (Not shipped)',
+      'TSHIRT-M T-shirt M · good 0 · damaged 4 (Wet)',
+    ]);
+    // Toggling again hides it.
+    await act(async () => {
+      (view!.container.querySelector('button[aria-label="Hide the lines of GRN-0001"]') as HTMLButtonElement).click();
+    });
+    await settle();
+    expect(view.container.querySelector('[data-testid="grn-line"]')).toBeNull();
+  });
+});
+
+describe('the QC hold picker skips the SYSTEM bins a hold cannot originate in (story 2-4a, BH5/VG3)', () => {
+  test('system QC-HOLD, RETURNS and DAMAGED are not offered; a user bin coded DAMAGED (pre-rule) and a storage bin are', async () => {
+    const bin = (id: string, code: string, systemOwned: boolean) => ({ id, code, systemOwned, zoneId: 'z-1', capacity: 1000, type: 'shelf' });
+    qcBins = [bin('b-a', 'A-01', false), bin('b-qc', 'QC-HOLD', true), bin('b-ret', 'RETURNS', true), bin('b-dmg', 'DAMAGED', true), bin('b-udmg', 'DAMAGED', false)];
+    qcStock = qcBins.map((b, i) => ({ id: `st-${i}`, warehouseId: WH, skuId: 's-acme', binId: b['id'], quantity: 2, createdAt: '2026-10-18T05:00:00.000Z' }));
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    const select = view.container.querySelector('select[aria-label="Stock scope (SKU at bin)"]') as HTMLSelectElement;
+    const offered = [...select.querySelectorAll('option')].map((o) => o.value).filter((v) => v !== '');
+    expect(offered).toEqual(['s-acme:b-a', 's-acme:b-udmg']);
+  });
 });

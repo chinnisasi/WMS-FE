@@ -460,3 +460,54 @@ describe('LineRecordsPanel', () => {
   });
 });
 
+
+describe('LineRecordsPanel — receipt lines (story 2-4a, VG1)', () => {
+  test('the Damaged cell shows the value on a split and an all-damaged line, "—" on a good-only one', async () => {
+    const RECEIPT_LINE_ID = '0198f7a2-bbbb-7000-8000-000000000003';
+    const receipt = (n: number, qty: string, appliedQty: string, damagedQty?: string): Record<string, unknown> => ({
+      kind: 'receipt-line',
+      id: `0198f7a2-dddd-7000-8000-00000000000${n}`,
+      grnCode: `GRN-000${n}`,
+      poCode: null,
+      asnCode: null,
+      blind: true,
+      recordedAt: '2026-09-16T04:30:00.000000Z',
+      warehouseId: 'w1',
+      warehouseCode: 'BLR1',
+      skuId: 's1',
+      skuCode: 'ACME-PC',
+      skuName: 'Acme widget',
+      qty,
+      appliedQty,
+      ...(damagedQty === undefined ? {} : { damagedQty }),
+      actorId: ACTOR,
+      actorEmail: 'priya@example.com',
+    });
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      const request = input instanceof Request ? input : new Request(input.toString());
+      return json(200, {
+        kind: 'receipt-line',
+        invoiceStatus: 'issued',
+        summary: { lineQuantity: '3', recordsQuantity: '3', reconciles: true },
+        records: [receipt(1, '2', '2', '1'), receipt(2, '0', '0', '3'), receipt(3, '4', '4')],
+        nextCursor: null,
+        url: request.url,
+      });
+    }) as unknown as typeof fetch);
+    const base = invoice('issued');
+    const withReceipt = {
+      ...base,
+      lines: [{ ...base.lines[0]!, id: RECEIPT_LINE_ID, chargeCode: 'inbound_handling', basis: 'per_receipt_line', quantity: '3' }],
+    } as ClientInvoiceDto;
+    view = render(<LineRecordsPanel invoice={withReceipt} />);
+    await settle();
+    await press(button(view.container, /^Show records/));
+    const headers = [...view.container.querySelectorAll('table[aria-label="Line records"] thead th')].map((th) => th.textContent ?? '');
+    const damagedColumn = headers.indexOf('Damaged');
+    expect(damagedColumn).toBeGreaterThan(-1);
+    const cells = [...view.container.querySelectorAll('table[aria-label="Line records"] tbody tr')].map(
+      (row) => [...row.querySelectorAll('td')][damagedColumn]?.textContent ?? '',
+    );
+    expect(cells).toEqual(['1', '3', '—']);
+  });
+});

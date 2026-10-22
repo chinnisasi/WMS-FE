@@ -4,6 +4,8 @@ import { restoreGlobals, stubGlobal } from '../test/globals';
 
 import {
   ApiProblem,
+  fetchApiAdjustStock,
+  fetchApiListGoodsReceiptLines,
   fetchApiCorrectSkuClient,
   fetchApiCreateClient,
   fetchApiCreatePartner,
@@ -2832,5 +2834,44 @@ describe('gate-in wrappers (story 2-3a)', () => {
     stubFetch(409, { code: 'gate-in-closed', status: 409, detail: 'GI-0001 is gated out.' });
     await expect(fetchApiGateOutGateIn(T, G, {}, KEY)).rejects.toMatchObject({ code: 'gate-in-closed', status: 409 });
     clearSession();
+  });
+});
+
+describe('story 2-4a — the GRN lines read, the batch list by bin, the stock adjustment', () => {
+  const T = '0198f7a2-1b3c-7d4e-8f90-112233445566';
+  const W = '0198f7a2-1b3c-7d4e-8f90-99aabbccddee';
+  const SKU = '0198f7a2-1b3c-7d4e-8f90-aabbccddeeff';
+  const BIN = '0198f7a2-1b3c-7d4e-8f90-aabbccddee00';
+  const GRN = '0198f7a2-1b3c-7d4e-8f90-aabbccddee11';
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+
+  test('the GRN lines read is a GET on the GRN', async () => {
+    stubFetch(200, { items: [] });
+    await fetchApiListGoodsReceiptLines(T, GRN);
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${T}/receiving/goods-receipts/${GRN}/lines`);
+    expect(lastRequest!.method).toBe('GET');
+  });
+
+  test('the batch list narrows to one bin when asked (and only then)', async () => {
+    stubFetch(200, { items: [] });
+    await fetchApiListBatches(T, W, SKU, { binId: BIN });
+    expect([...new URL(lastRequest!.url).searchParams.entries()]).toEqual([
+      ['skuId', SKU],
+      ['binId', BIN],
+    ]);
+  });
+
+  test('the adjustment POSTs the body under the key; 201 is applied, 202 is pending', async () => {
+    const body = { warehouseId: W, skuId: SKU, binId: BIN, quantityDelta: -2, reasonCode: 'damaged' as const, note: 'n' };
+    stubFetch(201, { event: { id: 'e' }, onHand: { quantity: 1 } });
+    expect((await fetchApiAdjustStock(T, body, KEY)).kind).toBe('applied');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${T}/inventory/adjustments`);
+    expect(lastRequest!.method).toBe('POST');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.clone().json()).toEqual(body);
+    stubFetch(202, { pendingAdjustment: { id: 'p-1' } });
+    expect(await fetchApiAdjustStock(T, body, KEY)).toEqual({ kind: 'pending', pending: { pendingAdjustment: { id: 'p-1' } } as never });
+    stubFetch(400, { code: 'damaged-bin-write-off-only', title: 't', status: 400, detail: 'd' });
+    await expect(fetchApiAdjustStock(T, body, KEY)).rejects.toMatchObject({ code: 'damaged-bin-write-off-only' });
   });
 });
