@@ -24,19 +24,22 @@ export function ShipByChip({
   shipByDate,
   todayIst,
   orderStatus,
+  open = true,
 }: {
   readonly shipByDate: string | null | undefined;
   readonly todayIst: string;
   readonly orderStatus?: string;
+  /** False once the work is done (a picklist with nothing left to pick): the date alone, never Overdue / Due today. */
+  readonly open?: boolean;
 }) {
   if (shipByDate === null || shipByDate === undefined) return null;
-  const status = shipByStatus(shipByDate, todayIst, orderStatus);
+  const status = open ? shipByStatus(shipByDate, todayIst, orderStatus) : null;
   return (
     <span
       className={`rounded-full border px-2 py-0.5 text-xs ${status === null ? 'border-(--border) text-(--muted-foreground)' : 'border-(--warning) font-medium text-(--warning)'}`}
       data-testid="ship-by-chip"
     >
-      Ship by {shipByLabel(shipByDate, todayIst, orderStatus)}
+      Ship by {open ? shipByLabel(shipByDate, todayIst, orderStatus) : shipByLabel(shipByDate, todayIst, 'dispatched')}
     </span>
   );
 }

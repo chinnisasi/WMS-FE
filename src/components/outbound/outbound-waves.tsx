@@ -1085,7 +1085,12 @@ function PicklistPanel({
         </span>
         {/* Story 4-2a — the picklist's most urgent priority and earliest ship-by (absent on a pre-4-2a wave). */}
         <PriorityChip priority={picklist.priority ?? null} />
-        <ShipByChip shipByDate={picklist.shipByDate ?? null} todayIst={todayIst} />
+        <ShipByChip
+          shipByDate={picklist.shipByDate ?? null}
+          todayIst={todayIst}
+          // Overdue / Due today only while something is left to pick.
+          open={picklist.status !== 'cancelled' && picklist.lines.some((line) => line.status === 'planned')}
+        />
       </div>
       <ol className="flex flex-col gap-1">
         {/* Walk order is the server's (bins.code ascending) — never re-sorted

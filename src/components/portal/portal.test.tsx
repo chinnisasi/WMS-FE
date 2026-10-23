@@ -289,6 +289,32 @@ describe('the portal surfaces — ready, empty, failed', () => {
     buttonNamed(view.container, 'Retry');
   });
 
+  test('story 4-2a: an Orders row shows its type, priority, ship-by and payment line; a dispatched order is never Overdue', async () => {
+    const row = { status: 'accepted', source: 'manual', externalRef: null, warehouseName: 'Whitefield', destinationName: 'Asha', destinationCity: 'Bengaluru', destinationPincode: '560001', lineCount: 1, createdAt: '2026-10-08T10:00:00.000Z' };
+    routes = {
+      '/portal/orders': [
+        200,
+        {
+          items: [
+            { ...row, id: 'o-open', clientOrderRef: 'SO-1', orderType: 'b2c', priority: 'high', shipByDate: '2020-01-01', codAmountPaise: 149900 },
+            { ...row, id: 'o-done', clientOrderRef: 'SO-2', status: 'dispatched', orderType: 'b2b', priority: 'normal', shipByDate: '2020-01-01', codAmountPaise: null },
+          ],
+          nextCursor: null,
+        },
+      ],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    const chips = [...view.container.querySelectorAll('[data-testid="order-field-chips"]')].map((node) => node.textContent ?? '');
+    expect(chips[0]).toContain('High');
+    expect(chips[0]).toContain('01 Jan · Overdue');
+    expect(chips[0]).toContain('COD ₹1,499.00');
+    expect(chips[1]).toContain('Prepaid');
+    expect(chips[1]).not.toContain('Overdue');
+    expect(view.container.textContent).toContain('B2C');
+    expect(view.container.textContent).toContain('B2B');
+  });
+
   test('Orders: ready, then a kit line expands with its components nested', async () => {
     routes = {
       '/portal/orders': [

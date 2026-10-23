@@ -758,6 +758,8 @@ describe('Waves: the client filter (story 1-5a)', () => {
       picklists: [
         { ...base, priority: 'high', shipByDate: '2020-01-01' },
         { ...base, id: 'pl-2', lines: [{ ...base.lines[0], picklistId: 'pl-2' }] },
+        // Everything picked: the date alone, never Overdue.
+        { ...base, id: 'pl-3', shipByDate: '2020-01-02', lines: base.lines.map((line) => ({ ...line, picklistId: 'pl-3', status: 'picked' })) },
       ],
     };
     view = await mount('operator');
@@ -769,7 +771,7 @@ describe('Waves: the client filter (story 1-5a)', () => {
     const chips = [...view.container.querySelectorAll('[data-testid="priority-chip"]')].map((c) => c.textContent);
     expect(chips).toEqual(['High']);
     const shipBy = [...view.container.querySelectorAll('[data-testid="ship-by-chip"]')].map((c) => c.textContent);
-    expect(shipBy).toEqual(['Ship by 01 Jan · Overdue']);
+    expect(shipBy).toEqual(['Ship by 01 Jan · Overdue', 'Ship by 02 Jan']);
   });
 
   test('a mixed wave’s detail names each order’s client', async () => {

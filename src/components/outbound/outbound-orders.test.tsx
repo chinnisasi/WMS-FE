@@ -1382,6 +1382,33 @@ describe('the order fields (story 4-2a)', () => {
     expect('shipByDate' in creates[1]!.body).toBe(false);
   });
 
+  test('the list and detail: a dispatched COD order past its ship-by shows "COD ₹x" and never "Overdue"; an open one does (A14)', async () => {
+    clientsBody = [SELF_CLIENT];
+    ordersResponder = () => ({
+      items: [
+        { ...entry('open-1', 'c-self'), clientOrderRef: 'SO-OPEN', orderType: 'b2c', priority: 'urgent', shipByDate: '2020-01-01', codAmountPaise: null },
+        { ...entry('done-1', 'c-self'), clientOrderRef: 'SO-DONE', status: 'dispatched', orderType: 'b2c', priority: 'normal', shipByDate: '2020-01-01', codAmountPaise: 149900 },
+      ],
+      nextCursor: null,
+    });
+    view = await mountForm();
+    const rows = [...view.container.querySelectorAll('[data-testid="order-field-chips"]')].map((node) => node.textContent ?? '');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('Urgent');
+    expect(rows[0]).toContain('01 Jan · Overdue');
+    expect(rows[0]).toContain('Prepaid');
+    expect(rows[1]).toContain('COD ₹1,499.00');
+    expect(rows[1]).not.toContain('Overdue');
+    act(() => view!.unmount());
+
+    order = { ...(order as object), id: 'done-1', status: 'dispatched', orderType: 'b2c', priority: 'normal', shipByDate: '2020-01-01', codAmountPaise: 149900 } as typeof order;
+    view = await mount('done-1');
+    const fields = view.container.querySelector('[data-testid="order-detail-fields"]')!.textContent ?? '';
+    expect(fields).toContain('B2C');
+    expect(fields).toContain('COD ₹1,499.00');
+    expect(fields).not.toContain('Overdue');
+  });
+
   test('a ship-by in the past sends nothing (parsed before any key); an order-field edit mints a fresh key', async () => {
     view = await mountForm();
     fillDestination(view.container);
