@@ -76,41 +76,120 @@ jobs:
     # Story 6-2a — the production image (decision 10): build it, run it with
     # a runtime API address, and probe it. The web root must answer, and
     # /runtime-config.js must carry the address given at RUN time — the proof
-    # that one image serves every environment. Nothing is pushed (story 6-2b).
+    # that one image serves every environment. Nothing is pushed.
+    #
+    # Story 6-2c — linux/amd64 (the ECS platform), a docker network, a
+    # read-only root filesystem (writable: /tmp and /app/.next/cache), and the
+    # smoke client (scripts/image-smoke.mjs, the same file wms-be carries) a
+    # container of the image under test, on Node:
+    #   - ownership: uid != 0; server.js and .next/server not writable;
+    #     .next/cache writable
+    #   - the start refuses a bad WMS_API_BASE_URL with 78
+    #   - keep-alive: a socket idle 61 s is reused (Keep-Alive: timeout=65)
+    #   - drain: a keep-alive request in flight at SIGTERM is answered with
+    #     Connection: close and the container exits 0 in under 5 s; an idle
+    #     container's SIGTERM exits 0
     runs-on: ubuntu-latest
+    env:
+      PLATFORM: linux/amd64
+      NET: wms-smoke
+      API_BASE: https://api.ci.example/api/v1
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build the image
-        run: docker build -t wms-fe:ci .
+      - name: Build the image (linux/amd64)
+        run: docker build --platform "$PLATFORM" -t wms-fe:ci .
 
-      - name: The image runs as non-root
-        run: test "$(docker run --rm wms-fe:ci id -u)" != "0"
+      - name: Ownership — non-root; the code root-owned and not writable; only .next/cache writable (decision 10)
+        run: |
+          docker run --rm --platform "$PLATFORM" --entrypoint sh wms-fe:ci -ec '
+            test "$(id -u)" != "0"
+            test "$(stat -c %u /app/server.js)" = "0"
+            test "$(stat -c %u /app/.next/server)" = "0"
+            ! test -w /app/server.js
+            ! test -w /app/.next/server
+            ! test -w /app/start-standalone.mjs
+            ! touch /app/.next/server/written 2>/dev/null
+            test "$(stat -c %U /app/.next/cache)" = "node"
+            touch /app/.next/cache/written
+            test "$KEEP_ALIVE_TIMEOUT" = "65000"
+            echo "uid $(id -u); code root-owned and read-only; .next/cache writable"'
 
-      - name: It refuses to start without a valid runtime API address (C6)
+      - name: It refuses to start without a valid runtime API address (C6 — exit 78, A18)
         run: |
           set +e
-          docker run --rm wms-fe:ci; unset_status=$?
-          docker run --rm -e WMS_API_BASE_URL=/api/v1 wms-fe:ci; relative_status=$?
+          unset_out=$(docker run --rm --platform "$PLATFORM" wms-fe:ci 2>&1); unset_status=$?
+          relative_out=$(docker run --rm --platform "$PLATFORM" -e WMS_API_BASE_URL=/api/v1 wms-fe:ci 2>&1); relative_status=$?
           set -e
-          test "$unset_status" = "1" && test "$relative_status" = "1"
+          echo "unset: $unset_status — $unset_out"
+          echo "relative: $relative_status — $relative_out"
+          test "$unset_status" = "78" && test "$relative_status" = "78"
+          echo "$unset_out" | grep -q 'WMS_API_BASE_URL is not set'
+          echo "$relative_out" | grep -q 'WMS_API_BASE_URL is not an absolute URL'
 
-      - name: Run it with a runtime API address
+      - name: Run it read-only with a runtime API address
         run: |
-          docker run -d --name wms-fe -p 3001:3001 \
-            -e WMS_API_BASE_URL=https://api.ci.example/api/v1 \
-            wms-fe:ci
+          docker network create "$NET"
+          mkdir -p "$RUNNER_TEMP/bin"
+          # The smoke client; SMOKE_ARGS adds docker options (the drain runs it detached, kept for its logs).
+          cat > "$RUNNER_TEMP/bin/smoke" <<'SH'
+          #!/bin/sh
+          exec docker run ${SMOKE_ARGS:---rm} --platform "$PLATFORM" --network "$NET" --read-only --tmpfs /tmp \
+            -v "$GITHUB_WORKSPACE/scripts/image-smoke.mjs:/smoke/image-smoke.mjs:ro" --entrypoint node wms-fe:ci /smoke/image-smoke.mjs "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/bin/smoke"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          docker run -d --name wms-fe --platform "$PLATFORM" --network "$NET" -p 3001:3001 \
+            --read-only --tmpfs /tmp --tmpfs /app/.next/cache:uid=1000,gid=1000 \
+            -e WMS_API_BASE_URL="$API_BASE" wms-fe:ci
 
       - name: Smoke — the web root and the runtime config
         run: |
-          for i in $(seq 1 60); do
-            curl -sf -o /dev/null http://localhost:3001/login && break
-            sleep 1
-          done
+          smoke ready http://wms-fe:3001 --path=/runtime-config.js
+          smoke status http://wms-fe:3001/login 200
           curl -sfL -o /dev/null -w 'web root: %{http_code}\n' http://localhost:3001/
-          curl -sf http://localhost:3001/runtime-config.js | tee /dev/stderr \
-            | grep -F '"apiBaseUrl":"https://api.ci.example/api/v1"'
+          smoke status http://wms-fe:3001/runtime-config.js 200 --contains="\"apiBaseUrl\":\"$API_BASE\""
+
+      - name: Keep-alive — a socket idle 61 s is reused (decision 3)
+        run: smoke keepalive http://wms-fe:3001 --path=/runtime-config.js
+
+      - name: Keep-alive negative control — the same smoke FAILS at the 61 s reuse against a 5 s keep-alive
+        run: |
+          docker run -d --name wms-fe-negative --platform "$PLATFORM" --network "$NET" \
+            --read-only --tmpfs /tmp --tmpfs /app/.next/cache:uid=1000,gid=1000 \
+            -e KEEP_ALIVE_TIMEOUT=5000 -e WMS_API_BASE_URL="$API_BASE" wms-fe:ci
+          # --timeout=5 lets the header check pass: the failure must come from the reuse probe.
+          if out=$(smoke keepalive http://wms-fe-negative:3001 --path=/runtime-config.js --timeout=5 2>&1); then
+            echo "$out"; echo "the keepalive smoke PASSED against a 5 s keep-alive — it does not bite"; exit 1
+          fi
+          echo "$out"
+          echo "$out" | grep -Eq 'FAIL: (the server closed the idle socket before 61000 ms|the reused socket after 61000 ms idle)'
+          docker rm -f wms-fe-negative
+
+      - name: Drain — a keep-alive request in flight at SIGTERM gets Connection close; exit 0 in under 5 s (A1)
+        run: |
+          SMOKE_ARGS="-d --name smoke-drain" smoke web-drain http://wms-fe:3001
+          for _ in $(seq 1 120); do docker logs smoke-drain 2>&1 | grep -q '^SMOKE-SIGNAL-NOW' && break; sleep 0.5; done
+          docker logs smoke-drain 2>&1 | grep -q '^SMOKE-SIGNAL-NOW'
+          start=$(date +%s)
+          docker kill -s TERM wms-fe
+          web_status=$(docker wait wms-fe)
+          elapsed=$(( $(date +%s) - start ))
+          smoke_status=$(docker wait smoke-drain)
+          docker logs smoke-drain
+          echo "smoke exit $smoke_status; web exit $web_status after ${elapsed}s"
+          test "$smoke_status" = "0" && test "$web_status" = "0" && test "$elapsed" -lt 5
+
+      - name: An idle SIGTERM exits 0
+        run: |
+          docker run -d --name wms-fe-idle --platform "$PLATFORM" --network "$NET" \
+            --read-only --tmpfs /tmp --tmpfs /app/.next/cache:uid=1000,gid=1000 \
+            -e WMS_API_BASE_URL="$API_BASE" wms-fe:ci
+          smoke ready http://wms-fe-idle:3001 --path=/runtime-config.js
+          docker kill -s TERM wms-fe-idle
+          test "$(docker wait wms-fe-idle)" = "0"
 
       - name: Container logs
         if: always()
-        run: docker logs wms-fe || true
+        run: |
+          for c in wms-fe wms-fe-idle wms-fe-negative; do echo "──── $c"; docker logs "$c" 2>&1 | tail -80 || true; done

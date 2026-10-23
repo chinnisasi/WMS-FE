@@ -1,0 +1,14 @@
+# Story 6-2c (A19) — the Dockerfile's FROM lines are digest-pinned
+# (`image:tag@sha256:…`). Dependabot proposes the refreshed digest of the SAME
+# tag weekly, and a human reviews each PR. Tag (version) bumps are ignored
+# here: the Bun tag must equal .bun-version and the Node tag stays 22-alpine
+# (scripts/dockerfile.test.ts), so an upgrade is its own change.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major', 'version-update:semver-minor', 'version-update:semver-patch']
