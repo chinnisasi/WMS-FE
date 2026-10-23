@@ -1903,9 +1903,17 @@ export type LedgerReferenceDocDto = {
      */
     asnLineId?: string;
     /**
-     * The GRN line the movement belongs to: on a `putaway.placed` event the line whose received stock moved; (story 2-4a) on a `grn.damaged` event the line whose damaged units were booked into DAMAGED. Absent on every `grn.received` event
+     * The GRN line the movement belongs to: on a `putaway.placed` event the line whose received stock moved; (story 2-4a) on a `grn.damaged` event the line whose damaged units were booked into DAMAGED; (story 2-8a) on a `qc.failed` event of a receipt hold the line whose failed units moved to DAMAGED (they stay credited on the line). Absent on every `grn.received` event
      */
     grnLineId?: string;
+    /**
+     * The QC hold the movement belongs to (qc-hold arm: qc.held, qc.released, qc.failed)
+     */
+    holdId?: string;
+    /**
+     * Story 2-8a — the inspection that closed the hold (qc-hold arm: the inspection's qc.released and qc.failed events only)
+     */
+    inspectionId?: string;
     /**
      * Story 9-3a — the pending adjustment an approval posted this event for (manual-adjustment arm, approvals only)
      */
@@ -4890,15 +4898,21 @@ export type QcHoldDto = {
      * Why the stock is quarantined (carried verbatim)
      */
     reason: string;
-    status: 'open' | 'released';
+    /**
+     * Story 2-8a — `inspected`: closed by an inspection outcome (released/inspected both carry releasedBy/releasedAt, read as closed by/at)
+     */
+    status: 'open' | 'released' | 'inspected';
     heldBy: string;
     /**
      * ISO-8601 UTC
      */
     heldAt: string;
+    /**
+     * Who closed the hold (released or inspected it); null while open
+     */
     releasedBy: string | null;
     /**
-     * ISO-8601 UTC instant when released; null while the hold is open
+     * ISO-8601 UTC instant the hold closed (released or inspected); null while the hold is open
      */
     releasedAt: string | null;
     /**
@@ -4917,6 +4931,87 @@ export type QcHoldDto = {
 
 export type QcHoldResponse = {
     qcHold: QcHoldDto;
+};
+
+export type QcInspectFailureDto = {
+    /**
+     * Why these units failed (`other` needs the note)
+     */
+    reason: 'damaged' | 'expired' | 'contaminated' | 'wrong-item' | 'spec-failure' | 'other';
+    /**
+     * Units failed for this reason (> 0). A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    quantity: number;
+};
+
+export type QcInspectLineDto = {
+    /**
+     * The held arm's batch (null on an untracked SKU's single arm)
+     */
+    batchId: string | null;
+    /**
+     * Units that passed — back to the origin bin (Receiving for a receipt hold). A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    passed: number;
+    /**
+     * Units that failed, one entry per reason (none when everything passed) — they move to the DAMAGED bin
+     */
+    failed: Array<QcInspectFailureDto>;
+};
+
+export type InspectQcHoldDto = {
+    /**
+     * One line per batch arm the hold moved — exactly those arms, each summing to its held quantity (held quantities are never sent)
+     */
+    lines: Array<QcInspectLineDto>;
+    /**
+     * The inspector's note (at most 500 characters after trimming; blank = none). Required when a failure's reason is `other`
+     */
+    note?: string | null;
+};
+
+export type QcInspectionLineDto = {
+    batchId: string | null;
+    outcome: 'passed' | 'failed';
+    /**
+     * Present exactly on a failed row
+     */
+    failReason: 'damaged' | 'expired' | 'contaminated' | 'wrong-item' | 'spec-failure' | 'other' | null;
+    /**
+     * Units, base UoM
+     */
+    quantity: number;
+};
+
+export type QcInspectionDto = {
+    id: string;
+    holdId: string;
+    note: string | null;
+    /**
+     * Who inspected (the hold's releasedBy)
+     */
+    inspectedBy: string;
+    /**
+     * When, ISO-8601 UTC (the hold's releasedAt)
+     */
+    inspectedAt: string;
+    /**
+     * Σ passed, base UoM
+     */
+    passedQuantity: number;
+    /**
+     * Σ failed (moved to DAMAGED), base UoM
+     */
+    failedQuantity: number;
+    /**
+     * By batch (untracked first), passed before failed, failures by reason
+     */
+    lines: Array<QcInspectionLineDto>;
+};
+
+export type InspectQcHoldResponse = {
+    qcHold: QcHoldDto;
+    inspection: QcInspectionDto;
 };
 
 export type ReleaseReceiptHoldsDto = {
@@ -4951,15 +5046,21 @@ export type QcHoldEntryDto = {
      * Why the stock is quarantined (carried verbatim)
      */
     reason: string;
-    status: 'open' | 'released';
+    /**
+     * Story 2-8a — `inspected`: closed by an inspection outcome (released/inspected both carry releasedBy/releasedAt, read as closed by/at)
+     */
+    status: 'open' | 'released' | 'inspected';
     heldBy: string;
     /**
      * ISO-8601 UTC
      */
     heldAt: string;
+    /**
+     * Who closed the hold (released or inspected it); null while open
+     */
     releasedBy: string | null;
     /**
-     * ISO-8601 UTC instant when released; null while the hold is open
+     * ISO-8601 UTC instant the hold closed (released or inspected); null while the hold is open
      */
     releasedAt: string | null;
     /**
@@ -5002,11 +5103,43 @@ export type QcHoldEntryDto = {
      * Story 1-2b — the quantity the hold moved into QC (the sum of its own qc.held events), base UoM
      */
     heldQty: number;
+    /**
+     * Story 2-8a — on an inspected hold, the units that failed (moved to DAMAGED), base UoM; null on an open or released hold
+     */
+    failedQuantity: number | null;
 };
 
 export type QcHoldListResponse = {
     items: Array<QcHoldEntryDto>;
     nextCursor?: string | null;
+};
+
+export type QcHeldArmDto = {
+    /**
+     * null on an untracked SKU
+     */
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * The batch's expiry as an IST calendar date (YYYY-MM-DD); null when none
+     */
+    expiryDate: string | null;
+    /**
+     * Units held on this arm, base UoM
+     */
+    quantity: number;
+};
+
+export type QcHoldDetailResponse = {
+    qcHold: QcHoldEntryDto;
+    /**
+     * The batch arms the hold moved (its own qc.held events), untracked first
+     */
+    arms: Array<QcHeldArmDto>;
+    /**
+     * Present once the hold is inspected; null otherwise
+     */
+    inspection: QcInspectionDto | null;
 };
 
 export type GateInDocumentInputDto = {
@@ -9864,7 +9997,7 @@ export type QcHoldNotificationDto = {
     resolvedAt: string | null;
     sourceType: 'qc-hold';
     summary: QcHoldSummaryDto;
-    resolution: 'released' | null;
+    resolution: 'released' | 'inspected' | null;
 };
 
 export type ChannelSyncSummaryDto = {
@@ -9997,7 +10130,7 @@ export type QcReceiptNotificationDto = {
     resolvedAt: string | null;
     sourceType: 'qc-receipt';
     summary: QcReceiptSummaryDto;
-    resolution: 'released' | null;
+    resolution: 'released' | 'inspected' | null;
 };
 
 export type LicenceExpirySummaryDto = {
@@ -13666,7 +13799,7 @@ export type InventoryControllerListEventsData = {
         /**
          * Story 9-1 — only events of these types (repeatable: `?type=a&type=b`; one value is a one-element list). An unknown type is refused (400 validation-failed naming the known set)
          */
-        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged' | 'stock.moved'>;
+        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged' | 'qc.failed' | 'stock.moved'>;
         /**
          * Story 9-1 — only events RECORDED at or after this instant (`recorded_at` — the server stamp, never the device `occurred_at`). ISO-8601 with a zone designator
          */
@@ -16540,7 +16673,10 @@ export type ReceivingControllerListQcHoldsData = {
          * Filter by warehouse
          */
         warehouseId?: string;
-        status?: 'open' | 'released';
+        /**
+         * Story 2-8a — `inspected` added; `closed` = released or inspected
+         */
+        status?: 'open' | 'released' | 'inspected' | 'closed';
         /**
          * Story 1-2b — only one goods receipt's QC-on-receipt holds
          */
@@ -16697,6 +16833,63 @@ export type ReceivingControllerReleaseQcHoldResponses = {
 
 export type ReceivingControllerReleaseQcHoldResponse = ReceivingControllerReleaseQcHoldResponses[keyof ReceivingControllerReleaseQcHoldResponses];
 
+export type ReceivingControllerInspectQcHoldData = {
+    body: InspectQcHoldDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        holdId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/qc-holds/{holdId}/inspect';
+};
+
+export type ReceivingControllerInspectQcHoldErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed holdId or body, a batch named twice, a reason named twice in one batch, `other` without a note, a note over 500 characters, or a quantity finer than the unit allows (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks qc.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No QC hold with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The hold is already closed — released or inspected (qc-hold-released); units pass but the origin bin is gone or retired (qc-hold-origin-bin-gone); a user location occupies the DAMAGED code (damaged-bin-conflict); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The lines do not cover exactly the held arms and quantities (qc-inspection-mismatch), or the Idempotency-Key was reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerInspectQcHoldError = ReceivingControllerInspectQcHoldErrors[keyof ReceivingControllerInspectQcHoldErrors];
+
+export type ReceivingControllerInspectQcHoldResponses = {
+    /**
+     * The inspected hold and its inspection (a matching Idempotency-Key replays it)
+     */
+    200: InspectQcHoldResponse;
+};
+
+export type ReceivingControllerInspectQcHoldResponse = ReceivingControllerInspectQcHoldResponses[keyof ReceivingControllerInspectQcHoldResponses];
+
 export type ReceivingControllerReleaseReceiptHoldsData = {
     body: ReleaseReceiptHoldsDto;
     headers: {
@@ -16752,6 +16945,46 @@ export type ReceivingControllerReleaseReceiptHoldsResponses = {
 };
 
 export type ReceivingControllerReleaseReceiptHoldsResponse = ReceivingControllerReleaseReceiptHoldsResponses[keyof ReceivingControllerReleaseReceiptHoldsResponses];
+
+export type ReceivingControllerGetQcHoldData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        holdId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/qc-holds/{holdId}';
+};
+
+export type ReceivingControllerGetQcHoldErrors = {
+    /**
+     * A malformed holdId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No QC hold with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReceivingControllerGetQcHoldError = ReceivingControllerGetQcHoldErrors[keyof ReceivingControllerGetQcHoldErrors];
+
+export type ReceivingControllerGetQcHoldResponses = {
+    200: QcHoldDetailResponse;
+};
+
+export type ReceivingControllerGetQcHoldResponse = ReceivingControllerGetQcHoldResponses[keyof ReceivingControllerGetQcHoldResponses];
 
 export type GateInControllerListData = {
     body?: never;

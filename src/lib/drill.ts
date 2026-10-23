@@ -81,6 +81,8 @@ export const LEDGER_EVENT_TYPES = [
   'grn.damaged',
   // Story 3-1 — the bin-to-bin move.
   'stock.moved',
+  // Story 2-8a — an inspection's failed units, QC-HOLD → DAMAGED.
+  'qc.failed',
 ] as const satisfies readonly LedgerEventType[];
 
 /** Record-typed: a new registry type must be labelled to compile. */
@@ -100,6 +102,7 @@ export const LEDGER_TYPE_LABEL: Readonly<Record<LedgerEventType, string>> = {
   'return.received': 'Return received',
   'grn.damaged': 'Received damaged',
   'stock.moved': 'Moved',
+  'qc.failed': 'QC failed',
 };
 
 /** A ledger event's type as words; an unregistered type prints as itself. */

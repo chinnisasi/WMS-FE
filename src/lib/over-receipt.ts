@@ -130,13 +130,17 @@ export function qcReason(error: unknown): string {
       case 'qc-hold-open':
         return 'An open QC hold already covers this scope — release it first.';
       case 'qc-hold-released':
-        return 'This hold was already released — refresh the list.';
+        return 'This hold is already closed (released or inspected) — refresh the list.';
+      case 'qc-inspection-mismatch':
+        return error.detail ?? 'The quantities no longer match the held stock — close and reopen the inspection.';
+      case 'damaged-bin-conflict':
+        return error.detail ?? 'A user location holds the DAMAGED code — failed units cannot be booked until it is re-coded.';
       case 'qc-hold-origin-bin-gone':
         return 'The origin bin no longer exists, so the stock cannot return to it — the hold stays open.';
       case 'not-found':
         return 'This hold no longer exists — refresh the list.';
       case 'role-denied':
-        return 'Your role cannot place or release QC holds.';
+        return 'Your role cannot place, release or inspect QC holds.';
       case 'idempotency-key-reuse':
         return 'This action was already processed.';
       case 'unauthenticated':

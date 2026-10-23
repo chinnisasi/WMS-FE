@@ -77,6 +77,8 @@ describe('holdLabel (the affected-units join)', () => {
   test('an open hold reads held; a released hold reads released', () => {
     expect(holdLabel(hold())).toBe('held');
     expect(holdLabel(hold({ status: 'released' }))).toBe('released');
+    // Story 2-8a — an excursion's hold closed by an inspection outcome.
+    expect(holdLabel(hold({ status: 'inspected' }))).toBe('inspected');
   });
 
   test('a hold the qc-holds read no longer returns reads disposed', () => {

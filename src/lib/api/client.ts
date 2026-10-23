@@ -118,6 +118,8 @@ import {
   outboundControllerListWaves,
   outboundControllerReleaseWave,
   receivingControllerApproveOverReceipt,
+  receivingControllerGetQcHold,
+  receivingControllerInspectQcHold,
   receivingControllerListGoodsReceiptLines,
   receivingControllerListGoodsReceipts,
   receivingControllerListOverReceipts,
@@ -378,6 +380,9 @@ import type {
   OverReceiptDecisionResponse,
   OverReceiptListResponse,
   PlaceQcHoldDto,
+  InspectQcHoldDto,
+  InspectQcHoldResponse,
+  QcHoldDetailResponse,
   QcHoldListResponse,
   QcHoldResponse,
   ReorderPolicyListResponse,
@@ -2956,7 +2961,8 @@ export async function fetchApiListQcHolds(
   tenantId: string,
   options?: {
     warehouseId?: string;
-    status?: 'open' | 'released';
+    /** Story 2-8a — `inspected` added; `closed` = released or inspected (the Closed tab). */
+    status?: 'open' | 'released' | 'inspected' | 'closed';
     /** Story 1-2b — only one goods receipt's QC-on-receipt holds. */
     grnId?: string;
     /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
@@ -3013,6 +3019,41 @@ export async function fetchApiReleaseQcHold(
 ): Promise<QcHoldResponse> {
   const { data, error } = await receivingControllerReleaseQcHold({
     path: { tenantId, holdId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-8a — one QC hold with the batch arms it moved (code, expiry,
+ * quantity) and, once inspected, its inspection. Any member may read it.
+ */
+export async function fetchApiGetQcHold(tenantId: string, holdId: string, signal?: AbortSignal): Promise<QcHoldDetailResponse> {
+  const { data, error } = await receivingControllerGetQcHold({ path: { tenantId, holdId }, signal });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-8a — records a hold's inspection outcome (capability `qc.manage`):
+ * per held arm, passed units go back to the origin and failed units to the
+ * DAMAGED bin with a reason; the hold closes `inspected`. 422
+ * `qc-inspection-mismatch` when the lines do not cover the held arms exactly.
+ */
+export async function fetchApiInspectQcHold(
+  tenantId: string,
+  holdId: string,
+  body: InspectQcHoldDto,
+  idempotencyKey: string,
+): Promise<InspectQcHoldResponse> {
+  const { data, error } = await receivingControllerInspectQcHold({
+    path: { tenantId, holdId },
+    body,
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
