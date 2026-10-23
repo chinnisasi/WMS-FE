@@ -1,5 +1,8 @@
 'use client';
 
+import { useTodayIst } from '@/components/shared/use-today-ist';
+import { OrderFieldChips } from '@/components/shared/order-chips';
+import { manifestCodLabel, orderTypeLabel, paymentLine } from '@/lib/order-fields';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -149,6 +152,8 @@ function PackDispatchTable({
   canLabel: boolean;
   active: ActiveClientState;
 }) {
+  // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
+  const todayIst = useTodayIst();
   const orders = usePipelineOrders(warehouseId);
   const [statusFilter, setStatusFilter] = useState<PipelineStatus | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -197,6 +202,12 @@ function PackDispatchTable({
           {orderStatusLabel(order.status)}
         </span>
       ),
+    },
+    {
+      // Story 4-2a — priority, ship-by and the payment line (what to collect).
+      key: 'fields',
+      header: 'Priority · ship-by · payment',
+      render: (order) => <OrderFieldChips order={order} todayIst={todayIst} />,
     },
     {
       key: 'createdAt',
@@ -340,6 +351,13 @@ function PackDispatchPanel({
           <FeedbackBanner {...packOutcome(slip, uomOf)} />
           <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
             <div className="text-xs font-medium">Packing slip</div>
+            {/* Story 4-2a — the type and the payment line ("—" on a slip stored before 4-2a). */}
+            <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="slip-order-fields">
+              <span>{orderTypeLabel(slip.orderType)}</span>
+              <span className="data font-medium" data-testid="slip-payment">
+                {paymentLine(slip)}
+              </span>
+            </div>
             <div className="text-xs text-(--muted-foreground)">
               Packed by {slip.packedBy} ·{' '}
               <time dateTime={slip.packedAt}>{new Date(slip.packedAt).toLocaleString()}</time> ·{' '}
@@ -365,6 +383,9 @@ function PackDispatchPanel({
           <FeedbackBanner {...dispatchOutcome(record, uomOf)} />
           <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
             <div className="text-xs font-medium">Dispatch record</div>
+            <div className="data text-xs font-medium" data-testid="dispatch-payment">
+              {paymentLine(record)}
+            </div>
             <div className="text-xs text-(--muted-foreground)">
               {dispatchRecordLabel(record)} · dispatched by {record.dispatchedBy} ·{' '}
               <time dateTime={record.dispatchedAt}>
@@ -1299,6 +1320,9 @@ function ManifestSection({
               <span>{manifest.carrierCode}</span>
               <span className="data">
                 {manifest.shipmentCount} {manifest.shipmentCount === 1 ? 'shipment' : 'shipments'}
+              </span>
+              <span className="data" data-testid="manifest-cod">
+                {manifestCodLabel(manifest)}
               </span>
               <span className="text-(--muted-foreground)">
                 by {manifest.createdBy} ·{' '}

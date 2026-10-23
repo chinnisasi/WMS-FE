@@ -864,6 +864,31 @@ describe('Place an order (4-1a)', () => {
     expect(view.container.querySelector('form[aria-label="Place an order"]')).toBeNull();
   });
 
+  test('story 4-2a: the priority offers Normal and High only (Urgent is the warehouse’s); chosen fields ride, an untouched form sends none', async () => {
+    postReplies = [[201, PLACED]];
+    const container = await openForm();
+    const priority = [...container.querySelectorAll('label')].find((l) => l.querySelector('span')?.textContent === 'Priority')!.querySelector('select')!;
+    expect([...priority.options].map((o) => o.textContent)).toEqual(['Normal', 'High']);
+    setValue(priority, 'high');
+    const cod = [...container.querySelectorAll('label')].find((l) => l.querySelector('span')?.textContent === 'Cash on delivery')!.querySelector('input')!;
+    act(() => void cod.click());
+    setValue(
+      [...container.querySelectorAll('label')].find((l) => l.querySelector('span')?.textContent === 'Amount to collect ₹')!.querySelector('input')!,
+      '1,499',
+    );
+    await fillAndSubmit(container);
+    // A rupee amount the server would refuse sends nothing.
+    expect(posts).toHaveLength(0);
+    setValue(
+      [...container.querySelectorAll('label')].find((l) => l.querySelector('span')?.textContent === 'Amount to collect ₹')!.querySelector('input')!,
+      '1499.00',
+    );
+    await submit(container);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.body).toMatchObject({ priority: 'high', codAmountPaise: 149900 });
+    expect('orderType' in posts[0]!.body).toBe(false);
+  });
+
   test('the POST carries {warehouseId, lines[{skuId, quantity}], destination} — never a clientId or a ratePaise — with an Idempotency-Key; only portal routes', async () => {
     postReplies = [[201, PLACED]];
     const container = await openForm();

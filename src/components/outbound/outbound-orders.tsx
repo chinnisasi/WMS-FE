@@ -1,5 +1,6 @@
 'use client';
 
+import { useTodayIst } from '@/components/shared/use-today-ist';
 import Link from 'next/link';
 import { useEffect, useId, useState, useSyncExternalStore } from 'react';
 
@@ -68,6 +69,10 @@ import { canCreateReturn, RETURN_CREATED_REASON, returnCreatedWord } from '@/lib
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 // Story 4-1a — the Ship-to fieldset is shared with the portal's order form.
 import { ShipToFieldset } from '@/components/shared/ship-to-fieldset';
+import { OrderFieldsFieldset } from '@/components/shared/order-fields-fieldset';
+import { OrderFieldChips } from '@/components/shared/order-chips';
+import { orderTypeLabel } from '@/lib/order-fields';
+import { emptyOrderFieldsDraft, parseOrderFieldsDraft, type OrderFieldsDraft } from '@/lib/order-fields-form';
 // Story 4-1b — the exact-match search box, shared with the portal's list.
 import { OrderSearch } from '@/components/shared/order-search';
 import { HandlingBadges } from '@/components/shared/handling-badges';
@@ -180,6 +185,8 @@ function OrderCreateForm({
   warehouseId: string;
   active: ActiveClientState;
 }) {
+  // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
+  const todayIst = useTodayIst();
   const skus = useOutboundSkus();
   // Story 1-1 — client first. A SKU code is unique per client, so with more
   // than one client the form asks which client the order is for before any
@@ -217,6 +224,8 @@ function OrderCreateForm({
   const [consigneeLegalName, setConsigneeLegalName] = useState('');
   // Story 4-1b: the client's own order number (optional; blank sends no key).
   const [clientOrderRef, setClientOrderRef] = useState('');
+  // Story 4-2a: type, priority, ship-by and COD (each sent only when chosen).
+  const [orderFields, setOrderFields] = useState<OrderFieldsDraft>(emptyOrderFieldsDraft());
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -302,6 +311,14 @@ function OrderCreateForm({
     setClientOrderRef(next);
   }
 
+  /** Story 4-2a — every order field joins the backend's request hash when
+   * sent: an edit mints a fresh key, like every other field. */
+  function editOrderFields(next: OrderFieldsDraft) {
+    pinClient();
+    setIdempotencyKey(null);
+    setOrderFields(next);
+  }
+
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const clientProblem = orderClientProblem(clients, clientId);
@@ -343,6 +360,17 @@ function OrderCreateForm({
       setOutcome({ tone: 'rejected', word: 'Not created', reason: own.problem });
       return;
     }
+    // Story 4-2a — type, priority, ship-by (against today in IST) and COD,
+    // parsed before any key is minted.
+    const fields = parseOrderFieldsDraft(orderFields, {
+      todayIst: todayIst,
+      hasBuyerGstin: buyer.gstin !== undefined,
+      surface: 'staff',
+    });
+    if (fields.problem !== null) {
+      setOutcome({ tone: 'rejected', word: 'Not created', reason: fields.problem });
+      return;
+    }
     // Reused across retries of an unchanged draft; minted afresh otherwise.
     const key = idempotencyKey ?? ulid();
     setIdempotencyKey(key);
@@ -363,6 +391,8 @@ function OrderCreateForm({
           ...legalNameBody(buyer.gstin, consigneeLegalName),
           // Story 4-1b — only when given.
           ...clientOrderRefBody(own.ref),
+          // Story 4-2a — only the chosen keys.
+          ...fields.body,
         },
         key,
       );
@@ -371,6 +401,7 @@ function OrderCreateForm({
       setConsigneeGstin('');
       setConsigneeLegalName('');
       setClientOrderRef('');
+      setOrderFields(emptyOrderFieldsDraft());
       setIdempotencyKey(null);
       setOutcome(createOutcome(order, (skuId) => skuMap?.[skuId], parsed.lines));
       setHiddenNote(hiddenByClientFilterNote(active, order.clientId, allClients, tenantName));
@@ -475,6 +506,7 @@ function OrderCreateForm({
           The client&apos;s own reference — shown on the order and searchable. Up to 64 letters, digits, spaces and punctuation.
         </span>
       </label>
+      <OrderFieldsFieldset draft={orderFields} onDraft={editOrderFields} todayIst={todayIst} surface="staff" />
       <ShipToFieldset
         destination={destination}
         onDestination={editDestination}
@@ -624,6 +656,8 @@ function OrdersTable({
   /** Story 4-1b — the active client, named in an empty search result. */
   active?: ActiveClientState;
 }) {
+  // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
+  const todayIst = useTodayIst();
   // Story 4-1b — the exact-match search (null: none). Hidden while drilled
   // (the drill's rows are its tile's); a change returns the table to page one
   // (the hook stamps its cursor with it, and it joins the table key).
@@ -731,6 +765,14 @@ function OrdersTable({
         ]
       : []),
     { key: 'source', header: 'Source', render: (order) => orderSourceLabel(order.source) },
+    {
+      // Story 4-2a — priority, ship-by (Overdue / Due today while open) and
+      // the payment line: "COD ₹x", "Prepaid", or "—" on a legacy order.
+      key: 'fields',
+      header: 'Priority · ship-by · payment',
+      render: (order) => <OrderFieldChips order={order} todayIst={todayIst} />,
+    },
+    { key: 'orderType', header: 'Type', render: (order) => orderTypeLabel(order.orderType) },
     {
       // Story 11-1: the one address line the list works from first — city
       // and pincode. Pre-11.1 rows read `destination: null` and render a dash.
@@ -903,6 +945,8 @@ export function OrderDetailPanel({
    */
   canManageReturns?: boolean;
 }) {
+  // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
+  const todayIst = useTodayIst();
   const detail = useOrderDetail(orderId);
   const skus = useOutboundSkus();
   // Story 1-2a — a departed client's order offers no "Create return" (the
@@ -942,6 +986,11 @@ export function OrderDetailPanel({
         <span className="font-mono text-sm font-medium">{orderLabel(detail.data)}</span>
         <span className="font-mono text-xs text-(--muted-foreground)">{detail.data.id}</span>
       </header>
+      {/* Story 4-2a — the type, then priority, ship-by and the payment line. */}
+      <p className="flex flex-wrap items-center gap-2 text-xs" data-testid="order-detail-fields">
+        <span data-testid="order-detail-type">{orderTypeLabel(detail.data.orderType)}</span>
+        <OrderFieldChips order={detail.data} todayIst={todayIst} />
+      </p>
       {warehouseId !== undefined && (
         // Story 9-3a — the order's pick, pack and dispatch events. The label
         // is the order's real handle — story 4-1b: the order label rule.

@@ -734,6 +734,27 @@ describe('the pack bench', () => {
     expect(buttonLabels(view)).toContain('Dispatch this order');
   });
 
+  test('story 4-2a: the slip carries the type and "COD ₹x"; a slip stored before 4-2a reads "—"', async () => {
+    packResponder = () => {
+      orderStatuses['order-1'] = 'ready_to_dispatch';
+      return { status: 201, body: { pack: { ...(packedFixture('order-1') as object), orderType: 'b2c', codAmountPaise: 149900 } } };
+    };
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    await pressButton(view, 'Pack this order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="slip-payment"]')!.textContent).toBe('COD ₹1,499.00');
+    expect(view.container.querySelector('[data-testid="slip-order-fields"]')!.textContent).toContain('B2C');
+  });
+
+  test('story 4-2a: a legacy stored slip (no order fields) shows the payment line as "—"', async () => {
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    await pressButton(view, 'Pack this order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="slip-payment"]')!.textContent).toBe('—');
+  });
+
   test('a scan mismatch is refused verbatim, changes nothing optimistically, and a retry reuses the key', async () => {
     const mismatch =
       'Pack mismatch — SPICE-01 scanned 4.000 kg but picked 3.000 kg; FLOUR-01 scanned 3.000 kg but picked 2.000 kg.';

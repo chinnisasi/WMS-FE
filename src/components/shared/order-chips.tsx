@@ -1,0 +1,71 @@
+import { paymentLine, priorityChip, shipByLabel, shipByStatus } from '@/lib/order-fields';
+
+/**
+ * Story 4-2a — the order fields at a glance, shared by every order surface
+ * (staff list and detail, the wave picker, picklists, pack and dispatch, the
+ * portal). Text always — a chip is never colour alone. `todayIst` is passed
+ * in (the IST date of `Date.now()`); the Overdue / Due today word shows only
+ * while the order is still to ship (A14).
+ */
+export function PriorityChip({ priority }: { readonly priority: string | null | undefined }) {
+  const chip = priorityChip(priority);
+  if (chip === null) return null;
+  return (
+    <span
+      className="rounded-full border border-(--warning) px-2 py-0.5 text-xs font-medium text-(--warning)"
+      data-testid="priority-chip"
+    >
+      {chip}
+    </span>
+  );
+}
+
+export function ShipByChip({
+  shipByDate,
+  todayIst,
+  orderStatus,
+}: {
+  readonly shipByDate: string | null | undefined;
+  readonly todayIst: string;
+  readonly orderStatus?: string;
+}) {
+  if (shipByDate === null || shipByDate === undefined) return null;
+  const status = shipByStatus(shipByDate, todayIst, orderStatus);
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-xs ${status === null ? 'border-(--border) text-(--muted-foreground)' : 'border-(--warning) font-medium text-(--warning)'}`}
+      data-testid="ship-by-chip"
+    >
+      Ship by {shipByLabel(shipByDate, todayIst, orderStatus)}
+    </span>
+  );
+}
+
+/** Priority, ship-by and the payment line in one row. */
+export function OrderFieldChips({
+  order,
+  todayIst,
+  showPayment = true,
+}: {
+  readonly order: {
+    readonly priority?: string | null;
+    readonly shipByDate?: string | null;
+    readonly codAmountPaise?: number | null;
+    readonly orderType?: string | null;
+    readonly status?: string;
+  };
+  readonly todayIst: string;
+  readonly showPayment?: boolean;
+}) {
+  return (
+    <span className="flex flex-wrap items-center gap-1" data-testid="order-field-chips">
+      <PriorityChip priority={order.priority} />
+      <ShipByChip shipByDate={order.shipByDate} todayIst={todayIst} {...(order.status === undefined ? {} : { orderStatus: order.status })} />
+      {showPayment && (
+        <span className="data text-xs" data-testid="payment-line">
+          {paymentLine(order)}
+        </span>
+      )}
+    </span>
+  );
+}

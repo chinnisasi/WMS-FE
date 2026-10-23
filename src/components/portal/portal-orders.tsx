@@ -1,5 +1,10 @@
 'use client';
 
+import { useTodayIst } from '@/components/shared/use-today-ist';
+import { OrderFieldsFieldset } from '@/components/shared/order-fields-fieldset';
+import { OrderFieldChips } from '@/components/shared/order-chips';
+import { emptyOrderFieldsDraft, type OrderFieldsDraft } from '@/lib/order-fields-form';
+import { orderTypeLabel } from '@/lib/order-fields';
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiPortalPlaceOrder } from '@/lib/api/client';
@@ -51,6 +56,8 @@ import { WarehousesFailure } from '@/components/shared/warehouses-failure';
  * (`portal/stock`) as a non-blocking hint.
  */
 export function PortalOrders() {
+  // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
+  const todayIst = useTodayIst();
   // Story 4-1b — the exact-match search over this company's own orders (null: none).
   const [reference, setReference] = useState<string | null>(null);
   const orders = usePortalOrders(null, reference);
@@ -81,6 +88,9 @@ export function PortalOrders() {
     },
     { key: 'ref', header: 'Reference', render: (row) => orderReference(row) },
     { key: 'status', header: 'Status', render: (row) => orderStatusLabel(row.status) },
+    // Story 4-2a — priority, ship-by and the payment line; the type beside them.
+    { key: 'fields', header: 'Priority · ship-by · payment', render: (row) => <OrderFieldChips order={row} todayIst={todayIst} /> },
+    { key: 'orderType', header: 'Type', render: (row) => orderTypeLabel(row.orderType) },
     { key: 'warehouse', header: 'Warehouse', render: (row) => row.warehouseName },
     { key: 'destination', header: 'Destination', render: (row) => orderDestination(row) },
     { key: 'lines', header: 'Lines', numeric: true, render: (row) => lineCountLabel(row.lineCount) },
@@ -175,6 +185,8 @@ function PlaceOrderForm({
   onCancel: () => void;
   onPlaced: (order: PortalPlacedOrderResponse) => void;
 }) {
+  // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
+  const todayIst = useTodayIst();
   const skus = usePortalSkuOptions();
   const warehouses = usePortalWarehouses();
   const stock = usePortalStockRows();
@@ -185,6 +197,8 @@ function PlaceOrderForm({
   const [consigneeLegalName, setConsigneeLegalName] = useState('');
   // Story 4-1b — "Your order number (optional)": in the request hash when sent.
   const [clientOrderRef, setClientOrderRef] = useState('');
+  // Story 4-2a — type, priority (Normal / High), ship-by and COD.
+  const [orderFields, setOrderFields] = useState<OrderFieldsDraft>(emptyOrderFieldsDraft());
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -214,7 +228,7 @@ function PlaceOrderForm({
       setProblem(PORTAL_SESSION_EXPIRED);
       return;
     }
-    const parsed = parsePortalOrderCreate({ lines, destination, consigneeGstin, consigneeLegalName, clientOrderRef }, chosenWarehouse, byId);
+    const parsed = parsePortalOrderCreate({ lines, destination, consigneeGstin, consigneeLegalName, clientOrderRef, orderFields }, chosenWarehouse, byId, todayIst);
     if (parsed.body === null) {
       setProblem(parsed.problem);
       return;
@@ -316,6 +330,7 @@ function PlaceOrderForm({
             Your own reference — shown on the order and searchable. Up to 64 letters, digits, spaces and punctuation.
           </span>
         </label>
+        <OrderFieldsFieldset draft={orderFields} onDraft={edit(setOrderFields)} todayIst={todayIst} surface="portal" />
         <LineRows<LineOption>
           lines={lines}
           options={options}

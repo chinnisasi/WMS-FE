@@ -1,5 +1,8 @@
 'use client';
 
+import { useTodayIst } from '@/components/shared/use-today-ist';
+import { OrderFieldChips, PriorityChip, ShipByChip } from '@/components/shared/order-chips';
+import { compareOrderUrgency } from '@/lib/order-fields';
 import { useEffect, useRef, useState } from 'react';
 
 import {
@@ -362,6 +365,8 @@ function WaveGenerateForm({
   /** Story 1-5a — only to say "All clients": the picker is never filtered. */
   active: ActiveClient;
 }) {
+  // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
+  const todayIst = useTodayIst();
   const [policyId, setPolicyId] = useState('');
   const [explicit, setExplicit] = useState(false);
   const [selected, setSelected] = useState<readonly string[]>([]);
@@ -537,7 +542,9 @@ function WaveGenerateForm({
                 {acceptedOnPage.length} chosen.
               </div>
               <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-                {acceptedOnPage.map((order) => (
+                {/* Story 4-2a — the picker lists by urgency (the wave's own
+                    key: due first, priority, ship-by, then oldest), chips shown. */}
+                {[...acceptedOnPage].sort((a, b) => compareOrderUrgency(a, b, todayIst)).map((order) => (
                   <li key={order.id}>
                     <label className="flex items-center gap-2 text-xs">
                       <input
@@ -556,6 +563,7 @@ function WaveGenerateForm({
                       {orderLabel(order) !== shortOrderId(order.id) && (
                         <span className="font-mono text-(--muted-foreground)">{shortOrderId(order.id)}</span>
                       )}
+                      <OrderFieldChips order={order} todayIst={todayIst} />
                     </label>
                   </li>
                 ))}
@@ -1066,6 +1074,8 @@ function PicklistPanel({
   /** Story 1-6a — the whole SKU (it names the unit and carries the handling warnings). */
   skuOf: (skuId: string) => SkuResponse | undefined;
 }) {
+  // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
+  const todayIst = useTodayIst();
   return (
     <div className="flex flex-col gap-1 rounded-sm border border-(--border) p-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1073,6 +1083,9 @@ function PicklistPanel({
         <span className="rounded-full border border-(--border) px-2 py-0.5 text-(--muted-foreground)">
           {picklistStatusLabel(picklist.status)}
         </span>
+        {/* Story 4-2a — the picklist's most urgent priority and earliest ship-by (absent on a pre-4-2a wave). */}
+        <PriorityChip priority={picklist.priority ?? null} />
+        <ShipByChip shipByDate={picklist.shipByDate ?? null} todayIst={todayIst} />
       </div>
       <ol className="flex flex-col gap-1">
         {/* Walk order is the server's (bins.code ascending) — never re-sorted
