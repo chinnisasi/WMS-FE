@@ -18,6 +18,8 @@ import {
   adjustLedgerHref,
   adjustOffered,
   adjustOutcome,
+  pendReasonText,
+  pendSourceText,
   adjustReason,
   adjustReasonHint,
   adjustSkuRefusal,
@@ -526,6 +528,42 @@ describe('adjustOutcome — decision 11', () => {
       sku: { ...SKU, uom: 'kg', uomPrecision: 3 },
     });
     expect(kgOutcome.reason).toContain('Over the 10.000 threshold — SPF −12.500 kg in A-01');
+  });
+
+  test('story 3-2b — a 202 pended for approval-required (or with no threshold) reads "Sent for approval", never a threshold', () => {
+    for (const pendingAdjustment of [
+      { quantityDelta: -2, thresholdQuantityAtRequest: 10, pendReason: 'approval-required' },
+      { quantityDelta: -2, thresholdQuantityAtRequest: null, pendReason: 'approval-required' },
+      { quantityDelta: -2, thresholdQuantityAtRequest: null },
+    ]) {
+      const outcome = adjustOutcome({ kind: 'pending', pending: { pendingAdjustment: pendingAdjustment as never } }, labels);
+      expect(outcome.word).toBe('Sent for approval');
+      expect(outcome.reason).toBe("SPF −2 each in A-01 waits for an owner's approval — your role can request adjustments, not apply them; stock is unchanged until then.");
+      expect(outcome.link).toEqual({ href: ADJUSTMENT_PENDINGS_HREF, label: 'Open the approval queue' });
+    }
+    // An explicit `threshold` reason keeps the 3-2a words.
+    const threshold = adjustOutcome({ kind: 'pending', pending: { pendingAdjustment: { quantityDelta: 25, thresholdQuantityAtRequest: 10, pendReason: 'threshold' } as never } }, labels);
+    expect(threshold.word).toBe('Pending approval');
+  });
+});
+
+describe('story 3-2b — the approval card: why it pended, and from where', () => {
+  const qty = (value: number) => String(value);
+  test('pendReasonText: approval required, or the threshold it crossed (an older row without a reason is a threshold pend)', () => {
+    expect(pendReasonText({ pendReason: 'approval-required', thresholdQuantityAtRequest: 10 }, qty)).toBe(
+      'approval required — the requester may only request adjustments',
+    );
+    expect(pendReasonText({ pendReason: 'approval-required', thresholdQuantityAtRequest: null }, qty)).toBe(
+      'approval required — the requester may only request adjustments',
+    );
+    expect(pendReasonText({ pendReason: 'threshold', thresholdQuantityAtRequest: 10 }, qty)).toBe('over the 10 threshold, frozen at request');
+    expect(pendReasonText({ thresholdQuantityAtRequest: 4 }, qty)).toBe('over the 4 threshold, frozen at request');
+  });
+
+  test('pendSourceText: the handheld\'s id tail, or nothing from the web', () => {
+    expect(pendSourceText({ sourceDeviceId: '0198f7a2-1b3c-7d4e-8f90-00000000d0c5' })).toBe('from handheld …0000d0c5');
+    expect(pendSourceText({ sourceDeviceId: null })).toBeNull();
+    expect(pendSourceText({})).toBeNull();
   });
 });
 

@@ -1441,7 +1441,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust';
     /**
      * The replay fate the server refused with
      */
@@ -1517,7 +1517,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -1618,7 +1618,7 @@ export type StockAdjustmentDto = {
      */
     note: string;
     /**
-     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock
+     * Business time (ISO-8601 UTC, Z-suffixed); defaults to the commit clock on the web. Story 3-2b: REQUIRED on a handheld (device session) adjustment — the time the operator confirmed it
      */
     occurredAt?: string;
     /**
@@ -1725,9 +1725,13 @@ export type AdjustmentPendingDto = {
     decidedBy: string | null;
     decidedAt: string | null;
     /**
-     * The policy threshold (base UoM) as it read at request time — frozen context
+     * The policy threshold (base UoM) as it read at request time — frozen context. Story 3-2b: null when the tenant had no policy and a request-only holder's adjustment was force-pended (pendReason 'approval-required')
      */
-    thresholdQuantityAtRequest: number;
+    thresholdQuantityAtRequest: number | null;
+    /**
+     * Story 3-2b — why it pended: 'threshold' (|quantityDelta| strictly exceeded the policy threshold) or 'approval-required' (the requester holds only stock.adjust.request — every request pends). Always present on a new 202 and on the queue; a 202 replayed from before 3-2b is served with 'threshold'
+     */
+    pendReason?: 'threshold' | 'approval-required';
 };
 
 export type StockAdjustmentPendingResponse = {
@@ -1811,13 +1815,21 @@ export type AdjustmentPendingEntryDto = {
     decidedBy: string | null;
     decidedAt: string | null;
     /**
-     * The policy threshold (base UoM) as it read at request time — frozen context
+     * The policy threshold (base UoM) as it read at request time — frozen context. Story 3-2b: null when the tenant had no policy and a request-only holder's adjustment was force-pended (pendReason 'approval-required')
      */
-    thresholdQuantityAtRequest: number;
+    thresholdQuantityAtRequest: number | null;
+    /**
+     * Story 3-2b — why it pended: 'threshold' (|quantityDelta| strictly exceeded the policy threshold) or 'approval-required' (the requester holds only stock.adjust.request — every request pends). Always present on a new 202 and on the queue; a 202 replayed from before 3-2b is served with 'threshold'
+     */
+    pendReason?: 'threshold' | 'approval-required';
     /**
      * True only when an approval posted this adjustment from story 9-3a on (the row recorded its first event): its events are listed by `GET …/inventory/events?adjustmentPendingId=`. False while pending, on a reject, and for an approval decided before 9-3a
      */
     ledgerLinked: boolean;
+    /**
+     * Story 3-2b — the handheld that submitted the request (null from the web, and on every row raised before 3-2b)
+     */
+    sourceDeviceId: string | null;
 };
 
 export type AdjustmentPendingListResponse = {
@@ -4588,6 +4600,14 @@ export type CatalogMoveReasonDto = {
     noteRequired: boolean;
 };
 
+export type CatalogAdjustReasonDto = {
+    code: 'stock-count' | 'damaged' | 'expired' | 'shrinkage' | 'found' | 'recall' | 'system-correction' | 'other';
+    /**
+     * The operator-facing label (the web uses the same words)
+     */
+    label: string;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -4655,6 +4675,10 @@ export type CatalogSnapshotResponse = {
      * Story 3-1 (additive): the bin-to-bin move's reason vocabulary, in order — the handheld's reason chips. A reason with noteRequired needs a note (up to 200 characters). An older server omits it, and the handheld then offers no Move stock
      */
     moveReasons: Array<CatalogMoveReasonDto>;
+    /**
+     * Story 3-2b (additive): the stock adjustment's reason vocabulary with labels, in order — the handheld's Adjust reason chips (every reason needs the note the adjustment always carries). An older server omits it, and the handheld then offers no Adjust
+     */
+    adjustReasons: Array<CatalogAdjustReasonDto>;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -13330,15 +13354,15 @@ export type InventoryControllerAdjustStockData = {
 
 export type InventoryControllerAdjustStockErrors = {
     /**
-     * Missing or malformed Idempotency-Key, invalid body, or a Story 2.4 batch/serial arm violation (validation-failed): batch/serials on an untracked SKU, a tracked movement missing its arm, malformed batch dates (or expiry preceding mfg), overrideReason on an intake or missing on an override draw, duplicate serials, a quantityDelta that does not equal the serial count, or a reasonCode outside the closed adjustment vocabulary; a retired bin (bin-retired), the system QC-hold or IN-TRANSIT bin (qc-bin-not-adjustable), the system RETURNS bin (returns-bin-not-adjustable), or — story 2-4a — anything but a negative write-off on the system DAMAGED bin (damaged-bin-write-off-only, also at a pend's approval)
+     * Missing or malformed Idempotency-Key, invalid body, or a Story 2.4 batch/serial arm violation (validation-failed): batch/serials on an untracked SKU, a tracked movement missing its arm, malformed batch dates (or expiry preceding mfg), overrideReason on an intake or missing on an override draw, duplicate serials, a quantityDelta that does not equal the serial count, a reasonCode outside the closed adjustment vocabulary, or — story 3-2b — occurredAt missing on a handheld adjustment; a retired bin (bin-retired), the system QC-hold or IN-TRANSIT bin (qc-bin-not-adjustable), the system RETURNS bin (returns-bin-not-adjustable), or — story 2-4a — anything but a negative write-off on the system DAMAGED bin (damaged-bin-write-off-only, also at a pend's approval)
      */
     400: ProblemDetailsDto;
     /**
-     * Missing or invalid session token
+     * Missing or invalid session token of either family, or a device token without a badge-in session (unauthenticated)
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied), or the caller lacks stock.adjust (role-denied)
+     * Session belongs to another tenant (permission-denied), an unknown or revoked device (device-revoked), or the caller holds neither stock.adjust nor stock.adjust.request — or replays an applied adjustment without stock.adjust (role-denied)
      */
     403: ProblemDetailsDto;
     /**
@@ -13346,7 +13370,7 @@ export type InventoryControllerAdjustStockErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Concurrent request on the same Idempotency-Key (conflict); a kit SKU can never hold stock (kit-cannot-hold-stock, naming it); or a serial-tracked movement scans a serial that already lives in a bin (duplicate-serial, naming it) or draws a serial the ledger last saw in another bin (serial-elsewhere, naming the last-known bin)
+     * Concurrent request on the same Idempotency-Key (conflict); a kit SKU can never hold stock (kit-cannot-hold-stock, naming it); a serial-tracked movement scans a serial that already lives in a bin (duplicate-serial, naming it) or draws a serial the ledger last saw in another bin (serial-elsewhere, naming the last-known bin); a positive adjustment for a departed client (client-departed); or — story 3-2b — the handheld op was captured by another operator (operator-mismatch)
      */
     409: ProblemDetailsDto;
     /**
@@ -13363,7 +13387,7 @@ export type InventoryControllerAdjustStockResponses = {
      */
     201: StockAdjustmentResponse;
     /**
-     * Story 5-2: |quantityDelta| exceeds the tenant's policy threshold — the adjustment PENDS (no ledger event, no on-hand change) until an Owner approves or rejects; the body is the pend snapshot with its threshold context
+     * Story 5-2: |quantityDelta| exceeds the tenant's policy threshold (pendReason 'threshold'), or — story 3-2b — the requester holds only stock.adjust.request (pendReason 'approval-required'): the adjustment PENDS (no ledger event, no on-hand change) until an Owner approves or rejects; the body is the pend snapshot with its threshold context
      */
     202: StockAdjustmentPendingResponse;
 };

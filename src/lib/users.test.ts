@@ -60,7 +60,15 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 2-3a adds `gate.manage` (owner + ops_manager + operator — the gate-in) — 45 became 46.
     // Story 3-1 adds `stock.move` (owner + ops_manager + operator — the bin-to-bin move) — 46 became 47;
     // story 4-1a adds `orders.place` (owner + client — the portal order) — 47 became 48.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(48);
+    // Story 3-2b adds `stock.adjust.request` (owner + ops_manager + operator — the handheld adjustment request) — 48 became 49.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(49);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'stock.adjust.request')),
+    ).toEqual(['owner', 'ops_manager', 'operator']);
+    // The operator REQUESTS; it never holds `stock.adjust` (the web Adjust form's gate).
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'stock.adjust')),
+    ).toEqual(['owner', 'ops_manager']);
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'stock.move')),
     ).toEqual(['owner', 'ops_manager', 'operator']);
@@ -233,6 +241,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'gate.manage',
         // Story 3-1 — the bin-to-bin move (derived, never hand-copied).
         'stock.move',
+        // Story 3-2b — the adjustment request (derived, never hand-copied).
+        'stock.adjust.request',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -262,6 +272,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
       'gate.manage',
       // Story 3-1 — the floor moves stock between bins.
       'stock.move',
+      // Story 3-2b — the floor requests an adjustment (always pended).
+      'stock.adjust.request',
     ]);
     expect(roleHasCapability('operator', 'putaway.execute')).toBe(true);
     expect(roleHasCapability('operator', 'warehouse.create')).toBe(false);
