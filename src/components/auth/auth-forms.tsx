@@ -345,7 +345,7 @@ export function AcceptInviteForm({ initialToken = '' }: { initialToken?: string 
     // The inviting tenant id rides the invite link too.
     const tenantId = new URLSearchParams(window.location.search).get('tenant') ?? '';
     if (tenantId === '') {
-      setRejection('This invite link is incomplete — ask the owner for a fresh invitation.');
+      setRejection('This invite link is incomplete — ask whoever invited you to send a new invitation.');
       return;
     }
     setPending(true);
@@ -439,7 +439,7 @@ function rejectionReason(error: unknown): string {
       case 'invite-pending':
         return 'This invitation has not been accepted yet — use the link from your invitation.';
       case 'invite-invalid':
-        return 'This invite link is not valid — ask the owner for a fresh invitation.';
+        return 'This invite link is not valid — ask whoever invited you to send a new invitation.';
       case 'idempotency-key-reuse':
         return 'This submission was already processed; check your tenant list.';
       case 'validation-failed':

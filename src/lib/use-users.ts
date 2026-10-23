@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiListUsers } from '@/lib/api/client';
-import type { UserResponse } from '@/lib/api/generated';
+import type { UserListItemResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { USERS_CHANGED_EVENT } from '@/lib/users';
 
 export interface UsersPage {
-  items: readonly UserResponse[];
+  items: readonly UserListItemResponse[];
   /** Cursor for the DataTable's Next button; null on the last page. */
   nextCursor: string | null;
 }
