@@ -1,0 +1,4 @@
+{
+  "keepAliveTimeoutMs": 65000,
+  "shutdownForceExitMs": 25000
+}
