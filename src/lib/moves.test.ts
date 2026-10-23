@@ -95,8 +95,8 @@ describe('the bins the form offers', () => {
     ];
     expect(originSkuRows(rows)).toEqual([{ skuId: 's1', quantity: 5 }]);
     const batches = [
-      { id: 'b1', code: 'L1', mfgDate: null, expiryDate: null, status: 'active', quantity: 5 },
-      { id: 'b2', code: 'L2', mfgDate: null, expiryDate: null, status: 'active', quantity: 0 },
+      { id: 'b1', code: 'L1', mfgDate: null, expiryDate: null, status: 'active' as const, blockedReason: null, blockedNote: null, blockedAt: null, blockedBy: null, blockedByName: null, expired: false, quantity: 5 },
+      { id: 'b2', code: 'L2', mfgDate: null, expiryDate: null, status: 'active' as const, blockedReason: null, blockedNote: null, blockedAt: null, blockedBy: null, blockedByName: null, expired: false, quantity: 0 },
     ];
     expect(moveBatchOptions(batches).map((x) => x.code)).toEqual(['L1']);
   });

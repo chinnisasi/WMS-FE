@@ -548,6 +548,197 @@ describe('the Inventory screen — Batches', () => {
     expect(panelText()).not.toContain('Batch not found');
   });
 
+  // ── story 3-3a: block / unblock ─────────────────────────────────────────────
+
+  async function setField(selector: string, value: string): Promise<void> {
+    const element = panel().querySelector(selector) as HTMLTextAreaElement | HTMLSelectElement;
+    if (element === null) throw new Error(`No field ${selector}`);
+    const proto = element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLTextAreaElement.prototype;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(element, value);
+      element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    });
+  }
+
+  const BLOCKED_A = {
+    id: BATCH_A,
+    skuId: SKU_SERUM,
+    code: 'LOT-A',
+    mfgDate: null,
+    expiryDate: '2027-01-01T00:00:00.000Z',
+    status: 'blocked',
+    blockedReason: 'recall',
+    blockedNote: null,
+    blockedAt: '2026-10-17T09:30:00.000Z',
+    blockedBy: 'u-1',
+    blockedByName: 'owner',
+    expired: false,
+  };
+
+  test('3-3a: a qc.manage role blocks a batch — reason and note in the body, one key, the banner, and the list re-read', async () => {
+    const posted: { pathname: string; body: unknown; key: string | null }[] = [];
+    overrides.push({
+      match: (p) => p.endsWith(`/inventory/batches/${BATCH_A}/block`),
+      respond: () => json(201, { batch: BLOCKED_A }),
+    });
+    stubGlobal('fetch', ((original) => async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init);
+      if (request.method === 'POST') {
+        posted.push({ pathname: new URL(request.url).pathname, body: await request.clone().json(), key: request.headers.get('Idempotency-Key') });
+      }
+      return original(input, init);
+    })(globalThis.fetch) as unknown as typeof fetch);
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    expect(cellTexts(tableRows()[0]!)[3]).toBe('Active');
+    await click(button('Block LOT-A'));
+    const dialog = panel().querySelector('[data-testid="batch-block-dialog"]')!;
+    expect(dialog.getAttribute('aria-label')).toBe('Block batch LOT-A');
+
+    // No reason → refused in the browser, nothing sent.
+    await click(button('Block batch'));
+    expect(panelText()).toContain('Pick a reason for the block.');
+    // Other without a note → refused too.
+    await setField('select[aria-label="Block reason"]', 'other');
+    await click(button('Block batch'));
+    expect(panelText()).toContain('Say why in the note — the reason is Other.');
+    expect(posted).toHaveLength(0);
+
+    await setField('select[aria-label="Block reason"]', 'recall');
+    await setField('textarea[aria-label="Block note"]', '  Supplier recall R-17 ');
+    const listReadsBefore = batchListReads().length;
+    await click(button('Block batch'));
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.pathname).toBe(`/api/v1/tenants/${T}/inventory/batches/${BATCH_A}/block`);
+    expect(posted[0]!.body).toEqual({ reason: 'recall', note: 'Supplier recall R-17' });
+    expect(posted[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(panel().querySelector('[data-testid="batch-block-dialog"]')).toBeNull();
+    expect(panelText()).toContain('Batch LOT-A is blocked (recall) in every warehouse');
+    expect(batchListReads().length).toBe(listReadsBefore + 1);
+  });
+
+  test('3-3a: a blocked batch reads "Blocked — recall (by owner, date)", an expired one "Expired"; Unblock needs a note', async () => {
+    overrides.push({
+      match: (p) => p.endsWith('/inventory/batches'),
+      respond: () =>
+        json(200, {
+          items: [
+            { ...BLOCKED_A, quantity: 12 },
+            { id: BATCH_B, code: 'LOT-B', mfgDate: null, expiryDate: '2026-10-01T00:00:00.000Z', status: 'active', blockedReason: null, blockedAt: null, blockedBy: null, blockedByName: null, expired: true, quantity: 3 },
+          ],
+        }),
+    });
+    overrides.push({
+      match: (p) => p.endsWith(`/inventory/batches/${BATCH_A}/unblock`),
+      respond: () => problem(409, 'batch-not-blocked'),
+    });
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    expect(cellTexts(tableRows()[0]!)[3]).toBe('Blocked — recall (by owner, 17 Oct 2026)');
+    expect(cellTexts(tableRows()[1]!)[3]).toBe('Expired');
+    await click(button('Unblock LOT-A'));
+    await click(button('Unblock batch'));
+    expect(panelText()).toContain('Say why the block is lifted — a note is required.');
+    await setField('textarea[aria-label="Unblock note"]', 'Recall withdrawn');
+    await click(button('Unblock batch'));
+    expect(panelText()).toContain('This batch is not blocked any more — refresh the batches.');
+  });
+
+  test('3-3a: Esc is ignored while a block is in flight — the dialog (and its key) survive until the answer', async () => {
+    let release: (() => void) | null = null;
+    overrides.push({
+      match: (p) => p.endsWith(`/inventory/batches/${BATCH_A}/block`),
+      respond: () =>
+        new Promise<Response>((resolve) => {
+          release = () => resolve(json(201, { batch: BLOCKED_A }));
+        }),
+    });
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    await click(button('Block LOT-A'));
+    await setField('select[aria-label="Block reason"]', 'recall');
+    await click(button('Block batch'));
+    expect(button('Blocking…').disabled).toBe(true);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    await settle();
+    expect(panel().querySelector('[data-testid="batch-block-dialog"]')).not.toBeNull();
+    await act(async () => {
+      release!();
+    });
+    await settle();
+    expect(panel().querySelector('[data-testid="batch-block-dialog"]')).toBeNull();
+    expect(panelText()).toContain('Batch LOT-A is blocked (recall) in every warehouse');
+    // Idle again: Esc closes a freshly opened dialog.
+    await click(button('Block LOT-A'));
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    await settle();
+    expect(panel().querySelector('[data-testid="batch-block-dialog"]')).toBeNull();
+  });
+
+  test('3-3a: a 409 batch-already-blocked closes the dialog and re-reads the list (the batch moved on)', async () => {
+    overrides.push({
+      match: (p) => p.endsWith(`/inventory/batches/${BATCH_A}/block`),
+      respond: () => problem(409, 'batch-already-blocked'),
+    });
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    await click(button('Block LOT-A'));
+    await setField('select[aria-label="Block reason"]', 'recall');
+    const before = batchListReads().length;
+    await click(button('Block batch'));
+    expect(panel().querySelector('[data-testid="batch-block-dialog"]')).toBeNull();
+    expect(batchListReads().length).toBe(before + 1);
+    expect(panelText()).toContain('This batch is already blocked — refresh the batches.');
+  });
+
+  test('3-3a: blocking from an open detail re-fetches the detail, whose status then reads "Blocked — …"', async () => {
+    let blockedNow = false;
+    overrides.push({
+      match: (p) => p.endsWith(`/inventory/batches/${BATCH_A}/block`),
+      respond: () => {
+        blockedNow = true;
+        return json(201, { batch: { ...BLOCKED_A, blockedNote: 'Supplier recall R-17' } });
+      },
+    });
+    overrides.push({
+      match: (p) => p === `/api/v1/tenants/${T}/inventory/batches/${BATCH_A}` && blockedNow,
+      respond: () =>
+        json(200, { ...BLOCKED_A, blockedNote: 'Supplier recall R-17', bins: [{ warehouseId: WH, binId: BIN_D1, quantity: 12 }], history: [] }),
+    });
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    await click(tableRows()[0]!.querySelector('button')!);
+    const detailReads = () => requests.filter((r) => r.pathname === `/api/v1/tenants/${T}/inventory/batches/${BATCH_A}`).length;
+    expect(detailReads()).toBe(1);
+    expect(panel().querySelector('[data-testid="batch-detail-status"]')?.textContent).toContain('Active');
+    await click(button('Block this batch'));
+    await setField('select[aria-label="Block reason"]', 'recall');
+    await setField('textarea[aria-label="Block note"]', 'Supplier recall R-17');
+    await click(button('Block batch'));
+    expect(detailReads()).toBe(2);
+    expect(panel().querySelector('[data-testid="batch-detail-status"]')?.textContent).toContain(
+      'Blocked — recall: Supplier recall R-17 (by owner, 17 Oct 2026)',
+    );
+  });
+
+  test('3-3a: a role without qc.manage sees no Block action', async () => {
+    writeSession({ ...session(), user: { ...session().user, role: 'accountant' } } as StoredSession);
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    expect(tableRows()).toHaveLength(2);
+    expect([...panel().querySelectorAll('button')].some((b) => (b.textContent ?? '').startsWith('Block'))).toBe(false);
+  });
+
   test('a failed bin map on Batches says "Bin codes not loaded" with Retry bin codes', async () => {
     overrides.push({ match: (p) => /\/zones\/[^/]+\/bins$/.test(p), respond: () => problem(500, 'boom') });
     view = render(<InventoryScreen initialTab="batches" />);
@@ -1411,7 +1602,7 @@ describe('story 3-2a — the stock adjustment', () => {
     overrides.push({
       match: (p) => p.endsWith('/inventory/batches'),
       respond: () =>
-        json(200, { items: [{ id: BATCH_A, code: 'LOT-A', mfgDate: null, expiryDate: '2026-01-01T00:00:00.000Z', status: 'active', quantity: 12 }] }),
+        json(200, { items: [{ id: BATCH_A, code: 'LOT-A', mfgDate: null, expiryDate: '2026-01-01T00:00:00.000Z', status: 'active', expired: true, quantity: 12 }] }),
     });
     withAdjust(applied(-1));
     view = render(<InventoryScreen />);
@@ -1422,7 +1613,7 @@ describe('story 3-2a — the stock adjustment', () => {
     expect(fefoRadio.disabled).toBe(true);
     expect((panel().querySelector('input[aria-label="Pick a batch"]') as HTMLInputElement).checked).toBe(true);
     expect(panel().querySelector('[data-testid="fefo-preview"]')?.textContent).toBe(
-      'No unexpired batch holds stock here — pick the batch to remove, with a reason.',
+      'No unexpired, unblocked batch holds stock here — pick the batch to remove, with a reason.',
     );
     expect(panelText()).toContain('(expired)');
     await set('select[aria-label="Batch"]', 'LOT-A');

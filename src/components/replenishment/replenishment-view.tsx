@@ -11,6 +11,7 @@ import {
   fetchApiSubmitSuggestedPo,
   fetchApiUpsertReorderPolicy,
 } from '@/lib/api/client';
+import { batchLifecycleLabel } from '@/lib/batch-block';
 import { skuInactiveMarker } from '@/lib/sku-status';
 import type {
   BatchAlertDto,
@@ -868,7 +869,8 @@ function BatchDetailBlock({ batchId, sku }: { batchId: string; sku: SkuResponse 
     <div className="rounded-sm border border-(--border) bg-(--background) p-2 text-xs">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-mono">{batch.code}</span>
-        <span>{batch.status}</span>
+        {/* Story 3-3a — status only here (the actions live on the inventory batch list). */}
+        <span data-testid="batch-alert-status">{batchLifecycleLabel(batch)}</span>
         {batch.expiryDate !== null && (
           <span>
             expiry <time dateTime={batch.expiryDate}>{new Date(batch.expiryDate).toLocaleDateString()}</time>

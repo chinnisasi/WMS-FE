@@ -87,6 +87,8 @@ import {
   inventoryControllerGetBatch,
   inventoryControllerListAdjustmentPendings,
   inventoryControllerListBatches,
+  inventoryControllerBlockBatch,
+  inventoryControllerUnblockBatch,
   inventoryControllerListEvents,
   inventoryControllerListStock,
   inventoryControllerRejectAdjustment,
@@ -393,6 +395,9 @@ import type {
   BatchAlertResponse,
   BatchDetailResponse,
   BatchListResponse,
+  BatchBlockResponse,
+  BlockBatchDto,
+  UnblockBatchDto,
   MoveStockDto,
   MoveStockResponse,
   StockAdjustmentDto,
@@ -3142,6 +3147,47 @@ export async function fetchApiListBatches(
     // damaged write-off lists the DAMAGED bin's batches); absent = the warehouse.
     query: options?.binId === undefined ? { skuId } : { skuId, binId: options.binId },
     signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 3-3a — block a batch (a lot) in every warehouse, with a reason
+ * (`qc.manage`). Keyed per draft (reused on a retry of the unchanged draft,
+ * cleared on any edit — reason and note are in the server's hash). 201 with
+ * the batch's lifecycle view.
+ */
+export async function fetchApiBlockBatch(
+  tenantId: string,
+  batchId: string,
+  body: BlockBatchDto,
+  idempotencyKey: string,
+): Promise<BatchBlockResponse> {
+  const { data, error } = await inventoryControllerBlockBatch({
+    path: { tenantId, batchId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-3a — unblock a batch, with a required note (`qc.manage`). Keyed per draft. */
+export async function fetchApiUnblockBatch(
+  tenantId: string,
+  batchId: string,
+  body: UnblockBatchDto,
+  idempotencyKey: string,
+): Promise<BatchBlockResponse> {
+  const { data, error } = await inventoryControllerUnblockBatch({
+    path: { tenantId, batchId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {
     throw unwrapError(error, 400);

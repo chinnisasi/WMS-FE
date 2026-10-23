@@ -125,7 +125,7 @@ export function AdjustForm({
   // No unexpired batch with stock here: FEFO has nothing to draw, so a Remove
   // must name its batch (decision 6) — the mode is "pick" whatever was chosen.
   const noFefo =
-    batchTracked && draft.direction === 'remove' && batchRows !== null && fefoBatch(batchRows, shownAt).kind === 'none';
+    batchTracked && draft.direction === 'remove' && batchRows !== null && fefoBatch(batchRows).kind === 'none';
   const batchMode = noFefo ? 'pick' : draft.batchMode;
 
   const heldRows = binStock.state === 'ready' ? originSkuRows(binStock.data.rows) : [];
@@ -222,7 +222,7 @@ export function AdjustForm({
   const addSkus = bin !== null && catalog.state === 'ready' && kitIds !== null ? addSkuOptions(catalog.data, bin, kitIds) : [];
   const precision = sku?.uomPrecision ?? 0;
   const nowMs = shownAt;
-  const fefo = batchRows === null ? null : fefoBatch(batchRows, nowMs);
+  const fefo = batchRows === null ? null : fefoBatch(batchRows);
   const known = draft.direction === 'add' ? existingBatch(batchRows, draft.batchCode) : null;
   const classWarning = draft.direction === 'add' && sku !== null && bin !== null ? storageClassWarning(sku, bin) : null;
   const reasonHint = adjustReasonHint(draft.reasonCode, { batchTracked: sku?.batchTracked === true, direction: draft.direction });
