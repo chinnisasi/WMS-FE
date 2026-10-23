@@ -115,6 +115,8 @@ function PolicyBody({
 
   const edit = (next: AllocationPolicyFields) => {
     keyRef.current = null;
+    // A corrected input drops its stale field error.
+    setProblem(null);
     setFields(next);
     onDirtyChange(JSON.stringify(next) !== JSON.stringify(allocationPolicyFieldsOf(current)));
   };

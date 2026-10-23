@@ -26,7 +26,9 @@ describe('story 4-3a: the allocation policy lib', () => {
     expect(allocationPolicyWarnings({ minDays: 30, expiryRequired: true, receivingMinDays: 60, undatedBatchesOnHand: 5 })).toEqual([]);
     const both = allocationPolicyWarnings({ minDays: 90, expiryRequired: false, receivingMinDays: null, undatedBatchesOnHand: 1 });
     expect(both[0]).toBe('1 batch on hand has no expiry date — the minimum cannot limit it. Turn on "Expiry date required" in the receiving policy.');
-    expect(both[1]).toContain('The outbound minimum (90 days) is above the receiving minimum (none)');
+    expect(both[1]).toBe(
+      'Receiving accepts any remaining shelf life, but the outbound minimum is 90 days: goods may be accepted that can never ship — stock received below it stays on hand and is never shipped.',
+    );
     expect(allocationPolicyWarnings({ minDays: 90, expiryRequired: true, receivingMinDays: 90, undatedBatchesOnHand: 2 })).toEqual([]);
   });
 
@@ -41,6 +43,10 @@ describe('story 4-3a: the allocation policy lib', () => {
     );
     expect(allocationReason({ batchCode: 'L7', batchExpiryDate: null, batchReceivedOn: '2026-01-03', allocationRule: 'fifo', minOutboundShelfLifeDays: null })).toBe(
       'batch L7 · lot first received 3 Jan 2026 · oldest first',
+    );
+    // A dated lot under FIFO names its first receipt — the fact FIFO chose on.
+    expect(allocationReason({ batchCode: 'L3', batchExpiryDate: '2027-03-31', batchReceivedOn: '2026-01-03', allocationRule: 'fifo', minOutboundShelfLifeDays: null })).toBe(
+      'batch L3 · lot first received 3 Jan 2026 · oldest first',
     );
     expect(allocationReason({ batchCode: null, allocationRule: 'fefo', minOutboundShelfLifeDays: 30 })).toBe('earliest expiry first · needs ≥ 30 days');
     expect(allocationReason({})).toBeNull();

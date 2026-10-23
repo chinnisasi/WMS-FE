@@ -103,9 +103,13 @@ export function allocationPolicyWarnings(input: {
       `${input.undatedBatchesOnHand} ${input.undatedBatchesOnHand === 1 ? 'batch' : 'batches'} on hand ${input.undatedBatchesOnHand === 1 ? 'has' : 'have'} no expiry date — the minimum cannot limit ${input.undatedBatchesOnHand === 1 ? 'it' : 'them'}. Turn on "Expiry date required" in the receiving policy.`,
     );
   }
-  if (input.receivingMinDays === null || input.minDays > input.receivingMinDays) {
+  if (input.receivingMinDays === null) {
     warnings.push(
-      `The outbound minimum (${input.minDays} days) is above the receiving minimum (${input.receivingMinDays === null ? 'none' : `${input.receivingMinDays} days`}): goods may be accepted that can never ship — stock received below it stays on hand and is never shipped.`,
+      `Receiving accepts any remaining shelf life, but the outbound minimum is ${input.minDays} days: goods may be accepted that can never ship — stock received below it stays on hand and is never shipped.`,
+    );
+  } else if (input.minDays > input.receivingMinDays) {
+    warnings.push(
+      `The outbound minimum (${input.minDays} days) is above the receiving minimum (${input.receivingMinDays} days): goods may be accepted that can never ship — stock received below it stays on hand and is never shipped.`,
     );
   }
   return warnings;
@@ -179,8 +183,13 @@ export function allocationReason(line: {
 }): string | null {
   const parts: string[] = [];
   if (line.batchCode != null) parts.push(`batch ${line.batchCode}`);
-  if (line.batchCode != null && line.batchExpiryDate != null) parts.push(`exp ${formatIstDate(line.batchExpiryDate)}`);
-  else if (line.batchCode != null && line.batchReceivedOn != null) parts.push(`lot first received ${formatIstDate(line.batchReceivedOn)}`);
+  if (line.batchCode != null) {
+    // The fact the rule chose on: FIFO the lot's first receipt; FEFO the
+    // expiry, and the first receipt for an undated lot.
+    if (line.allocationRule === 'fifo' && line.batchReceivedOn != null) parts.push(`lot first received ${formatIstDate(line.batchReceivedOn)}`);
+    else if (line.batchExpiryDate != null) parts.push(`exp ${formatIstDate(line.batchExpiryDate)}`);
+    else if (line.batchReceivedOn != null) parts.push(`lot first received ${formatIstDate(line.batchReceivedOn)}`);
+  }
   if (line.allocationRule === 'fefo' || line.allocationRule === 'fifo') parts.push(allocationRuleShort(line.allocationRule));
   if (line.minOutboundShelfLifeDays != null) parts.push(`needs ≥ ${line.minOutboundShelfLifeDays} days`);
   return parts.length === 0 ? null : parts.join(' · ');
