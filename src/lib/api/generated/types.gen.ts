@@ -3373,7 +3373,7 @@ export type OrderEntryDto = {
     /**
      * Story 4-2a — the order priority: 'normal', 'high' or 'urgent' (every order created before 4-2a reads 'normal').
      */
-    priority: 'normal' | 'high' | 'urgent' | null;
+    priority: 'normal' | 'high' | 'urgent';
     /**
      * Story 4-2a — the ship-by date, an IST calendar date YYYY-MM-DD ("ship by the end of that IST day"); null when none.
      */
@@ -4867,7 +4867,7 @@ export type CatalogSnapshotResponse = {
      */
     putawayTasks: Array<PutawayTaskDto>;
     /**
-     * Story 4.3 (additive): the pick tasks of every ready picklist on a released wave, in walk order (the bin/batch each names is advisory — the server re-derives both at pick time)
+     * Story 4.3 (additive): the pick tasks of every ready picklist on a released wave — story 4-2a: whole picklists by urgency (the most urgent planned order of each picklist, judged on the snapshot IST date), each in walk order (the bin/batch each names is advisory — the server re-derives both at pick time)
      */
     pickTasks: Array<PickTaskDto>;
     /**
