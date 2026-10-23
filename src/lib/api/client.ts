@@ -198,6 +198,8 @@ import {
   clientsControllerUpdateAddresses,
   clientsControllerGetReceivingPolicy,
   clientsControllerUpdateReceivingPolicy,
+  clientsControllerGetAllocationPolicy,
+  clientsControllerUpdateAllocationPolicy,
   clientsControllerListContacts,
   clientsControllerAddContact,
   clientsControllerEditContact,
@@ -284,6 +286,8 @@ import type {
   UpdateClientAddressesDto,
   UpdateClientReceivingPolicyDto,
   ClientReceivingPolicyResponse,
+  UpdateClientAllocationPolicyDto,
+  ClientAllocationPolicyResponse,
   ReleaseReceiptHoldsResponse,
   ClientContactDto,
   AddLicenceDto,
@@ -1345,6 +1349,49 @@ export async function fetchApiUpdateClientReceivingPolicy(
   idempotencyKey: string,
 ): Promise<ClientDto> {
   const { data, error } = await clientsControllerUpdateReceivingPolicy({
+    path: { tenantId, clientId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.client;
+}
+
+/**
+ * Story 4-3a — a client's outbound allocation policy (rule + minimum remaining
+ * shelf life at dispatch) plus its untracked-SKU and undated-batch counts (any
+ * staff session).
+ */
+export async function fetchApiGetClientAllocationPolicy(
+  tenantId: string,
+  clientId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ClientAllocationPolicyResponse> {
+  const { data, error } = await clientsControllerGetAllocationPolicy({
+    path: { tenantId, clientId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 4-3a — replace a client's allocation policy (owner-only). A FULL
+ * replace: both keys are always sent (`minOutboundShelfLifeDays` null for
+ * none — a missing key is a 400). Answers the client; its `allocationPolicy`
+ * is optional on the wire (a replayed pre-4-3a answer lacks it).
+ */
+export async function fetchApiUpdateClientAllocationPolicy(
+  tenantId: string,
+  clientId: string,
+  body: UpdateClientAllocationPolicyDto,
+  idempotencyKey: string,
+): Promise<ClientDto> {
+  const { data, error } = await clientsControllerUpdateAllocationPolicy({
     path: { tenantId, clientId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },

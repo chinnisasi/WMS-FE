@@ -68,6 +68,10 @@ let departBlockers: unknown[] | null = null;
 /** Story 1-2b — the receiving policy the GET answers per client, and a refusal the next PUT answers. */
 let policies: Record<string, { receivingToleranceBps: number; qcOnReceipt: boolean; expiryRequired: boolean; minShelfLifeDays: number | null }> = {};
 let policyRefusal: { status: number; code: string; detail: string } | null = null;
+/** Story 4-3a — the allocation policy the GET answers per client, its counts, and a refusal the next PUT answers. */
+let allocations: Record<string, { allocationRule: 'fefo' | 'fifo'; minOutboundShelfLifeDays: number | null }> = {};
+let undatedOnHand = 0;
+let allocationRefusal: { status: number; code: string; detail: string; field?: string } | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -130,6 +134,24 @@ function stubRouter(): void {
         return json(200, { client: { ...(client as object), receivingPolicy: policies[id] } });
       }
     }
+    // Story 4-3a — the allocation policy.
+    if (pathname.endsWith('/allocation-policy')) {
+      const id = pathname.split('/').at(-2)!;
+      if (method === 'GET') {
+        const policy = allocations[id] ?? { allocationRule: 'fefo', minOutboundShelfLifeDays: null };
+        return json(200, { clientId: id, ...policy, untrackedSkuCount: 2, undatedBatchesOnHand: undatedOnHand });
+      }
+      if (method === 'PUT') {
+        if (allocationRefusal !== null) {
+          const refusal = allocationRefusal;
+          allocationRefusal = null;
+          return json(refusal.status, { code: refusal.code, title: 'Invalid allocation policy', status: refusal.status, detail: refusal.detail, ...(refusal.field === undefined ? {} : { field: refusal.field }) });
+        }
+        allocations[id] = body as (typeof allocations)[string];
+        const client = clientRows.find((row) => (row as { id: string }).id === id);
+        return json(200, { client: { ...(client as object), allocationPolicy: allocations[id] } });
+      }
+    }
     // Story 1-2a — contacts and addresses.
     if (method === 'GET' && pathname.endsWith('/contacts')) {
       return json(200, { items: contactRows });
@@ -180,6 +202,9 @@ beforeEach(() => {
   departBlockers = null;
   policies = {};
   policyRefusal = null;
+  allocations = {};
+  undatedOnHand = 0;
+  allocationRefusal = null;
   stubRouter();
 });
 
@@ -461,9 +486,10 @@ describe('ClientsCard', () => {
       writeSession(session('owner'));
       view = render(<ClientsCard />);
       await settle();
-      expect(rowButtons('self')).toEqual(['Contacts', 'Addresses', 'Receiving']);
-      expect(rowButtons('GONE')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving']);
-      expect(rowButtons('GLOBEX')).toEqual(['Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Suspend', 'Depart']);
+      // Story 4-3a — every row, self and departed included, also offers Allocation (the policy is not work).
+      expect(rowButtons('self')).toEqual(['Contacts', 'Addresses', 'Receiving', 'Allocation']);
+      expect(rowButtons('GONE')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Allocation']);
+      expect(rowButtons('GLOBEX')).toEqual(['Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Allocation', 'Suspend', 'Depart']);
     });
 
     test('a refused departure lists every blocker in an alert under the confirm, which stays open; the retry reuses the key and departs', async () => {
@@ -492,7 +518,7 @@ describe('ClientsCard', () => {
       expect(departs.map((r) => r.body)).toEqual([{ status: 'departed' }, { status: 'departed' }]);
       expect(departs[1]!.key).toBe(departs[0]!.key);
       expect(view.container.textContent).toContain('Globex Ltd has departed — it takes no new work, and its history stays.');
-      expect(rowButtons('GLOBEX')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving']);
+      expect(rowButtons('GLOBEX')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Allocation']);
     });
 
     test('Contacts: any staff session reads the list, the owner adds (roles as checkboxes), makes one primary and removes one', async () => {
@@ -801,6 +827,106 @@ describe('ClientsCard', () => {
     });
     expect(requests.some((r) => r.method === 'POST')).toBe(false);
     expect(view.container.textContent).toContain('reserved');
+  });
+  describe('story 4-3a: the outbound allocation policy', () => {
+    async function openAllocation(code: string): Promise<void> {
+      await act(async () => {
+        (view!.container.querySelector(`button[aria-label="Allocation policy of ${code}"]`) as HTMLButtonElement).click();
+      });
+      await settle();
+    }
+    const form = (code: string) => view!.container.querySelector(`form[aria-label="Allocation policy of ${code}"]`) as HTMLFormElement | null;
+    const radio = (f: HTMLFormElement, rule: string) => f.querySelector(`input[name="allocationRule"][value="${rule}"]`) as HTMLInputElement;
+    const minInput = (f: HTMLFormElement) => f.querySelector('input[name="minOutboundShelfLifeDays"]') as HTMLInputElement;
+    async function submit(f: HTMLFormElement): Promise<void> {
+      await act(async () => {
+        f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+      await settle();
+    }
+
+    test('the owner picks a rule and a minimum; the PUT sends both keys (null for none); the key is reused on a retry, fresh after an edit', async () => {
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await openAllocation('ACME');
+      const f = form('ACME')!;
+      expect(radio(f, 'fefo').checked).toBe(true);
+      await act(async () => {
+        radio(f, 'fifo').click();
+      });
+      setInput(minInput(f), '90');
+      allocationRefusal = { status: 503, code: 'unavailable', detail: 'Try again.' };
+      await submit(f);
+      await submit(f);
+      const puts = requests.filter((r) => r.method === 'PUT' && r.pathname.endsWith('/allocation-policy'));
+      expect(puts).toHaveLength(2);
+      expect(puts[1]!.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-acme/allocation-policy`);
+      expect(puts[1]!.body).toEqual({ allocationRule: 'fifo', minOutboundShelfLifeDays: 90 });
+      expect(puts[1]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(puts[1]!.key).toBe(puts[0]!.key);
+      expect(view.container.textContent).toContain("ACME's allocation policy saved");
+      setInput(minInput(f), '');
+      await submit(f);
+      const third = requests.filter((r) => r.method === 'PUT')[2]!;
+      expect(third.body).toEqual({ allocationRule: 'fifo', minOutboundShelfLifeDays: null });
+      expect(third.key).not.toBe(puts[1]!.key);
+    });
+
+    test('a bad minimum is refused before any key is minted; a 400 naming the field renders under the input', async () => {
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await openAllocation('ACME');
+      const f = form('ACME')!;
+      setInput(minInput(f), '0');
+      await submit(f);
+      expect(requests.some((r) => r.method === 'PUT')).toBe(false);
+      expect(f.querySelector('[data-field="minDays"]')!.textContent).toContain('whole number of days from 1 to 3650');
+      setInput(minInput(f), '30');
+      allocationRefusal = { status: 400, code: 'validation-failed', detail: 'minOutboundShelfLifeDays must be null or a whole number', field: 'minOutboundShelfLifeDays' };
+      await submit(f);
+      expect(f.querySelector('[data-field="minDays"]')!.textContent).toContain('minOutboundShelfLifeDays must be null');
+    });
+
+    test('the notes state both halves of a save; the warnings (undated stock without expiry required; outbound above receiving) show and never block', async () => {
+      undatedOnHand = 3;
+      clientRows = [SELF, { ...ACME, receivingPolicy: { receivingToleranceBps: 0, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: 30 } }];
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await openAllocation('ACME');
+      const text = () => view!.container.textContent ?? '';
+      expect(text()).toContain('Promises change now: stock below the minimum stops being promised to new orders and channels.');
+      expect(text()).toContain('Open planned waves keep the rule they were planned under — cancel and regenerate one to apply the change.');
+      expect(text()).toContain("2 of this client's SKUs are untracked — they are picked in bin walk order under either rule.");
+      expect(text()).toContain('Batches with no expiry date are never limited by the minimum');
+      // No minimum: no warnings.
+      expect(view.container.querySelector('ul[aria-label="Allocation policy warnings"]')).toBeNull();
+      const f = form('ACME')!;
+      setInput(minInput(f), '90');
+      expect(text()).toContain('3 batches on hand have no expiry date — the minimum cannot limit them.');
+      expect(text()).toContain('The outbound minimum (90 days) is above the receiving minimum (30 days)');
+      expect(text()).toContain('stock received below it stays on hand and is never shipped');
+      await submit(f);
+      expect(requests.filter((r) => r.method === 'PUT')).toHaveLength(1);
+    });
+
+    for (const role of ['ops_manager', 'accountant', 'operator'] as const) {
+      test(`${role} reads the allocation policy with no inputs and no Save`, async () => {
+        allocations = { 'c-acme': { allocationRule: 'fifo', minOutboundShelfLifeDays: 120 } };
+        writeSession(session(role));
+        view = render(<ClientsCard />);
+        await settle();
+        await openAllocation('ACME');
+        expect(view.container.textContent).toContain('Outbound allocation — ACME');
+        expect(form('ACME')).toBeNull();
+        const panel = view.container.querySelector('section[aria-labelledby]')!;
+        expect(panel.querySelectorAll('input')).toHaveLength(0);
+        expect(panel.textContent).toContain('Oldest first (FIFO)');
+        expect(panel.textContent).toContain('120 days');
+      });
+    }
   });
 });
 
