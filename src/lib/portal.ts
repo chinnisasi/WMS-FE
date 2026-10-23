@@ -32,7 +32,9 @@ import {
 } from '@/lib/asns';
 import { parseQuantityInput } from '@/lib/format-quantity';
 import { parseGstinField } from '@/lib/gstin';
+import { istDateOf } from '@/lib/rate-cards';
 import { clientOrderRefBody, parseClientOrderRef } from '@/lib/orders';
+import { emptyOrderFieldsDraft, parseOrderFieldsDraft, type OrderFieldsDraft } from '@/lib/order-fields-form';
 import {
   legalNameBody,
   legalNameProblem,
@@ -402,6 +404,8 @@ export interface PortalOrderDraft {
   readonly consigneeLegalName: string;
   /** Story 4-1b — "Your order number (optional)"; blank sends no key. Optional so older drafts read as blank. */
   readonly clientOrderRef?: string;
+  /** Story 4-2a — type, priority (Normal / High), ship-by and COD. Optional so older drafts read as untouched. */
+  readonly orderFields?: OrderFieldsDraft;
 }
 
 /**
@@ -417,6 +421,7 @@ export function parsePortalOrderCreate(
   draft: PortalOrderDraft,
   warehouseId: string,
   skus: Readonly<Record<string, Pick<LineOption, 'code' | 'uom' | 'uomPrecision'>>> = {},
+  todayIst: string = istDateOf(Date.now()),
 ): { body: PortalCreateOrderDto | null; problem: string | null } {
   if (warehouseId === '') return { body: null, problem: 'Choose the warehouse the order ships from.' };
   const filled = draft.lines.filter((line) => line.skuId !== '' || line.qty.trim() !== '');
@@ -448,6 +453,13 @@ export function parsePortalOrderCreate(
   // Story 4-1b — the order number's shape, as the server reads it (trimmed; blank = absent).
   const own = parseClientOrderRef(draft.clientOrderRef ?? '', 'Your order number');
   if (own.problem !== null) return { body: null, problem: own.problem };
+  // Story 4-2a — the order fields, each only when chosen (urgent refused: A12).
+  const fields = parseOrderFieldsDraft(draft.orderFields ?? emptyOrderFieldsDraft(), {
+    todayIst,
+    hasBuyerGstin: buyer.gstin !== undefined,
+    surface: 'portal',
+  });
+  if (fields.problem !== null) return { body: null, problem: fields.problem };
   return {
     body: {
       warehouseId,
@@ -459,6 +471,8 @@ export function parsePortalOrderCreate(
       ...legalNameBody(buyer.gstin, draft.consigneeLegalName),
       // Story 4-1b — only when given.
       ...clientOrderRefBody(own.ref),
+      // Story 4-2a — only the chosen keys (the portal never sends urgent).
+      ...(fields.body as Omit<typeof fields.body, 'priority'> & { priority?: 'high' }),
     },
     problem: null,
   };

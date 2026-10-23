@@ -1349,3 +1349,83 @@ describe('the client order number (story 4-1b)', () => {
     expect(view.container.textContent).toContain('for ACME — Acme Foods — it may be another client\'s: show all clients to search them all.');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Story 4-2a: the order fields                                        */
+/* ------------------------------------------------------------------ */
+
+describe('the order fields (story 4-2a)', () => {
+  function selectIn(container: HTMLElement, text: string): HTMLSelectElement {
+    const found = labelled(container, text)[0];
+    expect(found).toBeDefined();
+    return found!.querySelector('select')!;
+  }
+
+  test('an untouched form sends none of the four keys (the pre-4-2a bytes); chosen ones ride, COD in exact paise', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(1);
+    for (const key of ['orderType', 'priority', 'shipByDate', 'codAmountPaise']) expect(key in creates[0]!.body).toBe(false);
+
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setSelect(selectIn(view.container, 'Order type'), 'b2c');
+    setSelect(selectIn(view.container, 'Priority'), 'urgent');
+    const cod = labelled(view.container, 'Cash on delivery')[0]!.querySelector('input')!;
+    act(() => void cod.click());
+    setInput(input(view.container, 'Amount to collect ₹'), '1499.00');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(2);
+    expect(creates[1]!.body).toMatchObject({ orderType: 'b2c', priority: 'urgent', codAmountPaise: 149900 });
+    expect('shipByDate' in creates[1]!.body).toBe(false);
+  });
+
+  test('the list and detail: a dispatched COD order past its ship-by shows "COD ₹x" and never "Overdue"; an open one does (A14)', async () => {
+    clientsBody = [SELF_CLIENT];
+    ordersResponder = () => ({
+      items: [
+        { ...entry('open-1', 'c-self'), clientOrderRef: 'SO-OPEN', orderType: 'b2c', priority: 'urgent', shipByDate: '2020-01-01', codAmountPaise: null },
+        { ...entry('done-1', 'c-self'), clientOrderRef: 'SO-DONE', status: 'dispatched', orderType: 'b2c', priority: 'normal', shipByDate: '2020-01-01', codAmountPaise: 149900 },
+      ],
+      nextCursor: null,
+    });
+    view = await mountForm();
+    const rows = [...view.container.querySelectorAll('[data-testid="order-field-chips"]')].map((node) => node.textContent ?? '');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('Urgent');
+    expect(rows[0]).toContain('01 Jan · Overdue');
+    expect(rows[0]).toContain('Prepaid');
+    expect(rows[1]).toContain('COD ₹1,499.00');
+    expect(rows[1]).not.toContain('Overdue');
+    act(() => view!.unmount());
+
+    order = { ...(order as object), id: 'done-1', status: 'dispatched', orderType: 'b2c', priority: 'normal', shipByDate: '2020-01-01', codAmountPaise: 149900 } as typeof order;
+    view = await mount('done-1');
+    const fields = view.container.querySelector('[data-testid="order-detail-fields"]')!.textContent ?? '';
+    expect(fields).toContain('B2C');
+    expect(fields).toContain('COD ₹1,499.00');
+    expect(fields).not.toContain('Overdue');
+  });
+
+  test('a ship-by in the past sends nothing (parsed before any key); an order-field edit mints a fresh key', async () => {
+    view = await mountForm();
+    fillDestination(view.container);
+    fillLine(view.container, 0, 'glove-sku', '1', '10');
+    setInput(input(view.container, 'Ship by (optional)'), '2020-01-01');
+    await submitCreate(view.container);
+    expect(creates).toHaveLength(0);
+    expect(view.container.querySelector('[role="alert"]')!.textContent).toContain('Ship-by cannot be in the past');
+
+    setInput(input(view.container, 'Ship by (optional)'), '');
+    createStatus = 503;
+    await submitCreate(view.container);
+    await submitCreate(view.container);
+    expect(creates[1]!.key).toBe(creates[0]!.key);
+    setSelect(selectIn(view.container, 'Priority'), 'high');
+    await submitCreate(view.container);
+    expect(creates[2]!.key).not.toBe(creates[1]!.key);
+    expect(creates[2]!.body.priority).toBe('high');
+  });
+});

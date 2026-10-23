@@ -2882,6 +2882,22 @@ export type CreateOrderDto = {
      * Story 4-1b — the client's own order number (optional; a manual order only — 400 beside source 'ingested'). Trimmed (the pattern is the trimmed value's); blank reads as absent. 1–64 printable ASCII characters (refused by the command, 400 validation-failed, behind its replay lookup); unique among the client's live orders (409 duplicate-client-order-ref — a cancelled order frees its number). Create-only.
      */
     clientOrderRef?: string;
+    /**
+     * Story 4-2a — 'b2b' or 'b2c'. Omitted: derived — b2b with a consigneeGstin, else b2c. An explicit b2c beside a consigneeGstin is 400 (a GST-registered buyer is a business); b2b without one is allowed. Manual orders only (400 on source 'ingested').
+     */
+    orderType?: 'b2b' | 'b2c';
+    /**
+     * Story 4-2a — 'normal' (the default when omitted), 'high' or 'urgent'. Wave planning takes due and urgent orders first. Manual orders only.
+     */
+    priority?: 'normal' | 'high' | 'urgent';
+    /**
+     * Story 4-2a — ship by the end of this IST day, YYYY-MM-DD; from today (IST) to 365 days ahead, else 400. Manual orders only.
+     */
+    shipByDate?: string;
+    /**
+     * Story 4-2a — cash on delivery: the amount the courier collects, integer paise (1 to 1,000,000,000 — ₹1 crore). Omit it for a prepaid order. A string, a fraction or a value out of range is 400.
+     */
+    codAmountPaise?: number;
 };
 
 export type OrderLineDto = {
@@ -2946,6 +2962,22 @@ export type OrderDto = {
      * Story 4-1b — the client's own order number (null when none was given). Absent only on a replayed response stored before 4-1b — read absent as null
      */
     clientOrderRef?: string | null;
+    /**
+     * Story 4-2a — the order type: 'b2b' or 'b2c' (operational only — tax treatment stays GSTIN-driven). Null on an order created before 4-2a. Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    orderType?: 'b2b' | 'b2c' | null;
+    /**
+     * Story 4-2a — the order priority: 'normal', 'high' or 'urgent' (every order created before 4-2a reads 'normal'). Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    priority?: 'normal' | 'high' | 'urgent' | null;
+    /**
+     * Story 4-2a — the ship-by date, an IST calendar date YYYY-MM-DD ("ship by the end of that IST day"); null when none. Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    shipByDate?: string | null;
+    /**
+     * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect). Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    codAmountPaise?: number | null;
     /**
      * Where the shipment goes (story 11-1); null on a pre-11.1 order row
      */
@@ -3057,6 +3089,22 @@ export type PackDto = {
      */
     clientOrderRef?: string | null;
     /**
+     * Story 4-2a — the order type: 'b2b' or 'b2c' (operational only — tax treatment stays GSTIN-driven). Null on an order created before 4-2a. Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    orderType?: 'b2b' | 'b2c' | null;
+    /**
+     * Story 4-2a — the order priority: 'normal', 'high' or 'urgent' (every order created before 4-2a reads 'normal'). Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    priority?: 'normal' | 'high' | 'urgent' | null;
+    /**
+     * Story 4-2a — the ship-by date, an IST calendar date YYYY-MM-DD ("ship by the end of that IST day"); null when none. Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    shipByDate?: string | null;
+    /**
+     * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect). Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    codAmountPaise?: number | null;
+    /**
      * The operator who packed it
      */
     packedBy: string;
@@ -3132,6 +3180,14 @@ export type DispatchDto = {
      * Story 4-1b — the client's own order number (null when none was given). Absent only on a replayed response stored before 4-1b — read absent as null
      */
     clientOrderRef?: string | null;
+    /**
+     * Story 4-2a — the order type: 'b2b' or 'b2c' (operational only — tax treatment stays GSTIN-driven). Null on an order created before 4-2a. Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    orderType?: 'b2b' | 'b2c' | null;
+    /**
+     * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect). Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    codAmountPaise?: number | null;
     /**
      * The operator who dispatched it
      */
@@ -3227,6 +3283,10 @@ export type ShipmentDto = {
      * The manifest the shipment closed onto; null while labelled
      */
     manifestId: string | null;
+    /**
+     * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect). Absent only on a replayed response stored before 4-2a — read absent as null.
+     */
+    codAmountPaise?: number | null;
 };
 
 export type ShipmentResponse = {
@@ -3306,6 +3366,22 @@ export type OrderEntryDto = {
      * Story 4-1b — the client's own order number; null when none was given (a live read — always present)
      */
     clientOrderRef: string | null;
+    /**
+     * Story 4-2a — the order type: 'b2b' or 'b2c' (operational only — tax treatment stays GSTIN-driven). Null on an order created before 4-2a.
+     */
+    orderType: 'b2b' | 'b2c' | null;
+    /**
+     * Story 4-2a — the order priority: 'normal', 'high' or 'urgent' (every order created before 4-2a reads 'normal').
+     */
+    priority: 'normal' | 'high' | 'urgent';
+    /**
+     * Story 4-2a — the ship-by date, an IST calendar date YYYY-MM-DD ("ship by the end of that IST day"); null when none.
+     */
+    shipByDate: string | null;
+    /**
+     * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect).
+     */
+    codAmountPaise: number | null;
     /**
      * Where the shipment goes (story 11-1); null on a pre-11.1 order row
      */
@@ -3462,6 +3538,14 @@ export type ManifestDto = {
      * The closed shipment ids — carried by the CREATE response only (the idempotency snapshot); list rows are header rows (the shipments point back through their manifestId)
      */
     shipmentIds?: Array<string>;
+    /**
+     * Story 4-2a — how many of the manifest's shipments are cash on delivery (the courier's hand-over count); frozen in the create snapshot, computed the same way on a list row. Absent only on a replayed create stored before 4-2a — read absent as 0.
+     */
+    codShipmentCount?: number;
+    /**
+     * Story 4-2a — the cash the courier collects across the manifest's COD shipments, integer paise (0 when none). Frozen in the create snapshot; a list row computes the same (order COD never changes). Absent only on a replayed create stored before 4-2a — read absent as 0.
+     */
+    codTotalPaise?: number;
     /**
      * The operator who created it
      */
@@ -3631,6 +3715,14 @@ export type PicklistDto = {
      * Distinct bin stops on this walk — the "steps" of the batching guarantee
      */
     stopCount: number;
+    /**
+     * Story 4-2a — the most urgent priority among the orders of this picklist's non-cancelled lines. Absent only on a replayed wave stored before 4-2a — read absent as null.
+     */
+    priority?: 'normal' | 'high' | 'urgent' | null;
+    /**
+     * Story 4-2a — the earliest ship-by date (IST, YYYY-MM-DD) among the orders of this picklist's non-cancelled lines; null when none has one. Absent only on a replayed wave stored before 4-2a — read absent as null.
+     */
+    shipByDate?: string | null;
     /**
      * ISO-8601 UTC creation time
      */
@@ -4487,6 +4579,14 @@ export type PickTaskDto = {
      * Story 11.7: the parent kit SKU's code when this task's order line is a kit component (order_lines.parent_line_id), null on an ordinary line. Display-only — the device renders "from kit {code}" in the task header; no pick logic reads kit-ness.
      */
     kitParentSkuCode: string | null;
+    /**
+     * Story 4-2a — the task's order priority (display: the stop's chip). The walk stays in bin order.
+     */
+    orderPriority: 'normal' | 'high' | 'urgent';
+    /**
+     * Story 4-2a — the task's order ship-by date (IST, YYYY-MM-DD); null when none.
+     */
+    orderShipByDate: string | null;
 };
 
 export type CatalogPackTaskDto = {
@@ -4505,6 +4605,18 @@ export type CatalogPackTaskDto = {
      * Story 10.3: the SKU is handled by unit — the bench must scan each case's handling-unit label (count == pickedQty), never a typed quantity.
      */
     catchWeightTracked: boolean;
+    /**
+     * Story 4-2a — the order's priority (order-level, repeated on each of its SKU rows): the pack card's chip. Pack tasks arrive by the urgency key (due first, priority, ship-by, then oldest).
+     */
+    orderPriority: 'normal' | 'high' | 'urgent';
+    /**
+     * Story 4-2a — the order's ship-by date (IST, YYYY-MM-DD); null when none.
+     */
+    orderShipByDate: string | null;
+    /**
+     * Story 4-2a — the cash to collect on delivery for this order, integer paise; null means prepaid.
+     */
+    codAmountPaise: number | null;
 };
 
 export type CatalogHandlingUnitDto = {
@@ -4755,7 +4867,7 @@ export type CatalogSnapshotResponse = {
      */
     putawayTasks: Array<PutawayTaskDto>;
     /**
-     * Story 4.3 (additive): the pick tasks of every ready picklist on a released wave, in walk order (the bin/batch each names is advisory — the server re-derives both at pick time)
+     * Story 4.3 (additive): the pick tasks of every ready picklist on a released wave — story 4-2a: whole picklists by urgency (the most urgent planned order of each picklist, judged on the snapshot IST date), each in walk order (the bin/batch each names is advisory — the server re-derives both at pick time)
      */
     pickTasks: Array<PickTaskDto>;
     /**
@@ -9490,6 +9602,22 @@ export type PortalOrderRowDto = {
      * Story 4-1b — your own order number, as given when the order was placed; null when none was given
      */
     clientOrderRef: string | null;
+    /**
+     * Story 4-2a — the order type: 'b2b' or 'b2c' (operational only — tax treatment stays GSTIN-driven). Null on an order created before 4-2a.
+     */
+    orderType: 'b2b' | 'b2c' | null;
+    /**
+     * Story 4-2a — the order priority: 'normal', 'high' or 'urgent' (every order created before 4-2a reads 'normal').
+     */
+    priority: 'normal' | 'high' | 'urgent';
+    /**
+     * Story 4-2a — the ship-by date, an IST calendar date YYYY-MM-DD ("ship by the end of that IST day"); null when none.
+     */
+    shipByDate: string | null;
+    /**
+     * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect).
+     */
+    codAmountPaise: number | null;
     warehouseName: string;
     destinationName: string | null;
     destinationCity: string | null;
@@ -9542,6 +9670,22 @@ export type PortalCreateOrderDto = {
      * Story 4-1b — your own order number (optional). Trimmed (the pattern is the trimmed value's); blank reads as absent. 1–64 printable ASCII characters (400 validation-failed otherwise); must not be already used by another of your orders (409 duplicate-client-order-ref — a cancelled order frees its number).
      */
     clientOrderRef?: string;
+    /**
+     * Story 4-2a — 'b2b' or 'b2c' (optional). Omitted: b2b when a consigneeGstin is given, else b2c. b2c beside a consigneeGstin is 400.
+     */
+    orderType?: 'b2b' | 'b2c';
+    /**
+     * Story 4-2a — 'normal' (the default) or 'high'. 'urgent' is set by the warehouse only (400 here).
+     */
+    priority?: 'normal' | 'high';
+    /**
+     * Story 4-2a — ship by the end of this IST day, YYYY-MM-DD, from today (IST) to 365 days ahead (optional).
+     */
+    shipByDate?: string;
+    /**
+     * Story 4-2a — cash on delivery: the amount to collect, integer paise (1 to 1,000,000,000). Omit it for a prepaid order.
+     */
+    codAmountPaise?: number;
 };
 
 export type PortalPlacedOrderResponse = {
@@ -9565,6 +9709,22 @@ export type PortalPlacedOrderResponse = {
      * Story 4-1b — your order number as stored (trimmed); null when none was given. Absent only on a replay of an order placed before 4-1b — read absent as null
      */
     clientOrderRef?: string | null;
+    /**
+     * Story 4-2a — the order type: 'b2b' or 'b2c' (operational only — tax treatment stays GSTIN-driven). Null on an order created before 4-2a. Absent only on a replay of an order placed before 4-2a — read absent as null.
+     */
+    orderType?: 'b2b' | 'b2c' | null;
+    /**
+     * Story 4-2a — the order priority: 'normal', 'high' or 'urgent' (every order created before 4-2a reads 'normal'). Absent only on a replay of an order placed before 4-2a — read absent as null.
+     */
+    priority?: 'normal' | 'high' | 'urgent' | null;
+    /**
+     * Story 4-2a — the ship-by date, an IST calendar date YYYY-MM-DD ("ship by the end of that IST day"); null when none. Absent only on a replay of an order placed before 4-2a — read absent as null.
+     */
+    shipByDate?: string | null;
+    /**
+     * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect). Absent only on a replay of an order placed before 4-2a — read absent as null.
+     */
+    codAmountPaise?: number | null;
 };
 
 export type PortalOrderComponentDto = {
@@ -9601,6 +9761,22 @@ export type PortalOrderDetailResponse = {
      * Story 4-1b — your own order number, as given when the order was placed; null when none was given
      */
     clientOrderRef: string | null;
+    /**
+     * Story 4-2a — the order type: 'b2b' or 'b2c' (operational only — tax treatment stays GSTIN-driven). Null on an order created before 4-2a.
+     */
+    orderType: 'b2b' | 'b2c' | null;
+    /**
+     * Story 4-2a — the order priority: 'normal', 'high' or 'urgent' (every order created before 4-2a reads 'normal').
+     */
+    priority: 'normal' | 'high' | 'urgent';
+    /**
+     * Story 4-2a — the ship-by date, an IST calendar date YYYY-MM-DD ("ship by the end of that IST day"); null when none.
+     */
+    shipByDate: string | null;
+    /**
+     * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect).
+     */
+    codAmountPaise: number | null;
     warehouseName: string;
     destinationName: string | null;
     destinationCity: string | null;
@@ -15161,7 +15337,7 @@ export type OutboundControllerCreateOrderData = {
 
 export type OutboundControllerCreateOrderErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or invalid body — story 4-1b: a clientOrderRef that is not 1–64 printable ASCII characters, or one on an ingested order (validation-failed)
+     * Missing or malformed Idempotency-Key, or invalid body — story 4-1b: a clientOrderRef that is not 1–64 printable ASCII characters, or one on an ingested order; story 4-2a: an orderType, priority, shipByDate or codAmountPaise out of its vocabulary, shape or range — orderType b2c beside a consigneeGstin, a ship-by before today (IST) or more than 365 days ahead, a COD amount that is not a whole number of paise from 1 to 1,000,000,000 — or orderType/priority/shipByDate on an ingested order (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -15413,7 +15589,7 @@ export type OutboundControllerLabelOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The order is not packable-state (it does not read ready_to_dispatch — conflict naming the status), or it already has a labelled or manifested shipment (conflict), or a concurrent idempotent request (conflict). Nothing is written
+     * The order is not packable-state (it does not read ready_to_dispatch — conflict naming the status), or it already has a labelled or manifested shipment (conflict), or a concurrent idempotent request (conflict); story 4-2a: a cash-on-delivery order on a carrier that has not declared it can collect COD — checked before any adapter call (carrier-cod-unsupported). Nothing is written
      */
     409: ProblemDetailsDto;
     /**

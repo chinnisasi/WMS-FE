@@ -734,6 +734,27 @@ describe('the pack bench', () => {
     expect(buttonLabels(view)).toContain('Dispatch this order');
   });
 
+  test('story 4-2a: the slip carries the type and "COD ₹x"; a slip stored before 4-2a reads "—"', async () => {
+    packResponder = () => {
+      orderStatuses['order-1'] = 'ready_to_dispatch';
+      return { status: 201, body: { pack: { ...(packedFixture('order-1') as object), orderType: 'b2c', codAmountPaise: 149900 } } };
+    };
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    await pressButton(view, 'Pack this order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="slip-payment"]')!.textContent).toBe('COD ₹1,499.00');
+    expect(view.container.querySelector('[data-testid="slip-order-fields"]')!.textContent).toContain('B2C');
+  });
+
+  test('story 4-2a: a legacy stored slip (no order fields) shows the payment line as "—"', async () => {
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    await pressButton(view, 'Pack this order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="slip-payment"]')!.textContent).toBe('—');
+  });
+
   test('a scan mismatch is refused verbatim, changes nothing optimistically, and a retry reuses the key', async () => {
     const mismatch =
       'Pack mismatch — SPICE-01 scanned 4.000 kg but picked 3.000 kg; FLOUR-01 scanned 3.000 kg but picked 2.000 kg.';
@@ -953,6 +974,28 @@ describe('the pack bench', () => {
 /* ------------------------------------------------------------------ */
 
 describe('dispatch', () => {
+  test('story 4-2a: the dispatch record shows the payment line — "COD ₹x", "—" on a record stored before 4-2a', async () => {
+    dispatchResponder = () => {
+      orderStatuses['order-2'] = 'dispatched';
+      return { status: 201, body: { dispatch: { ...(dispatchedFixture('order-2') as object), orderType: 'b2c', codAmountPaise: 149900 } } };
+    };
+    view = await mount('operator');
+    await expand(view, 'order-2');
+    await pressButton(view, 'Dispatch this order');
+    await pressButton(view, 'Dispatch this order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="dispatch-payment"]')!.textContent).toBe('COD ₹1,499.00');
+  });
+
+  test('story 4-2a: a legacy dispatch record (no order fields) reads "—"', async () => {
+    view = await mount('operator');
+    await expand(view, 'order-2');
+    await pressButton(view, 'Dispatch this order');
+    await pressButton(view, 'Dispatch this order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="dispatch-payment"]')!.textContent).toBe('—');
+  });
+
   test('an empty body is a complete dispatch; the record names the retired holds', async () => {
     view = await mount('operator');
     await expand(view, 'order-2');
@@ -1419,6 +1462,14 @@ describe('the manifest section (4.6c)', () => {
 
     expect(mutations()).toHaveLength(0);
     expect(text(view)).toContain('Pick at least one labelled shipment to manifest.');
+  });
+
+  test('story 4-2a: a manifest row shows the courier cash hand-over — "1 COD · collect ₹x"; a pre-4-2a row reads "No COD"', async () => {
+    manifestRows = [{ ...(manifestFixture('mf-1') as object), codShipmentCount: 1, codTotalPaise: 149900 }, manifestFixture('mf-0')];
+    view = await mount('operator');
+    await settle();
+    const cells = [...view.container.querySelectorAll('[data-testid="manifest-cod"]')].map((cell) => cell.textContent);
+    expect(cells).toEqual(['1 COD · collect ₹1,499.00', 'No COD']);
   });
 
   test('the manifests pager carries the keyset cursor to the older page', async () => {
