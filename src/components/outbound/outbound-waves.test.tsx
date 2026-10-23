@@ -724,6 +724,54 @@ describe('Waves: the client filter (story 1-5a)', () => {
     expect(item.textContent).not.toContain(id);
   });
 
+  test('story 4-2a: the generate picker lists by urgency — overdue first, then priority, then oldest — with the chips', async () => {
+    const row = (id: string, createdAt: string, fields: Record<string, unknown>) => ({
+      id, tenantId: TENANT_ID, warehouseId: 'wh-1', status: 'accepted', source: 'manual', integrationId: null, externalEventId: null, clientOrderRef: id, destination: null, clientId: 'c-self', createdAt, updatedAt: createdAt,
+      orderType: 'b2c', priority: 'normal', shipByDate: null, codAmountPaise: null, ...fields,
+    });
+    pickerOrders = [
+      row('SO-OLD', '2026-09-01T00:00:00.000Z', {}),
+      row('SO-URGENT', '2026-09-02T00:00:00.000Z', { priority: 'urgent' }),
+      // A ship-by long past: overdue whatever today is, so it leads.
+      row('SO-LATE', '2026-09-03T00:00:00.000Z', { shipByDate: '2020-01-01', codAmountPaise: 149900 }),
+    ];
+    view = await mount('ops_manager');
+    const choose = [...view.container.querySelectorAll('label')].find((l) => l.textContent === 'Choose orders')!;
+    await act(async () => {
+      choose.querySelector('input')!.click();
+    });
+    await settle();
+    const items = [...view.container.querySelectorAll('li')].filter((li) => li.querySelector('input[type="checkbox"]') !== null);
+    expect(items.map((li) => ['SO-LATE', 'SO-URGENT', 'SO-OLD'].find((ref) => li.textContent!.includes(ref)))).toEqual(['SO-LATE', 'SO-URGENT', 'SO-OLD']);
+    expect(items[0]!.textContent).toContain('01 Jan · Overdue');
+    expect(items[0]!.textContent).toContain('COD ₹1,499.00');
+    expect(items[1]!.querySelector('[data-testid="priority-chip"]')!.textContent).toBe('Urgent');
+    expect(items[2]!.querySelector('[data-testid="priority-chip"]')).toBeNull();
+    expect(items[2]!.textContent).toContain('Prepaid');
+  });
+
+  test('story 4-2a: a picklist shows its most urgent priority and earliest ship-by; a pre-4-2a picklist shows neither', async () => {
+    waveRows = [wave()];
+    const base = picklist();
+    waveDetail = {
+      ...wave(),
+      picklists: [
+        { ...base, priority: 'high', shipByDate: '2020-01-01' },
+        { ...base, id: 'pl-2', lines: [{ ...base.lines[0], picklistId: 'pl-2' }] },
+      ],
+    };
+    view = await mount('operator');
+    const toggle = buttons(view).find((b) => b.textContent?.includes('wave-planned'))!;
+    await act(async () => {
+      toggle.click();
+    });
+    await settle();
+    const chips = [...view.container.querySelectorAll('[data-testid="priority-chip"]')].map((c) => c.textContent);
+    expect(chips).toEqual(['High']);
+    const shipBy = [...view.container.querySelectorAll('[data-testid="ship-by-chip"]')].map((c) => c.textContent);
+    expect(shipBy).toEqual(['Ship by 01 Jan · Overdue']);
+  });
+
   test('a mixed wave’s detail names each order’s client', async () => {
     waveRows = [wave()];
     skuClients = { 'sku-1': 'c-glow', 'sku-2': 'c-self' };
