@@ -25,6 +25,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   // The ASN import (2026-10-17) — one file's run; each ASN it created has its own 'ASN' row.
   asn_import: 'ASN import',
   audit_export: 'Audit export',
+  // Story 3-3a — a batch (lot) blocked or unblocked.
+  batch: 'Batch',
   batch_alert: 'Batch alert',
   bin: 'Bin',
   // Story 3-1 — a bin-to-bin move (`stock.moved`).

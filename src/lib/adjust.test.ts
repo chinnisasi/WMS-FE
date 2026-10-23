@@ -159,7 +159,7 @@ describe('addSkuOptions — decision 9', () => {
 // ── FEFO ─────────────────────────────────────────────────────────────────────
 
 function batch(code: string, quantity: number, expiryDate: string | null, id = `id-${code}`): BatchListItemDto {
-  return { id, code, mfgDate: null, expiryDate, status: 'active', quantity };
+  return { id, code, mfgDate: null, expiryDate, status: 'active', blockedReason: null, blockedNote: null, blockedAt: null, blockedBy: null, blockedByName: null, expired: false, quantity };
 }
 const NOW = Date.parse('2026-10-23T06:00:00.000Z');
 const L1 = batch('L1', 3, '2027-01-15T00:00:00.000Z');
@@ -167,46 +167,53 @@ const L2 = batch('L2', 5, '2027-06-15T00:00:00.000Z');
 
 describe('fefoBatch — the server rule (resolveFefoBatch)', () => {
   test('the oldest non-expired batch with stock: L1 (exp 2027-01) before L2 (exp 2027-06)', () => {
-    expect(fefoBatch([L2, L1], NOW)).toEqual({ kind: 'one', batch: L1 });
-    expect(fefoCap(fefoBatch([L2, L1], NOW))).toBe(3);
+    expect(fefoBatch([L2, L1])).toEqual({ kind: 'one', batch: L1 });
+    expect(fefoCap(fefoBatch([L2, L1]))).toBe(3);
   });
 
   test('a batch with no stock in the bin is never a candidate', () => {
-    expect(fefoBatch([{ ...L1, quantity: 0 }, L2], NOW)).toEqual({ kind: 'one', batch: L2 });
+    expect(fefoBatch([{ ...L1, quantity: 0 }, L2])).toEqual({ kind: 'one', batch: L2 });
+  });
+
+  test('story 3-3a: a BLOCKED batch is never the default — the next one is, and a bin of blocked only has none', () => {
+    const blocked = { ...L1, status: 'blocked' as const, blockedReason: 'recall' as const };
+    expect(fefoBatch([blocked, L2])).toEqual({ kind: 'one', batch: L2 });
+    expect(fefoBatch([blocked])).toEqual({ kind: 'none' });
   });
 
   test('nulls last: a batch without expiry is drawn after every dated one', () => {
     const open = batch('OPEN', 9, null);
-    expect(fefoBatch([open, L2], NOW)).toEqual({ kind: 'one', batch: L2 });
-    expect(fefoBatch([open], NOW)).toEqual({ kind: 'one', batch: open });
+    expect(fefoBatch([open, L2])).toEqual({ kind: 'one', batch: L2 });
+    expect(fefoBatch([open])).toEqual({ kind: 'one', batch: open });
   });
 
-  test('an instant compare: one millisecond before expiry is drawable, one after is not', () => {
-    const expiry = Date.parse(L1.expiryDate!);
-    expect(fefoBatch([L1, L2], expiry - 1)).toEqual({ kind: 'one', batch: L1 });
-    expect(fefoBatch([L1, L2], expiry)).toEqual({ kind: 'one', batch: L1 }); // expiry >= now
-    expect(fefoBatch([L1, L2], expiry + 1)).toEqual({ kind: 'one', batch: L2 });
+  test("story 3-3a: expiry is the SERVER's `expired` flag, never the client's date compare", () => {
+    // L1's date is far in the future, but the server says it is expired: skipped.
+    expect(fefoBatch([{ ...L1, expired: true }, L2])).toEqual({ kind: 'one', batch: L2 });
+    // A past date the server still calls unexpired (its clock, its boundary) is drawn.
+    const stale = batch('STALE', 2, '2026-01-01T00:00:00.000Z');
+    expect(fefoBatch([stale, L2])).toEqual({ kind: 'one', batch: stale });
   });
 
   test('only expired batches: no candidate', () => {
-    const old = batch('OLD', 4, '2026-01-01T00:00:00.000Z');
-    expect(fefoBatch([old], NOW)).toEqual({ kind: 'none' });
+    const old = { ...batch('OLD', 4, '2026-01-01T00:00:00.000Z'), expired: true };
+    expect(fefoBatch([old])).toEqual({ kind: 'none' });
     expect(fefoCap({ kind: 'none' })).toBeNull();
-    expect(fefoPreview({ kind: 'none' }, { uomPrecision: 0 })).toBe('No unexpired batch holds stock here — pick the batch to remove, with a reason.');
+    expect(fefoPreview({ kind: 'none' }, { uomPrecision: 0 })).toBe('No unexpired, unblocked batch holds stock here — pick the batch to remove, with a reason.');
   });
 
   test('a tie on expiry names both; the cap is the smaller', () => {
     const T1 = batch('L1', 3, '2027-01-15T00:00:00.000Z');
     const T2 = batch('L2', 5, '2027-01-15T00:00:00.000Z');
-    const pick = fefoBatch([T1, T2, batch('L3', 1, '2027-09-01T00:00:00.000Z')], NOW);
+    const pick = fefoBatch([T1, T2, batch('L3', 1, '2027-09-01T00:00:00.000Z')]);
     expect(pick).toEqual({ kind: 'tie', batches: [T1, T2] });
     expect(fefoCap(pick)).toBe(3);
     expect(fefoPreview(pick, { uomPrecision: 0 })).toBe('FEFO takes L1 or L2 — same expiry (3 here).');
   });
 
   test('the preview names the FEFO batch and its quantity at the SKU precision', () => {
-    expect(fefoPreview(fefoBatch([L1, L2], NOW), { uomPrecision: 0 })).toBe('FEFO takes L1 (3 here).');
-    expect(fefoPreview(fefoBatch([batch('K1', 2.5, null)], NOW), { uomPrecision: 3 })).toBe('FEFO takes K1 (2.500 here).');
+    expect(fefoPreview(fefoBatch([L1, L2]), { uomPrecision: 0 })).toBe('FEFO takes L1 (3 here).');
+    expect(fefoPreview(fefoBatch([batch('K1', 2.5, null)]), { uomPrecision: 3 })).toBe('FEFO takes K1 (2.500 here).');
   });
 });
 
@@ -299,10 +306,11 @@ describe('parseAdjustment — the I/O matrix', () => {
   });
 
   test('FEFO with only an expired batch: an explicit batch is required', () => {
-    const old = batch('OLD', 4, '2026-01-01T00:00:00.000Z');
+    // 3-3a: the server's `expired` flag (the fixture says what the server says).
+    const old = { ...batch('OLD', 4, '2026-01-01T00:00:00.000Z'), expired: true };
     expect(parse(draft({ skuId: 'sku-lot', direction: 'remove', quantity: '1' }), lot, { batches: [old] })).toEqual({
       kind: 'refused',
-      problem: 'No unexpired batch holds stock here — pick the batch to remove, with a reason.',
+      problem: 'No unexpired, unblocked batch holds stock here — pick the batch to remove, with a reason.',
     });
     const picked = body(
       parse(draft({ skuId: 'sku-lot', direction: 'remove', quantity: '1', batchMode: 'pick', batchCode: 'OLD', overrideReason: 'expired lot' }), lot, {
@@ -580,7 +588,7 @@ describe('adjustReason — every code in words', () => {
     expect(adjustReason(p(400, 'damaged-bin-write-off-only'))).toBe('The DAMAGED bin only takes a write-off — use Write off on its row.');
     expect(adjustReason(p(409, 'kit-cannot-hold-stock'))).toBe('A kit holds no stock — adjust its component SKUs.');
     expect(adjustReason(p(422, 'insufficient-on-hand', 'No batch to draw', 'Bin x holds no non-expired batch'))).toBe(
-      'No unexpired batch holds stock here now — pick the batch, with a reason.',
+      'No unexpired, unblocked batch holds stock here now — pick the batch, with a reason.',
     );
     expect(adjustReason(p(409, 'duplicate-serial', 'd', 'Serial S1 is already in bin A'))).toBe('A serial is already in stock — an Add takes only serials that are not on hand.');
     expect(adjustReason(p(409, 'serial-elsewhere', 's', 'server words'))).toBe('A serial is in another bin — check the serials against this bin.');

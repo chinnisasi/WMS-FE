@@ -13,7 +13,6 @@ import { quantityLabel } from '@/lib/format-quantity';
 import {
   batchDetailReason,
   batchFailureWord,
-  batchStatusLabel,
   TOTAL_CAPPED,
   TOTAL_PAGE_FAILED,
   batchQuantityLabel,
@@ -44,9 +43,11 @@ import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
 import { roleHasCapability } from '@/lib/users';
 import { writeOffOffered } from '@/lib/write-off';
+import { batchBlockOutcome, batchLifecycleLabel } from '@/lib/batch-block';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AdjustBanner, AdjustForm } from '@/components/inventory/adjust-form';
+import { BatchBlockDialog } from '@/components/inventory/batch-block-dialog';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { Ledger } from '@/components/inventory/ledger';
 import { WriteOffBanner, WriteOffPanel, type WriteOffResult } from '@/components/inventory/write-off';
@@ -871,25 +872,51 @@ function BatchList({
   onToggle: (id: string) => void;
 }) {
   const batches = useBatchList(warehouseId, sku.id);
+  // Story 3-3a — Block / Unblock, gated on the capability mirror (`qc.manage`).
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
+  const canBlock = roleHasCapability(role, 'qc.manage');
+  const [dialog, setDialog] = useState<{ mode: 'block' | 'unblock'; batch: BatchListItemDto } | null>(null);
+  const [banner, setBanner] = useState<{ tone: 'accepted' | 'warning'; word: string; reason: string } | null>(null);
+  // Bumped after a block or unblock so an open detail re-reads its status.
+  const [revision, setRevision] = useState(0);
   const columns: Column<BatchListItemDto>[] = [
     { key: 'code', header: 'Batch', render: (b) => <span className="font-mono text-xs">{b.code}</span> },
     { key: 'mfg', header: 'Manufactured', render: (b) => (b.mfgDate === null ? '—' : istDateLabel(b.mfgDate)) },
     { key: 'expiry', header: 'Expires', render: (b) => (b.expiryDate === null ? '—' : istDateLabel(b.expiryDate)) },
-    { key: 'status', header: 'Status', render: (b) => batchStatusLabel(b.status) },
+    { key: 'status', header: 'Status', render: (b) => <span data-testid={`batch-status-${b.code}`}>{batchLifecycleLabel(b)}</span> },
     { key: 'quantity', header: 'Here', numeric: true, render: (b) => batchQuantityLabel(b.quantity, sku) },
     {
       key: 'open',
       header: '',
       render: (b) => (
-        <button
-          type="button"
-          className={rowButtonClass}
-          aria-expanded={openBatch === b.id}
-          aria-controls={`inventory-detail-${b.id}`}
-          onClick={() => onToggle(b.id)}
-        >
-          {openBatch === b.id ? 'Close' : 'Open'}
-        </button>
+        <span className="flex gap-1">
+          <button
+            type="button"
+            className={rowButtonClass}
+            aria-expanded={openBatch === b.id}
+            aria-controls={`inventory-detail-${b.id}`}
+            onClick={() => onToggle(b.id)}
+          >
+            {openBatch === b.id ? 'Close' : 'Open'}
+          </button>
+          {canBlock && (
+            <button
+              type="button"
+              className={rowButtonClass}
+              disabled={dialog !== null}
+              onClick={() => {
+                setBanner(null);
+                setDialog({ mode: b.status === 'blocked' ? 'unblock' : 'block', batch: b });
+              }}
+            >
+              {b.status === 'blocked' ? `Unblock ${b.code}` : `Block ${b.code}`}
+            </button>
+          )}
+        </span>
       ),
     },
   ];
@@ -901,6 +928,28 @@ function BatchList({
       <div className="text-xs">
         Batches of <span className="font-mono">{label}</span> — {sku.name}
       </div>
+      {banner !== null && <FeedbackBanner tone={banner.tone} word={banner.word} reason={banner.reason} />}
+      {dialog !== null && (
+        <BatchBlockDialog
+          key={`${dialog.mode}-${dialog.batch.id}`}
+          mode={dialog.mode}
+          batch={dialog.batch}
+          onClose={() => setDialog(null)}
+          onDone={(response) => {
+            setBanner({ tone: 'accepted', ...batchBlockOutcome(dialog.mode, response) });
+            setDialog(null);
+            setRevision((n) => n + 1);
+            batches.reload();
+          }}
+          onStale={(reason) => {
+            // Someone else blocked or unblocked it: re-read, never act on the stale row.
+            setBanner({ tone: 'warning', word: 'Batch changed', reason });
+            setDialog(null);
+            setRevision((n) => n + 1);
+            batches.reload();
+          }}
+        />
+      )}
       <ListTable
         columns={columns}
         rows={batches.state === 'ready' ? batches.data : []}
@@ -908,7 +957,29 @@ function BatchList({
         rowAttrs={(b) => (b.quantity === 0 ? { className: 'text-(--muted-foreground)', 'data-zero': 'true' } : {})}
         expanded={(b) =>
           openBatch === b.id ? (
-            <BatchDetail batchId={b.id} warehouseId={warehouseId} sku={sku} bins={bins} warehouses={warehouses} />
+            <BatchDetail
+              key={revision}
+              batchId={b.id}
+              warehouseId={warehouseId}
+              sku={sku}
+              bins={bins}
+              warehouses={warehouses}
+              action={
+                canBlock ? (
+                  <button
+                    type="button"
+                    className={rowButtonClass}
+                    disabled={dialog !== null}
+                    onClick={() => {
+                      setBanner(null);
+                      setDialog({ mode: b.status === 'blocked' ? 'unblock' : 'block', batch: b });
+                    }}
+                  >
+                    {b.status === 'blocked' ? 'Unblock this batch' : 'Block this batch'}
+                  </button>
+                ) : null
+              }
+            />
           ) : null
         }
       />
@@ -922,12 +993,15 @@ function BatchDetail({
   sku,
   bins,
   warehouses,
+  action,
 }: {
   batchId: string;
   warehouseId: string;
   sku: SkuResponse;
   bins: readonly BinResponse[] | null;
   warehouses: readonly DrillWarehouse[];
+  /** Story 3-3a — the Block / Unblock action, for a role holding `qc.manage`. */
+  action: ReactNode | null;
 }) {
   const detail = useBatchDetail(batchId, batchDetailReason);
   if (detail.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading the batch…</div>;
@@ -941,6 +1015,13 @@ function BatchDetail({
   const history = detail.data.history.filter((event) => event.warehouseId === warehouseId);
   return (
     <div className="flex flex-col gap-2 text-xs" data-testid="batch-detail">
+      <div data-testid="batch-detail-status">
+        <span className="font-medium">Status:</span> {batchLifecycleLabel(detail.data)}
+        {(detail.data.status === 'blocked' || detail.data.expired) && (
+          <span className="text-(--muted-foreground)"> — on hand, never promised or picked by default.</span>
+        )}
+        {action !== null && <span className="ml-2">{action}</span>}
+      </div>
       <div className="font-medium">Bins in this warehouse</div>
       {here.length === 0 ? (
         <div className="text-(--muted-foreground)">None of this batch is in this warehouse.</div>

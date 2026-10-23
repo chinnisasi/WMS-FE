@@ -178,17 +178,19 @@ function expiryMs(batch: Pick<BatchListItemDto, 'expiryDate'>): number | null {
 
 /**
  * Decision 6 — the server's FEFO default draw (`resolveFefoBatch`):
- * batches with stock in the bin whose expiry is null or not before `nowMs`
- * (an instant compare — `Date.parse(expiry) >= now`), expiry ascending,
- * nulls last. `rows` are the bin's batches (`GET …/batches?skuId&binId`).
+ * batches with stock in the bin that are neither expired nor blocked, expiry
+ * ascending, nulls last. `rows` are the bin's batches (`GET
+ * …/batches?skuId&binId`). Story 3-3a (code review): "expired" is the
+ * SERVER's flag (`BatchListItemDto.expired`, its one `isBatchExpiredAt`
+ * judgement at read time) — the web no longer re-derives it from the date;
+ * a BLOCKED batch is never default-drawn either. Both stay nameable as an
+ * explicit Remove (the write-off path).
  */
-export function fefoBatch(rows: readonly BatchListItemDto[], nowMs: number): FefoPick {
+export function fefoBatch(rows: readonly BatchListItemDto[]): FefoPick {
   const candidates = rows
     .filter((row) => row.quantity > 0)
-    .filter((row) => {
-      const ms = expiryMs(row);
-      return ms === null || ms >= nowMs;
-    })
+    .filter((row) => row.status !== 'blocked')
+    .filter((row) => !row.expired)
     .sort((a, b) => {
       const x = expiryMs(a);
       const y = expiryMs(b);
@@ -217,7 +219,7 @@ export function fefoName(pick: Exclude<FefoPick, { kind: 'none' }>): string {
 
 /** The preview line under a FEFO Remove. */
 export function fefoPreview(pick: FefoPick, sku: Pick<SkuResponse, 'uomPrecision'>): string {
-  if (pick.kind === 'none') return 'No unexpired batch holds stock here — pick the batch to remove, with a reason.';
+  if (pick.kind === 'none') return 'No unexpired, unblocked batch holds stock here — pick the batch to remove, with a reason.';
   return `FEFO takes ${fefoName(pick)} (${formatQuantity(fefoCap(pick)!, sku.uomPrecision)} here).`;
 }
 
@@ -384,9 +386,9 @@ export function parseAdjustment(args: {
     if (args.batches === null) return refused('Still reading the batches — try again in a moment.');
     if (draft.direction === 'remove') {
       if (draft.batchMode === 'fefo') {
-        const pick = fefoBatch(args.batches, args.nowMs);
+        const pick = fefoBatch(args.batches);
         if (pick.kind === 'none') {
-          return refused('No unexpired batch holds stock here — pick the batch to remove, with a reason.');
+          return refused('No unexpired, unblocked batch holds stock here — pick the batch to remove, with a reason.');
         }
         const cap = fefoCap(pick)!;
         if (qty > cap) {
@@ -572,7 +574,7 @@ export function adjustReason(error: unknown, context: { readonly batchCode?: str
   if (!(error instanceof ApiProblem)) return UNREACHABLE_REASON;
   switch (error.code) {
     case 'insufficient-on-hand':
-      if (error.title === 'No batch to draw') return 'No unexpired batch holds stock here now — pick the batch, with a reason.';
+      if (error.title === 'No batch to draw') return 'No unexpired, unblocked batch holds stock here now — pick the batch, with a reason.';
       return 'The bin (or the batch) holds fewer units than that now — refresh and try a smaller quantity.';
     case 'bin-retired':
       return 'The bin is retired — nothing was changed.';

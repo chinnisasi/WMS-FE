@@ -187,19 +187,6 @@ export function totalAcrossBins(rows: readonly { readonly quantity: number }[], 
 /* Batches                                                             */
 /* ------------------------------------------------------------------ */
 
-/**
- * The batch lifecycle statuses in words — the backend's `batches_status_check`
- * (`active`, `blocked`, migration 0010). An unknown value falls back to its raw text.
- */
-const BATCH_STATUS_LABEL: Readonly<Record<string, string>> = {
-  active: 'Active',
-  blocked: 'Blocked',
-};
-
-export function batchStatusLabel(status: string): string {
-  return Object.prototype.hasOwnProperty.call(BATCH_STATUS_LABEL, status) ? BATCH_STATUS_LABEL[status]! : status;
-}
-
 /** A batch's quantity here — a zero reads "0 in this warehouse" (the row is greyed). */
 export function batchQuantityLabel(quantity: number, sku: QuantityUom | null): string {
   return quantity === 0 ? '0 in this warehouse' : quantityLabel(quantity, sku);

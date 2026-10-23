@@ -5,7 +5,6 @@ import {
   batchDetailReason,
   batchFailureWord,
   batchQuantityLabel,
-  batchStatusLabel,
   LOADING_CODES,
   NOT_BATCH_TRACKED,
   otherWarehousesLabel,
@@ -195,13 +194,6 @@ describe('review follow-ups', () => {
       kind: 'ambiguous',
       message: 'More than one bin matches x-A — type the exact code.',
     });
-  });
-
-  test('batch statuses in words; an unknown status keeps its raw text', () => {
-    expect(batchStatusLabel('active')).toBe('Active');
-    expect(batchStatusLabel('blocked')).toBe('Blocked');
-    expect(batchStatusLabel('recalled')).toBe('recalled');
-    expect(batchStatusLabel('constructor')).toBe('constructor');
   });
 
   test('the batch failure heading: not-found only for the 404 sentence', () => {

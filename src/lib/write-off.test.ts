@@ -67,7 +67,7 @@ describe('parseWriteOff', () => {
 
 describe('writeOffBatches', () => {
   test('only batches with stock in the bin, by code', () => {
-    const batch = (code: string, quantity: number) => ({ id: code, code, mfgDate: null, expiryDate: null, status: 'active', quantity });
+    const batch = (code: string, quantity: number) => ({ id: code, code, mfgDate: null, expiryDate: null, status: 'active' as const, blockedReason: null, blockedNote: null, blockedAt: null, blockedBy: null, blockedByName: null, expired: false, quantity });
     expect(writeOffBatches([batch('B', 2), batch('A', 0), batch('C', 1)]).map((b) => b.code)).toEqual(['B', 'C']);
   });
 });

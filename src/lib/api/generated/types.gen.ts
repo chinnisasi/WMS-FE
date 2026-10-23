@@ -2153,9 +2153,33 @@ export type BatchListItemDto = {
      */
     expiryDate: string | null;
     /**
-     * Batch lifecycle status (active today)
+     * Batch lifecycle status — `blocked` (story 3-3a) is on hand but never promised or default-drawn, in every warehouse
      */
-    status: string;
+    status: 'active' | 'blocked';
+    /**
+     * Story 3-3a — why the batch is blocked; null unless blocked
+     */
+    blockedReason: 'recall' | 'qc-failed' | 'contamination' | 'client-instruction' | 'expiry-review' | 'other' | null;
+    /**
+     * Story 3-3a — the block's note; null when none was given or not blocked
+     */
+    blockedNote: string | null;
+    /**
+     * Story 3-3a — when it was blocked (ISO-8601 UTC); null unless blocked
+     */
+    blockedAt: string | null;
+    /**
+     * Story 3-3a — who blocked it; null unless blocked
+     */
+    blockedBy: string | null;
+    /**
+     * Story 3-3a — the blocker's display name (the member's email handle); null unless blocked
+     */
+    blockedByName: string | null;
+    /**
+     * Story 3-3a — the server judged the batch past its expiry instant: on hand, but never promised (ATP) or default-drawn
+     */
+    expired: boolean;
     /**
      * On-hand of this batch in the queried warehouse (the bin filter applied; 0 when none)
      */
@@ -2226,9 +2250,33 @@ export type BatchDetailResponse = {
      */
     expiryDate: string | null;
     /**
-     * Batch lifecycle status (active today)
+     * Batch lifecycle status — `blocked` (story 3-3a) is on hand but never promised or default-drawn, in every warehouse
      */
-    status: string;
+    status: 'active' | 'blocked';
+    /**
+     * Story 3-3a — why the batch is blocked; null unless blocked
+     */
+    blockedReason: 'recall' | 'qc-failed' | 'contamination' | 'client-instruction' | 'expiry-review' | 'other' | null;
+    /**
+     * Story 3-3a — the block's note; null when none was given or not blocked
+     */
+    blockedNote: string | null;
+    /**
+     * Story 3-3a — when it was blocked (ISO-8601 UTC); null unless blocked
+     */
+    blockedAt: string | null;
+    /**
+     * Story 3-3a — who blocked it; null unless blocked
+     */
+    blockedBy: string | null;
+    /**
+     * Story 3-3a — the blocker's display name (the member's email handle); null unless blocked
+     */
+    blockedByName: string | null;
+    /**
+     * Story 3-3a — the server judged the batch past its expiry instant: on hand, but never promised (ATP) or default-drawn
+     */
+    expired: boolean;
     /**
      * Per-bin on-hand rows across every warehouse of the tenant
      */
@@ -2237,6 +2285,73 @@ export type BatchDetailResponse = {
      * Full movement history (oldest first, one query)
      */
     history: Array<BatchLedgerEntryDto>;
+};
+
+export type BlockBatchDto = {
+    /**
+     * Why the lot is blocked — `other` requires a note
+     */
+    reason: 'recall' | 'qc-failed' | 'contamination' | 'client-instruction' | 'expiry-review' | 'other';
+    /**
+     * What happened — trimmed, at most 500 characters; required when reason is `other`
+     */
+    note?: string | null;
+};
+
+export type BatchLifecycleDto = {
+    id: string;
+    skuId: string;
+    /**
+     * Batch code (unique per tenant + SKU)
+     */
+    code: string;
+    /**
+     * Manufacturing date (ISO-8601 UTC), null when unrecorded
+     */
+    mfgDate: string | null;
+    /**
+     * Expiry instant (ISO-8601 UTC — the IST midnight beginning the label date), null when unrecorded
+     */
+    expiryDate: string | null;
+    /**
+     * `blocked` — on hand but never promised or default-drawn, in every warehouse
+     */
+    status: 'active' | 'blocked';
+    /**
+     * Why it is blocked — null unless blocked
+     */
+    blockedReason: 'recall' | 'qc-failed' | 'contamination' | 'client-instruction' | 'expiry-review' | 'other' | null;
+    /**
+     * The block's note (always present with reason `other`) — null when none was given or not blocked
+     */
+    blockedNote: string | null;
+    /**
+     * When it was blocked (ISO-8601 UTC) — null unless blocked
+     */
+    blockedAt: string | null;
+    /**
+     * Who blocked it — null unless blocked
+     */
+    blockedBy: string | null;
+    /**
+     * The blocker's display name (the member's email handle) — null unless blocked
+     */
+    blockedByName: string | null;
+    /**
+     * The server judged the batch past its expiry instant — expired stock is on hand but never promised or default-drawn (blocked or not)
+     */
+    expired: boolean;
+};
+
+export type BatchBlockResponse = {
+    batch: BatchLifecycleDto;
+};
+
+export type UnblockBatchDto = {
+    /**
+     * Why the block is lifted — required, trimmed, 1–500 characters
+     */
+    note: string;
 };
 
 export type SerialLocationDto = {
@@ -8124,7 +8239,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -8151,7 +8266,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -13703,7 +13818,7 @@ export type InventoryControllerApproveAdjustmentErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Already approved/rejected (adjustment-pending-decided), a kit SKU since the pend (kit-cannot-hold-stock), a concurrent idempotent request (conflict), or the world moved since the pend and the re-execution hit a guard whose 409 applies (e.g. a handling unit no longer active)
+     * Already approved/rejected (adjustment-pending-decided), a kit SKU since the pend (kit-cannot-hold-stock), a concurrent idempotent request (conflict), the FEFO-default batch the pend resolved has since been blocked or has expired (batch-blocked / batch-expired — story 3-3a), or the world moved since the pend and the re-execution hit a guard whose 409 applies (e.g. a handling unit no longer active)
      */
     409: ProblemDetailsDto;
     /**
@@ -14210,6 +14325,114 @@ export type InventoryControllerGetBatchResponses = {
 };
 
 export type InventoryControllerGetBatchResponse = InventoryControllerGetBatchResponses[keyof InventoryControllerGetBatchResponses];
+
+export type InventoryControllerBlockBatchData = {
+    body: BlockBatchDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        batchId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/batches/{batchId}/block';
+};
+
+export type InventoryControllerBlockBatchErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a reason outside the vocabulary, reason `other` without a note, or a note over 500 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks qc.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No batch with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The batch is already blocked (batch-already-blocked), or a concurrent request on the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InventoryControllerBlockBatchError = InventoryControllerBlockBatchErrors[keyof InventoryControllerBlockBatchErrors];
+
+export type InventoryControllerBlockBatchResponses = {
+    201: BatchBlockResponse;
+};
+
+export type InventoryControllerBlockBatchResponse = InventoryControllerBlockBatchResponses[keyof InventoryControllerBlockBatchResponses];
+
+export type InventoryControllerUnblockBatchData = {
+    body: UnblockBatchDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        batchId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/batches/{batchId}/unblock';
+};
+
+export type InventoryControllerUnblockBatchErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a missing, blank or over-500-character note (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks qc.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No batch with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The batch is not blocked (batch-not-blocked), or a concurrent request on the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type InventoryControllerUnblockBatchError = InventoryControllerUnblockBatchErrors[keyof InventoryControllerUnblockBatchErrors];
+
+export type InventoryControllerUnblockBatchResponses = {
+    201: BatchBlockResponse;
+};
+
+export type InventoryControllerUnblockBatchResponse = InventoryControllerUnblockBatchResponses[keyof InventoryControllerUnblockBatchResponses];
 
 export type InventoryControllerGetSerialData = {
     body?: never;
@@ -21284,7 +21507,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
