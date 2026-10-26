@@ -4,6 +4,9 @@ import { ApiProblem } from '@/lib/api/client';
 import type { CountVarianceEntryResponseDto } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from './outbound-orders';
 import {
+  RECEIPT_PHOTO_GUIDANCE,
+  rejectedOpGuidance as photoGuidance,
+  rejectedOpSummary as photoSummary,
   GRN_DAMAGED_BIN_CONFLICT_GUIDANCE,
   grnLineQuantityWords,
   MAX_CONSIDERED_EVENT_SEQS,
@@ -908,5 +911,28 @@ describe('story 3-2b — a refused handheld adjustment (stock.adjust)', () => {
     expect(applied.word).toBe('Op applied');
     // A move is never read as a pend.
     expect(rejectedOpResolvedOutcome({ opType: 'stock.move' }, 'applied', { snapshot: { pendingAdjustment: {} } }).word).toBe('Op applied');
+  });
+});
+
+describe('a refused handheld damage photo — receipt-photo.stage (story 2-5a)', () => {
+  test('summary: "Damage photo not uploaded", the ref tail, the line and IST capture time, the refusal in words', () => {
+    const entry = {
+      opType: 'receipt-photo.stage' as const,
+      problemCode: 'attachment-type-unsupported',
+      payload: { ref: '01JB7Z5Y6W1X2Y3Z4A5B6C7D8E', capturedAt: '2026-10-13T08:33:00.000Z', grnOpId: 'op-1', lineIndex: 1 },
+    };
+    expect(photoSummary(entry)).toEqual({
+      heading: 'Damage photo not uploaded',
+      lines: ['Photo …5B6C7D8E · receipt line 2 · taken 13 Oct 2026, 14:03 IST — not a JPEG, PNG or WebP photo'],
+    });
+    expect(photoGuidance(entry)).toEqual([RECEIPT_PHOTO_GUIDANCE]);
+    expect(RECEIPT_PHOTO_GUIDANCE).toContain('The receipt is not affected');
+  });
+
+  test('a defensive read: a bare payload and an unknown code still read', () => {
+    expect(photoSummary({ opType: 'receipt-photo.stage', problemCode: 'brand-new-code', payload: {} })).toEqual({
+      heading: 'Damage photo not uploaded',
+      lines: ['Photo — brand-new-code'],
+    });
   });
 });

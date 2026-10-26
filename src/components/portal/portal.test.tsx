@@ -1484,3 +1484,85 @@ describe('story UI-1 — the portal Home', () => {
     expect(steps[2]!.getAttribute('aria-current')).toBe('step');
   });
 });
+
+describe('Inbound — Receipts and their damage photos (story 2-5a)', () => {
+  const GRN_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000b7';
+  const row = {
+    id: GRN_ID,
+    code: 'GRN-0042',
+    warehouseName: 'Whitefield',
+    poCode: null,
+    asnCode: 'ASN-001',
+    lineCount: 1,
+    receivedTotal: 1200,
+    damagedTotal: 3,
+    shortTotal: 0,
+    photoCount: 1,
+    receivedAt: '2026-10-13T08:33:00.000Z',
+    createdAt: '2026-10-13T08:40:00.000Z',
+  };
+  const detail = {
+    ...row,
+    lines: [
+      {
+        lineNo: 1,
+        skuCode: 'TEE-RED',
+        skuName: 'Red tee',
+        qty: 1200,
+        damagedQty: 3,
+        damageReasonCode: 'crushed',
+        shortQty: 0,
+        shortReasonCode: null,
+        photos: [
+          { id: 'ph-1', status: 'attached', url: 'https://bucket.example/ph-1?sig=1', urlExpiresAt: '2999-01-01T00:00:00.000Z', width: 1600, height: 1200, capturedAt: '2026-10-13T08:33:00.000Z' },
+          { id: 'ph-2', status: 'removed', url: null, urlExpiresAt: null, width: null, height: null, capturedAt: null },
+        ],
+      },
+    ],
+  };
+
+  test('the list reads the portal route only; a row expands to its lines, its photo, and the removed placeholder with no image', async () => {
+    writeSession(PORTAL_SESSION);
+    routes = {
+      '/portal/inbound/goods-receipts': [200, { items: [row], nextCursor: null }],
+      [`/portal/inbound/goods-receipts/${GRN_ID}`]: [200, detail],
+    };
+    view = render(<PortalInbound />);
+    await settle();
+    expect(view.container.textContent).toContain('Receipts');
+    expect(view.container.textContent).toContain('GRN-0042');
+    expect(view.container.textContent).toContain('1,200');
+    const section = [...view.container.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === 'Receipts')!;
+    click(buttonNamed(section as HTMLElement, 'Lines'));
+    await settle();
+    expect(requests).toContain(`GET /api/v1/tenants/${TENANT_ID}/portal/inbound/goods-receipts/${GRN_ID}`);
+    expect(requests.every((r) => !r.includes('/receiving/'))).toBe(true);
+    const lines = view.container.querySelector('[data-testid="receipt-lines"]')!;
+    expect(lines.textContent).toContain('damaged 3 (Crushed)');
+    expect(lines.querySelectorAll('img')).toHaveLength(1);
+    const removed = lines.querySelector('[data-testid="portal-photo-removed"]')!;
+    expect(removed.textContent).toContain('Removed by the warehouse');
+    expect(removed.querySelector('img')).toBeNull();
+  });
+
+  test('a photo opens the lightbox (one modal); the removed one shows its placeholder there too', async () => {
+    writeSession(PORTAL_SESSION);
+    routes = {
+      '/portal/inbound/goods-receipts': [200, { items: [row], nextCursor: null }],
+      [`/portal/inbound/goods-receipts/${GRN_ID}`]: [200, detail],
+    };
+    view = render(<PortalInbound />);
+    await settle();
+    const section = [...view.container.querySelectorAll('section')].find((s) => s.querySelector('h2')?.textContent === 'Receipts')!;
+    click(buttonNamed(section as HTMLElement, 'Lines'));
+    await settle();
+    click(view.container.querySelector('button[aria-label="Open TEE-RED photo 1"]')!);
+    const dialog = view.container.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector('img')!.getAttribute('src')).toBe('https://bucket.example/ph-1?sig=1');
+    expect(dialog.textContent).toContain('1 of 2');
+    click(dialog.querySelector('button[aria-label="Next photo"]')!);
+    expect(dialog.querySelector('img')).toBeNull();
+    expect(dialog.textContent).toContain('Removed by the warehouse');
+    expect(view.container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  });
+});

@@ -69,6 +69,11 @@ import {
   fetchApiPortalService,
   fetchApiReplaceRateCardLines,
   fetchApiImportCatalog,
+  fetchApiListReceiptPhotos,
+  fetchApiAddReceiptPhoto,
+  fetchApiRemoveReceiptPhoto,
+  fetchApiPortalGoodsReceipts,
+  fetchApiPortalGoodsReceipt,
   fetchApiImportAsns,
   fetchApiListClients,
   fetchApiRenameClient,
@@ -3056,6 +3061,63 @@ describe('3-5a wrappers (count tasks, bulk create, count policies)', () => {
     expect(new URL(lastRequest!.url).pathname).toBe(`${path}/c`);
     expect(lastRequest!.method).toBe('DELETE');
     expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    clearSession();
+  });
+});
+
+describe('damage photo wrappers (story 2-5a)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const GRN = '0198f7a2-1b3c-7d4e-8f90-0000000000b7';
+  const LINE = '0198f7a2-1b3c-7d4e-8f90-00000000a001';
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}`;
+
+  test('the list GETs the receipt\'s photos with no key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { storageEnabled: true, photos: [] });
+    await fetchApiListReceiptPhotos(SESSION.tenant.id, GRN);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/receiving/goods-receipts/${GRN}/photos`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    clearSession();
+  });
+
+  test('add POSTs multipart {file} to the line under its key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { attachment: { id: 'a-1' } });
+    const file = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'crate.jpg', { type: 'image/jpeg' });
+    await fetchApiAddReceiptPhoto(SESSION.tenant.id, GRN, LINE, file, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/receiving/goods-receipts/${GRN}/lines/${LINE}/photos`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    const form = await lastRequest!.formData();
+    expect((form.get('file') as File).name).toBe('crate.jpg');
+    expect([...form.keys()]).toEqual(['file']);
+    clearSession();
+  });
+
+  test('remove POSTs {reason} JSON under its key; a refusal surfaces its code', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { attachment: { id: 'a-1', status: 'removed' } });
+    await fetchApiRemoveReceiptPhoto(SESSION.tenant.id, GRN, 'a-1', 'Wrong pallet', KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/receiving/goods-receipts/${GRN}/photos/a-1/remove`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ reason: 'Wrong pallet' });
+    stubFetch(409, { type: 'about:blank', title: 'x', status: 409, code: 'attachment-not-attached' });
+    await expect(fetchApiRemoveReceiptPhoto(SESSION.tenant.id, GRN, 'a-1', 'Again', KEY)).rejects.toMatchObject({ code: 'attachment-not-attached', status: 409 });
+    clearSession();
+  });
+
+  test('the portal receipts: the list sends no query on the first page and the cursor after; the detail GETs its id', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiPortalGoodsReceipts(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/inbound/goods-receipts`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiPortalGoodsReceipts(SESSION.tenant.id, { cursor: 'c2' });
+    expect(new URL(lastRequest!.url).searchParams.get('cursor')).toBe('c2');
+    stubFetch(200, { id: GRN, lines: [] });
+    await fetchApiPortalGoodsReceipt(SESSION.tenant.id, GRN);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/inbound/goods-receipts/${GRN}`);
     clearSession();
   });
 });

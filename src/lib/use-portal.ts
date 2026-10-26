@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import {
   fetchApiPortalAsn,
   fetchApiPortalAsns,
+  fetchApiPortalGoodsReceipt,
+  fetchApiPortalGoodsReceipts,
   fetchApiPortalSkus,
   fetchApiPortalWarehouses,
   fetchApiPortalInvoice,
@@ -19,6 +21,8 @@ import {
 import type {
   PortalAsnDetailResponse,
   PortalAsnRowDto,
+  PortalGoodsReceiptDetailDto,
+  PortalGoodsReceiptRowDto,
   PortalInvoiceDetailResponse,
   PortalInvoiceRowDto,
   PortalOrderDetailResponse,
@@ -128,20 +132,25 @@ function usePortalDetail<T>(
   subject: string,
   fetchOne: (tenantId: string, id: string) => Promise<T>,
   reason: (error: unknown) => string = (error) => portalReadReason(error, subject),
-): ResourceState<T> & Reloadable {
+): ResourceState<T> & Reloadable & { refresh: () => Promise<void> } {
   const tenantId = useTenantId();
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{ tenantId: string; id: string; state: ResourceState<T> } | null>(null);
+  // Story 2-5a — every fetch takes a sequence number and only the newest may
+  // land (guide §1.3): `refresh()` runs from an event handler, with no
+  // effect cleanup to cancel it.
+  const seq = useRef(0);
 
   useEffect(() => {
     if (tenantId === null || id === null) return;
     let cancelled = false;
+    const mine = ++seq.current;
     (async () => {
       try {
         const data = await fetchOne(tenantId, id);
-        if (!cancelled) setResult({ tenantId, id, state: { state: 'ready', data } });
+        if (!cancelled && mine === seq.current) setResult({ tenantId, id, state: { state: 'ready', data } });
       } catch (error) {
-        if (!cancelled) setResult({ tenantId, id, state: { state: 'failed', reason: reason(error) } });
+        if (!cancelled && mine === seq.current) setResult({ tenantId, id, state: { state: 'failed', reason: reason(error) } });
       }
     })();
     return () => {
@@ -154,8 +163,24 @@ function usePortalDetail<T>(
     setResult(null);
     setRevision((r) => r + 1);
   }, []);
+  /**
+   * Story 2-5a — a QUIET refetch (the last-good detail stays on screen until
+   * the answer lands; a failure keeps it): the receipt detail's photo URLs
+   * expire after ≈ 300 s, and an expired image refetches through this (A28).
+   */
+  const refresh = useCallback(async () => {
+    if (tenantId === null || id === null) return;
+    const mine = ++seq.current;
+    try {
+      const data = await fetchOne(tenantId, id);
+      if (mine === seq.current) setResult({ tenantId, id, state: { state: 'ready', data } });
+    } catch {
+      // Quiet: the last-good detail stays.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, id]);
   const stale = tenantId === null || id === null || result === null || result.tenantId !== tenantId || result.id !== id;
-  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload, refresh };
 }
 
 const cursorOption = (cursor: string | null) => (cursor === null ? {} : { cursor });
@@ -203,6 +228,18 @@ export function usePortalPurchaseOrders() {
 
 export function usePortalPurchaseOrder(poId: string | null): ResourceState<PortalPurchaseOrderDetailResponse> & Reloadable {
   return usePortalDetail(poId, 'This purchase order', fetchApiPortalPurchaseOrder);
+}
+
+/** Story 2-5a — this client's goods receipts (the Receipts section). */
+export function usePortalGoodsReceipts() {
+  return usePortalList<PortalGoodsReceiptRowDto>('grns', 'your receipts', (tenantId, cursor) =>
+    fetchApiPortalGoodsReceipts(tenantId, cursorOption(cursor)),
+  );
+}
+
+/** Story 2-5a — one receipt's lines and damage photos; `refresh()` re-reads quietly when a photo URL expires. */
+export function usePortalGoodsReceipt(grnId: string | null) {
+  return usePortalDetail<PortalGoodsReceiptDetailDto>(grnId, 'This receipt', fetchApiPortalGoodsReceipt);
 }
 
 export function usePortalInvoices() {

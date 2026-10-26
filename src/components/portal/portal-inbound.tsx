@@ -1,9 +1,19 @@
 'use client';
 
-import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiPortalAnnounceAsn } from '@/lib/api/client';
-import type { PortalAsnDetailResponse, PortalAsnRowDto, PortalPurchaseOrderRowDto } from '@/lib/api/generated';
+import type {
+  PortalAsnDetailResponse,
+  PortalAsnRowDto,
+  PortalGoodsReceiptLineDto,
+  PortalGoodsReceiptRowDto,
+  PortalPurchaseOrderRowDto,
+  PortalReceiptPhotoDto,
+} from '@/lib/api/generated';
+import { istDateTimeLabel } from '@/lib/audit-exports';
+import { damageReasonLabel, shortReasonLabel } from '@/lib/grn-lines';
+import { PORTAL_REMOVED_PHOTO, createUrlRefresher, photoCountLabel, type UrlRefresher } from '@/lib/receipt-photos';
 import { MAX_ASN_CODE_LENGTH, type AsnDraftLine, type LineOption } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
 import {
@@ -15,6 +25,7 @@ import {
   PORTAL_SKUS_TOO_MANY_MESSAGE,
   portalAsnReason,
   portalDate,
+  portalQuantity,
   portalSkuOption,
   portalWarehouseOptions,
   receivedOfLabel,
@@ -24,6 +35,8 @@ import { ulid } from '@/lib/ulid';
 import {
   usePortalAsn,
   usePortalAsns,
+  usePortalGoodsReceipt,
+  usePortalGoodsReceipts,
   usePortalPurchaseOrder,
   usePortalPurchaseOrders,
   usePortalSkuOptions,
@@ -36,6 +49,7 @@ import { DataTable, expandedRowId, type DataTableColumn } from '@/components/dat
 import { EmptyState } from '@/components/shared/empty-state';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { LineRows } from '@/components/shared/line-rows';
+import { CameraGlyph, LightboxStage, ModalFrame, PlaceholderBody, PresignedImage, TileFrame } from '@/components/shared/photo-viewer';
 import { ReadFailure, Section, buttonClass, inputClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
 import { WarehousesFailure } from '@/components/shared/warehouses-failure';
 
@@ -56,6 +70,7 @@ export function PortalInbound() {
     <div className="flex flex-col gap-4">
       <AsnsSection />
       <PurchaseOrdersSection />
+      <ReceiptsSection />
     </div>
   );
 }
@@ -376,5 +391,186 @@ function PoLines({ poId }: { poId: string }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+// ── Story 2-5a — Receipts ────────────────────────────────────────────────────
+
+/**
+ * Story 2-5a — the client's goods receipts (decision 10: the minimal read
+ * 2.9 extends): what arrived, what was damaged or short, and the damage
+ * photos taken at the dock. A row expands to its lines and their photos; a
+ * photo opens the lightbox. A photo the warehouse removed is a placeholder,
+ * "Removed by the warehouse" — no image, no reason, no remover (A4).
+ */
+function ReceiptsSection() {
+  const grns = usePortalGoodsReceipts();
+  const [openId, setOpenId] = useState<string | null>(null);
+  const columns: readonly DataTableColumn<PortalGoodsReceiptRowDto>[] = [
+    toggleColumn<PortalGoodsReceiptRowDto>(openId, setOpenId),
+    { key: 'code', header: 'Receipt', render: (row) => <span className="font-mono">{row.code}</span> },
+    { key: 'warehouse', header: 'Warehouse', render: (row) => row.warehouseName },
+    { key: 'against', header: 'Against', render: (row) => receiptAgainst(row) },
+    { key: 'lines', header: 'Lines', numeric: true, render: (row) => lineCountLabel(row.lineCount) },
+    { key: 'good', header: 'Received', numeric: true, render: (row) => portalQuantity(row.receivedTotal) },
+    {
+      key: 'damaged',
+      header: 'Damaged',
+      numeric: true,
+      render: (row) => (row.damagedTotal > 0 ? <span className="font-medium">{portalQuantity(row.damagedTotal)}</span> : <span className="text-(--muted-foreground)">—</span>),
+    },
+    {
+      key: 'short',
+      header: 'Short',
+      numeric: true,
+      render: (row) => (row.shortTotal > 0 ? portalQuantity(row.shortTotal) : <span className="text-(--muted-foreground)">—</span>),
+    },
+    {
+      key: 'photos',
+      header: 'Photos',
+      render: (row) =>
+        row.photoCount > 0 ? (
+          <span className="inline-flex items-center gap-1" aria-label={photoCountLabel(row.photoCount)}>
+            <CameraGlyph />
+            <span className="data">{row.photoCount}</span>
+          </span>
+        ) : (
+          <span className="text-(--muted-foreground)">—</span>
+        ),
+    },
+    { key: 'received', header: 'Received on', render: (row) => portalDate(row.receivedAt) },
+  ];
+  return (
+    <Section title="Receipts">
+      <div className="text-(--muted-foreground)">
+        What the warehouse received for you, newest first — with damaged and short units, and photos of any damage taken at the dock.
+      </div>
+      {grns.state === 'loading' && <div className="text-(--muted-foreground)">Loading your receipts…</div>}
+      {grns.state === 'failed' && <ReadFailure word="Receipts not loaded" reason={grns.reason} onRetry={grns.reload} />}
+      {grns.state === 'ready' && (
+        <DataTable<PortalGoodsReceiptRowDto>
+          columns={columns}
+          rows={grns.data.items}
+          nextCursor={grns.data.nextCursor}
+          onCursor={grns.onCursor}
+          emptyMessage="No receipts for your company yet."
+          renderExpanded={(row) => (row.id === openId ? <ReceiptLines grnId={row.id} /> : null)}
+        />
+      )}
+    </Section>
+  );
+}
+
+/** The document a receipt booked against, in the client's words. */
+function receiptAgainst(row: Pick<PortalGoodsReceiptRowDto, 'poCode' | 'asnCode'>): React.ReactNode {
+  if (row.asnCode !== null) return <span className="font-mono">{row.asnCode}</span>;
+  if (row.poCode !== null) return <span className="font-mono">{row.poCode}</span>;
+  return <span className="text-(--muted-foreground)">—</span>;
+}
+
+/** `good 90 · damaged 10 (Crushed) · short 5 (Not shipped)`. */
+function portalLineCondition(line: PortalGoodsReceiptLineDto): string {
+  const parts = [`good ${portalQuantity(line.qty)}`];
+  if (line.damagedQty > 0) parts.push(`damaged ${portalQuantity(line.damagedQty)} (${damageReasonLabel(line.damageReasonCode ?? undefined)})`);
+  if (line.shortQty > 0) parts.push(`short ${portalQuantity(line.shortQty)} (${shortReasonLabel(line.shortReasonCode ?? undefined)})`);
+  return parts.join(' · ');
+}
+
+function ReceiptLines({ grnId }: { grnId: string }) {
+  const grn = usePortalGoodsReceipt(grnId);
+  // A28 — one refresher per receipt; it reads the newest `refresh` at call time.
+  const [refresher] = useState(() => createUrlRefresher(grn.refresh));
+  useEffect(() => refresher.bind(grn.refresh), [refresher, grn.refresh]);
+  const [openPhotoId, setOpenPhotoId] = useState<string | null>(null);
+
+  if (grn.state === 'loading') return <div className="text-(--muted-foreground)">Loading lines…</div>;
+  if (grn.state === 'failed') return <ReadFailure word="Lines not loaded" reason={grn.reason} onRetry={grn.reload} />;
+  const all = grn.data.lines.flatMap((line) => line.photos.map((photo) => ({ photo, line })));
+  const index = openPhotoId === null ? -1 : all.findIndex((entry) => entry.photo.id === openPhotoId);
+  const open = index === -1 ? null : all[index]!;
+  return (
+    <>
+      <ul className="flex flex-col gap-3 py-1" data-testid="receipt-lines">
+        {grn.data.lines.map((line) => (
+          <li key={line.lineNo} className="flex flex-col gap-1.5">
+            <div>
+              {skuLabel(line)} <span className="data text-(--muted-foreground)">· {portalLineCondition(line)}</span>
+            </div>
+            {line.photos.length > 0 && (
+              <ul className="flex flex-wrap gap-2" aria-label={`Damage photos of ${line.skuCode}`}>
+                {line.photos.map((photo, at) => (
+                  <li key={photo.id} className="w-20">
+                    <PortalPhotoTile photo={photo} label={`${line.skuCode} photo ${at + 1}`} refresher={refresher} onOpen={() => setOpenPhotoId(photo.id)} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+      {open !== null && (
+        <ModalFrame
+          title={`Damage photo · ${grn.data.code}`}
+          subtitle={skuLabel(open.line)}
+          wide
+          onClose={() => setOpenPhotoId(null)}
+          onEscape={() => setOpenPhotoId(null)}
+        >
+          <LightboxStage
+            photo={open.photo}
+            alt={`${open.line.skuCode} damage photo`}
+            position={index + 1}
+            total={all.length}
+            onPrevious={() => setOpenPhotoId(all[(index - 1 + all.length) % all.length]!.photo.id)}
+            onNext={() => setOpenPhotoId(all[(index + 1) % all.length]!.photo.id)}
+            onBack={() => setOpenPhotoId(null)}
+            refresher={refresher}
+            placeholder={<PortalPlaceholder photo={open.photo} />}
+            meta={
+              <div className="text-xs text-(--muted-foreground)">
+                Line {open.line.lineNo} · {open.line.skuCode}
+                {open.photo.status === 'removed' ? ` · ${PORTAL_REMOVED_PHOTO}` : ''}
+                {open.photo.capturedAt !== null && ` · taken ${istDateTimeLabel(open.photo.capturedAt)} IST`}
+              </div>
+            }
+          />
+        </ModalFrame>
+      )}
+    </>
+  );
+}
+
+function PortalPlaceholder({ photo }: { photo: PortalReceiptPhotoDto }) {
+  return photo.status === 'removed' ? (
+    <PlaceholderBody glyph="⊘" word={PORTAL_REMOVED_PHOTO} />
+  ) : (
+    <PlaceholderBody glyph="▢" word="Image unavailable" />
+  );
+}
+
+function PortalPhotoTile({
+  photo,
+  label,
+  refresher,
+  onOpen,
+}: {
+  photo: PortalReceiptPhotoDto;
+  label: string;
+  refresher: UrlRefresher;
+  onOpen: () => void;
+}) {
+  return (
+    <TileFrame tone={photo.status === 'removed' ? 'muted' : 'plain'} testId={`portal-photo-${photo.status}`}>
+      {photo.status === 'attached' && photo.url !== null ? (
+        <div className="relative h-full w-full">
+          <PresignedImage photo={{ ...photo, url: photo.url }} alt={label} refresher={refresher} />
+          <button type="button" aria-label={`Open ${label}`} onClick={onOpen} className="absolute inset-0 focus-visible:outline-2 focus-visible:outline-(--ring)" />
+        </div>
+      ) : (
+        <button type="button" aria-label={`${label}: ${photo.status === 'removed' ? PORTAL_REMOVED_PHOTO : 'image unavailable'}`} onClick={onOpen} className="h-full w-full">
+          <PortalPlaceholder photo={photo} />
+        </button>
+      )}
+    </TileFrame>
   );
 }

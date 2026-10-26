@@ -123,6 +123,9 @@ import {
   receivingControllerGetQcHold,
   receivingControllerInspectQcHold,
   receivingControllerListGoodsReceiptLines,
+  receivingControllerListReceiptPhotos,
+  receivingControllerAddReceiptPhoto,
+  receivingControllerRemoveReceiptPhoto,
   receivingControllerListGoodsReceipts,
   receivingControllerListOverReceipts,
   receivingControllerListQcHolds,
@@ -218,6 +221,8 @@ import {
   portalControllerAnnounceAsn,
   portalControllerAsn,
   portalControllerAsns,
+  portalControllerGoodsReceipts,
+  portalControllerGoodsReceipt,
   portalControllerInvoice,
   portalControllerInvoices,
   portalControllerMe,
@@ -250,6 +255,8 @@ import type {
   ReportingControllerDownloadRegisterData,
   PortalAsnDetailResponse,
   PortalAsnPageResponse,
+  PortalGoodsReceiptListResponse,
+  PortalGoodsReceiptDetailDto,
   PortalAsnRowDto,
   PortalCreateAsnDto,
   PortalCreateOrderDto,
@@ -358,6 +365,8 @@ import type {
   InvoiceResponse,
   GenerateBinsDto,
   GoodsReceiptLinesResponse,
+  ReceiptPhotosResponse,
+  ReceiptPhotoResponse,
   GoodsReceiptListResponse,
   HealthResponse,
   MergeBinDto,
@@ -5074,6 +5083,31 @@ export async function fetchApiPortalPurchaseOrders(
   return data;
 }
 
+/** Story 2-5a — this client's goods receipts, newest first (keyset). */
+export async function fetchApiPortalGoodsReceipts(
+  tenantId: string,
+  options?: PortalPageOptions,
+): Promise<PortalGoodsReceiptListResponse> {
+  const { data, error } = await portalControllerGoodsReceipts({ path: { tenantId }, query: portalPageQuery(options), signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/**
+ * Story 2-5a — one of this client's goods receipts: its lines with their
+ * condition and damage photos (attached ones with a short-lived URL, removed
+ * ones as a placeholder). Another client's receipt is a 404.
+ */
+export async function fetchApiPortalGoodsReceipt(
+  tenantId: string,
+  grnId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalGoodsReceiptDetailDto> {
+  const { data, error } = await portalControllerGoodsReceipt({ path: { tenantId, grnId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
 export async function fetchApiPortalPurchaseOrder(
   tenantId: string,
   poId: string,
@@ -5311,6 +5345,72 @@ export async function fetchApiListGoodsReceiptLines(
   options?: { signal?: AbortSignal },
 ): Promise<GoodsReceiptLinesResponse> {
   const { data, error } = await receivingControllerListGoodsReceiptLines({ path: { tenantId, grnId }, signal: options?.signal });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-5a — one goods receipt's damage photos (any staff role): every live
+ * photo (attached + awaited) in receipt order with a short-lived presigned
+ * URL, then at most the 50 newest removed / never-arrived ones. A URL is
+ * valid until its `urlExpiresAt` (≈ 300 s) — the dialog refetches this list
+ * when an image fails after that (A28).
+ */
+export async function fetchApiListReceiptPhotos(
+  tenantId: string,
+  grnId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ReceiptPhotosResponse> {
+  const { data, error } = await receivingControllerListReceiptPhotos({ path: { tenantId, grnId }, signal: options?.signal });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-5a — add one damage photo to a goods-receipt line from the web
+ * (`receipt.attach`). Multipart (`file` only), keyed: the key is the photo's
+ * intent, so a retry of the SAME prepared file reuses it. 201 carries the
+ * attachment with no URL — refetch the list to show it.
+ */
+export async function fetchApiAddReceiptPhoto(
+  tenantId: string,
+  grnId: string,
+  lineId: string,
+  file: File,
+  idempotencyKey: string,
+): Promise<ReceiptPhotoResponse> {
+  const { data, error } = await receivingControllerAddReceiptPhoto({
+    body: { file },
+    headers: { 'Idempotency-Key': idempotencyKey },
+    path: { tenantId, grnId, lineId },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-5a — remove a damage photo (soft: the record stays with who and
+ * why), or cancel an awaited placeholder (`receipt.photo-remove`). The reason
+ * is in the request hash, so a key is bound to the reason it was sent with.
+ */
+export async function fetchApiRemoveReceiptPhoto(
+  tenantId: string,
+  grnId: string,
+  attachmentId: string,
+  reason: string,
+  idempotencyKey: string,
+): Promise<ReceiptPhotoResponse> {
+  const { data, error } = await receivingControllerRemoveReceiptPhoto({
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+    path: { tenantId, grnId, attachmentId },
+  });
   if (error || !data) {
     throw unwrapError(error, 400);
   }

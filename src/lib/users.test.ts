@@ -61,7 +61,15 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 3-1 adds `stock.move` (owner + ops_manager + operator — the bin-to-bin move) — 46 became 47;
     // story 4-1a adds `orders.place` (owner + client — the portal order) — 47 became 48.
     // Story 3-2b adds `stock.adjust.request` (owner + ops_manager + operator — the handheld adjustment request) — 48 became 49.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(49);
+    // Story 2-5a adds `receipt.attach` (owner + ops_manager + operator — a web damage photo) and
+    // `receipt.photo-remove` (owner + ops_manager — evidence is removed by a manager) — 49 became 51.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(51);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'receipt.attach')),
+    ).toEqual(['owner', 'ops_manager', 'operator']);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'receipt.photo-remove')),
+    ).toEqual(['owner', 'ops_manager']);
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'stock.adjust.request')),
     ).toEqual(['owner', 'ops_manager', 'operator']);
@@ -243,6 +251,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'stock.move',
         // Story 3-2b — the adjustment request (derived, never hand-copied).
         'stock.adjust.request',
+        // Story 2-5a — damage photos: add, and remove/cancel (derived).
+        'receipt.attach',
+        'receipt.photo-remove',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -274,6 +285,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
       'stock.move',
       // Story 3-2b — the floor requests an adjustment (always pended).
       'stock.adjust.request',
+      // Story 2-5a — the dock adds a damage photo from the web (never removes one).
+      'receipt.attach',
     ]);
     expect(roleHasCapability('operator', 'putaway.execute')).toBe(true);
     expect(roleHasCapability('operator', 'warehouse.create')).toBe(false);
