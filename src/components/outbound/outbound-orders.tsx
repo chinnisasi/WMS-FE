@@ -91,7 +91,7 @@ import {
   selectClass,
 } from '@/components/outbound/shell';
 import { StatusChip } from '@/components/shared/status-chip';
-import { ORDER_STATUS_TONE } from '@/lib/status-tone';
+import { orderStatusTone } from '@/lib/status-tone';
 
 /**
  * The Outbound orders surface (story 4.2b) — the first web consumer of the
@@ -752,7 +752,7 @@ function OrdersTable({
       key: 'status',
       header: 'Status',
       render: (order) => (
-        <StatusChip tone={ORDER_STATUS_TONE[order.status]}>{orderStatusLabel(order.status)}</StatusChip>
+        <StatusChip tone={orderStatusTone(order.status)}>{orderStatusLabel(order.status)}</StatusChip>
       ),
     },
     ...(showClients(clients)
@@ -905,13 +905,11 @@ function OrdersTable({
           }
           loading={orders.state === 'loading' ? 'Loading orders…' : undefined}
           emptyMessage={
-            orders.state === 'loading'
-              ? 'Loading orders…'
-              : loaded.length === 0
-                ? searching !== null
-                  ? orderSearchEmptyMessage(searching, warehouseLabel, active ?? { state: 'all' }, tenantName)
-                  : 'No orders in this warehouse yet.'
-                : 'No orders on this page match that status.'
+            loaded.length === 0
+              ? searching !== null
+                ? orderSearchEmptyMessage(searching, warehouseLabel, active ?? { state: 'all' }, tenantName)
+                : 'No orders in this warehouse yet.'
+              : 'No orders on this page match that status.'
           }
         />
       )}

@@ -13,7 +13,7 @@ import { statusChipClass, StatusChip } from './status-chip';
  */
 export interface ExceptionItem {
   readonly key: string;
-  /** The words after the count: "short-picked lines today". */
+  /** The words after the count, agreeing with it: "short-picked lines today". */
   readonly label: string;
   readonly count: number;
   /** The drill behind the count, or null when there is none for this viewer. */
@@ -29,8 +29,10 @@ export function ExceptionStrip({
 }) {
   const open = items.filter((item) => item.count > 0);
   return (
-    <section aria-label="Needs attention" className="flex flex-wrap items-center gap-2 text-sm" data-testid="exception-strip">
-      <h2 className="text-sm font-medium">Needs attention</h2>
+    <section aria-labelledby="exception-strip-heading" className="flex flex-wrap items-center gap-2 text-sm" data-testid="exception-strip">
+      <h2 id="exception-strip-heading" className="text-sm font-medium">
+        Needs attention
+      </h2>
       {open.length === 0 ? (
         <span className="text-(--muted-foreground)" data-testid="exceptions-cleared">
           <span aria-hidden>✓ </span>

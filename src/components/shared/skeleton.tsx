@@ -4,9 +4,12 @@
  * a spinner and never a jump from a sentence to a table.
  *
  * The bars are decoration (`aria-hidden`); the words are not lost: every
- * skeleton carries a `LoadingStatus` whose label is visually hidden but read
- * by a screen reader. It is a polite live region WITHOUT `role="status"` —
- * the page's real status banners keep that role to themselves.
+ * skeleton carries a `LoadingStatus` whose label is visually hidden but in
+ * the accessibility tree, so a screen reader reading the page finds
+ * "Loading …" where the rows will be (as the old visible sentence did). It
+ * is marked polite but WITHOUT `role="status"` — the page's real status
+ * banners keep that role. It mounts with its text, so most screen readers
+ * will not speak it unprompted; nothing here promises an announcement.
  * `motion-safe:` keeps the pulse off under Reduce Motion. Portal-allowed.
  */
 export function LoadingStatus({ label }: { readonly label: string }) {

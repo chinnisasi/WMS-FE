@@ -163,7 +163,9 @@ describe('overviewExceptions (story UI-1 — exceptions first, never a false all
       ['aged', 0],
       ['sync', 2],
     ]);
-    expect(exceptionsClearedText(result)).toBe('Nothing needs attention');
+    expect(exceptionsClearedText(result)).toBe('No exceptions in these figures'); // scoped: never an outright all-clear
+    expect(result.items.find((i) => i.key === 'pending-over-receipts')!.label).toBe('over-receipt awaiting a decision');
+    expect(result.items.find((i) => i.key === 'short-picks')!.label).toBe('short-picked lines today');
   });
 
   test('an unavailable tile or a null figure is omitted, never read as zero — and the all-clear says so', () => {
@@ -177,7 +179,7 @@ describe('overviewExceptions (story UI-1 — exceptions first, never a false all
     );
     expect(result.omitted).toBe(3);
     expect(result.items.map((i) => i.key)).toEqual(['backordered', 'expiry', 'aged']);
-    expect(exceptionsClearedText(result)).toBe('Nothing needs attention in the figures available');
+    expect(exceptionsClearedText(result)).toBe('No exceptions in the figures available');
     expect(exceptionsClearedText({ omitted: 6, sources: 6 })).toBeNull();
   });
 

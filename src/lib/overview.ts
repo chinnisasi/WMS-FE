@@ -175,11 +175,26 @@ export function currentTime(): number {
 /** One "needs a human" count on the Overview's strip (UI-PATTERNS §6, row 1). */
 export interface OverviewException {
   readonly key: string;
-  /** The words after the count: "short-picked lines today". */
+  /** The words after the count, already agreed with it: "1 short-picked line today", "3 short-picked lines today". */
   readonly label: string;
   readonly count: number;
   /** The drill behind the count for this viewer, or null (no screen, or no capability). */
   readonly href: string | null;
+}
+
+/** Singular and plural label for each exception. */
+const EXCEPTION_WORDS: Readonly<Record<string, readonly [string, string]>> = {
+  'pending-over-receipts': ['over-receipt awaiting a decision', 'over-receipts awaiting a decision'],
+  'short-picks': ['short-picked line today', 'short-picked lines today'],
+  backordered: ['backordered channel order today', 'backordered channel orders today'],
+  expiry: ['open expiry alert', 'open expiry alerts'],
+  aged: ['open aged-stock alert', 'open aged-stock alerts'],
+  sync: ['channel not syncing cleanly', 'channels not syncing cleanly'],
+};
+
+function exceptionLabel(key: string, count: number): string {
+  const words = EXCEPTION_WORDS[key]!;
+  return count === 1 ? words[0] : words[1];
 }
 
 export interface OverviewExceptions {
@@ -206,7 +221,6 @@ export function overviewExceptions(
   let omitted = 0;
   const add = (
     key: string,
-    label: string,
     state: 'ok' | 'unavailable',
     figure: { readonly value: number | null; readonly drill: Parameters<typeof drillLinkHref>[0] },
   ) => {
@@ -214,30 +228,29 @@ export function overviewExceptions(
       omitted += 1;
       return;
     }
-    items.push({ key, label, count: figure.value, href: drillLinkHref(figure.drill, can) });
+    items.push({ key, label: exceptionLabel(key, figure.value), count: figure.value, href: drillLinkHref(figure.drill, can) });
   };
-  add('pending-over-receipts', 'over-receipts awaiting a decision', t.grnVariances.state, t.grnVariances.pendingOverReceipts);
-  add('short-picks', 'short-picked lines today', t.shortPicks.state, t.shortPicks.shortLines.today);
-  add('backordered', 'backordered channel orders today', t.oversell.state, t.oversell.backorderedOrders.today);
-  add('expiry', 'open expiry alerts', t.expiryAlerts.state, t.expiryAlerts.openExpiryUpcoming);
-  add('aged', 'open aged-stock alerts', t.expiryAlerts.state, t.expiryAlerts.openAged);
+  add('pending-over-receipts', t.grnVariances.state, t.grnVariances.pendingOverReceipts);
+  add('short-picks', t.shortPicks.state, t.shortPicks.shortLines.today);
+  add('backordered', t.oversell.state, t.oversell.backorderedOrders.today);
+  add('expiry', t.expiryAlerts.state, t.expiryAlerts.openExpiryUpcoming);
+  add('aged', t.expiryAlerts.state, t.expiryAlerts.openAged);
   if (t.syncHealth.state === 'unavailable' || t.syncHealth.connections === null) {
     omitted += 1;
   } else {
-    items.push({
-      key: 'sync',
-      label: 'channels not syncing cleanly',
-      count: t.syncHealth.connections.filter((c) => c.health !== 'ok').length,
-      href: drillLinkHref(t.syncHealth.drill, can),
-    });
+    const count = t.syncHealth.connections.filter((c) => c.health !== 'ok').length;
+    items.push({ key: 'sync', label: exceptionLabel('sync', count), count, href: drillLinkHref(t.syncHealth.drill, can) });
   }
   return { items, omitted, sources: 6 };
 }
 
-/** The all-clear sentence the strip may truthfully say, or null when it saw nothing at all. */
+/** The all-clear sentence the strip may truthfully say (scoped to its own figures), or null when it saw nothing at all. */
 export function exceptionsClearedText(exceptions: Pick<OverviewExceptions, 'omitted' | 'sources'>): string | null {
   if (exceptions.omitted >= exceptions.sources) return null;
-  return exceptions.omitted === 0 ? 'Nothing needs attention' : 'Nothing needs attention in the figures available';
+  // The strip covers these six figures only — not every queue a person may
+  // owe (adjustments, count variances, refused scans live on Conflicts), so
+  // it never says "nothing needs attention" outright.
+  return exceptions.omitted === 0 ? 'No exceptions in these figures' : 'No exceptions in the figures available';
 }
 
 /** The page header's API status: the words always, `ok` only when the probe said so. */

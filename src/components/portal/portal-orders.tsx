@@ -45,7 +45,7 @@ import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass
 import { WarehousesFailure } from '@/components/shared/warehouses-failure';
 import { StatusChip } from '@/components/shared/status-chip';
 import { StatusTimeline } from '@/components/shared/status-timeline';
-import { ORDER_STATUS_TONE } from '@/lib/status-tone';
+import { orderStatusTone } from '@/lib/status-tone';
 
 /**
  * Story 21-7 — the portal's Orders surface: this company's orders, newest
@@ -91,7 +91,7 @@ export function PortalOrders() {
       ),
     },
     { key: 'ref', header: 'Reference', render: (row) => orderReference(row) },
-    { key: 'status', header: 'Status', render: (row) => <StatusChip tone={ORDER_STATUS_TONE[row.status]}>{orderStatusLabel(row.status)}</StatusChip> },
+    { key: 'status', header: 'Status', render: (row) => <StatusChip tone={orderStatusTone(row.status)}>{orderStatusLabel(row.status)}</StatusChip> },
     // Story 4-2a — priority, ship-by and the payment line; the type beside them.
     { key: 'fields', header: 'Priority · ship-by · payment', render: (row) => <OrderFieldChips order={row} todayIst={todayIst} /> },
     { key: 'orderType', header: 'Type', render: (row) => orderTypeLabel(row.orderType) },

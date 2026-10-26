@@ -365,7 +365,7 @@ export function ReturnsList({
           onCursor={returns.onCursor}
           renderExpanded={(rma) => (expandedId === rma.id ? <ReturnDetail tenantId={tenantId} rma={rma} skus={skuMap} /> : null)}
           loading={returns.state === 'loading' ? 'Loading returns…' : undefined}
-          emptyMessage={returns.state === 'loading' ? 'Loading returns…' : 'No returns yet'}
+          emptyMessage='No returns yet'
         />
       )}
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}

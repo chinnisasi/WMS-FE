@@ -227,7 +227,7 @@ function OverviewTiles({
 
       {/* Every source unread: no strip — the stale banner already speaks. */}
       {cleared === null ? null : (
-        <ExceptionStrip items={exceptions.items} clearedText={cleared ?? ''} />
+        <ExceptionStrip items={exceptions.items} clearedText={cleared} />
       )}
       <section aria-labelledby="overview-group-0" className="flex flex-col gap-3">
         <h2 id="overview-group-0" className="text-sm font-medium">

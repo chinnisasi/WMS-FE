@@ -224,6 +224,9 @@ describe('PortalShell', () => {
     expect(view.container.querySelector('[data-testid="portal-company"]')!.textContent).toBe('Brand A Apparel');
     const nav = [...view.container.querySelectorAll('nav[aria-label="Portal"] a')].map((a) => a.textContent);
     expect(nav).toEqual(['Home', 'Stock', 'Orders', 'Inbound', 'Invoices', 'Service']); // UI-1 adds Home
+    // On /portal/stock, Stock is current and Home is not (Home matches exact /portal only).
+    const current = [...view.container.querySelectorAll('nav[aria-label="Portal"] a[aria-current="page"]')].map((a) => a.textContent);
+    expect(current).toEqual(['Stock']);
     expect(view.container.querySelector('[data-testid="portal-page"]')).not.toBeNull();
     expect(requests).toEqual([`GET /api/v1/tenants/${TENANT_ID}/portal/me`]);
     expect(replaces).toEqual([]);
@@ -1388,6 +1391,16 @@ describe('story UI-1 — the portal Home', () => {
     createdAt: '2026-10-08T10:00:00.000Z',
   });
 
+  test('a client without the write capabilities sees no action buttons on Home', async () => {
+    writeSession({ ...PORTAL_SESSION, user: { ...PORTAL_SESSION.user, role: 'viewer' as never } });
+    routes = { '/portal/service': [503, { code: 'report-unavailable', status: 503, title: 'Report unavailable', detail: 'slow' }] };
+    view = render(<PortalHome />);
+    await settle();
+    const names = [...view.container.querySelectorAll('a')].map((a) => a.textContent);
+    expect(names).not.toContain('Place an order');
+    expect(names).not.toContain('Announce a shipment');
+  });
+
   test('welcome header with the two writes; counts say "+" when the list has another page; a failed read fails only its tile', async () => {
     routes = {
       '/portal/orders': [200, { items: [order('o-1', 'accepted', 'SO-1'), order('o-2', 'dispatched', 'SO-2')], nextCursor: 'CURSOR-2' }],
@@ -1414,8 +1427,12 @@ describe('story UI-1 — the portal Home', () => {
     expect(recent[0]).toContain('SO-1');
     expect(recent[0]).toContain('Accepted');
     expect(c.querySelector('[data-testid="recent-orders"] [data-tone="success"]')!.textContent).toBe('Dispatched');
-    // Every request is a portal route.
+    // Every request is a portal route, and each count tile reads its own status.
     expect(requests.every((r) => r.includes('/portal/'))).toBe(true);
+    const orderReads = urls.filter((u) => u.includes('/portal/orders'));
+    expect(orderReads.some((u) => u.includes('status=accepted'))).toBe(true);
+    expect(orderReads.some((u) => u.includes('status=ready_to_dispatch'))).toBe(true);
+    expect(orderReads.some((u) => !u.includes('status='))).toBe(true); // the recent list is unfiltered
   });
 
   test('a filtered count: only the expected ASNs on the page, with "+" for a further page', async () => {

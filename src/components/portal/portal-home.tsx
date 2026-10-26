@@ -5,17 +5,17 @@ import { useState, useSyncExternalStore } from 'react';
 
 import type { PortalOrderRowDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
+import { roleHasCapability } from '@/lib/users';
 import {
   asnExpected,
   atLeastCount,
   orderDestination,
   orderReference,
   orderStatusLabel,
-  portalCompanyLabel,
   portalDate,
 } from '@/lib/portal';
 import { defaultServicePeriod } from '@/lib/service-report';
-import { ORDER_STATUS_TONE } from '@/lib/status-tone';
+import { orderStatusTone } from '@/lib/status-tone';
 import { usePortalAsns, usePortalOrders, usePortalService } from '@/lib/use-portal';
 
 import { KpiTile } from '@/components/kpi-tile';
@@ -36,7 +36,19 @@ import { ReadFailure, Section, buttonClass, primaryClass } from '@/components/sh
  * is a portal route; the client is the session's, never a parameter.
  */
 export function PortalHome() {
-  const company = useSyncExternalStore(subscribeSession, () => portalCompanyLabel(readSession()), () => '');
+  // The client's own name or code — never the neutral fallback word ("Welcome, Client portal").
+  const company = useSyncExternalStore(
+    subscribeSession,
+    () => {
+      const session = readSession();
+      return session?.client?.name ?? session?.client?.code ?? '';
+    },
+    () => '',
+  );
+  // The two writes show only for the capability their form needs (the Orders and Inbound pages gate the same way).
+  const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
+  const canPlace = roleHasCapability(role, 'orders.place');
+  const canAnnounce = roleHasCapability(role, 'asn.announce');
   const accepted = usePortalOrders('accepted');
   const packed = usePortalOrders('ready_to_dispatch');
   const asns = usePortalAsns();
@@ -50,14 +62,20 @@ export function PortalHome() {
         title={company === '' ? 'Home' : `Welcome, ${company}`}
         description="Your stock, orders and shipments at the warehouse — and how the warehouse is performing for you."
         actions={
-          <>
-            <Link href="/portal/inbound" className={buttonClass}>
-              Announce a shipment
-            </Link>
-            <Link href="/portal/orders" className={primaryClass}>
-              Place an order
-            </Link>
-          </>
+          canPlace || canAnnounce ? (
+            <>
+              {canAnnounce && (
+                <Link href="/portal/inbound" className={buttonClass}>
+                  Announce a shipment
+                </Link>
+              )}
+              {canPlace && (
+                <Link href="/portal/orders" className={primaryClass}>
+                  Place an order
+                </Link>
+              )}
+            </>
+          ) : undefined
         }
       />
 
@@ -162,7 +180,8 @@ function CountTile<T>({
 function RecentOrders({ read }: { read: ListRead<PortalOrderRowDto> }) {
   if (read.state === 'loading') {
     return (
-      <div className="flex flex-col gap-2" aria-hidden>
+      <div className="flex flex-col gap-2">
+        <LoadingStatus label="Loading your recent orders…" />
         {Array.from({ length: 3 }, (_, i) => (
           <SkeletonBar key={i} className="h-4 w-full" />
         ))}
@@ -187,7 +206,7 @@ function RecentOrders({ read }: { read: ListRead<PortalOrderRowDto> }) {
       {rows.map((order) => (
         <li key={order.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
           <span className="font-medium">{orderReference(order)}</span>
-          <StatusChip tone={ORDER_STATUS_TONE[order.status]}>{orderStatusLabel(order.status)}</StatusChip>
+          <StatusChip tone={orderStatusTone(order.status)}>{orderStatusLabel(order.status)}</StatusChip>
           <span className="text-(--muted-foreground)">{orderDestination(order)}</span>
           <span className="data ml-auto text-xs text-(--muted-foreground)">Placed {portalDate(order.createdAt)}</span>
         </li>

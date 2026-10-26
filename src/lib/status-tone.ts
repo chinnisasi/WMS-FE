@@ -16,3 +16,8 @@ export const ORDER_STATUS_TONE: Readonly<Record<OrderStatus, StatusTone>> = {
   dispatched: 'success',
   cancelled: 'neutral',
 };
+
+/** The tone for an order status — `neutral` for a status a newer backend added and this build does not know. */
+export function orderStatusTone(status: string): StatusTone {
+  return Object.hasOwn(ORDER_STATUS_TONE, status) ? ORDER_STATUS_TONE[status as OrderStatus] : 'neutral';
+}

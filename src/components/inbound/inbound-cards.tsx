@@ -606,13 +606,11 @@ function GoodsReceiptsCard({
           renderExpanded={(grn) => (expandedId === grn.id ? <GoodsReceiptLinesPanel grnId={grn.id} skuMap={skuMap} /> : null)}
           loading={grns.state === 'loading' ? 'Loading receipts…' : undefined}
           emptyMessage={
-            grns.state === 'loading'
-              ? 'Loading receipts…'
-              : drill !== null
-                ? 'No receipts match this figure.'
-                : warehouseId === null
-                  ? 'Create a warehouse first.'
-                  : 'No receipts recorded yet.'
+            drill !== null
+              ? 'No receipts match this figure.'
+              : warehouseId === null
+                ? 'Create a warehouse first.'
+                : 'No receipts recorded yet.'
           }
         />
       )}
@@ -759,7 +757,7 @@ function PutawayCard({
           columns={columns}
           rows={tasks.state === 'ready' ? tasks.data.map((task) => ({ ...task, id: task.grnLineId })) : []}
           loading={tasks.state === 'loading' ? 'Loading putaway tasks…' : undefined}
-          emptyMessage={tasks.state === 'loading' ? 'Loading putaway tasks…' : 'Nothing awaiting putaway'}
+          emptyMessage='Nothing awaiting putaway'
         />
       )}
     </section>

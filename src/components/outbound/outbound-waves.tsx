@@ -976,11 +976,9 @@ function WavesTable({
           }
           loading={waves.state === 'loading' ? 'Loading waves…' : undefined}
           emptyMessage={
-            waves.state === 'loading'
-              ? 'Loading waves…'
-              : loaded.length === 0
-                ? 'No waves in this warehouse yet.'
-                : 'No waves on this page match that status.'
+            loaded.length === 0
+              ? 'No waves in this warehouse yet.'
+              : 'No waves on this page match that status.'
           }
         />
       )}

@@ -502,7 +502,7 @@ describe('story UI-1 — exceptions first, the page header and the health indica
     expect(c.querySelector('[data-testid="exception-short-picks"]')!.textContent).toBe('⚠3 short-picked lines today');
     expect(c.querySelector('[data-testid="exception-short-picks"] a')).toBeNull(); // no web screen for this drill
     expect(c.querySelector('[data-testid="exception-pending-over-receipts"] a')!.getAttribute('href')!.startsWith('/conflicts?')).toBe(true);
-    expect(c.querySelector('[data-testid="exception-sync"]')!.textContent).toBe('⚠1 channels not syncing cleanly');
+    expect(c.querySelector('[data-testid="exception-sync"]')!.textContent).toBe('⚠1 channel not syncing cleanly') // singular agrees with its count;
     expect(c.querySelector('[data-testid="exceptions-cleared"]')).toBeNull();
     // The three tile groups, every tile still present.
     expect([...c.querySelectorAll('h2')].map((h) => h.textContent?.trim())).toEqual(
@@ -514,7 +514,7 @@ describe('story UI-1 — exceptions first, the page header and the health indica
   test('without review.decide the over-receipt exception is a plain chip, not a link', async () => {
     view = await mount('accountant');
     expect(view.container.querySelector('[data-testid="exception-pending-over-receipts"] a')).toBeNull();
-    expect(view.container.querySelector('[data-testid="exception-pending-over-receipts"]')!.textContent).toContain('1 over-receipts');
+    expect(view.container.querySelector('[data-testid="exception-pending-over-receipts"]')!.textContent).toContain('1 over-receipt awaiting a decision');
   });
 
   test('the health indicator sits in the header; unreachable reads as an amber chip with the words', async () => {
