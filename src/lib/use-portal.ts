@@ -57,6 +57,13 @@ function useTenantId(): string | null {
   return useSyncExternalStore(subscribeSession, () => readSession()?.tenant.id ?? null, () => null);
 }
 
+/**
+ * Story UI-2 (A1) — the session tenant, for keying a portal table: the list
+ * hooks drop to page one when it changes, so the table's cursor stack must
+ * remount with them.
+ */
+export const usePortalTenantId = useTenantId;
+
 function usePortalList<T>(
   scope: string,
   subject: string,

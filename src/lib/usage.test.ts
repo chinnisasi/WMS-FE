@@ -65,9 +65,9 @@ describe('the period picker', () => {
 describe('a line', () => {
   test('storage reads as base-unit-days per base unit, the server’s exact decimal with separators — never re-rounded', () => {
     expect(usageQuantityLabel({ chargeCode: 'storage', uom: 'kg', quantity: '1234.567' })).toBe('1,234.567 kg-days');
-    expect(usageQuantityLabel({ chargeCode: 'storage', uom: 'each', quantity: '1152921504606846.976' })).toBe('1,152,921,504,606,846.976 each-days');
+    expect(usageQuantityLabel({ chargeCode: 'storage', uom: 'each', quantity: '1152921504606846.976' })).toBe('1,15,29,21,50,46,06,846.976 each-days');
     expect(usageQuantityLabel({ chargeCode: 'storage', uom: null, quantity: '0' })).toBe('0 unit-days');
-    expect(groupDecimal('1000000')).toBe('1,000,000');
+    expect(groupDecimal('1000000')).toBe('10,00,000');
     expect(groupDecimal('999')).toBe('999');
   });
 

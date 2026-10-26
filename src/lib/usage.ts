@@ -10,6 +10,7 @@
  * converts or re-prices a quantity (amounts are integer paise from the
  * server, quantities are its exact decimal strings).
  */
+import { groupIndianDigits } from '@/lib/format-quantity';
 import { ApiProblem } from '@/lib/api/client';
 import type { ClientUsageResponse, RateCardDto, UsageLineDto, UsageSegmentDto } from '@/lib/api/generated';
 import { formatRupees } from '@/lib/invoices';
@@ -121,7 +122,8 @@ export function parseCustomRange(
 export function groupDecimal(value: string): string {
   const negative = value.startsWith('-');
   const [whole, fraction] = (negative ? value.slice(1) : value).split('.');
-  const grouped = (whole ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  // Story UI-2 (W13) — en-IN grouping (was en-US thousands).
+  const grouped = groupIndianDigits(whole ?? '0');
   return `${negative ? '−' : ''}${grouped}${fraction === undefined ? '' : `.${fraction}`}`;
 }
 

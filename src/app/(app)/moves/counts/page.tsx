@@ -17,10 +17,13 @@ export default async function CountsPage({
 }) {
   const params = await searchParams;
   const tab = COUNTS_PAGE_TABS.parse(params);
+  // Story UI-2 — ⌘K "New count" (`?new=count`) opens the form (for a role
+  // that may create counts; the screen checks). It joins the key.
+  const newCount = params.new === 'count';
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Counts" description="Scheduled and open cycle counts, and the variances they found." />
-      <CountsScreen key={tab ?? 'default'} initialTab={tab} />
+      <CountsScreen key={`${tab ?? 'default'}|${newCount ? 'new' : ''}`} initialTab={tab} initialCreating={newCount} />
     </div>
   );
 }

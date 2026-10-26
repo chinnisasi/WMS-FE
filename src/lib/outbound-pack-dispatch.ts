@@ -1,3 +1,4 @@
+import { formatCount } from '@/lib/format-quantity';
 import { ApiProblem } from '@/lib/api/client';
 import type {
   CarrierConnectionResponse,
@@ -183,7 +184,7 @@ export function parsePackDraft(
     if (qty > MAX_QUANTITY_BASE) {
       return {
         body: null,
-        problem: `A scanned quantity is at most ${MAX_QUANTITY_BASE.toLocaleString('en-US')}.`,
+        problem: `A scanned quantity is at most ${formatCount(MAX_QUANTITY_BASE)}.`,
       };
     }
     scanned.push({ skuId: line.skuId, qty });
@@ -198,7 +199,7 @@ export function parsePackDraft(
       return { body: null, problem: 'Weight is a whole number of grams, at least 1.' };
     }
     if (weight > MAX_WEIGHT_GRAMS) {
-      return { body: null, problem: `Weight is at most ${MAX_WEIGHT_GRAMS.toLocaleString('en-US')} grams.` };
+      return { body: null, problem: `Weight is at most ${formatCount(MAX_WEIGHT_GRAMS)} grams.` };
     }
     weightGrams = weight;
   }
@@ -220,7 +221,7 @@ export function parsePackDraft(
         return { body: null, problem: 'Each dimension is a whole number of millimetres.' };
       }
       if (value > MAX_DIMENSION_MM) {
-        return { body: null, problem: `Each dimension is at most ${MAX_DIMENSION_MM.toLocaleString('en-US')} mm.` };
+        return { body: null, problem: `Each dimension is at most ${formatCount(MAX_DIMENSION_MM)} mm.` };
       }
       values.push(value);
     }
@@ -363,11 +364,11 @@ export function parcelMeasurementLabel(
 ): string {
   const parts: string[] = [];
   if (pack.weightGrams !== null) {
-    parts.push(`${pack.weightGrams.toLocaleString('en-US')} g`);
+    parts.push(`${formatCount(pack.weightGrams)} g`);
   }
   if (pack.dimensionsMm !== null) {
     parts.push(
-      `${pack.dimensionsMm.lengthMm.toLocaleString('en-US')} × ${pack.dimensionsMm.widthMm.toLocaleString('en-US')} × ${pack.dimensionsMm.heightMm.toLocaleString('en-US')} mm`,
+      `${formatCount(pack.dimensionsMm.lengthMm)} × ${formatCount(pack.dimensionsMm.widthMm)} × ${formatCount(pack.dimensionsMm.heightMm)} mm`,
     );
   }
   return parts.length === 0 ? 'Unmeasured' : parts.join(' · ');

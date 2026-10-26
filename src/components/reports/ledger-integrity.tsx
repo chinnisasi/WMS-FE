@@ -345,7 +345,9 @@ function AnchorList({
           rows={state.state === 'ready' ? state.data.items : []}
           nextCursor={state.state === 'ready' ? state.data.nextCursor : null}
           onCursor={setCursor}
-          emptyMessage={state.state === 'loading' ? 'Loading anchors…' : 'No anchors yet'}
+          emptyMessage="No anchors yet"
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={state.state === 'loading' ? 'Loading anchors…' : undefined}
         />
       )}
     </div>

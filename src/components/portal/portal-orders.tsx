@@ -36,7 +36,8 @@ import { ulid } from '@/lib/ulid';
 import { usePortalOrder, usePortalOrders, usePortalSkuOptions, usePortalStockRows, usePortalWarehouses } from '@/lib/use-portal';
 import { roleHasCapability } from '@/lib/users';
 
-import { DataTable, TableSkeleton, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { EmptyState } from '@/components/shared/empty-state';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { LineRows } from '@/components/shared/line-rows';
 import { OrderSearch } from '@/components/shared/order-search';
@@ -94,10 +95,11 @@ export function PortalOrders() {
     { key: 'status', header: 'Status', render: (row) => <StatusChip tone={orderStatusTone(row.status)}>{orderStatusLabel(row.status)}</StatusChip> },
     // Story 4-2a — priority, ship-by and the payment line; the type beside them.
     { key: 'fields', header: 'Priority · ship-by · payment', render: (row) => <OrderFieldChips order={row} todayIst={todayIst} /> },
-    { key: 'orderType', header: 'Type', render: (row) => orderTypeLabel(row.orderType) },
-    { key: 'warehouse', header: 'Warehouse', render: (row) => row.warehouseName },
-    { key: 'destination', header: 'Destination', render: (row) => orderDestination(row) },
-    { key: 'lines', header: 'Lines', numeric: true, render: (row) => lineCountLabel(row.lineCount) },
+    // Story UI-2 (§3.2) — column priority (spec A5).
+    { key: 'orderType', header: 'Type', priority: 3, render: (row) => orderTypeLabel(row.orderType) },
+    { key: 'warehouse', header: 'Warehouse', priority: 2, render: (row) => row.warehouseName },
+    { key: 'destination', header: 'Destination', priority: 3, render: (row) => orderDestination(row) },
+    { key: 'lines', header: 'Lines', numeric: true, priority: 3, render: (row) => lineCountLabel(row.lineCount) },
     { key: 'created', header: 'Placed', render: (row) => portalDate(row.createdAt) },
   ];
 
@@ -151,23 +153,28 @@ export function PortalOrders() {
         label="Find an order"
         placeholder="Your order number or channel ref"
       />
-      {orders.state === 'loading' && <TableSkeleton columns={columns} label="Loading your orders…" />}
+      {/* Story UI-2 (A1) — ONE table across every page load, so its cursor
+          stack survives and Prev returns to the previous page; a failure
+          shows above it and the table is kept (hidden), so Retry keeps Prev. */}
       {orders.state === 'failed' && <ReadFailure word="Orders not loaded" reason={orders.reason} onRetry={orders.reload} />}
-      {orders.state === 'ready' && (
+      <div hidden={orders.state === 'failed'}>
         <DataTable<PortalOrderRowDto>
           key={`${pageEpoch}|${JSON.stringify(reference)}`}
           columns={columns}
-          rows={orders.data.items}
-          nextCursor={orders.data.nextCursor}
+          rows={orders.state === 'ready' ? orders.data.items : []}
+          nextCursor={orders.state === 'ready' ? orders.data.nextCursor : null}
           onCursor={orders.onCursor}
           emptyMessage={
-            reference === null
-              ? 'No orders for your company yet.'
-              : `None of your orders has the order number or channel reference "${reference}".`
+            reference === null ? (
+              <EmptyState kind="first-use">No orders for your company yet.</EmptyState>
+            ) : (
+              <EmptyState kind="filtered">{`None of your orders has the order number or channel reference "${reference}".`}</EmptyState>
+            )
           }
           renderExpanded={(row) => (row.id === openId ? <OrderLines orderId={row.id} /> : null)}
+          loading={orders.state === 'loading' ? 'Loading your orders…' : undefined}
         />
-      )}
+      </div>
     </Section>
   );
 }

@@ -378,12 +378,10 @@ function EwayBillsSessioned({ drill, clearHref }: { drill: EwayDrill | null; cle
           nextCursor={list.state === 'ready' ? list.data.nextCursor : null}
           onCursor={list.onCursor}
           emptyMessage={
-            list.state === 'loading'
-              ? 'Loading e-way bills…'
-              : drill !== null
-                ? 'No e-way bills match this figure.'
-                : `No ${EWAY_TAB_LABEL[tab].toLowerCase()} e-way bills.`
+            drill !== null ? 'No e-way bills match this figure.' : `No ${EWAY_TAB_LABEL[tab].toLowerCase()} e-way bills.`
           }
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={list.state === 'loading' ? 'Loading e-way bills…' : undefined}
           renderExpanded={(bill) =>
             canManage && (drill === null ? tab === 'pending' : bill.status === 'pending') && bill.id === openId ? <BillActions bill={bill} onSettled={settled} labelOf={labelOf} canConfigure={canConfigure} /> : null
           }

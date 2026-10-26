@@ -1,14 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { NAV_ITEMS } from '@/lib/navigation';
+import { paletteItems, type PaletteGroup } from '@/lib/palette';
+import { readSession, subscribeSession } from '@/lib/auth';
 
 export interface PaletteAction {
   readonly id: string;
   readonly label: string;
   readonly run: () => void;
+  /** Story UI-2 — the item's group word, shown beside it; defaults to "Action". */
+  readonly group?: PaletteGroup;
 }
 
 /**
@@ -63,16 +66,27 @@ function PaletteOverlay({
     };
   }, [onClose]);
 
+  // Story UI-2 (gap 12) — the role-filtered surfaces, the capability-gated
+  // creates and "Find order «q»" (`paletteItems`, pinned in palette.test.ts),
+  // then any caller actions. The role is read the way the sidebar reads it.
+  const role = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.user.role,
+    () => undefined,
+  );
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const nav = NAV_ITEMS.map((item) => ({
-      id: `nav:${item.id}`,
-      label: item.label,
-      run: () => router.push(item.href),
+    const entries = paletteItems(role, query).map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      group: entry.group,
+      run: () => router.push(entry.href),
     }));
-    const all = [...nav, ...actions];
-    return q ? all.filter((i) => i.label.toLowerCase().includes(q)) : all;
-  }, [query, actions, router]);
+    const extra = actions
+      .filter((a) => q === '' || a.label.toLowerCase().includes(q))
+      .map((a) => ({ ...a, group: a.group ?? ('Action' as const) }));
+    return [...entries, ...extra];
+  }, [query, actions, router, role]);
 
   const commit = (index: number) => {
     const item = items[index];
@@ -125,10 +139,12 @@ function PaletteOverlay({
             setQuery(e.target.value);
             setSelected(0);
           }}
-          placeholder="Search surfaces and actions…"
+          placeholder="Go to a surface, run an action, or find an order…"
+          aria-label="Command palette search"
+          aria-controls="command-palette-list"
           className="w-full rounded-t-lg border-b border-(--border) bg-transparent px-4 py-3 text-sm outline-none"
         />
-        <ul ref={listRef} className="max-h-72 overflow-y-auto p-1">
+        <ul ref={listRef} id="command-palette-list" className="max-h-72 overflow-y-auto p-1">
           {items.length === 0 ? (
             <li className="px-3 py-2 text-sm text-(--muted-foreground)">No matches</li>
           ) : (
@@ -138,11 +154,12 @@ function PaletteOverlay({
                   type="button"
                   onMouseEnter={() => setSelected(i)}
                   onClick={() => commit(i)}
-                  className={`w-full rounded-md px-3 py-2 text-left text-sm ${
+                  className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm ${
                     i === selected ? 'bg-(--primary) text-(--primary-foreground)' : ''
                   }`}
                 >
-                  {item.label}
+                  <span>{item.label}</span>
+                  <span className={`text-xs ${i === selected ? '' : 'text-(--muted-foreground)'}`}>{item.group}</span>
                 </button>
               </li>
             ))

@@ -197,7 +197,9 @@ function AuditTrailSection() {
           rows={trail.state === 'ready' ? trail.data.items : []}
           nextCursor={trail.state === 'ready' ? trail.data.nextCursor : null}
           onCursor={trail.onCursor}
-          emptyMessage={trail.state === 'loading' ? 'Loading the audit trail…' : 'No actions match these filters.'}
+          emptyMessage="No actions match these filters."
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={trail.state === 'loading' ? 'Loading the audit trail…' : undefined}
         />
       )}
       {!exportDenied && <AuditExportsList exports={exports} userMap={userMap} />}

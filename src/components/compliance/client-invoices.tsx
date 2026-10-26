@@ -169,7 +169,9 @@ function ClientInvoicesSessioned() {
           rows={list.state === 'ready' ? list.data.items : []}
           nextCursor={list.state === 'ready' ? list.data.nextCursor : null}
           onCursor={list.onCursor}
-          emptyMessage={list.state === 'loading' ? 'Loading client invoices…' : 'No client invoices yet — prepare a month to start.'}
+          emptyMessage="No client invoices yet — prepare a month to start."
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={list.state === 'loading' ? 'Loading client invoices…' : undefined}
           renderExpanded={(row) =>
             row.id === openId ? (
               <ClientInvoiceDetail

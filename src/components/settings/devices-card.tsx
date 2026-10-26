@@ -59,10 +59,12 @@ function DevicesCardSessioned() {
   const canManage = roleHasCapability(role, 'device.manage');
 
   const columns: readonly DataTableColumn<DeviceResponse>[] = [
-    { key: 'label', header: 'Device', render: (d) => d.label ?? '—' },
+    // Story UI-2 (A4) — client-side sort; offered only while the page is the whole list.
+    { key: 'label', header: 'Device', sortValue: (d) => d.label, render: (d) => d.label ?? '—' },
     {
       key: 'operator',
       header: 'Operator',
+      sortValue: (d) => d.operatorEmail,
       render: (d) => d.operatorEmail ?? 'Not badged in yet',
     },
     {
@@ -78,6 +80,7 @@ function DevicesCardSessioned() {
     {
       key: 'lastSeen',
       header: 'Last seen',
+      sortValue: (d) => d.lastSeenAt,
       render: (d) =>
         d.lastSeenAt === null ? (
           '—'

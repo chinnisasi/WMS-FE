@@ -115,10 +115,15 @@ describe('skeletons', () => {
     expect(view.container.querySelector('tbody')!.textContent).toBe('Shirt3');
   });
 
-  test('DataTable `loading` leaves the pager as it was (UI-1 A14 — no new disabling)', () => {
-    view = render(<DataTable<Row> columns={COLUMNS} rows={[]} loading="Loading…" nextCursor="c2" onCursor={() => undefined} />);
+  test('DataTable `loading` disables the pager and never shows the empty message (UI-2 A1/A7, superseding UI-1 A14)', () => {
+    // UI-2 — with a cursor stack, a press while a page loads would push twice.
+    view = render(
+      <DataTable<Row> columns={COLUMNS} rows={[]} loading="Loading…" nextCursor="c2" onCursor={() => undefined} emptyMessage="Nothing here" />,
+    );
     const next = [...view.container.querySelectorAll('button')].find((b) => b.textContent === 'Next')!;
-    expect(next.disabled).toBe(false);
+    expect(next.disabled).toBe(true);
+    expect(view.container.textContent).not.toContain('Nothing here');
+    expect(view.container.querySelectorAll('[data-testid="skeleton-row"]')).toHaveLength(5);
   });
 
   test('TableSkeleton: the same header and skeleton body, no pager', () => {

@@ -244,13 +244,9 @@ export function AsnsCard({
           rows={asns.state === 'ready' ? asns.data.items : []}
           nextCursor={asns.state === 'ready' ? asns.data.nextCursor : null}
           onCursor={asns.onCursor}
-          emptyMessage={
-            warehouseId === null
-              ? 'Create a warehouse first.'
-              : asns.state === 'loading'
-                ? 'Loading…'
-                : 'No shipments announced yet.'
-          }
+          emptyMessage={warehouseId === null ? 'Create a warehouse first.' : 'No shipments announced yet.'}
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={warehouseId !== null && asns.state === 'loading' ? 'Loading shipments…' : undefined}
           renderExpanded={(asn) =>
             asn.id === openId ? (
               <AsnDetail key={asn.id} asnId={asn.id} skus={skus} kitIds={kitIds} canManage={canManage} onOutcome={report} />

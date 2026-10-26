@@ -11,9 +11,10 @@ import {
   portalRecipientAddress,
   portalSupplierAddress,
 } from '@/lib/portal';
-import { usePortalInvoice, usePortalInvoices } from '@/lib/use-portal';
+import { usePortalTenantId, usePortalInvoice, usePortalInvoices } from '@/lib/use-portal';
 
-import { DataTable, TableSkeleton, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { EmptyState } from '@/components/shared/empty-state';
 import { ReadFailure, Section, rowButtonClass } from '@/components/shared/surface';
 
 /**
@@ -25,6 +26,7 @@ import { ReadFailure, Section, rowButtonClass } from '@/components/shared/surfac
  */
 export function PortalInvoices() {
   const invoices = usePortalInvoices();
+  const tenantId = usePortalTenantId();
   const [openId, setOpenId] = useState<string | null>(null);
   const columns: readonly DataTableColumn<PortalInvoiceRowDto>[] = [
     {
@@ -50,18 +52,22 @@ export function PortalInvoices() {
   ];
   return (
     <Section title="Invoices">
-      {invoices.state === 'loading' && <TableSkeleton columns={columns} label="Loading your invoices…" />}
+      {/* Story UI-2 (A1) — ONE table across every page load, so its cursor
+          stack survives and Prev returns to the previous page; a failure
+          shows above it and the table is kept (hidden), so Retry keeps Prev. */}
       {invoices.state === 'failed' && <ReadFailure word="Invoices not loaded" reason={invoices.reason} onRetry={invoices.reload} />}
-      {invoices.state === 'ready' && (
+      <div hidden={invoices.state === 'failed'}>
         <DataTable<PortalInvoiceRowDto>
+          key={tenantId ?? 'none'}
           columns={columns}
-          rows={invoices.data.items}
-          nextCursor={invoices.data.nextCursor}
+          rows={invoices.state === 'ready' ? invoices.data.items : []}
+          nextCursor={invoices.state === 'ready' ? invoices.data.nextCursor : null}
           onCursor={invoices.onCursor}
-          emptyMessage="No invoices issued to your company yet."
+          emptyMessage={<EmptyState kind="first-use">No invoices issued to your company yet.</EmptyState>}
           renderExpanded={(row) => (row.id === openId ? <InvoiceDetail invoiceId={row.id} /> : null)}
+          loading={invoices.state === 'loading' ? 'Loading your invoices…' : undefined}
         />
-      )}
+      </div>
     </Section>
   );
 }

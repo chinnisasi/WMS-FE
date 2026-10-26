@@ -489,6 +489,26 @@ describe('the portal surfaces — ready, empty, failed', () => {
     expect(view.container.textContent).not.toContain('PAGE1-SKU');
   });
 
+  test('UI-2 (A1): after Next, Prev is enabled and returns to page 1 — the table stays mounted through the page load', async () => {
+    const stockRow = (code: string) => ({ skuId: code, skuCode: code, skuName: `${code} name`, baseUom: 'each', warehouseId: 'w-1', warehouseName: 'Whitefield', onHand: 1, allocated: 0 });
+    routes = {
+      '/portal/stock': [200, { items: [stockRow('PAGE1-SKU')], nextCursor: 'CURSOR-2' }],
+      '/portal/stock?cursor=CURSOR-2': [200, { items: [stockRow('PAGE2-SKU')], nextCursor: null }],
+    };
+    view = render(<PortalStock />);
+    await settle();
+    expect(buttonNamed(view.container, 'Prev').disabled).toBe(true);
+    click(buttonNamed(view.container, 'Next'));
+    await settle();
+    expect(view.container.textContent).toContain('PAGE2-SKU');
+    const prev = buttonNamed(view.container, 'Prev');
+    expect(prev.disabled).toBe(false);
+    click(prev);
+    await settle();
+    expect(view.container.textContent).toContain('PAGE1-SKU');
+    expect(buttonNamed(view.container, 'Prev').disabled).toBe(true);
+  });
+
   test('Inbound: an ASN and a PO expand to their lines through their detail reads', async () => {
     routes = {
       '/portal/inbound/asns': [
@@ -1192,7 +1212,9 @@ describe('Place an order (4-1a)', () => {
     routes = { ...routes, '/portal/orders': [200, { items: [row('o-1', 'SO-7', null), row('o-2', null, 'SHOP-9'), row('o-3', null, null)], nextCursor: null }] };
     view = render(<PortalOrders />);
     await settle();
-    const cells = [...view.container.querySelectorAll('tbody tr')].map((tr) => tr.querySelectorAll('td')[1]?.textContent);
+    // UI-2 (A5) — the Reference cell also hosts the narrow-width mirror of the
+    // priority columns, so read the cell's own content (its first node).
+    const cells = [...view.container.querySelectorAll('tbody tr')].map((tr) => tr.querySelectorAll('td')[1]?.firstChild?.textContent);
     expect(cells).toEqual(['SO-7', 'SHOP-9', 'Manual']);
     const box = view.container.querySelector<HTMLInputElement>('form[role="search"] input')!;
     setValue(box, ' SO-7 ');

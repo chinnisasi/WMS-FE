@@ -59,8 +59,11 @@ import { roleHasCapability } from '@/lib/users';
 import { WAVE_ORDER_CLIENTS_HEADING, waveOrderClientLabel, waveOrderClients } from '@/lib/wave-clients';
 import { ulid } from '@/lib/ulid';
 import { allocationReason } from '@/lib/allocation-policy';
+import { bulkOutcome, keyFate, type BulkOutcome, type BulkResult } from '@/lib/bulk';
+import { selectedRows } from '@/lib/data-table-model';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { EmptyState } from '@/components/shared/empty-state';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { HandlingBadges } from '@/components/shared/handling-badges';
@@ -656,6 +659,21 @@ function WavesTable({
   // Bumped to remount DataTable, whose Prev/Next cursor is internal state —
   // without it the table would still offer Prev on what is now page one.
   const [pageEpoch, setPageEpoch] = useState(0);
+  /**
+   * Story UI-2 (UI-PATTERNS §3.5, spec A2/A3) — bulk release. The selection
+   * is page-scoped and pruned to the planned waves on screen; a run is the
+   * SNAPSHOT of those ids at confirm, released one at a time, each with its
+   * own Idempotency-Key (kept for a no-answer retry, dropped on a refusal or
+   * a deselect, spent on success), and the outbound change is announced
+   * once, at the end.
+   */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [bulkConfirm, setBulkConfirm] = useState<readonly string[] | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{ readonly done: number; readonly total: number } | null>(null);
+  const [bulkResult, setBulkResult] = useState<BulkOutcome | null>(null);
+  const bulkInFlight = useRef(false);
+  const bulkKeys = useRef(new Map<string, string>());
+  const bulkConfirmRef = useRef<HTMLDivElement>(null);
 
   // Switching warehouse remounts this table (the page keys both surfaces on
   // it), so a mutation still in flight would otherwise settle into a tree
@@ -683,6 +701,74 @@ function WavesTable({
 
   const loaded = waves.state === 'ready' ? waves.data.items : [];
   const rows = filterPage(loaded, statusFilter);
+  const releasable = (wave: WaveEntryDto) => canReleaseWave(wave.status);
+  const bulkTargets = selectedRows(rows, selected, releasable);
+  const bulkBusy = bulkProgress !== null;
+
+  function changeSelection(next: ReadonlySet<string>) {
+    // A wave leaving the selection takes its key with it.
+    for (const id of bulkKeys.current.keys()) if (!next.has(id)) bulkKeys.current.delete(id);
+    setSelected(next);
+    setBulkResult(null);
+  }
+
+  // The selection that counts is the planned waves on screen: a refetch (a
+  // release landed, a page reset) leaves a refused wave picked and drops a
+  // released one — derived, not synced, and only from a settled read (while
+  // a refetch loads the page is unknown, not empty).
+  const effectiveSelected: ReadonlySet<string> =
+    waves.state === 'ready' ? new Set(selectedRows(rows, selected, releasable).map((wave) => wave.id)) : selected;
+  // A status filter or a client switch clears it (render-time reset, the
+  // React pattern for "state that follows a key").
+  const filterKey = `${statusFilter ?? ''}|${clientFilterKey(clientFilter)}`;
+  const [selectionKey, setSelectionKey] = useState(filterKey);
+  if (selectionKey !== filterKey) {
+    setSelectionKey(filterKey);
+    setSelected(new Set());
+    setBulkConfirm(null);
+  }
+
+  // The bulk confirmation takes focus when it opens (A6); Escape closes it.
+  useEffect(() => {
+    if (bulkConfirm !== null) bulkConfirmRef.current?.focus();
+  }, [bulkConfirm]);
+
+  async function runBulkRelease(ids: readonly string[]) {
+    if (bulkInFlight.current) return;
+    bulkInFlight.current = true;
+    setOutcome(null);
+    setBulkResult(null);
+    setBulkProgress({ done: 0, total: ids.length });
+    const results: BulkResult[] = [];
+    for (const id of ids) {
+      // The screen went away (a warehouse switch): stop sending.
+      if (!mounted.current) return;
+      const label = `Wave ${id}`;
+      let key = bulkKeys.current.get(id);
+      if (key === undefined) {
+        key = ulid();
+        bulkKeys.current.set(id, key);
+      }
+      try {
+        await fetchApiReleaseWave(tenantId, id, key);
+        bulkKeys.current.delete(id);
+        results.push({ id, label, kind: 'done' });
+      } catch (error) {
+        if (keyFate(error) === 'drop') bulkKeys.current.delete(id);
+        results.push({ id, label, kind: 'refused', reason: releaseReason(error) });
+      }
+      if (mounted.current) setBulkProgress({ done: results.length, total: ids.length });
+    }
+    bulkInFlight.current = false;
+    if (!mounted.current) return;
+    const released = new Set(results.filter((r) => r.kind === 'done').map((r) => r.id));
+    setSelected((current) => new Set([...current].filter((id) => !released.has(id))));
+    setBulkResult(bulkOutcome(results, { done: 'released' }, { one: 'wave', many: 'waves' }));
+    setBulkConfirm(null);
+    setBulkProgress(null);
+    // Once, at the end: every outbound view refetches a single time.
+    if (released.size > 0) notifyOutboundChanged();
+  }
 
   // The clock only needs to tick while a PLANNED wave on this page actually
   // has a cutoff to count down to.
@@ -773,6 +859,8 @@ function WavesTable({
     {
       key: 'policy',
       header: 'Policy',
+      // Story UI-2 (§3.2) — column priority (spec A5).
+      priority: 2,
       render: (wave) => policyMap[wave.policyId]?.name ?? <span className="font-mono text-xs">{wave.policyId}</span>,
     },
     {
@@ -819,6 +907,7 @@ function WavesTable({
     {
       key: 'createdAt',
       header: 'Created',
+      priority: 3,
       render: (wave) => <time dateTime={wave.createdAt}>{new Date(wave.createdAt).toLocaleString()}</time>,
     },
     {
@@ -826,6 +915,7 @@ function WavesTable({
       // "When did this go to the floor?" is the question asked about a
       // released wave, and both timestamps were fetched and thrown away.
       header: 'Released / cancelled',
+      priority: 3,
       render: (wave) => {
         const at = wave.status === 'released' ? wave.releasedAt : wave.status === 'cancelled' ? wave.cancelledAt : null;
         if (at === null) return <span className="text-(--muted-foreground)">—</span>;
@@ -849,7 +939,8 @@ function WavesTable({
                 {canReleaseWave(wave.status) && (
                   <button
                     type="button"
-                    disabled={busyId !== null}
+                    // UI-2 — per-row actions are off while rows are selected (§3.5).
+                    disabled={busyId !== null || effectiveSelected.size > 0 || bulkBusy}
                     onClick={() =>
                       setConfirm({
                         id: wave.id,
@@ -869,7 +960,7 @@ function WavesTable({
                     // Any mutation in flight disables every row: `busyId` and
                     // the outcome banner are single, so two concurrent
                     // submits would leave one of them unreported.
-                    disabled={busyId !== null}
+                    disabled={busyId !== null || effectiveSelected.size > 0 || bulkBusy}
                     onClick={() =>
                       setConfirm({
                         id: wave.id,
@@ -917,6 +1008,39 @@ function WavesTable({
           {pageFilterCount(rows.length, loaded.length)}
         </span>
       </div>
+
+      {bulkConfirm !== null && (
+        <div
+          ref={bulkConfirmRef}
+          tabIndex={-1}
+          role="group"
+          aria-label="Release the selected waves"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && !bulkBusy) {
+              event.stopPropagation();
+              setBulkConfirm(null);
+            }
+          }}
+          className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3 focus-visible:outline-2 focus-visible:outline-(--ring)"
+          data-testid="bulk-release-confirm"
+        >
+          <div className="text-xs text-(--muted-foreground)">
+            Releasing {bulkConfirm.length} {bulkConfirm.length === 1 ? 'wave makes its' : 'waves makes their'} picklists ready to
+            pick on the floor. Each wave is released on its own: the server checks each one&apos;s cutoff on its own clock and
+            may refuse some, and every wave reports its own result.
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={bulkBusy} onClick={() => void runBulkRelease(bulkConfirm)} className={primaryClass}>
+              {bulkProgress !== null
+                ? `Releasing ${Math.min(bulkProgress.done + 1, bulkProgress.total)} of ${bulkProgress.total}…`
+                : `Release ${bulkConfirm.length} ${bulkConfirm.length === 1 ? 'wave' : 'waves'}`}
+            </button>
+            <button type="button" disabled={bulkBusy} onClick={() => setBulkConfirm(null)} className={buttonClass}>
+              Keep them as they are
+            </button>
+          </div>
+        </div>
+      )}
 
       {target !== null && confirm !== null && (
         <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
@@ -975,15 +1099,56 @@ function WavesTable({
             ) : null
           }
           loading={waves.state === 'loading' ? 'Loading waves…' : undefined}
+          rowNoun={{ one: 'wave', many: 'waves' }}
+          selection={
+            canManageWaves
+              ? {
+                  selected: effectiveSelected,
+                  onChange: changeSelection,
+                  canSelect: releasable,
+                  rowLabel: (wave) => `Select wave ${wave.id}`,
+                  noun: { one: 'wave', many: 'waves' },
+                  busy: bulkBusy || busyId !== null,
+                  actions: (
+                    <button
+                      type="button"
+                      className={`${primaryClass} py-1`}
+                      disabled={bulkBusy || bulkTargets.length === 0}
+                      onClick={() => {
+                        setConfirm(null);
+                        setBulkConfirm(bulkTargets.map((wave) => wave.id));
+                      }}
+                    >
+                      Release {bulkTargets.length} {bulkTargets.length === 1 ? 'wave' : 'waves'}
+                    </button>
+                  ),
+                }
+              : undefined
+          }
           emptyMessage={
-            loaded.length === 0
-              ? 'No waves in this warehouse yet.'
-              : 'No waves on this page match that status.'
+            // Story UI-2 (§5, W4) — first use, or a filter that matched nothing.
+            loaded.length === 0 ? (
+              <EmptyState kind="first-use">No waves in this warehouse yet.</EmptyState>
+            ) : (
+              <EmptyState
+                kind="filtered"
+                action={
+                  <button type="button" className={rowButtonClass} onClick={() => setStatusFilter(null)}>
+                    Show all statuses
+                  </button>
+                }
+              >
+                No waves on this page match that status.
+              </EmptyState>
+            )
           }
         />
       )}
       {outcome !== null && (
         <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />
+      )}
+      {bulkResult !== null && (
+        <FeedbackBanner tone={bulkResult.tone} word={bulkResult.word} reason={bulkResult.reason} />
       )}
     </div>
   );

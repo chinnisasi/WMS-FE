@@ -2,7 +2,7 @@
 
 import { useTodayIst } from '@/components/shared/use-today-ist';
 import Link from 'next/link';
-import { useEffect, useId, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
 import { orderSkuOptionLabel } from '@/lib/sku-status';
@@ -67,6 +67,7 @@ import { ulid } from '@/lib/ulid';
 import { canCreateReturn, RETURN_CREATED_REASON, returnCreatedWord } from '@/lib/returns';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { EmptyState } from '@/components/shared/empty-state';
 // Story 4-1a — the Ship-to fieldset is shared with the portal's order form.
 import { ShipToFieldset } from '@/components/shared/ship-to-fieldset';
 import { OrderFieldsFieldset } from '@/components/shared/order-fields-fieldset';
@@ -87,6 +88,7 @@ import {
   labelClass,
   primaryClass,
   ReadFailure,
+  rowButtonClass,
   Section,
   selectClass,
 } from '@/components/outbound/shell';
@@ -120,7 +122,15 @@ export function OutboundOrders({
   warehouseLabel,
   role,
   drill = null,
-}: OutboundSurfaceProps & { readonly drill?: OrdersDrill | null }) {
+  initialReference = null,
+  focusNewOrder = false,
+}: OutboundSurfaceProps & {
+  readonly drill?: OrdersDrill | null;
+  /** Story UI-2 — `?ref=` from the ⌘K "Find order": the search the table opens on. */
+  readonly initialReference?: string | null;
+  /** Story UI-2 — `?new=order` from ⌘K "Create order": the form takes focus once it is ready. */
+  readonly focusNewOrder?: boolean;
+}) {
   const canManageOrders = roleHasCapability(role, 'orders.manage');
   // Story 13-1 — "Create return" on a dispatched order's detail.
   const canManageReturns = roleHasCapability(role, 'returns.manage');
@@ -136,7 +146,9 @@ export function OutboundOrders({
           ? 'Outbound orders'
           : `${warehouseLabel} — newest first. Acceptance reserves stock line by line.`}
       </div>
-      {canManageOrders && drill === null && <OrderCreateForm tenantId={tenantId} warehouseId={warehouseId} active={active} />}
+      {canManageOrders && drill === null && (
+        <OrderCreateForm tenantId={tenantId} warehouseId={warehouseId} active={active} focusOnReady={focusNewOrder} />
+      )}
       <OrdersTable
         tenantId={tenantId}
         warehouseId={warehouseId}
@@ -147,6 +159,7 @@ export function OutboundOrders({
         clientFilter={active.filter}
         clientsState={active.clients}
         active={active}
+        initialReference={drill === null ? initialReference : null}
       />
     </Section>
   );
@@ -182,11 +195,16 @@ function OrderCreateForm({
   tenantId,
   warehouseId,
   active,
+  focusOnReady = false,
 }: {
   tenantId: string;
   warehouseId: string;
   active: ActiveClientState;
+  focusOnReady?: boolean;
 }) {
+  // Story UI-2 — opened from ⌘K "Create order": once the form exists (its
+  // SKUs loaded), bring it into view and put the cursor in its first field.
+  const formRef = useRef<HTMLFormElement>(null);
   // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
   const todayIst = useTodayIst();
   const skus = useOutboundSkus();
@@ -415,6 +433,14 @@ function OrderCreateForm({
     }
   }
 
+  const formReady = skus.state === 'ready' && clientsState.state !== 'loading';
+  useEffect(() => {
+    if (!focusOnReady || !formReady) return;
+    const form = formRef.current;
+    form?.scrollIntoView?.({ block: 'start' });
+    form?.querySelector<HTMLElement>('input, select, textarea')?.focus();
+  }, [focusOnReady, formReady]);
+
   if (skus.state === 'loading' || clientsState.state === 'loading') {
     return (
       <div className="rounded-sm border border-(--border) p-3 text-xs text-(--muted-foreground)">
@@ -433,7 +459,7 @@ function OrderCreateForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-sm border border-(--border) p-3">
+    <form ref={formRef} onSubmit={onSubmit} className="flex flex-col gap-3 rounded-sm border border-(--border) p-3">
       <div className="text-xs text-(--muted-foreground)">
         Raise an order — acceptance reserves each line against available stock. A line above what is
         available is accepted and backordered for the remainder.
@@ -642,9 +668,12 @@ function OrdersTable({
   clientFilter,
   clientsState,
   active,
+  initialReference = null,
 }: {
   tenantId: string;
   warehouseId: string;
+  /** Story UI-2 — the search the table opens on (`?ref=`); null for none. */
+  initialReference?: string | null;
   /** Story 4-1b — names the warehouse in an empty search result. */
   warehouseLabel?: string | null;
   canManageOrders: boolean;
@@ -663,7 +692,7 @@ function OrdersTable({
   // Story 4-1b — the exact-match search (null: none). Hidden while drilled
   // (the drill's rows are its tile's); a change returns the table to page one
   // (the hook stamps its cursor with it, and it joins the table key).
-  const [reference, setReference] = useState<string | null>(null);
+  const [reference, setReference] = useState<string | null>(initialReference);
   const searching = drill === null ? reference : null;
   const orders = useOutboundOrders(warehouseId, clientFilter, drill, searching);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | null>(null);
@@ -764,7 +793,9 @@ function OrdersTable({
           } satisfies DataTableColumn<OrderEntryDto>,
         ]
       : []),
-    { key: 'source', header: 'Source', render: (order) => orderSourceLabel(order.source) },
+    // Story UI-2 (§3.2) — column priority: 3 hides below lg, 2 below md; the
+    // value then shows under the order label (spec A5: never a control or a test id).
+    { key: 'source', header: 'Source', priority: 3, render: (order) => orderSourceLabel(order.source) },
     {
       // Story 4-2a — priority, ship-by (Overdue / Due today while open) and
       // the payment line: "COD ₹x", "Prepaid", or "—" on a legacy order.
@@ -772,27 +803,31 @@ function OrdersTable({
       header: 'Priority · ship-by · payment',
       render: (order) => <OrderFieldChips order={order} todayIst={todayIst} />,
     },
-    { key: 'orderType', header: 'Type', render: (order) => orderTypeLabel(order.orderType) },
+    { key: 'orderType', header: 'Type', priority: 3, render: (order) => orderTypeLabel(order.orderType) },
     {
       // Story 11-1: the one address line the list works from first — city
       // and pincode. Pre-11.1 rows read `destination: null` and render a dash.
       key: 'destination',
       header: 'Ship to',
+      priority: 2,
       render: (order) => destinationSummary(order),
     },
     {
       key: 'channel',
       header: 'Channel refs',
+      priority: 3,
       render: (order) => <span className="font-mono text-xs">{channelRefLabel(order)}</span>,
     },
     {
       key: 'createdAt',
       header: 'Created',
+      priority: 2,
       render: (order) => <time dateTime={order.createdAt}>{new Date(order.createdAt).toLocaleString()}</time>,
     },
     {
       key: 'updatedAt',
       header: 'Updated',
+      priority: 3,
       render: (order) => <time dateTime={order.updatedAt}>{new Date(order.updatedAt).toLocaleString()}</time>,
     },
     ...(canManageOrders
@@ -905,11 +940,27 @@ function OrdersTable({
           }
           loading={orders.state === 'loading' ? 'Loading orders…' : undefined}
           emptyMessage={
-            loaded.length === 0
-              ? searching !== null
-                ? orderSearchEmptyMessage(searching, warehouseLabel, active ?? { state: 'all' }, tenantName)
-                : 'No orders in this warehouse yet.'
-              : 'No orders on this page match that status.'
+            // Story UI-2 (§5, W4) — first use, a search or a filter that matched nothing.
+            loaded.length === 0 ? (
+              searching !== null ? (
+                <EmptyState kind="filtered">
+                  {orderSearchEmptyMessage(searching, warehouseLabel, active ?? { state: 'all' }, tenantName)}
+                </EmptyState>
+              ) : (
+                <EmptyState kind="first-use">No orders in this warehouse yet.</EmptyState>
+              )
+            ) : (
+              <EmptyState
+                kind="filtered"
+                action={
+                  <button type="button" className={rowButtonClass} onClick={() => setStatusFilter(null)}>
+                    Show all statuses
+                  </button>
+                }
+              >
+                No orders on this page match that status.
+              </EmptyState>
+            )
           }
         />
       )}

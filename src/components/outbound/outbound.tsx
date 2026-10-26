@@ -46,7 +46,16 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
 export function Outbound({
   drill = null,
   initialTab = null,
-}: { drill?: ParsedDrill; initialTab?: OutboundTab | null } = {}) {
+  initialReference = null,
+  focusNewOrder = false,
+}: {
+  drill?: ParsedDrill;
+  initialTab?: OutboundTab | null;
+  /** Story UI-2 — ⌘K "Find order" (`?ref=`), already parsed; ignored under a drill. */
+  initialReference?: string | null;
+  /** Story UI-2 — ⌘K "Create order" (`?new=order`). */
+  focusNewOrder?: boolean;
+} = {}) {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
   const sessioned = useSyncExternalStore(
     subscribeSession,
@@ -68,10 +77,20 @@ export function Outbound({
       </Section>
     );
   }
-  return <OutboundSessioned drill={drill} initialTab={initialTab} />;
+  return <OutboundSessioned drill={drill} initialTab={initialTab} initialReference={initialReference} focusNewOrder={focusNewOrder} />;
 }
 
-function OutboundSessioned({ drill, initialTab }: { drill: ParsedDrill; initialTab: OutboundTab | null }) {
+function OutboundSessioned({
+  drill,
+  initialTab,
+  initialReference,
+  focusNewOrder,
+}: {
+  drill: ParsedDrill;
+  initialTab: OutboundTab | null;
+  initialReference: string | null;
+  focusNewOrder: boolean;
+}) {
   const ordersDrill = drillFor(drill, 'orders');
   const [tab, selectTab] = usePageTab(OUTBOUND_PAGE_TABS, OUTBOUND_PAGE_TABS.initial(drill, initialTab), ordersDrill !== null);
   const warehouses = useOutboundWarehouses();
@@ -162,6 +181,8 @@ function OutboundSessioned({ drill, initialTab }: { drill: ParsedDrill; initialT
             warehouseLabel={ordersWarehouseLabel}
             role={role}
             drill={ordersDrill}
+            initialReference={ordersDrill === null ? initialReference : null}
+            focusNewOrder={ordersDrill === null && focusNewOrder}
           />
         )}
         {tab === 'waves' && (

@@ -1,9 +1,10 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useState } from 'react';
 
 import { parseOrderSearch } from '@/lib/orders';
 
+import { Field } from '@/components/shared/field';
 import { buttonClass, inputClass } from '@/components/shared/surface';
 
 /**
@@ -29,7 +30,6 @@ export function OrderSearch({
 }) {
   const [text, setText] = useState(applied ?? '');
   const [problem, setProblem] = useState<string | null>(null);
-  const problemId = useId();
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -44,42 +44,40 @@ export function OrderSearch({
 
   return (
     <form role="search" aria-label={label} onSubmit={submit} className="flex flex-col gap-1">
-      <span className="text-xs text-(--muted-foreground)">{label}</span>
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          className={`${inputClass} w-56 py-1`}
-          value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-            setProblem(null);
-          }}
-          placeholder={placeholder}
-          aria-label={label}
-          aria-invalid={problem !== null}
-          aria-describedby={problem === null ? undefined : problemId}
-        />
-        <button type="submit" className={`${buttonClass} py-1`}>
-          Search
-        </button>
-        {applied !== null && (
-          <button
-            type="button"
-            className={`${buttonClass} py-1`}
-            onClick={() => {
-              setText('');
-              setProblem(null);
-              onSearch(null);
-            }}
-          >
-            Clear
-          </button>
+      {/* Story UI-2 (W9) — the shared Field contract: the label, and the
+          problem in text below, tied to the input by aria-describedby. */}
+      <Field label={label} error={problem} className="flex flex-col gap-1 text-xs [&>label]:text-xs [&>label]:font-normal [&>label]:text-(--muted-foreground)">
+        {(control) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              {...control}
+              className={`${inputClass} w-56 py-1`}
+              value={text}
+              onChange={(event) => {
+                setText(event.target.value);
+                setProblem(null);
+              }}
+              placeholder={placeholder}
+            />
+            <button type="submit" className={`${buttonClass} py-1`}>
+              Search
+            </button>
+            {applied !== null && (
+              <button
+                type="button"
+                className={`${buttonClass} py-1`}
+                onClick={() => {
+                  setText('');
+                  setProblem(null);
+                  onSearch(null);
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
         )}
-      </div>
-      {problem !== null && (
-        <span id={problemId} role="alert" className="text-xs text-(--destructive)">
-          {problem}
-        </span>
-      )}
+      </Field>
     </form>
   );
 }

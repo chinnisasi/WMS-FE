@@ -244,11 +244,11 @@ async function press(target: HTMLElement | undefined | null): Promise<void> {
   await settle();
 }
 
-async function mount(role: UserRole, initialTab: CountsTab | null = null, activeClient: string | null = null): Promise<void> {
+async function mount(role: UserRole, initialTab: CountsTab | null = null, activeClient: string | null = null, initialCreating = false): Promise<void> {
   writeSession(session(role));
   writeActiveWarehouseId(T, WH);
   if (activeClient !== null) writeActiveClientId(T, 'u-1', activeClient);
-  view = render(<CountsScreen initialTab={initialTab} />);
+  view = render(<CountsScreen initialTab={initialTab} initialCreating={initialCreating} />);
   await settle();
 }
 
@@ -372,6 +372,27 @@ describe('New count', () => {
     expect(form.textContent).toContain('1 count created');
     expect(form.textContent).toContain('Skipped 1: A-01 (already has an open count).');
     expect(form.textContent).toContain('no notification is sent');
+  });
+
+  test('story UI-2 (A9): two submits in one tick send ONE create — the keyed-submit in-flight guard', async () => {
+    await mount('ops_manager');
+    await press(button(root(), 'New count'));
+    setSelect(root().querySelector<HTMLSelectElement>('select[aria-label="Zone"]')!, ZA);
+    const form = root().querySelector<HTMLFormElement>('form[aria-label="New count"]')!;
+    await act(async () => {
+      form.requestSubmit();
+      form.requestSubmit();
+    });
+    await settle();
+    expect(writes().filter((r) => r.method === 'POST')).toHaveLength(1);
+  });
+
+  test('story UI-2: ⌘K "New count" opens the form on arrival for a manager, never for an operator', async () => {
+    await mount('ops_manager', null, null, true);
+    expect(root().querySelector('form[aria-label="New count"]')).not.toBeNull();
+    view?.unmount();
+    await mount('operator', null, null, true);
+    expect(root().querySelector('form[aria-label="New count"]')).toBeNull();
   });
 
   test('a zone with more than 500 countable bins is offered disabled, with the reason', async () => {

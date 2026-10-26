@@ -65,6 +65,7 @@ import {
 import { useInboundTabCounts, type InboundTabCounts } from '@/lib/use-inbound-tab-counts';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { EmptyState } from '@/components/shared/empty-state';
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
@@ -606,11 +607,12 @@ function GoodsReceiptsCard({
           renderExpanded={(grn) => (expandedId === grn.id ? <GoodsReceiptLinesPanel grnId={grn.id} skuMap={skuMap} /> : null)}
           loading={grns.state === 'loading' ? 'Loading receipts…' : undefined}
           emptyMessage={
-            drill !== null
-              ? 'No receipts match this figure.'
-              : warehouseId === null
-                ? 'Create a warehouse first.'
-                : 'No receipts recorded yet.'
+            // Story UI-2 (§5, W4).
+            drill !== null ? (
+              <EmptyState kind="filtered">No receipts match this figure.</EmptyState>
+            ) : (
+              <EmptyState kind="first-use">{warehouseId === null ? 'Create a warehouse first.' : 'No receipts recorded yet.'}</EmptyState>
+            )
           }
         />
       )}
@@ -757,7 +759,7 @@ function PutawayCard({
           columns={columns}
           rows={tasks.state === 'ready' ? tasks.data.map((task) => ({ ...task, id: task.grnLineId })) : []}
           loading={tasks.state === 'loading' ? 'Loading putaway tasks…' : undefined}
-          emptyMessage='Nothing awaiting putaway'
+          emptyMessage={<EmptyState kind="cleared">Nothing awaiting putaway</EmptyState>}
         />
       )}
     </section>

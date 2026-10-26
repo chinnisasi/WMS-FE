@@ -79,7 +79,9 @@ export function RecentMoves({ warehouseId, active }: { warehouseId: string; acti
           rows={rows}
           nextCursor={moves.state === 'ready' ? moves.data.nextCursor : null}
           onCursor={moves.onCursor}
-          emptyMessage={moves.state === 'loading' ? 'Loading the recent moves…' : 'No moves in this warehouse yet.'}
+          emptyMessage="No moves in this warehouse yet."
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={moves.state === 'loading' ? 'Loading the recent moves…' : undefined}
         />
       )}
     </div>

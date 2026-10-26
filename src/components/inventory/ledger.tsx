@@ -217,12 +217,10 @@ function LedgerTable({
       nextCursor={events.state === 'ready' ? events.data.nextCursor : null}
       onCursor={events.onCursor}
       emptyMessage={
-        events.state === 'loading'
-          ? 'Loading the ledger…'
-          : drill !== null
-            ? ledgerDrillEmptyMessage(drill)
-            : 'No ledger events in this warehouse yet.'
+        drill !== null ? ledgerDrillEmptyMessage(drill) : 'No ledger events in this warehouse yet.'
       }
+      // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+      loading={events.state === 'loading' ? 'Loading the ledger…' : undefined}
     />
   );
 }
