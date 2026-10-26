@@ -15,9 +15,12 @@ import {
   asOfLabel,
   countingSinceNote,
   currentTime,
+  exceptionsClearedText,
   failuresLabel,
   formatFigure,
+  healthIndicator,
   isOverviewStale,
+  overviewExceptions,
   lagLabel,
   sevenDayCaption,
   STALE_AFTER_MS,
@@ -34,6 +37,10 @@ import { useActiveClient } from '@/lib/use-active-client';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AllClientsNote } from '@/components/shared/client-filter-chip';
 import { KpiTile } from '@/components/kpi-tile';
+import { ExceptionStrip } from '@/components/shared/exception-strip';
+import { PageHeader } from '@/components/shared/page-header';
+import { SkeletonTiles } from '@/components/shared/skeleton';
+import { StatusChip } from '@/components/shared/status-chip';
 import { buttonClass, ReadFailure } from '@/components/outbound/shell';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
@@ -63,15 +70,35 @@ export function OverviewDashboard({ health }: { health: string }) {
     () => readSession() !== null,
     () => null as boolean | null,
   );
+  // Story UI-1 — the API probe is an operator diagnostic: a small status
+  // indicator in the header (the words always; amber when not ok), no longer
+  // a line in the dashboard body.
+  const indicator = healthIndicator(health);
   return (
     <section className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-lg font-semibold">Overview</h1>
-        <p className="mt-1 text-sm text-(--muted-foreground)">
-          Every figure is a projection of the warehouse&apos;s own records — a number, or Unavailable. Select a
-          figure's "Open …" link to see the rows behind it.
-        </p>
-      </div>
+      <PageHeader
+        title="Overview"
+        description={
+          <>
+            What needs attention first, then today&apos;s flow. Every figure is a projection of the warehouse&apos;s own
+            records — a number, or Unavailable; select a figure&apos;s &quot;Open …&quot; link to see the rows behind it.
+          </>
+        }
+        meta={
+          indicator.ok ? (
+            <span data-testid="api-health" title={indicator.text}>
+              <span aria-hidden className="text-(--accent)">
+                ✓{' '}
+              </span>
+              API health: <span className="data">{health}</span>
+            </span>
+          ) : (
+            <StatusChip tone="warning" glyph="⚠" data-testid="api-health">
+              API health: <span className="data">{health}</span>
+            </StatusChip>
+          )
+        }
+      />
       {sessioned === null ? null : sessioned ? (
         <>
           <OverviewClientNote />
@@ -86,9 +113,6 @@ export function OverviewDashboard({ health }: { health: string }) {
           .
         </div>
       )}
-      <p className="text-xs text-(--muted-foreground)" data-testid="api-health">
-        API health: <span className="data">{health}</span>
-      </p>
     </section>
   );
 }
@@ -110,7 +134,7 @@ function OverviewSessioned() {
   const overview = useReportingOverview(warehouses.state === 'ready' ? warehouseId : null);
 
   if (warehouses.state === 'loading') {
-    return <div className="text-sm text-(--muted-foreground)">Loading warehouses…</div>;
+    return <SkeletonTiles count={4} label="Loading warehouses…" />;
   }
   if (warehouses.state === 'failed') {
     return <WarehousesFailure state={warehouses} />;
@@ -137,7 +161,7 @@ function OverviewSessioned() {
     <div className="flex flex-col gap-2">
       {refreshNote}
       {overview.state === 'loading' ? (
-        <div className="text-sm text-(--muted-foreground)">Loading the overview…</div>
+        <SkeletonTiles count={8} label="Loading the overview…" />
       ) : overview.state === 'failed' ? (
         <ReadFailure word="Overview unavailable" reason={overview.reason} onRetry={overview.reload} />
       ) : (
@@ -176,6 +200,10 @@ function OverviewTiles({
   const stale = isOverviewStale(data, currentTime());
   const can = useCan();
   const t = data.tiles;
+  // Story UI-1 — exceptions first (UI-PATTERNS §6): the counts that need a
+  // human, as drill links, above the grouped tiles.
+  const exceptions = overviewExceptions(data, can);
+  const cleared = exceptionsClearedText(exceptions);
   const d7From = data.window.d7From;
   const refresh = (
     <button type="button" onClick={onRefresh} className={buttonClass}>
@@ -197,116 +225,137 @@ function OverviewTiles({
         <FeedbackBanner tone="warning" word="Figures may be stale" reason={staleReason(data)} action={refresh} />
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiTile
-          label="Dock-to-stock (median)"
-          {...windowedTile(t.dockToStock.medianMinutes, 'minutes', t.dockToStock.state, can)}
-        >
-          <SubFigures state={t.dockToStock.state}>
-            <LiveLine label="Awaiting putaway" figure={t.dockToStock.awaitingPutaway} kind="count" />
-          </SubFigures>
-        </KpiTile>
+      {/* Every source unread: no strip — the stale banner already speaks. */}
+      {cleared === null ? null : (
+        <ExceptionStrip items={exceptions.items} clearedText={cleared ?? ''} />
+      )}
+      <section aria-labelledby="overview-group-0" className="flex flex-col gap-3">
+        <h2 id="overview-group-0" className="text-sm font-medium">
+          Today’s flow
+        </h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiTile
+            label="Ready to dispatch"
+            {...liveTile(t.dispatchPipeline.readyToDispatch, 'count', t.dispatchPipeline.state, can)}
+          >
+            <SubFigures state={t.dispatchPipeline.state}>
+              <LiveLine label="Accepted, not packed" figure={t.dispatchPipeline.accepted} kind="count" />
+              <LiveLine label="Labelled, not manifested" figure={t.dispatchPipeline.labelledNotManifested} kind="count" />
+              <WindowedLine label="Orders dispatched" figure={t.dispatchPipeline.ordersDispatched} kind="count" />
+            </SubFigures>
+          </KpiTile>
 
-        <KpiTile label="Pick lines" {...windowedTile(t.pickRate.pickLines, 'count', t.pickRate.state, can)}>
-          <SubFigures state={t.pickRate.state}>
-            <LiveLine label="Last hour" figure={t.pickRate.lastHour} kind="count" />
-          </SubFigures>
-        </KpiTile>
+          <KpiTile label="Pick lines" {...windowedTile(t.pickRate.pickLines, 'count', t.pickRate.state, can)}>
+            <SubFigures state={t.pickRate.state}>
+              <LiveLine label="Last hour" figure={t.pickRate.lastHour} kind="count" />
+            </SubFigures>
+          </KpiTile>
 
-        <KpiTile label="Short-picked lines" {...windowedTile(t.shortPicks.shortLines, 'count', t.shortPicks.state, can)} />
+          <KpiTile
+            label="Dock-to-stock (median)"
+            {...windowedTile(t.dockToStock.medianMinutes, 'minutes', t.dockToStock.state, can)}
+          >
+            <SubFigures state={t.dockToStock.state}>
+              <LiveLine label="Awaiting putaway" figure={t.dockToStock.awaitingPutaway} kind="count" />
+            </SubFigures>
+          </KpiTile>
+        </div>
+      </section>
+      <section aria-labelledby="overview-group-1" className="flex flex-col gap-3">
+        <h2 id="overview-group-1" className="text-sm font-medium">
+          Exceptions and accuracy
+        </h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiTile label="Short-picked lines" {...windowedTile(t.shortPicks.shortLines, 'count', t.shortPicks.state, can)} />
 
-        <KpiTile
-          label="Over-receipts"
-          {...windowedTile(t.grnVariances.overReceipts, 'count', t.grnVariances.state, can)}
-        >
-          <SubFigures state={t.grnVariances.state}>
-            <LiveLine label="Pending decision" figure={t.grnVariances.pendingOverReceipts} kind="count" />
-            <WindowedLine label="Blind GRNs" figure={t.grnVariances.blindGrns} kind="count" />
-          </SubFigures>
-        </KpiTile>
+          <KpiTile
+            label="Over-receipts"
+            {...windowedTile(t.grnVariances.overReceipts, 'count', t.grnVariances.state, can)}
+          >
+            <SubFigures state={t.grnVariances.state}>
+              <LiveLine label="Pending decision" figure={t.grnVariances.pendingOverReceipts} kind="count" />
+              <WindowedLine label="Blind GRNs" figure={t.grnVariances.blindGrns} kind="count" />
+            </SubFigures>
+          </KpiTile>
 
-        <KpiTile
-          label="Order accuracy — defects (SM-3)"
-          {...windowedTile(t.orderAccuracy.defectsPer1000, 'per1000', t.orderAccuracy.state, can)}
-        >
-          <SubFigures state={t.orderAccuracy.state}>
-            <WindowedLine label="Short lines" figure={t.orderAccuracy.shortLines} kind="count" />
-            <WindowedLine label="Pack mismatches" figure={t.orderAccuracy.packFailures} kind="count" />
-            <WindowedLine label="Dispatched lines" figure={t.orderAccuracy.dispatchedLines} kind="count" />
-            <CountingNote countingSince={t.orderAccuracy.countingSince} d7From={d7From} />
-          </SubFigures>
-        </KpiTile>
+          <KpiTile
+            label="Order accuracy — defects (SM-3)"
+            {...windowedTile(t.orderAccuracy.defectsPer1000, 'per1000', t.orderAccuracy.state, can)}
+          >
+            <SubFigures state={t.orderAccuracy.state}>
+              <WindowedLine label="Short lines" figure={t.orderAccuracy.shortLines} kind="count" />
+              <WindowedLine label="Pack mismatches" figure={t.orderAccuracy.packFailures} kind="count" />
+              <WindowedLine label="Dispatched lines" figure={t.orderAccuracy.dispatchedLines} kind="count" />
+              <CountingNote countingSince={t.orderAccuracy.countingSince} d7From={d7From} />
+            </SubFigures>
+          </KpiTile>
 
-        <KpiTile
-          label="Oversell — backordered channel orders (SM-4)"
-          {...windowedTile(t.oversell.backorderedOrders, 'count', t.oversell.state, can)}
-        >
-          <SubFigures state={t.oversell.state}>
-            <WindowedLine label="Prevented (refused)" figure={t.oversell.prevented} kind="count" />
-            <CountingNote countingSince={t.oversell.countingSince} d7From={d7From} />
-          </SubFigures>
-        </KpiTile>
+          <KpiTile
+            label="Oversell — backordered channel orders (SM-4)"
+            {...windowedTile(t.oversell.backorderedOrders, 'count', t.oversell.state, can)}
+          >
+            <SubFigures state={t.oversell.state}>
+              <WindowedLine label="Prevented (refused)" figure={t.oversell.prevented} kind="count" />
+              <CountingNote countingSince={t.oversell.countingSince} d7From={d7From} />
+            </SubFigures>
+          </KpiTile>
+        </div>
+      </section>
+      <section aria-labelledby="overview-group-2" className="flex flex-col gap-3">
+        <h2 id="overview-group-2" className="text-sm font-medium">
+          Stock and channels
+        </h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiTile
+            label="Open expiry alerts"
+            {...liveTile(t.expiryAlerts.openExpiryUpcoming, 'count', t.expiryAlerts.state, can)}
+          >
+            <SubFigures state={t.expiryAlerts.state}>
+              <LiveLine label="Open aged-stock alerts" figure={t.expiryAlerts.openAged} kind="count" />
+              <WindowedLine label="Raised" figure={t.expiryAlerts.raised} kind="count" />
+            </SubFigures>
+          </KpiTile>
 
-        <KpiTile
-          label="Open expiry alerts"
-          {...liveTile(t.expiryAlerts.openExpiryUpcoming, 'count', t.expiryAlerts.state, can)}
-        >
-          <SubFigures state={t.expiryAlerts.state}>
-            <LiveLine label="Open aged-stock alerts" figure={t.expiryAlerts.openAged} kind="count" />
-            <WindowedLine label="Raised" figure={t.expiryAlerts.raised} kind="count" />
-          </SubFigures>
-        </KpiTile>
+          <KpiTile
+            label="Channel sync health"
+            value={t.syncHealth.connections === null ? '' : String(t.syncHealth.connections.length)}
+            href={drillLinkHref(t.syncHealth.drill, can)}
+            linkText={drillLinkText(t.syncHealth.drill.apiPath) ?? undefined}
+            unavailable={t.syncHealth.state === 'unavailable'}
+            secondary="connected channels"
+          >
+            {t.syncHealth.state === 'unavailable' || t.syncHealth.connections === null ? null : t.syncHealth
+                .connections.length === 0 ? (
+              <p className="mt-2 text-xs text-(--muted-foreground)">No channel ingests into this warehouse.</p>
+            ) : (
+              <ul className="mt-2 flex flex-col gap-1 text-xs" data-testid="sync-connections">
+                {t.syncHealth.connections.map((c) => {
+                  const reason = syncReasonText(c.reason);
+                  return (
+                    <li key={c.integrationId} data-health={c.health}>
+                      <span className="font-medium">{c.provider}</span> · {syncHealthLabel(c.health)}
+                      {reason === null ? null : <> — {reason}</>}
+                      <span className="block text-(--muted-foreground)">
+                        {lagLabel(c.lagSeconds)} · {failuresLabel(c.ingestFailures24h)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </KpiTile>
 
-        <KpiTile
-          label="Channel sync health"
-          value={t.syncHealth.connections === null ? '' : String(t.syncHealth.connections.length)}
-          href={drillLinkHref(t.syncHealth.drill, can)}
-          linkText={drillLinkText(t.syncHealth.drill.apiPath) ?? undefined}
-          unavailable={t.syncHealth.state === 'unavailable'}
-          secondary="connected channels"
-        >
-          {t.syncHealth.state === 'unavailable' || t.syncHealth.connections === null ? null : t.syncHealth
-              .connections.length === 0 ? (
-            <p className="mt-2 text-xs text-(--muted-foreground)">No channel ingests into this warehouse.</p>
-          ) : (
-            <ul className="mt-2 flex flex-col gap-1 text-xs" data-testid="sync-connections">
-              {t.syncHealth.connections.map((c) => {
-                const reason = syncReasonText(c.reason);
-                return (
-                  <li key={c.integrationId} data-health={c.health}>
-                    <span className="font-medium">{c.provider}</span> · {syncHealthLabel(c.health)}
-                    {reason === null ? null : <> — {reason}</>}
-                    <span className="block text-(--muted-foreground)">
-                      {lagLabel(c.lagSeconds)} · {failuresLabel(c.ingestFailures24h)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </KpiTile>
-
-        <KpiTile
-          label="Ready to dispatch"
-          {...liveTile(t.dispatchPipeline.readyToDispatch, 'count', t.dispatchPipeline.state, can)}
-        >
-          <SubFigures state={t.dispatchPipeline.state}>
-            <LiveLine label="Accepted, not packed" figure={t.dispatchPipeline.accepted} kind="count" />
-            <LiveLine label="Labelled, not manifested" figure={t.dispatchPipeline.labelledNotManifested} kind="count" />
-            <WindowedLine label="Orders dispatched" figure={t.dispatchPipeline.ordersDispatched} kind="count" />
-          </SubFigures>
-        </KpiTile>
-
-        <KpiTile
-          label="E-way bills by gateway (SM-8)"
-          {...windowedTile(t.sm8.gatewayShare, 'percent', t.sm8.state, can)}
-        >
-          <SubFigures state={t.sm8.state}>
-            <WindowedLine label="No manual pricing (invoices)" figure={t.sm8.noManualPricingShare} kind="percent" />
-            <WindowedLine label="Eligible bills" figure={t.sm8.eligible} kind="count" />
-          </SubFigures>
-        </KpiTile>
-      </div>
+          <KpiTile
+            label="E-way bills by gateway (SM-8)"
+            {...windowedTile(t.sm8.gatewayShare, 'percent', t.sm8.state, can)}
+          >
+            <SubFigures state={t.sm8.state}>
+              <WindowedLine label="No manual pricing (invoices)" figure={t.sm8.noManualPricingShare} kind="percent" />
+              <WindowedLine label="Eligible bills" figure={t.sm8.eligible} kind="count" />
+            </SubFigures>
+          </KpiTile>
+        </div>
+      </section>
     </div>
   );
 }

@@ -76,6 +76,8 @@ import {
   Section,
   selectClass,
 } from '@/components/outbound/shell';
+import { StatusChip } from '@/components/shared/status-chip';
+import { ORDER_STATUS_TONE } from '@/lib/status-tone';
 
 /**
  * The Outbound pack & dispatch pipeline (story 4-2d) — the web consumer of
@@ -198,9 +200,7 @@ function PackDispatchTable({
       key: 'status',
       header: 'Status',
       render: (order) => (
-        <span className="rounded-full border border-(--border) bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">
-          {orderStatusLabel(order.status)}
-        </span>
+        <StatusChip tone={ORDER_STATUS_TONE[order.status]}>{orderStatusLabel(order.status)}</StatusChip>
       ),
     },
     {

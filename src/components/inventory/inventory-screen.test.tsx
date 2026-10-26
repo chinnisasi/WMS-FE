@@ -818,13 +818,15 @@ describe('the Inventory screen — Ledger and the page', () => {
 
   test('the page parses ?tab=, ignores a stray list=, and keys on none|tab', async () => {
     const element = await InventoryPage({ searchParams: Promise.resolve({ tab: 'batches', list: 'ledger' }) });
-    expect(element.key).toBe('none|batches');
+    // UI-1 — the page is a PageHeader then the keyed screen; the key is the screen's.
+    const screenKey = (page: typeof element) => (page.props as { children: { key: string | null }[] }).children[1]!.key;
+    expect(screenKey(element)).toBe('none|batches');
     view = render(element);
     await settle();
     expect(view.container.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-tab')).toBe('batches');
 
     const bare = await InventoryPage({ searchParams: Promise.resolve({ tab: 'nope' }) });
-    expect(bare.key).toBe('none|default');
+    expect(screenKey(bare)).toBe('none|default');
   });
 });
 

@@ -75,6 +75,7 @@ import {
   Section,
   selectClass,
 } from '@/components/outbound/shell';
+import { StatusChip } from '@/components/shared/status-chip';
 
 /**
  * How often the browser re-reads its own clock for the at-risk derivation.
@@ -596,9 +597,9 @@ function WaveGenerateForm({
  */
 function AtRiskChip({ minutesRemaining }: { minutesRemaining: number }) {
   return (
-    <span className="rounded-full border border-(--warning) bg-(--warning)/10 px-2 py-0.5 text-xs font-medium text-(--foreground)">
+    <StatusChip tone="warning" glyph="⚠">
       At risk — {minutesRemainingLabel(minutesRemaining)}
-    </span>
+    </StatusChip>
   );
 }
 
@@ -759,9 +760,7 @@ function WavesTable({
         const cutoff = cutoffFor(wave);
         return (
           <div className="flex flex-wrap items-center gap-1">
-            <span className="rounded-full border border-(--border) bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">
-              {waveStatusLabel(wave.status)}
-            </span>
+            <StatusChip tone="neutral">{waveStatusLabel(wave.status)}</StatusChip>
             {/* Amber is for a PLANNED wave only: a released wave already made
                 it, and a cancelled one is not going anywhere. */}
             {cutoff !== null && isWaveAtRisk(wave.status, cutoff) && cutoff.kind === 'at-risk' && (
@@ -975,6 +974,7 @@ function WavesTable({
               <WaveDetailPanel waveId={wave.id} clientsState={active.clients} tenantName={active.tenantName} />
             ) : null
           }
+          loading={waves.state === 'loading' ? 'Loading waves…' : undefined}
           emptyMessage={
             waves.state === 'loading'
               ? 'Loading waves…'
@@ -1081,9 +1081,7 @@ function PicklistPanel({
     <div className="flex flex-col gap-1 rounded-sm border border-(--border) p-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="font-medium">{picklistLabel(picklist)}</span>
-        <span className="rounded-full border border-(--border) px-2 py-0.5 text-(--muted-foreground)">
-          {picklistStatusLabel(picklist.status)}
-        </span>
+        <StatusChip tone="neutral">{picklistStatusLabel(picklist.status)}</StatusChip>
         {/* Story 4-2a — the picklist's most urgent priority and earliest ship-by (absent on a pre-4-2a wave). */}
         <PriorityChip priority={picklist.priority ?? null} />
         <ShipByChip
@@ -1110,15 +1108,9 @@ function PicklistPanel({
               <span className="data">{pickLineQuantityLabel(line, skuOf(line.skuId))}</span>
               {/* Story 1-6a — the handling warnings of the SKU at this stop. */}
               <HandlingBadges sku={skuOf(line.skuId)} />
-              <span
-                className={
-                  line.status === 'unfulfillable' || line.status === 'short'
-                    ? 'rounded-full border border-(--destructive) px-2 py-0.5 text-(--destructive)'
-                    : 'rounded-full border border-(--border) px-2 py-0.5 text-(--muted-foreground)'
-                }
-              >
+              <StatusChip tone={line.status === 'unfulfillable' || line.status === 'short' ? 'danger' : 'neutral'}>
                 {pickLineStatusLabel(line.status)}
-              </span>
+              </StatusChip>
               {reason !== null && <span className="text-(--muted-foreground)">{reason}</span>}
               {allocation !== null && (
                 <span data-testid="line-allocation" className="text-(--muted-foreground)">

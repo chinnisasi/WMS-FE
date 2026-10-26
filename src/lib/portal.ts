@@ -47,8 +47,11 @@ import {
 
 // ── routing ──────────────────────────────────────────────────────────────────
 
-/** Where a portal session lands (sign-in, the operator shell's redirect, `/portal`). */
-export const PORTAL_HOME = '/portal/stock';
+/**
+ * Where a portal session lands (sign-in, the operator shell's redirect).
+ * Story UI-1 — the portal's own Home (it was Stock until then).
+ */
+export const PORTAL_HOME = '/portal';
 /** Where a staff session lands after sign-in (unchanged by 21-7). */
 export const OPERATOR_HOME = '/settings';
 
@@ -118,12 +121,14 @@ export const SESSION_ENDED_NOTICE: Readonly<Record<string, string>> = {
 };
 
 export interface PortalNavItem {
-  readonly id: 'stock' | 'orders' | 'inbound' | 'invoices' | 'service';
+  readonly id: 'home' | 'stock' | 'orders' | 'inbound' | 'invoices' | 'service';
   readonly label: string;
   readonly href: string;
 }
 
 export const PORTAL_NAV: readonly PortalNavItem[] = [
+  // Story UI-1 — Home: the portal's landing page (current only on exact `/portal`).
+  { id: 'home', label: 'Home', href: PORTAL_HOME },
   { id: 'stock', label: 'Stock', href: '/portal/stock' },
   { id: 'orders', label: 'Orders', href: '/portal/orders' },
   { id: 'inbound', label: 'Inbound', href: '/portal/inbound' },
@@ -199,6 +204,15 @@ export function portalDate(iso: string | null): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+}
+
+/** Story UI-1 — a date and 24-hour time in IST: "26 Oct 2026, 14:05 IST". */
+export function portalDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const day = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+  const time = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
+  return `${day}, ${time} IST`;
 }
 
 /** A SKU on a line: its code and name, or a dash when the catalog row is not visible. */
@@ -573,4 +587,67 @@ export function portalOrderReason(error: unknown, clientOrderRef: string | null 
     }
   }
   return UNREACHABLE_REASON;
+}
+
+// ── story UI-1: Home counts and the order timeline ──────────────────────────
+
+/** Whether a navigation item is the current page — Home only on exact `/portal`. */
+export function portalNavCurrent(item: Pick<PortalNavItem, 'href'>, pathname: string | null | undefined): boolean {
+  if (typeof pathname !== 'string') return false;
+  if (item.href === PORTAL_HOME) return pathname === PORTAL_HOME;
+  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+}
+
+/**
+ * A count read from ONE page of a list: the number shown, and "+" when the
+ * list has a further page — "at least this many". Never a page size, never a
+ * total the API did not return (UI-PATTERNS §3.4).
+ */
+export function atLeastCount(shown: number, nextCursor: string | null): string {
+  return nextCursor === null ? String(shown) : `${shown}+`;
+}
+
+/** An ASN still expected at the dock (announced, or part-received). */
+export function asnExpected(asn: Pick<PortalAsnRowDto, 'status'>): boolean {
+  return asn.status === 'announced' || asn.status === 'partially_received';
+}
+
+export type PortalTimelineState = 'done' | 'current' | 'upcoming' | 'stopped';
+export interface PortalTimelineStep {
+  readonly label: string;
+  readonly state: PortalTimelineState;
+  readonly time?: string;
+}
+
+/**
+ * The steps after Placed, per status — exhaustive over the generated union,
+ * so a new lifecycle arm fails the compile here. The read carries no
+ * per-step times, so only Placed (the order's `createdAt`) has one. A
+ * cancelled order shows Placed then Cancelled: the read does not say how far
+ * it had got, so the timeline does not guess.
+ */
+const ORDER_TIMELINE: Readonly<Record<PortalOrderRowDto['status'], readonly Omit<PortalTimelineStep, 'time'>[]>> = {
+  accepted: [
+    { label: 'Accepted', state: 'current' },
+    { label: 'Packed', state: 'upcoming' },
+    { label: 'Dispatched', state: 'upcoming' },
+  ],
+  ready_to_dispatch: [
+    { label: 'Accepted', state: 'done' },
+    { label: 'Packed', state: 'current' },
+    { label: 'Dispatched', state: 'upcoming' },
+  ],
+  dispatched: [
+    { label: 'Accepted', state: 'done' },
+    { label: 'Packed', state: 'done' },
+    { label: 'Dispatched', state: 'done' },
+  ],
+  cancelled: [{ label: 'Cancelled', state: 'stopped' }],
+};
+
+/** An order's lifecycle for the portal timeline: Placed (with its IST time), then the status's steps. */
+export function orderTimeline(order: Pick<PortalOrderRowDto, 'status' | 'createdAt'>): readonly PortalTimelineStep[] {
+  // A status a newer backend added and this build does not know: Placed alone, never a guess.
+  const rest = Object.hasOwn(ORDER_TIMELINE, order.status) ? ORDER_TIMELINE[order.status] : [];
+  return [{ label: 'Placed', state: 'done', time: portalDateTime(order.createdAt) }, ...rest];
 }

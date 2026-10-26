@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { CountsScreen } from '@/components/counts/counts-screen';
 import { COUNTS_PAGE_TABS } from '@/lib/page-tabs';
 
@@ -16,5 +17,10 @@ export default async function CountsPage({
 }) {
   const params = await searchParams;
   const tab = COUNTS_PAGE_TABS.parse(params);
-  return <CountsScreen key={tab ?? 'default'} initialTab={tab} />;
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Counts" description="Scheduled and open cycle counts, and the variances they found." />
+      <CountsScreen key={tab ?? 'default'} initialTab={tab} />
+    </div>
+  );
 }

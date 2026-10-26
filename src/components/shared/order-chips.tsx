@@ -1,4 +1,5 @@
 import { paymentLine, priorityChip, shipByLabel, shipByStatus } from '@/lib/order-fields';
+import { StatusChip } from './status-chip';
 
 /**
  * Story 4-2a — the order fields at a glance, shared by every order surface
@@ -11,12 +12,9 @@ export function PriorityChip({ priority }: { readonly priority: string | null | 
   const chip = priorityChip(priority);
   if (chip === null) return null;
   return (
-    <span
-      className="rounded-full border border-(--warning) px-2 py-0.5 text-xs font-medium text-(--warning)"
-      data-testid="priority-chip"
-    >
+    <StatusChip tone="warning" data-testid="priority-chip">
       {chip}
-    </span>
+    </StatusChip>
   );
 }
 
@@ -35,12 +33,9 @@ export function ShipByChip({
   if (shipByDate === null || shipByDate === undefined) return null;
   const status = open ? shipByStatus(shipByDate, todayIst, orderStatus) : null;
   return (
-    <span
-      className={`rounded-full border px-2 py-0.5 text-xs ${status === null ? 'border-(--border) text-(--muted-foreground)' : 'border-(--warning) font-medium text-(--warning)'}`}
-      data-testid="ship-by-chip"
-    >
+    <StatusChip tone={status === null ? 'neutral' : 'warning'} data-testid="ship-by-chip">
       Ship by {open ? shipByLabel(shipByDate, todayIst, orderStatus) : shipByLabel(shipByDate, todayIst, 'dispatched')}
-    </span>
+    </StatusChip>
   );
 }
 

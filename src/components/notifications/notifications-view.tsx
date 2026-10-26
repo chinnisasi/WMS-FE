@@ -68,6 +68,7 @@ function NotificationsTable() {
           rows={entries.state === 'ready' ? entries.data.items : []}
           nextCursor={entries.state === 'ready' ? entries.data.nextCursor : null}
           onCursor={entries.onCursor}
+          loading={entries.state === 'loading' ? 'Loading notifications…' : undefined}
           emptyMessage={entries.state === 'loading' ? 'Loading notifications…' : NOTIFICATIONS_EMPTY}
         />
       )}

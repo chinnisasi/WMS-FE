@@ -27,7 +27,7 @@ import { lineButtonClass as buttonClass, lineInputClass as inputClass } from '@/
 
 const primaryClass =
   'rounded-sm bg-(--primary) px-3 py-1 text-xs font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60';
-const headClass = 'h-9 border-b border-(--border) px-3 text-left font-medium text-(--muted-foreground)';
+const headClass = 'h-9 border-b border-(--border) px-3 text-left font-medium text-(--foreground)';
 
 /**
  * The ASN import (2026-10-17) — "Import from file" on the ASN card, for

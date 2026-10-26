@@ -45,6 +45,7 @@ import { Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 import { BinLabelsDialog, type BinLabelsTarget } from '@/components/settings/BinLabelsDialog';
 import { MAX_LABELS_PER_PRINT, binPrintBlock } from '@/lib/bin-labels';
+import { StatusChip } from '@/components/shared/status-chip';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -1056,17 +1057,11 @@ function ZoneBinsTable({
       header: 'Status',
       render: (bin) =>
         bin.retiredAt !== null ? (
-          <span className="rounded-full border border-(--border) px-2 py-0.5 text-xs text-(--muted-foreground)">
-            Retired
-          </span>
+          <StatusChip tone="neutral">Retired</StatusChip>
         ) : bin.blocked ? (
-          <span className="rounded-full border border-(--destructive) px-2 py-0.5 text-xs text-(--destructive)">
-            Blocked
-          </span>
+          <StatusChip tone="danger">Blocked</StatusChip>
         ) : (
-          <span className="rounded-full border border-(--border) bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">
-            {bin.systemOwned ? 'System' : 'Active'}
-          </span>
+          <StatusChip tone="neutral">{bin.systemOwned ? 'System' : 'Active'}</StatusChip>
         ),
     },
     ...(canOperate

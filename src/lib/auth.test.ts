@@ -278,7 +278,7 @@ describe('story 21-7 — the client dimension in the session', () => {
       // Exactly one shell renders each signed-in session.
       expect([fromApp.kind, fromPortal.kind].filter((kind) => kind === 'render')).toHaveLength(1);
     }
-    expect(operatorShellRoute(portal)).toEqual({ kind: 'redirect', href: '/portal/stock' });
+    expect(operatorShellRoute(portal)).toEqual({ kind: 'redirect', href: '/portal' }); // UI-1: the portal's Home
     expect(portalShellRoute(operator)).toEqual({ kind: 'redirect', href: '/settings' });
     // No session: both go to /login, neither to the other shell.
     expect(operatorShellRoute(null)).toEqual({ kind: 'redirect', href: '/login' });

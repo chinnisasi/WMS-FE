@@ -273,16 +273,16 @@ export function ImportResult({
             <table className="w-full border-collapse text-sm">
               <thead className="sticky top-0 bg-(--muted)">
                 <tr>
-                  <th scope="col" className="h-10 border-b border-(--border) px-3 text-left font-medium text-(--muted-foreground)">
+                  <th scope="col" className="h-10 border-b border-(--border) px-3 text-left font-medium text-(--foreground)">
                     Row
                   </th>
-                  <th scope="col" className="h-10 border-b border-(--border) px-3 text-left font-medium text-(--muted-foreground)">
+                  <th scope="col" className="h-10 border-b border-(--border) px-3 text-left font-medium text-(--foreground)">
                     SKU code
                   </th>
-                  <th scope="col" className="h-10 border-b border-(--border) px-3 text-left font-medium text-(--muted-foreground)">
+                  <th scope="col" className="h-10 border-b border-(--border) px-3 text-left font-medium text-(--foreground)">
                     Reason
                   </th>
-                  <th scope="col" className="h-10 border-b border-(--border) px-3 text-left font-medium text-(--muted-foreground)">
+                  <th scope="col" className="h-10 border-b border-(--border) px-3 text-left font-medium text-(--foreground)">
                     Detail
                   </th>
                 </tr>

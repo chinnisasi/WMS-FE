@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { NAV_ITEMS, NAV_ITEM_COUNT, visibleNavItems } from './navigation';
+import { NAV_ITEMS, NAV_ITEM_COUNT, PRODUCT_NAME, shellTitle, visibleNavItems } from './navigation';
 import type { UserRole } from './users';
 
 describe('sidebar IA skeleton', () => {
@@ -120,5 +120,32 @@ describe('sidebar IA skeleton', () => {
       expect(visibleNavItems(role).some((i) => i.id === 'channels')).toBe(false);
     }
     expect(visibleNavItems(undefined).some((i) => i.id === 'channels')).toBe(false);
+  });
+});
+
+describe('shellTitle (story UI-1 — the header\'s "where am I")', () => {
+  test('a surface by its href or a child path; Overview only on exact /', () => {
+    expect(shellTitle('/')).toBe('Overview');
+    expect(shellTitle('/outbound')).toBe('Outbound');
+    expect(shellTitle('/conflicts')).toBe('Conflicts & Reviews');
+    expect(shellTitle('/inbound/anything')).toBe('Inbound');
+  });
+
+  test('nested pages read Parent · Child; Security is its own title', () => {
+    expect(shellTitle('/inventory/ledger')).toBe('Inventory · Ledger');
+    expect(shellTitle('/moves/counts')).toBe('Moves · Counts');
+    expect(shellTitle('/inventory')).toBe('Inventory');
+    expect(shellTitle('/account/security')).toBe('Security');
+  });
+
+  test('a sibling sharing a prefix, an unknown path and no path read null', () => {
+    expect(shellTitle('/inboundx')).toBeNull();
+    expect(shellTitle('/nowhere')).toBeNull();
+    expect(shellTitle(null)).toBeNull();
+    expect(shellTitle('')).toBeNull();
+  });
+
+  test('the product name is one constant', () => {
+    expect(PRODUCT_NAME).toBe('WMS');
   });
 });

@@ -6,9 +6,10 @@ import { usePathname, useRouter } from 'next/navigation';
 
 import { refreshSessionUser } from '@/lib/api/client';
 import { clearSession, PORTAL_SUSPENDED_EVENT, readSession, subscribeSession, signedOutLoginHref } from '@/lib/auth';
-import { PORTAL_NAV, PORTAL_SUSPENDED_LOGIN, portalCompanyLabel, portalShellRoute } from '@/lib/portal';
+import { PORTAL_NAV, PORTAL_SUSPENDED_LOGIN, portalCompanyLabel, portalNavCurrent, portalShellRoute } from '@/lib/portal';
 
 import { SignOutButton } from '@/components/auth/sign-out';
+import { Logo } from '@/components/shared/logo';
 
 /**
  * Story 21-7 — the client portal's own shell: a brand header (the client's
@@ -68,6 +69,10 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-(--border) px-4 py-2 lg:px-6">
+        {/* Story UI-1 — whose portal this is (the product logotype until a
+            tenant logo exists), then the client company as the account. */}
+        <Logo />
+        <span aria-hidden className="h-6 w-px bg-(--border)" />
         <div className="flex flex-col">
           <span className="text-sm font-semibold" data-testid="portal-company">
             {company}
@@ -76,7 +81,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
         </div>
         <nav aria-label="Portal" className="flex flex-wrap gap-1">
           {PORTAL_NAV.map((item) => {
-            const current = pathname === item.href || pathname?.startsWith(`${item.href}/`);
+            const current = portalNavCurrent(item, pathname);
             return (
               <Link
                 key={item.id}

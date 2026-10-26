@@ -88,3 +88,30 @@ export function visibleNavItems(role: UserRole | undefined): readonly NavItem[] 
       item.capabilities.some((capability) => roleHasCapability(role, capability)),
   );
 }
+/**
+ * Story UI-1 — the product's working name (DESIGN.md: the PRD's working
+ * title until branding lands). The logotype and the document title read it,
+ * so a rename is this one line.
+ */
+export const PRODUCT_NAME = 'WMS';
+
+/** Nested pages that are not nav items, as "Parent · Child". */
+const NESTED_TITLES: readonly (readonly [string, string])[] = [
+  ['/inventory/ledger', 'Inventory · Ledger'],
+  ['/moves/counts', 'Moves · Counts'],
+  ['/account/security', 'Security'],
+];
+
+/**
+ * Story UI-1 — the header's "where am I" line: the current surface's label
+ * (a nested page as "Parent · Child"), or null for a path outside the IA.
+ * Overview matches `/` exactly; every other surface matches its href or a
+ * child path of it (never a sibling sharing a prefix, e.g. `/inboundx`).
+ */
+export function shellTitle(pathname: string | null | undefined): string | null {
+  if (typeof pathname !== 'string' || pathname === '') return null;
+  const under = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  for (const [href, title] of NESTED_TITLES) if (under(href)) return title;
+  if (pathname === '/') return 'Overview';
+  return NAV_ITEMS.find((item) => item.href !== '/' && under(item.href))?.label ?? null;
+}

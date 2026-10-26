@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { SecurityView } from '@/components/account/security-view';
 
 export const metadata = { title: 'Security' };
@@ -9,13 +10,11 @@ export const metadata = { title: 'Security' };
  */
 export default function SecurityPage() {
   return (
-    <div className="flex flex-col gap-4">
-      <section>
-        <h1 className="text-lg font-semibold">Security</h1>
-        <p className="mt-1 max-w-prose text-sm text-(--muted-foreground)">
-          Two-factor sign-in: after your password, a code from an authenticator app on your phone.
-        </p>
-      </section>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Security"
+        description="Two-factor sign-in: after your password, a code from an authenticator app on your phone."
+      />
       <SecurityView />
     </div>
   );

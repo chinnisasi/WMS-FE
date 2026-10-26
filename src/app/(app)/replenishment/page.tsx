@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { ReplenishmentView } from '@/components/replenishment/replenishment-view';
 import { UnsupportedDrillNotice } from '@/components/shared/drill-banner';
 import { drillKey, parseDrill } from '@/lib/drill';
@@ -18,9 +19,10 @@ export default async function ReplenishmentPage({
   const drill = parseDrill('replenishment', params);
   const tab = REPLENISHMENT_PAGE_TABS.parse(params);
   return (
-    <>
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Replenishment" description="Stock below its reorder point, suggested purchase orders and batch alerts." />
       {drill === 'unsupported' && <UnsupportedDrillNotice />}
       <ReplenishmentView key={`${drillKey(drill)}|${tab ?? 'default'}`} drill={drill} initialTab={tab} />
-    </>
+    </div>
   );
 }

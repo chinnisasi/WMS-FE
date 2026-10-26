@@ -1,4 +1,6 @@
 import type { ReportingOverviewResponse, SyncConnectionHealthDto } from '@/lib/api/generated';
+import { drillLinkHref } from '@/lib/drill-routes';
+import type { Capability } from '@/lib/users';
 
 /**
  * Story 9-1 — every sentence and derivation the Overview renders, kept here
@@ -166,4 +168,79 @@ export function failuresLabel(count: number): string {
  */
 export function currentTime(): number {
   return Date.now();
+}
+
+// ── story UI-1: the exceptions strip and the health indicator ────────────────
+
+/** One "needs a human" count on the Overview's strip (UI-PATTERNS §6, row 1). */
+export interface OverviewException {
+  readonly key: string;
+  /** The words after the count: "short-picked lines today". */
+  readonly label: string;
+  readonly count: number;
+  /** The drill behind the count for this viewer, or null (no screen, or no capability). */
+  readonly href: string | null;
+}
+
+export interface OverviewExceptions {
+  readonly items: readonly OverviewException[];
+  /** How many sources could not be read (an unavailable tile, a null figure) — never shown as zero. */
+  readonly omitted: number;
+  /** How many sources there are in all. */
+  readonly sources: number;
+}
+
+/**
+ * Story UI-1 — the exceptions the Overview leads with, taken from figures
+ * the overview read already returns. Nothing is computed beyond counting the
+ * channel connections whose health is not `ok`. A source whose tile is
+ * unavailable, or whose figure is null, is OMITTED (counted in `omitted`),
+ * never read as zero — so the all-clear can say whether it saw everything.
+ */
+export function overviewExceptions(
+  data: Pick<ReportingOverviewResponse, 'tiles'>,
+  can: (capability: Capability) => boolean,
+): OverviewExceptions {
+  const t = data.tiles;
+  const items: OverviewException[] = [];
+  let omitted = 0;
+  const add = (
+    key: string,
+    label: string,
+    state: 'ok' | 'unavailable',
+    figure: { readonly value: number | null; readonly drill: Parameters<typeof drillLinkHref>[0] },
+  ) => {
+    if (state === 'unavailable' || figure.value === null) {
+      omitted += 1;
+      return;
+    }
+    items.push({ key, label, count: figure.value, href: drillLinkHref(figure.drill, can) });
+  };
+  add('pending-over-receipts', 'over-receipts awaiting a decision', t.grnVariances.state, t.grnVariances.pendingOverReceipts);
+  add('short-picks', 'short-picked lines today', t.shortPicks.state, t.shortPicks.shortLines.today);
+  add('backordered', 'backordered channel orders today', t.oversell.state, t.oversell.backorderedOrders.today);
+  add('expiry', 'open expiry alerts', t.expiryAlerts.state, t.expiryAlerts.openExpiryUpcoming);
+  add('aged', 'open aged-stock alerts', t.expiryAlerts.state, t.expiryAlerts.openAged);
+  if (t.syncHealth.state === 'unavailable' || t.syncHealth.connections === null) {
+    omitted += 1;
+  } else {
+    items.push({
+      key: 'sync',
+      label: 'channels not syncing cleanly',
+      count: t.syncHealth.connections.filter((c) => c.health !== 'ok').length,
+      href: drillLinkHref(t.syncHealth.drill, can),
+    });
+  }
+  return { items, omitted, sources: 6 };
+}
+
+/** The all-clear sentence the strip may truthfully say, or null when it saw nothing at all. */
+export function exceptionsClearedText(exceptions: Pick<OverviewExceptions, 'omitted' | 'sources'>): string | null {
+  if (exceptions.omitted >= exceptions.sources) return null;
+  return exceptions.omitted === 0 ? 'Nothing needs attention' : 'Nothing needs attention in the figures available';
+}
+
+/** The page header's API status: the words always, `ok` only when the probe said so. */
+export function healthIndicator(health: string): { readonly ok: boolean; readonly text: string } {
+  return { ok: /^ok\b/.test(health), text: `API health: ${health}` };
 }

@@ -85,6 +85,7 @@ import {
   rowButtonClass,
   selectClass,
 } from '@/components/outbound/shell';
+import { StatusChip, type StatusTone } from '@/components/shared/status-chip';
 
 /**
  * The Channels surface (story 7-1): the tenant's sales-channel connections
@@ -275,18 +276,14 @@ function ConnectionList({
 }
 
 /**
- * The health chip's classes — the surface's inline severity, never colour
+ * The health chip's tone — the surface's inline severity, never colour
  * alone (the word rides the chip). `degraded` is the warning pair (amber),
- * `error` the destructive pair (red); `ok` stays the neutral border.
+ * `error` the destructive pair (red); `ok` stays neutral (UI-1: StatusChip).
  */
-function healthChipClass(health: ChannelConnectionListEntryDto['health']): string {
-  if (health === 'degraded') {
-    return 'rounded-full border border-(--warning) bg-(--warning)/10 px-2 py-0.5 text-xs font-medium text-(--foreground)';
-  }
-  if (health === 'error') {
-    return 'rounded-full border border-(--destructive) bg-(--destructive)/10 px-2 py-0.5 text-xs font-medium text-(--foreground)';
-  }
-  return 'rounded-full border border-(--border) px-2 py-0.5 text-xs';
+function healthChipTone(health: ChannelConnectionListEntryDto['health']): StatusTone {
+  if (health === 'degraded') return 'warning';
+  if (health === 'error') return 'danger';
+  return 'neutral';
 }
 
 function ConnectionCard({
@@ -364,7 +361,7 @@ function ConnectionCard({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium">{entry.providerName}</span>
         <span className="font-mono text-xs text-(--muted-foreground)">{entry.provider}</span>
-        <span className={healthChipClass(entry.health)}>{entry.health}</span>
+        <StatusChip tone={healthChipTone(entry.health)}>{entry.health}</StatusChip>
         {isDegraded && lag !== null && (
           <span className="text-xs text-(--foreground)">{lag}</span>
         )}

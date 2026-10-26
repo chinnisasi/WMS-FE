@@ -241,7 +241,7 @@ function InboundTabCount({ tab, counts }: { tab: InboundTab; counts: InboundTabC
   return (
     <span
       data-testid={`inbound-tab-count-${tab}`}
-      className="ml-1.5 rounded-full bg-(--muted) px-1.5 text-[11px] tabular-nums text-(--muted-foreground)"
+      className="ml-1.5 rounded-full bg-(--muted) px-1.5 text-[11px] tabular-nums text-(--foreground)"
     >
       {tabCountLabel(count)}
     </span>
@@ -604,6 +604,7 @@ function GoodsReceiptsCard({
           nextCursor={grns.state === 'ready' ? grns.data.nextCursor : null}
           onCursor={grns.onCursor}
           renderExpanded={(grn) => (expandedId === grn.id ? <GoodsReceiptLinesPanel grnId={grn.id} skuMap={skuMap} /> : null)}
+          loading={grns.state === 'loading' ? 'Loading receipts…' : undefined}
           emptyMessage={
             grns.state === 'loading'
               ? 'Loading receipts…'
@@ -757,6 +758,7 @@ function PutawayCard({
         <DataTable<PutawayTaskDto & { id: string }>
           columns={columns}
           rows={tasks.state === 'ready' ? tasks.data.map((task) => ({ ...task, id: task.grnLineId })) : []}
+          loading={tasks.state === 'loading' ? 'Loading putaway tasks…' : undefined}
           emptyMessage={tasks.state === 'loading' ? 'Loading putaway tasks…' : 'Nothing awaiting putaway'}
         />
       )}
