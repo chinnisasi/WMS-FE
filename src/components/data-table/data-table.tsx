@@ -249,12 +249,14 @@ export function DataTable<T extends { id: string }>({
   const [sortState, setSortState] = useState<SortState>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
   const isLoading = loading !== undefined;
 
   const move = (next: CursorStack) => {
     setStack(next);
     // A selection is page-scoped: any page move clears it (§3.5).
-    if (selection !== undefined && selection.selected.size > 0) selection.onChange(new Set());
+    // Always, so a caller's raw set never keeps off-screen picks (code review C7).
+    if (selection !== undefined) selection.onChange(new Set());
     onCursor?.(next.current);
   };
 
@@ -280,7 +282,9 @@ export function DataTable<T extends { id: string }>({
   useEffect(() => {
     if (!showBar && barHadFocus.current) {
       barHadFocus.current = false;
-      selectAllRef.current?.focus();
+      // The header checkbox, or — when no row is selectable any more — the table (C11).
+      if (selectAllRef.current) selectAllRef.current.focus();
+      else tableRef.current?.focus();
     }
   }, [showBar]);
 
@@ -289,11 +293,14 @@ export function DataTable<T extends { id: string }>({
   const mirrored = columns.filter((c) => c.priority === 2 || c.priority === 3);
   // The mirror sits under the row's first NAMED, always-shown cell — the
   // identifier — not under a bare toggle button.
-  const hostIndex = Math.max(0, columns.findIndex((c) => c.header !== '' && (c.priority ?? 1) === 1));
+  const shown1 = (c: DataTableColumn<T>) => (c.priority ?? 1) === 1;
+  const named = columns.findIndex((c) => c.header !== '' && shown1(c));
+  // Never inside a cell that itself hides; no always-shown column → no mirror (C12).
+  const hostIndex = named !== -1 ? named : columns.findIndex(shown1);
   const hidden = hiddenColumnCounts(columns);
 
   return (
-    <div className="overflow-x-auto rounded-md border border-(--border)">
+    <div ref={tableRef} tabIndex={-1} className="overflow-x-auto rounded-md border border-(--border) focus-visible:outline-2 focus-visible:outline-(--ring)">
       {isLoading && <LoadingStatus label={loading} />}
       {showBar && selection !== undefined && (
         <div
@@ -412,7 +419,7 @@ export function DataTable<T extends { id: string }>({
         )}
         <button
           type="button"
-          disabled={!hasPrevPage(stack) || !onCursor || isLoading}
+          disabled={!hasPrevPage(stack) || !onCursor || isLoading || selection?.busy === true}
           onClick={() => move(cursorStackPrev(stack))}
           className="rounded-sm border border-(--border) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--ring) disabled:opacity-40"
         >
@@ -420,7 +427,7 @@ export function DataTable<T extends { id: string }>({
         </button>
         <button
           type="button"
-          disabled={!nextCursor || !onCursor || isLoading}
+          disabled={!nextCursor || !onCursor || isLoading || selection?.busy === true}
           onClick={() => nextCursor && move(cursorStackNext(stack, nextCursor))}
           className="rounded-sm border border-(--border) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--ring) disabled:opacity-40"
         >

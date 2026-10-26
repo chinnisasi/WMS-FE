@@ -434,8 +434,11 @@ function OrderCreateForm({
   }
 
   const formReady = skus.state === 'ready' && clientsState.state !== 'loading';
+  // Once only: a later refetch must not pull focus out of what is being typed (C13).
+  const focusedOnce = useRef(false);
   useEffect(() => {
-    if (!focusOnReady || !formReady) return;
+    if (!focusOnReady || !formReady || focusedOnce.current) return;
+    focusedOnce.current = true;
     const form = formRef.current;
     form?.scrollIntoView?.({ block: 'start' });
     form?.querySelector<HTMLElement>('input, select, textarea')?.focus();

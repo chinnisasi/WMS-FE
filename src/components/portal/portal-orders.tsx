@@ -33,7 +33,7 @@ import {
   skuLabel,
 } from '@/lib/portal';
 import { ulid } from '@/lib/ulid';
-import { usePortalOrder, usePortalOrders, usePortalSkuOptions, usePortalStockRows, usePortalWarehouses } from '@/lib/use-portal';
+import { usePortalOrder, usePortalOrders, usePortalTenantId, usePortalSkuOptions, usePortalStockRows, usePortalWarehouses } from '@/lib/use-portal';
 import { roleHasCapability } from '@/lib/users';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
@@ -66,6 +66,7 @@ export function PortalOrders() {
   // Story 4-1b — the exact-match search over this company's own orders (null: none).
   const [reference, setReference] = useState<string | null>(null);
   const orders = usePortalOrders(null, reference);
+  const tenantId = usePortalTenantId();
   const [openId, setOpenId] = useState<string | null>(null);
   // Subscribed, never a bare readSession() at render.
   const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
@@ -159,7 +160,7 @@ export function PortalOrders() {
       {orders.state === 'failed' && <ReadFailure word="Orders not loaded" reason={orders.reason} onRetry={orders.reload} />}
       <div hidden={orders.state === 'failed'}>
         <DataTable<PortalOrderRowDto>
-          key={`${pageEpoch}|${JSON.stringify(reference)}`}
+          key={`${tenantId ?? 'none'}|${pageEpoch}|${JSON.stringify(reference)}`}
           columns={columns}
           rows={orders.state === 'ready' ? orders.data.items : []}
           nextCursor={orders.state === 'ready' ? orders.data.nextCursor : null}

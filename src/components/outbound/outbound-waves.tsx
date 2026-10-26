@@ -674,6 +674,7 @@ function WavesTable({
   const bulkInFlight = useRef(false);
   const bulkKeys = useRef(new Map<string, string>());
   const bulkConfirmRef = useRef<HTMLDivElement>(null);
+  const bulkResultRef = useRef<HTMLDivElement>(null);
 
   // Switching warehouse remounts this table (the page keys both surfaces on
   // it), so a mutation still in flight would otherwise settle into a tree
@@ -710,6 +711,9 @@ function WavesTable({
     for (const id of bulkKeys.current.keys()) if (!next.has(id)) bulkKeys.current.delete(id);
     setSelected(next);
     setBulkResult(null);
+    // A changed selection is a different command: an open confirm would
+    // release a stale snapshot (code review C8).
+    if (!bulkInFlight.current) setBulkConfirm(null);
   }
 
   // The selection that counts is the planned waves on screen: a refetch (a
@@ -726,6 +730,7 @@ function WavesTable({
     setSelectionKey(filterKey);
     setSelected(new Set());
     setBulkConfirm(null);
+    setBulkResult(null);
   }
 
   // The bulk confirmation takes focus when it opens (A6); Escape closes it.
@@ -740,32 +745,44 @@ function WavesTable({
     setBulkResult(null);
     setBulkProgress({ done: 0, total: ids.length });
     const results: BulkResult[] = [];
-    for (const id of ids) {
-      // The screen went away (a warehouse switch): stop sending.
-      if (!mounted.current) return;
-      const label = `Wave ${id}`;
-      let key = bulkKeys.current.get(id);
-      if (key === undefined) {
-        key = ulid();
-        bulkKeys.current.set(id, key);
+    try {
+      for (const id of ids) {
+        // The screen went away (a warehouse switch): stop sending.
+        if (!mounted.current) break;
+        const label = `Wave ${id}`;
+        let key = bulkKeys.current.get(id);
+        if (key === undefined) {
+          key = ulid();
+          bulkKeys.current.set(id, key);
+        }
+        try {
+          await fetchApiReleaseWave(tenantId, id, key);
+          bulkKeys.current.delete(id);
+          results.push({ id, label, kind: 'done' });
+        } catch (error) {
+          const fate = keyFate(error);
+          if (fate === 'drop') bulkKeys.current.delete(id);
+          // No answer may still have landed: never call it refused (code review C3).
+          results.push(fate === 'keep' ? { id, label, kind: 'no-answer' } : { id, label, kind: 'refused', reason: releaseReason(error) });
+        }
+        if (mounted.current) setBulkProgress({ done: results.length, total: ids.length });
       }
-      try {
-        await fetchApiReleaseWave(tenantId, id, key);
-        bulkKeys.current.delete(id);
-        results.push({ id, label, kind: 'done' });
-      } catch (error) {
-        if (keyFate(error) === 'drop') bulkKeys.current.delete(id);
-        results.push({ id, label, kind: 'refused', reason: releaseReason(error) });
-      }
-      if (mounted.current) setBulkProgress({ done: results.length, total: ids.length });
+    } finally {
+      bulkInFlight.current = false;
     }
-    bulkInFlight.current = false;
-    if (!mounted.current) return;
     const released = new Set(results.filter((r) => r.kind === 'done').map((r) => r.id));
+    // Even when the screen went away mid-run, the other outbound views must
+    // hear about what was released (a window event needs no mounted tree).
+    if (!mounted.current) {
+      if (released.size > 0) notifyOutboundChanged();
+      return;
+    }
     setSelected((current) => new Set([...current].filter((id) => !released.has(id))));
     setBulkResult(bulkOutcome(results, { done: 'released' }, { one: 'wave', many: 'waves' }));
     setBulkConfirm(null);
     setBulkProgress(null);
+    // Focus lands on the result, not on <body>, when the confirm goes away.
+    requestAnimationFrame(() => bulkResultRef.current?.focus());
     // Once, at the end: every outbound view refetches a single time.
     if (released.size > 0) notifyOutboundChanged();
   }
@@ -992,6 +1009,8 @@ function WavesTable({
               what keeps it from implying it searched the whole warehouse. */}
           <span className="text-xs text-(--muted-foreground)">Filter this page</span>
           <select
+            // A filter change mid-run would clear the run's selection (code review C4).
+            disabled={bulkBusy}
             className={`${selectClass} w-auto py-1`}
             value={statusFilter ?? ''}
             onChange={(e) => setStatusFilter(e.target.value === '' ? null : (e.target.value as WaveStatus))}
@@ -1148,7 +1167,9 @@ function WavesTable({
         <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />
       )}
       {bulkResult !== null && (
-        <FeedbackBanner tone={bulkResult.tone} word={bulkResult.word} reason={bulkResult.reason} />
+        <div ref={bulkResultRef} tabIndex={-1} className="focus-visible:outline-2 focus-visible:outline-(--ring)">
+          <FeedbackBanner tone={bulkResult.tone} word={bulkResult.word} reason={bulkResult.reason} />
+        </div>
       )}
     </div>
   );

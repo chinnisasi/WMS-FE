@@ -9,7 +9,9 @@ import { ApiProblem } from '@/lib/api/client';
 export type BulkResult =
   | { readonly id: string; readonly label: string; readonly kind: 'done' }
   | { readonly id: string; readonly label: string; readonly kind: 'refused'; readonly reason: string }
-  | { readonly id: string; readonly label: string; readonly kind: 'not-attempted' };
+  | { readonly id: string; readonly label: string; readonly kind: 'not-attempted' }
+  /** No answer (network, timeout): it may have landed — never reported as refused (code review C3). */
+  | { readonly id: string; readonly label: string; readonly kind: 'no-answer' };
 
 export interface BulkOutcome {
   readonly tone: 'accepted' | 'warning' | 'rejected';
@@ -29,13 +31,18 @@ export function bulkOutcome(
   const done = results.filter((r) => r.kind === 'done').length;
   const refused = results.filter((r): r is Extract<BulkResult, { kind: 'refused' }> => r.kind === 'refused');
   const skipped = results.filter((r) => r.kind === 'not-attempted');
+  const unknown = results.filter((r) => r.kind === 'no-answer');
   const counts = [
     `${done} ${verbs.done}`,
     ...(refused.length > 0 ? [`${refused.length} refused`] : []),
+    ...(unknown.length > 0 ? [`${unknown.length} not confirmed`] : []),
     ...(skipped.length > 0 ? [`${skipped.length} not attempted`] : []),
   ].join(' · ');
   const details = [
     ...refused.map((r) => `${r.label}: ${r.reason}`),
+    ...(unknown.length > 0
+      ? [`no answer for ${unknown.map((r) => r.label).join(', ')} — it may have been released; refresh the list before trying again`]
+      : []),
     ...(skipped.length > 0 ? [`not attempted: ${skipped.map((r) => r.label).join(', ')}`] : []),
   ];
   const total = results.length;

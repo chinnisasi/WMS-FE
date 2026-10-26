@@ -37,7 +37,7 @@ describe('paletteItems', () => {
     expect(paletteItems('owner', 'x'.repeat(201)).some((i) => i.group === 'Find')).toBe(false);
   });
 
-  test('a client (portal persona) sees no operator surface it cannot open and cannot find an order here', () => {
+  test('a client role holds no operator create (the operator shell, and so ⌘K, redirects a client to /portal)', () => {
     const items = paletteItems('client', 'SO-1');
     expect(items.some((i) => i.group === 'Action')).toBe(false);
   });

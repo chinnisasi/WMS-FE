@@ -601,6 +601,48 @@ describe('story UI-2: bulk release (UI-PATTERNS §3.5)', () => {
     expect(text(view)).toContain('1 wave selected');
   });
 
+  async function bulkRelease(rendered: Rendered, n: number) {
+    await pressButton(rendered, `Release ${n} ${n === 1 ? 'wave' : 'waves'}`);
+    await act(async () => {
+      buttons(rendered)
+        .find((b) => b.textContent === `Release ${n} ${n === 1 ? 'wave' : 'waves'}` && b.closest('[data-testid="bulk-release-confirm"]'))!
+        .click();
+    });
+    await settle();
+  }
+
+  test('key fate at the call site: a refusal re-mints on retry; no answer replays the SAME key and is never "refused"', async () => {
+    waveRows = [wave({ id: 'w-1' }), wave({ id: 'w-2' })];
+    let attempt = 0;
+    const realFetch = globalThis.fetch;
+    releaseResponder = () => ({ status: 409, body: { code: 'cutoff-passed', title: 'Too late', status: 409, detail: 'Too late' } });
+    stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init);
+      if (request.method === 'POST' && new URL(request.url).pathname.includes('/w-2/release')) {
+        attempt += 1;
+        requests.push({ method: 'POST', pathname: new URL(request.url).pathname, search: '', idempotencyKey: request.headers.get('Idempotency-Key') });
+        throw new TypeError('Failed to fetch');
+      }
+      return realFetch(input as RequestInfo, init);
+    }) as unknown as typeof fetch);
+    view = await mount('ops_manager');
+    await act(async () => box(view!, 'Select all waves on this page')!.click());
+    await bulkRelease(view, 2);
+    expect(text(view)).toContain('not confirmed');
+    expect(text(view)).not.toContain('2 refused');
+
+    // Both stay planned and selected; run again.
+    await bulkRelease(view, 2);
+    const posts = mutations();
+    const w1 = posts.filter((p) => p.pathname.includes('/w-1/')).map((p) => p.idempotencyKey);
+    const w2 = posts.filter((p) => p.pathname.includes('/w-2/')).map((p) => p.idempotencyKey);
+    expect(w1).toHaveLength(2);
+    expect(w1[0]).not.toBe(w1[1]); // refused (409) → the key was dropped
+    expect(w2).toHaveLength(2);
+    expect(w2[0]).toBe(w2[1]); // no answer → the key is kept for a safe replay
+    expect(attempt).toBe(2);
+  });
+
   test('a page move clears the selection, and an Operator gets no checkboxes', async () => {
     waveRows = [wave({ id: 'w-1' })];
     waveNextCursor = 'page-2-cursor';

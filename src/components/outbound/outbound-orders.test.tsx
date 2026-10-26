@@ -1327,6 +1327,30 @@ describe('the client order number (story 4-1b)', () => {
     expect(view.container.textContent).toContain('page-1');
   });
 
+  test('story UI-2: ⌘K "Find order" (`initialReference`) opens the list already searched; a drill would win', async () => {
+    ordersResponder = (url) =>
+      url.searchParams.get('reference') === 'SO-1042'
+        ? { items: [{ ...entry('found-1', 'c-self'), clientOrderRef: 'SO-1042' }], nextCursor: null }
+        : { items: [entry('page-1', 'c-self')], nextCursor: null };
+    view = render(
+      <OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01 Whitefield" role="owner" initialReference="SO-1042" />,
+    );
+    await settle();
+    expect(listUrls.every((url) => url.searchParams.get('reference') === 'SO-1042')).toBe(true);
+    expect(searchInput(view.container).value).toBe('SO-1042');
+    expect(view.container.textContent).not.toContain('page-1');
+  });
+
+  test('story UI-2: ⌘K "Create order" (`focusNewOrder`) puts the cursor in the create form once it is ready', async () => {
+    view = render(
+      <OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01 Whitefield" role="owner" focusNewOrder />,
+    );
+    await settle();
+    const form = view.container.querySelector('form:not([role="search"])')!;
+    expect(form).not.toBeNull();
+    expect(form.contains(document.activeElement)).toBe(true);
+  });
+
   test('over 200 characters is refused in the box — nothing is sent', async () => {
     view = await mountForm();
     const before = listUrls.length;

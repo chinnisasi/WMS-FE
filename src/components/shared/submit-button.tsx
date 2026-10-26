@@ -1,3 +1,5 @@
+import { useId } from 'react';
+
 import { primaryClass } from '@/components/shared/surface';
 
 /**
@@ -24,16 +26,26 @@ export function SubmitButton({
   readonly className?: string;
 }) {
   const blocked = !ready && !busy && notReadyReason !== undefined;
+  // The reason is the button's DESCRIPTION, not part of its name (code review
+  // C24): "Create counts" stays findable by name while it is disabled.
+  const reasonId = useId();
   return (
-    <button
-      type="submit"
-      className={className}
-      disabled={busy || !ready}
-      aria-busy={busy ? 'true' : undefined}
-      title={blocked ? notReadyReason : undefined}
-    >
-      {busy ? busyLabel : label}
-      {blocked && <span className="sr-only"> — {notReadyReason}</span>}
-    </button>
+    <>
+      <button
+        type="submit"
+        className={className}
+        disabled={busy || !ready}
+        aria-busy={busy ? 'true' : undefined}
+        title={blocked ? notReadyReason : undefined}
+        aria-describedby={blocked ? reasonId : undefined}
+      >
+        {busy ? busyLabel : label}
+      </button>
+      {blocked && (
+        <span id={reasonId} hidden>
+          {notReadyReason}
+        </span>
+      )}
+    </>
   );
 }

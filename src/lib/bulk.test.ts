@@ -43,6 +43,20 @@ describe('bulkOutcome', () => {
   });
 });
 
+test('a release with no answer is "not confirmed", never "refused" (code review C3)', () => {
+  const outcome = bulkOutcome(
+    [
+      { id: 'a', label: 'W-a', kind: 'done' },
+      { id: 'b', label: 'W-b', kind: 'no-answer' },
+    ],
+    verbs,
+    noun,
+  );
+  expect(outcome.tone).toBe('warning');
+  expect(outcome.reason).toBe('1 released · 1 not confirmed — no answer for W-b — it may have been released; refresh the list before trying again.');
+  expect(outcome.reason).not.toContain('refused');
+});
+
 describe('keyFate', () => {
   test('success spends the key; a server refusal drops it; no answer keeps it for a safe replay', () => {
     expect(keyFate('done')).toBe('spent');

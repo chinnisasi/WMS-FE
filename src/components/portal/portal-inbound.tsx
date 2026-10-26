@@ -28,6 +28,7 @@ import {
   usePortalPurchaseOrders,
   usePortalSkuOptions,
   usePortalWarehouses,
+  usePortalTenantId,
 } from '@/lib/use-portal';
 import { roleHasCapability } from '@/lib/users';
 
@@ -79,6 +80,7 @@ function toggleColumn<T extends { id: string }>(openId: string | null, setOpenId
 
 function AsnsSection() {
   const asns = usePortalAsns();
+  const tenantId = usePortalTenantId();
   const [openId, setOpenId] = useState<string | null>(null);
   // Subscribed, never a bare readSession() at render.
   const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
@@ -140,7 +142,7 @@ function AsnsSection() {
       {asns.state === 'failed' && <ReadFailure word="Notices not loaded" reason={asns.reason} onRetry={asns.reload} />}
       <div hidden={asns.state === 'failed'}>
         <DataTable<PortalAsnRowDto>
-          key={pageEpoch}
+          key={`${tenantId ?? 'none'}|${pageEpoch}`}
           columns={columns}
           rows={asns.state === 'ready' ? asns.data.items : []}
           nextCursor={asns.state === 'ready' ? asns.data.nextCursor : null}
@@ -328,6 +330,7 @@ function AsnLines({ asnId }: { asnId: string }) {
 
 function PurchaseOrdersSection() {
   const pos = usePortalPurchaseOrders();
+  const tenantId = usePortalTenantId();
   const [openId, setOpenId] = useState<string | null>(null);
   const columns: readonly DataTableColumn<PortalPurchaseOrderRowDto>[] = [
     toggleColumn<PortalPurchaseOrderRowDto>(openId, setOpenId),
@@ -346,6 +349,7 @@ function PurchaseOrdersSection() {
       {pos.state === 'failed' && <ReadFailure word="Purchase orders not loaded" reason={pos.reason} onRetry={pos.reload} />}
       <div hidden={pos.state === 'failed'}>
         <DataTable<PortalPurchaseOrderRowDto>
+          key={tenantId ?? 'none'}
           columns={columns}
           rows={pos.state === 'ready' ? pos.data.items : []}
           nextCursor={pos.state === 'ready' ? pos.data.nextCursor : null}

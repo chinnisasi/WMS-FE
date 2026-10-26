@@ -40,13 +40,14 @@ export function Field({
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const hasError = error !== undefined && error !== null && error !== '';
-  const describedBy = [hint !== undefined ? hintId : null, hasError ? errorId : null].filter((part) => part !== null).join(' ');
+  const hasHint = hint !== undefined && hint !== null && hint !== false && hint !== '';
+  const describedBy = [hasHint ? hintId : null, hasError ? errorId : null].filter((part) => part !== null).join(' ');
   return (
     <div className={className}>
       <label htmlFor={id} className={labelHidden ? 'sr-only' : labelClass}>
         {label}
       </label>
-      {hint !== undefined && (
+      {hasHint && (
         <span id={hintId} className="text-xs text-(--muted-foreground)">
           {hint}
         </span>

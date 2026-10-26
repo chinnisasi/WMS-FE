@@ -64,7 +64,9 @@ describe('SubmitButton', () => {
     view = render(<SubmitButton busy={false} ready={false} label="Create counts" busyLabel="Creating…" notReadyReason="Choose a zone first." />);
     let button = view.container.querySelector('button')!;
     expect(button.disabled).toBe(true);
-    expect(button.textContent).toBe('Create counts — Choose a zone first.');
+    expect(button.textContent).toBe('Create counts');
+    const reason = view.container.querySelector(`[id="${button.getAttribute('aria-describedby')}"]`)!;
+    expect(reason.textContent).toBe('Choose a zone first.');
     view.rerender(<SubmitButton busy ready label="Create counts" busyLabel="Creating…" />);
     button = view.container.querySelector('button')!;
     expect(button.textContent).toBe('Creating…');
