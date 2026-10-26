@@ -85,6 +85,12 @@ export function untrackedAllocationNote(untrackedSkuCount: number): string {
     : `${untrackedSkuCount} of this client's SKUs are untracked — they are picked in bin walk order under either rule.`;
 }
 
+/** One warning: the banner's word and its reason line (rendered by `FeedbackBanner` tone `warning`). */
+export interface AllocationWarning {
+  word: string;
+  reason: string;
+}
+
 /**
  * The panel's warnings (never blocks): A12 — a minimum with expiry not
  * required and undated batches on hand; A13 — an outbound minimum above the
@@ -95,22 +101,25 @@ export function allocationPolicyWarnings(input: {
   expiryRequired: boolean;
   receivingMinDays: number | null;
   undatedBatchesOnHand: number;
-}): string[] {
-  const warnings: string[] = [];
+}): AllocationWarning[] {
+  const warnings: AllocationWarning[] = [];
   if (input.minDays === null) return warnings;
   if (!input.expiryRequired && input.undatedBatchesOnHand > 0) {
-    warnings.push(
-      `${input.undatedBatchesOnHand} ${input.undatedBatchesOnHand === 1 ? 'batch' : 'batches'} on hand ${input.undatedBatchesOnHand === 1 ? 'has' : 'have'} no expiry date — the minimum cannot limit ${input.undatedBatchesOnHand === 1 ? 'it' : 'them'}. Turn on "Expiry date required" in the receiving policy.`,
-    );
+    warnings.push({
+      word: 'Undated stock is not limited',
+      reason: `${input.undatedBatchesOnHand} ${input.undatedBatchesOnHand === 1 ? 'batch' : 'batches'} on hand ${input.undatedBatchesOnHand === 1 ? 'has' : 'have'} no expiry date — the minimum cannot limit ${input.undatedBatchesOnHand === 1 ? 'it' : 'them'}. Turn on "Expiry date required" in the receiving policy.`,
+    });
   }
   if (input.receivingMinDays === null) {
-    warnings.push(
-      `Receiving accepts any remaining shelf life, but the outbound minimum is ${input.minDays} days: goods may be accepted that can never ship — stock received below it stays on hand and is never shipped.`,
-    );
+    warnings.push({
+      word: 'Stock may be received that can never ship',
+      reason: `Receiving accepts any remaining shelf life, but the outbound minimum is ${input.minDays} days: goods may be accepted that can never ship — stock received below it stays on hand and is never shipped.`,
+    });
   } else if (input.minDays > input.receivingMinDays) {
-    warnings.push(
-      `The outbound minimum (${input.minDays} days) is above the receiving minimum (${input.receivingMinDays} days): goods may be accepted that can never ship — stock received below it stays on hand and is never shipped.`,
-    );
+    warnings.push({
+      word: 'Stock may be received that can never ship',
+      reason: `The outbound minimum (${input.minDays} days) is above the receiving minimum (${input.receivingMinDays} days): goods may be accepted that can never ship — stock received below it stays on hand and is never shipped.`,
+    });
   }
   return warnings;
 }

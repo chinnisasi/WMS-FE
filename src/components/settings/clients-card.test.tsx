@@ -902,7 +902,7 @@ describe('ClientsCard', () => {
       expect(text()).toContain("2 of this client's SKUs are untracked — they are picked in bin walk order under either rule.");
       expect(text()).toContain('Batches with no expiry date are never limited by the minimum');
       // No minimum: no warnings.
-      expect(view.container.querySelector('ul[aria-label="Allocation policy warnings"]')).toBeNull();
+      expect(view.container.querySelector('[aria-label="Allocation policy warnings"]')).toBeNull();
       const f = form('ACME')!;
       setInput(minInput(f), '90');
       expect(text()).toContain('3 batches on hand have no expiry date — the minimum cannot limit them.');

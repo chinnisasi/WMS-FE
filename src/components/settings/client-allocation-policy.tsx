@@ -175,13 +175,11 @@ function PolicyBody({
   );
   const warningList =
     warnings.length === 0 ? null : (
-      <ul aria-label="Allocation policy warnings" className="flex flex-col gap-1">
+      <div role="group" aria-label="Allocation policy warnings" className="flex flex-col gap-2">
         {warnings.map((warning) => (
-          <li key={warning} role="status" className="rounded-sm border border-(--warning,#b45309) px-2 py-1 text-xs">
-            {warning}
-          </li>
+          <FeedbackBanner key={warning.word} tone="warning" word={warning.word} reason={warning.reason} />
         ))}
-      </ul>
+      </div>
     );
 
   if (!canManage) {
