@@ -75,3 +75,63 @@ export function grnShortSuffix(grn: Pick<GoodsReceiptEntryDto, 'shortUnits'>): s
   const short = (grn as { shortUnits?: number }).shortUnits ?? 0;
   return short > 0 ? ` · ${short} short` : '';
 }
+
+// ── story 2-6a: the serials captured on a line ───────────────────────────────
+
+export type GrnLineSerial = NonNullable<GoodsReceiptLineEntryDto['serials']>[number];
+
+/** Each serial unit's state in words (A19) — a `Record` over the generated union. */
+export const SERIAL_STATE_LABEL: Readonly<Record<GrnLineSerial['state'], string>> = {
+  applied: 'Booked',
+  pending: 'Awaiting approval',
+  rejected: 'Approval rejected',
+};
+
+/** The chip tone per state: booked is neutral, waiting is a warning, rejected an error. */
+export const SERIAL_STATE_TONE: Readonly<Record<GrnLineSerial['state'], 'neutral' | 'warning' | 'error'>> = {
+  applied: 'neutral',
+  pending: 'warning',
+  rejected: 'error',
+};
+
+/** The marker beside a serial received again after its write-off. */
+export const SERIAL_AFTER_WRITE_OFF_LABEL = 'Re-received after write-off';
+
+/** `N unit(s) — serial unreadable`, or null when none were recorded. */
+export function unreadableSerialLabel(line: Pick<GoodsReceiptLineEntryDto, 'unreadableSerialQty'>): string | null {
+  const count = line.unreadableSerialQty ?? 0;
+  return count > 0 ? `${count} unit${count === 1 ? '' : 's'} — serial unreadable` : null;
+}
+
+/** The QC-on-receipt skip in words (A22), or null. */
+export function qcSkippedLabel(line: Pick<GoodsReceiptLineEntryDto, 'qcSkipped'>): string | null {
+  return line.qcSkipped === 'serial-tracked' ? 'QC on receipt skipped — serial-tracked' : null;
+}
+
+/**
+ * The collapsed summary of a line's serials: `3 serials · 2 booked · 1
+ * awaiting approval` (the states in a fixed order, each only when present),
+ * or null when the line captured none.
+ */
+export function grnSerialSummary(serials: readonly GrnLineSerial[] | undefined): string | null {
+  if (serials === undefined || serials.length === 0) return null;
+  const counts: Record<GrnLineSerial['state'], number> = { applied: 0, pending: 0, rejected: 0 };
+  let rereceived = 0;
+  for (const serial of serials) {
+    counts[serial.state] += 1;
+    if (serial.afterWriteOff === true) rereceived += 1;
+  }
+  const parts = [`${serials.length} serial${serials.length === 1 ? '' : 's'}`];
+  for (const state of ['applied', 'pending', 'rejected'] as const) {
+    if (counts[state] > 0) parts.push(`${counts[state]} ${SERIAL_STATE_LABEL[state].toLowerCase()}`);
+  }
+  if (rereceived > 0) parts.push(`${rereceived} re-received after write-off`);
+  return parts.join(' · ');
+}
+
+/** The serials whose number contains `query` (case-insensitive, trimmed); every serial when blank. */
+export function filterSerials(serials: readonly GrnLineSerial[], query: string): readonly GrnLineSerial[] {
+  const needle = query.trim().toLowerCase();
+  if (needle === '') return serials;
+  return serials.filter((serial) => serial.serial.toLowerCase().includes(needle));
+}

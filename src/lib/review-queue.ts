@@ -413,6 +413,15 @@ export const GRN_REFUSAL_LABEL: Readonly<Record<RejectedGrnLineDto['code'], stri
   'shelf-life-short': 'shelf life too short',
   // Story 1-6d — licence enforcement: no valid client and site licence on the receipt date.
   'licence-not-covered': 'no valid licence',
+  // Story 2-6a — serial capture: two whole-line codes, six per-serial codes.
+  'serials-required': 'serial numbers missing',
+  'serials-on-untracked': 'serials on an untracked SKU',
+  'serial-format-invalid': 'not a valid IMEI',
+  'serial-in-stock': 'serial already in stock',
+  'serial-in-transit': 'serial in transit on a transfer',
+  'serial-pending-approval': "serial awaiting another receipt's approval",
+  'serial-dispatched-use-returns': 'serial left on an order — receive as a return',
+  'serial-blocked': 'serial blocked',
 };
 
 /** The remedy a `grn.lines-refused` row's reviewer reads (Discard only). */
@@ -431,6 +440,23 @@ export const GRN_BATCH_EXPIRY_MISMATCH_GUIDANCE =
   "The expiry date differs from the one this batch already has (or another line's for the same batch) — check the label; receive these lines again with the batch's expiry, or under their own batch code, then discard this row.";
 export const GRN_EXPIRY_REQUIRED_GUIDANCE =
   "This client requires an expiry date on batch-tracked goods — receive these lines again with the label's expiry date, then discard this row.";
+
+/** Story 2-6a — the remedies for the serial refusals of a `grn.lines-refused` row (Discard only). */
+export const GRN_SERIALS_REQUIRED_GUIDANCE =
+  'These SKUs are serial-tracked and the lines carried no serials (an older handheld build, or a receipt queued before serial capture) — receive them again on the current build, scanning each unit, then discard this row.';
+export const GRN_SERIALS_ON_UNTRACKED_GUIDANCE =
+  'These SKUs are not serial-tracked, so their lines carry no serials — receive them again without serials, then discard this row.';
+export const GRN_SERIAL_IN_STOCK_GUIDANCE =
+  'These serials are already in stock (each entry names where) — one serial is one unit. Check the units and their labels, then discard this row; the rest of each line booked.';
+export const GRN_SERIAL_IN_TRANSIT_GUIDANCE =
+  "These serials are on a stock transfer in transit — confirm the transfer's arrival instead of receiving them, then discard this row.";
+export const GRN_SERIAL_PENDING_GUIDANCE =
+  "These serials are waiting on another receipt's over-receipt approval — decide that approval first, then discard this row.";
+export const GRN_SERIAL_DISPATCHED_GUIDANCE =
+  'These serials left the warehouse on a customer order — receive them as a return against that order, then discard this row.';
+export const GRN_SERIAL_BLOCKED_GUIDANCE = 'These serials are blocked — check why before receiving them again, then discard this row.';
+export const GRN_SERIAL_FORMAT_GUIDANCE =
+  "These SKUs take IMEI 1 as the serial (15 digits with a check digit) and the scanned values are not valid IMEIs — scan the IMEI 1 barcode on each unit's box and receive them again, then discard this row.";
 
 /** Story 1-2b — the `grn.shelf-life-refused` row's remedy (Accept anyway with a note, or Discard). */
 export const GRN_SHELF_LIFE_GUIDANCE =
@@ -467,6 +493,15 @@ const GRN_LINES_GUIDANCE: readonly (readonly [RejectedGrnLineDto['code'], string
   ['expiry-before-mfg', GRN_EXPIRY_BEFORE_MFG_GUIDANCE],
   ['expiry-on-untracked', GRN_EXPIRY_ON_UNTRACKED_GUIDANCE],
   ['expiry-required', GRN_EXPIRY_REQUIRED_GUIDANCE],
+  // Story 2-6a — after every older code, in the server's precedence.
+  ['serials-required', GRN_SERIALS_REQUIRED_GUIDANCE],
+  ['serials-on-untracked', GRN_SERIALS_ON_UNTRACKED_GUIDANCE],
+  ['serial-in-stock', GRN_SERIAL_IN_STOCK_GUIDANCE],
+  ['serial-in-transit', GRN_SERIAL_IN_TRANSIT_GUIDANCE],
+  ['serial-pending-approval', GRN_SERIAL_PENDING_GUIDANCE],
+  ['serial-dispatched-use-returns', GRN_SERIAL_DISPATCHED_GUIDANCE],
+  ['serial-blocked', GRN_SERIAL_BLOCKED_GUIDANCE],
+  ['serial-format-invalid', GRN_SERIAL_FORMAT_GUIDANCE],
 ];
 
 /**

@@ -365,6 +365,8 @@ export interface SkuCreateDraft {
   readonly barcode: string;
   readonly batchTracked: boolean;
   readonly serialTracked: boolean;
+  /** Story 2-6a — consulted only while `serialTracked`. */
+  readonly serialFormat: SerialFormat;
   readonly catchWeightTracked: boolean;
   readonly weightGrams: string;
   readonly lengthMm: string;
@@ -398,6 +400,7 @@ export function emptySkuCreateDraft(): SkuCreateDraft {
     barcode: '',
     batchTracked: false,
     serialTracked: false,
+    serialFormat: 'free',
     catchWeightTracked: false,
     weightGrams: '',
     lengthMm: '',
@@ -497,6 +500,9 @@ export function parseSkuCreateDraft(
       ...(barcode === '' ? {} : { barcode }),
       batchTracked: draft.batchTracked,
       serialTracked: draft.serialTracked,
+      // Story 2-6a — sent only when it says something: `imei` on a serial SKU
+      // (free is the server default, and `imei` without serials is a 400).
+      ...serialFormatCreateField(draft.serialTracked, draft.serialFormat),
       catchWeightTracked: draft.catchWeightTracked,
       ...(Object.keys(attributes).length === 0 ? {} : { attributes }),
       storageClass: draft.storageClass as StorageClass,
@@ -524,4 +530,51 @@ export function clientsUnavailableNote(state: { readonly state: 'loading' | 'rea
   if (state.state === 'ready') return null;
   if (state.state === 'loading') return 'Loading clients…';
   return `Clients not loaded — ${state.reason ?? 'retry'}. Creating waits for the client list.`;
+}
+
+// ── story 2-6a: the serial format ─────────────────────────────────────────────
+
+export type SerialFormat = NonNullable<SkuResponse['serialFormat']>;
+
+/** The two serial formats, in the order the select offers them. */
+export const SERIAL_FORMAT_OPTIONS: readonly { readonly value: SerialFormat; readonly label: string }[] = [
+  { value: 'free', label: 'Free text (any serial)' },
+  { value: 'imei', label: 'IMEI 1 (15 digits, check digit)' },
+];
+
+/** A SKU's stored format; a SKU answered before 2-6a carries none and reads `free`. */
+export function serialFormatOf(sku: Pick<SkuResponse, 'serialFormat'>): SerialFormat {
+  return sku.serialFormat ?? 'free';
+}
+
+/** The create body's format key: only `imei` on a serial-tracked SKU is sent. */
+export function serialFormatCreateField(serialTracked: boolean, format: SerialFormat): { serialFormat?: SerialFormat } {
+  return serialTracked && format === 'imei' ? { serialFormat: 'imei' } : {};
+}
+
+/**
+ * The edit body's format key (A15): only while the SKU stays serial-tracked
+ * and the format changed. Ending serial tracking sends nothing — the server
+ * resets the format to `free` itself — so `imei` never rides without serials.
+ */
+export function serialFormatEditField(
+  sku: Pick<SkuResponse, 'serialFormat'>,
+  serialTracked: boolean,
+  format: SerialFormat,
+): { serialFormat?: SerialFormat } {
+  if (!serialTracked) return {};
+  return format === serialFormatOf(sku) ? {} : { serialFormat: format };
+}
+
+/** The table's tracking words: `Serial (IMEI)` for an imei SKU. */
+export function trackingLabel(sku: Pick<SkuResponse, 'batchTracked' | 'serialTracked' | 'catchWeightTracked' | 'serialFormat'>): string {
+  return (
+    [
+      sku.batchTracked ? 'Batch' : null,
+      sku.serialTracked ? (serialFormatOf(sku) === 'imei' ? 'Serial (IMEI)' : 'Serial') : null,
+      sku.catchWeightTracked ? 'Catch weight' : null,
+    ]
+      .filter((flag) => flag !== null)
+      .join(' + ') || '—'
+  );
 }

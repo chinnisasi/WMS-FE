@@ -166,6 +166,30 @@ describe('story 1-4: the SKU create card', () => {
     expect(view.container.textContent).toContain('TEA-1 created');
   });
 
+  test('story 2-6a: the serial format shows only while serial tracking is on; IMEI rides the body', async () => {
+    view = await openForm();
+    const select = () => view!.container.querySelector<HTMLSelectElement>('select[aria-label="Serial format"]');
+    expect(select()).toBeNull();
+    const serialBox = [...view.container.querySelectorAll('label')]
+      .find((node) => node.textContent?.trim() === 'Serial tracked')!
+      .querySelector<HTMLInputElement>('input')!;
+    act(() => serialBox.click());
+    expect(select()).not.toBeNull();
+    act(() => {
+      select()!.value = 'imei';
+      select()!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    setInput(field(view.container, 'Code'), 'PH-1');
+    setInput(field(view.container, 'Name'), 'Phone');
+    submit(view.container);
+    await settle();
+    expect(requests.find((r) => r.method === 'POST')!.body).toMatchObject({ serialTracked: true, serialFormat: 'imei' });
+    // Unticking hides the control and IMEI never rides without serials.
+    requests = [];
+    act(() => serialBox.click());
+    expect(select()).toBeNull();
+  });
+
   test('a refused create retried unchanged reuses its Idempotency-Key; an edit mints a new one', async () => {
     createRefusals = 2;
     view = await openForm();

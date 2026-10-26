@@ -289,6 +289,25 @@ describe('OverReceiptQueue — late receipts (story 21-9)', () => {
     }
   });
 
+  test('story 2-6a: a serial excess names its serials on the card; the full list sits behind a disclosure', async () => {
+    writeSession(SESSION);
+    const serials = Array.from({ length: 12 }, (_, i) => `IMEI-${i}`);
+    ENTRIES.push(entry('5', { poId: PO_ID, poLineId: 'pl-1', serials }, 12));
+    try {
+      view = render(<OverReceiptQueue />);
+      await settle();
+      const card = [...view.container.querySelectorAll('article')][3]!;
+      expect(card.querySelector('[data-testid="over-receipt-serials"]')!.textContent).toContain(
+        `Serials (12, book on approval): ${serials.slice(0, 10).join(', ')} and 2 more`,
+      );
+      expect(card.querySelectorAll('details li')).toHaveLength(12);
+      // A non-serial excess shows no serials line.
+      expect([...view.container.querySelectorAll('article')][0]!.querySelector('[data-testid="over-receipt-serials"]')).toBeNull();
+    } finally {
+      ENTRIES.pop();
+    }
+  });
+
   test('approving a null-line row says it went to stock and credited no line', async () => {
     stubLate();
     writeSession(SESSION);
