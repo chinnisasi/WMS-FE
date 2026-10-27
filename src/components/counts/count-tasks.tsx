@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Fragment, useMemo, useRef, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 
 import { fetchApiCreateCounts } from '@/lib/api/client';
 import type { CountTaskListEntryDto, SkuResponse } from '@/lib/api/generated';
@@ -35,7 +35,8 @@ import type { ActiveClientState } from '@/lib/use-active-client';
 import { useCountTaskDetail, useCountTasks, useCountZones } from '@/lib/use-counts';
 import { useSkuMap, useUserMap } from '@/lib/use-inbound';
 import { useWarehouseBins } from '@/lib/use-inventory';
-import { ulid } from '@/lib/ulid';
+import { useKeyedSubmit } from '@/lib/use-keyed-submit';
+import { SubmitButton } from '@/components/shared/submit-button';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AllClientsNote } from '@/components/shared/client-filter-chip';
@@ -59,6 +60,7 @@ export function CountTasks({
   canResolve,
   viewerId,
   active,
+  initialCreating = false,
 }: {
   tenantId: string;
   warehouseId: string;
@@ -66,11 +68,13 @@ export function CountTasks({
   canResolve: boolean;
   viewerId: string | null;
   active: ActiveClientState;
+  /** Story UI-2 — open the New count form on arrival (⌘K), only for a role that may create counts. */
+  initialCreating?: boolean;
 }) {
   const [status, setStatus] = useState<CountTaskStatus | null>(null);
   const [origin, setOrigin] = useState<CountTaskOrigin | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(initialCreating && canManage);
   const tasks = useCountTasks(warehouseId, status, origin);
   const users = useUserMap();
   const planners = useMemo(() => plannerNames(users), [users]);
@@ -313,10 +317,9 @@ function NewCountForm({ tenantId, warehouseId, onClose }: { tenantId: string; wa
   const [zoneId, setZoneId] = useState<string>('');
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [search, setSearch] = useState('');
-  const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
-  const keyRef = useRef<string | null>(null);
-  const sending = useRef(false);
+  // Story UI-2 (W10) — the shared key-per-draft and in-flight rules.
+  const keyed = useKeyedSubmit();
 
   const binList = useMemo(() => (bins.state === 'ready' ? countableBins(bins.data) : []), [bins]);
   const zoneList = useMemo(
@@ -330,7 +333,7 @@ function NewCountForm({ tenantId, warehouseId, onClose }: { tenantId: string; wa
 
   // Every selection edit is a new draft — a new key on the next submit.
   function edit(apply: () => void) {
-    keyRef.current = null;
+    keyed.invalidate();
     setOutcome(null);
     apply();
   }
@@ -340,27 +343,23 @@ function NewCountForm({ tenantId, warehouseId, onClose }: { tenantId: string; wa
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!ready || sending.current) return;
-    sending.current = true;
-    setBusy(true);
-    setOutcome(null);
-    const key = (keyRef.current ??= ulid());
+    if (!ready || keyed.busy) return;
     try {
-      const response = await fetchApiCreateCounts(
-        tenantId,
-        mode === 'zone' ? { warehouseId, zoneId } : { warehouseId, binIds: [...picked] },
-        key,
-      );
-      setOutcome(createCountsOutcome(response));
-      keyRef.current = null;
+      const sent = await keyed.run(async (key) => {
+        setOutcome(null);
+        return fetchApiCreateCounts(
+          tenantId,
+          mode === 'zone' ? { warehouseId, zoneId } : { warehouseId, binIds: [...picked] },
+          key,
+        );
+      });
+      if (!sent.sent) return;
+      setOutcome(createCountsOutcome(sent.value));
       setPicked(new Set());
       setZoneId('');
       notifyCountsChanged();
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not created', reason: createCountsReason(error) });
-    } finally {
-      sending.current = false;
-      setBusy(false);
     }
   }
 
@@ -453,9 +452,13 @@ function NewCountForm({ tenantId, warehouseId, onClose }: { tenantId: string; wa
       </div>
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
       <div className="flex gap-2">
-        <button type="submit" className={primaryClass} disabled={!ready || busy}>
-          {busy ? 'Creating…' : 'Create counts'}
-        </button>
+        <SubmitButton
+          busy={keyed.busy}
+          ready={ready}
+          label="Create counts"
+          busyLabel="Creating…"
+          notReadyReason={mode === 'zone' ? 'Choose a zone first.' : capNote ?? 'Choose at least one bin first.'}
+        />
         <button type="button" className={buttonClass} onClick={onClose}>
           Close
         </button>

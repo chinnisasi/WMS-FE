@@ -197,7 +197,9 @@ export function AuditExportsList({ exports, userMap }: { exports: Exports; userM
         <DataTable<AuditExportDto>
           columns={columns}
           rows={exports.state === 'ready' ? exports.data : []}
-          emptyMessage={exports.state === 'loading' ? 'Loading your exports…' : 'No exports yet'}
+          emptyMessage="No exports yet"
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={exports.state === 'loading' ? 'Loading your exports…' : undefined}
         />
       )}
     </div>

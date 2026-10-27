@@ -24,7 +24,7 @@ export interface QuantityUom {
 
 /**
  * `qty` at `precision` decimal places, with the integer part grouped
- * (2.5/3 → '2.500', 3000/0 → '3,000', 1234.5/3 → '1,234.500').
+ * (2.5/3 → '2.500', 3000/0 → '3,000', 1234.5/3 → '1,234.500', 1234567/0 → '12,34,567').
  *
  * A 0-precision unit never grows a `.000` suffix, and the grouping applies to
  * the integer part only — the fraction stays a plain digit run. The clamp
@@ -38,7 +38,30 @@ export function formatQuantity(qty: number, precision: number): string {
   const dot = fixed.indexOf('.');
   const intPart = dot === -1 ? fixed : fixed.slice(0, dot);
   const fracPart = dot === -1 ? '' : fixed.slice(dot);
-  return fracPart === '' ? Number(intPart).toLocaleString('en-US') : `${Number(intPart).toLocaleString('en-US')}${fracPart}`;
+  // Story UI-2 (W13) — `en-IN` grouping (12,34,567), the house format beside ₹.
+  return fracPart === '' ? Number(intPart).toLocaleString('en-IN') : `${Number(intPart).toLocaleString('en-IN')}${fracPart}`;
+}
+
+/**
+ * Story UI-2 (W13) — `en-IN` grouping of a string of digits, for the callers
+ * that hold a server value as text and must never re-parse it as a float
+ * (`groupDecimal`, `portalQuantity`): the last three digits, then pairs —
+ * '1234567' → '12,34,567'.
+ */
+export function groupIndianDigits(digits: string): string {
+  if (digits.length <= 3) return digits;
+  const head = digits.slice(0, -3);
+  const tail = digits.slice(-3);
+  return `${head.replace(/\B(?=(\d{2})+(?!\d))/g, ',')},${tail}`;
+}
+
+/**
+ * Story UI-2 (UI-PATTERNS §1, W13) — a count (orders, lines, rows) with
+ * `en-IN` grouping: 1234567 → '12,34,567'. Grouping only — it never rounds:
+ * a fractional input (the unit-agnostic quantity fallback) keeps its digits.
+ */
+export function formatCount(n: number): string {
+  return n.toLocaleString('en-IN', { maximumFractionDigits: 20 });
 }
 
 /**
@@ -62,7 +85,7 @@ export function quantityInputLabel(precision: number): string {
  * precision would fabricate a fact; the fallback does neither.
  */
 export function quantityLabel(value: number, uom: QuantityUom | null): string {
-  return uom === null ? `${value} units` : `${formatQuantity(value, uom.uomPrecision)} ${uom.uom}`;
+  return uom === null ? `${formatCount(value)} units` : `${formatQuantity(value, uom.uomPrecision)} ${uom.uom}`;
 }
 
 /**

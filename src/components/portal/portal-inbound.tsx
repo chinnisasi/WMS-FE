@@ -28,10 +28,12 @@ import {
   usePortalPurchaseOrders,
   usePortalSkuOptions,
   usePortalWarehouses,
+  usePortalTenantId,
 } from '@/lib/use-portal';
 import { roleHasCapability } from '@/lib/users';
 
-import { DataTable, TableSkeleton, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { EmptyState } from '@/components/shared/empty-state';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { LineRows } from '@/components/shared/line-rows';
 import { ReadFailure, Section, buttonClass, inputClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
@@ -78,6 +80,7 @@ function toggleColumn<T extends { id: string }>(openId: string | null, setOpenId
 
 function AsnsSection() {
   const asns = usePortalAsns();
+  const tenantId = usePortalTenantId();
   const [openId, setOpenId] = useState<string | null>(null);
   // Subscribed, never a bare readSession() at render.
   const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
@@ -133,19 +136,22 @@ function AsnsSection() {
           reason={`${lineCountLabel(announced.lineCount)} sent to ${announced.warehouseName} — the warehouse receives against it when it arrives.`}
         />
       )}
-      {asns.state === 'loading' && <TableSkeleton columns={columns} label="Loading your shipment notices…" />}
+      {/* Story UI-2 (A1) — ONE table across every page load, so its cursor
+          stack survives and Prev returns to the previous page; a failure
+          shows above it and the table is kept (hidden), so Retry keeps Prev. */}
       {asns.state === 'failed' && <ReadFailure word="Notices not loaded" reason={asns.reason} onRetry={asns.reload} />}
-      {asns.state === 'ready' && (
+      <div hidden={asns.state === 'failed'}>
         <DataTable<PortalAsnRowDto>
-          key={pageEpoch}
+          key={`${tenantId ?? 'none'}|${pageEpoch}`}
           columns={columns}
-          rows={asns.data.items}
-          nextCursor={asns.data.nextCursor}
+          rows={asns.state === 'ready' ? asns.data.items : []}
+          nextCursor={asns.state === 'ready' ? asns.data.nextCursor : null}
           onCursor={asns.onCursor}
-          emptyMessage="No shipment notices for your company yet."
+          emptyMessage={<EmptyState kind="first-use">No shipment notices for your company yet.</EmptyState>}
           renderExpanded={(row) => (row.id === openId ? <AsnLines asnId={row.id} /> : null)}
+          loading={asns.state === 'loading' ? 'Loading your shipment notices…' : undefined}
         />
-      )}
+      </div>
     </Section>
   );
 }
@@ -324,6 +330,7 @@ function AsnLines({ asnId }: { asnId: string }) {
 
 function PurchaseOrdersSection() {
   const pos = usePortalPurchaseOrders();
+  const tenantId = usePortalTenantId();
   const [openId, setOpenId] = useState<string | null>(null);
   const columns: readonly DataTableColumn<PortalPurchaseOrderRowDto>[] = [
     toggleColumn<PortalPurchaseOrderRowDto>(openId, setOpenId),
@@ -336,18 +343,22 @@ function PurchaseOrdersSection() {
   ];
   return (
     <Section title="Purchase orders">
-      {pos.state === 'loading' && <TableSkeleton columns={columns} label="Loading your purchase orders…" />}
+      {/* Story UI-2 (A1) — ONE table across every page load, so its cursor
+          stack survives and Prev returns to the previous page; a failure
+          shows above it and the table is kept (hidden), so Retry keeps Prev. */}
       {pos.state === 'failed' && <ReadFailure word="Purchase orders not loaded" reason={pos.reason} onRetry={pos.reload} />}
-      {pos.state === 'ready' && (
+      <div hidden={pos.state === 'failed'}>
         <DataTable<PortalPurchaseOrderRowDto>
+          key={tenantId ?? 'none'}
           columns={columns}
-          rows={pos.data.items}
-          nextCursor={pos.data.nextCursor}
+          rows={pos.state === 'ready' ? pos.data.items : []}
+          nextCursor={pos.state === 'ready' ? pos.data.nextCursor : null}
           onCursor={pos.onCursor}
-          emptyMessage="No purchase orders for your company yet."
+          emptyMessage={<EmptyState kind="first-use">No purchase orders for your company yet.</EmptyState>}
           renderExpanded={(row) => (row.id === openId ? <PoLines poId={row.id} /> : null)}
+          loading={pos.state === 'loading' ? 'Loading your purchase orders…' : undefined}
         />
-      )}
+      </div>
     </Section>
   );
 }

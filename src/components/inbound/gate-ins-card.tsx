@@ -344,9 +344,9 @@ export function GateInsCard({
           nextCursor={list.state === 'ready' ? list.data.nextCursor : null}
           onCursor={list.onCursor}
           renderExpanded={renderExpanded}
-          emptyMessage={
-            list.state === 'loading' ? 'Loading gate-ins…' : warehouseId === null ? 'Create a warehouse first.' : 'No gate-ins recorded yet.'
-          }
+          emptyMessage={warehouseId === null ? 'Create a warehouse first.' : 'No gate-ins recorded yet.'}
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={list.state === 'loading' ? 'Loading gate-ins…' : undefined}
         />
       )}
     </section>

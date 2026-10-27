@@ -6,6 +6,7 @@
  * Pure: no React, no fetch — pinned by `portal.test.ts` (the house rule: a
  * claim left in JSX is a claim nothing can pin).
  */
+import { groupIndianDigits } from '@/lib/format-quantity';
 import { ApiProblem } from '@/lib/api/client';
 import type {
   PortalCreateAsnDto,
@@ -190,7 +191,8 @@ export function portalQuantity(qty: number): string {
   const dot = unsigned.indexOf('.');
   const intPart = dot === -1 ? unsigned : unsigned.slice(0, dot);
   const fracPart = dot === -1 ? '' : unsigned.slice(dot);
-  return `${negative ? '−' : ''}${intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fracPart}`;
+  // Story UI-2 (W13) — en-IN grouping (was en-US thousands).
+  return `${negative ? '−' : ''}${groupIndianDigits(intPart)}${fracPart}`;
 }
 
 /** `5 each`, `2.5 kg`. */

@@ -2,6 +2,7 @@ import { PageHeader } from '@/components/shared/page-header';
 import { Outbound } from '@/components/outbound/outbound';
 import { UnsupportedDrillNotice } from '@/components/shared/drill-banner';
 import { drillKey, parseDrill } from '@/lib/drill';
+import { parseOrderSearch } from '@/lib/orders';
 import { OUTBOUND_PAGE_TABS } from '@/lib/page-tabs';
 
 export const metadata = { title: 'Outbound' };
@@ -21,11 +22,22 @@ export default async function OutboundPage({
   const params = await searchParams;
   const drill = parseDrill('outbound', params);
   const tab = OUTBOUND_PAGE_TABS.parse(params);
+  // Story UI-2 — ⌘K deep links: `?ref=` opens Orders searched for that
+  // reference (re-validated here; a drill wins), `?new=order` focuses the
+  // create form. Both join the key, so following another link remounts.
+  const reference = drill === null && typeof params.ref === 'string' ? parseOrderSearch(params.ref).reference : null;
+  const newOrder = drill === null && params.new === 'order';
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Outbound" description="Orders, waves, picking, packing and dispatch." />
       {drill === 'unsupported' && <UnsupportedDrillNotice />}
-      <Outbound key={`${drillKey(drill)}|${tab ?? 'default'}`} drill={drill} initialTab={tab} />
+      <Outbound
+        key={`${drillKey(drill)}|${tab ?? 'default'}|${reference ?? ''}|${newOrder ? 'new' : ''}`}
+        drill={drill}
+        initialTab={tab}
+        initialReference={reference}
+        focusNewOrder={newOrder}
+      />
     </div>
   );
 }

@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  formatCount,
+  groupIndianDigits,
   formatQuantity,
   parseQuantityInput,
   quantityInputLabel,
@@ -30,7 +32,10 @@ describe('formatQuantity', () => {
 
   test('the integer part groups, the fraction stays a plain digit run', () => {
     expect(formatQuantity(1234.5, 3)).toBe('1,234.500');
-    expect(formatQuantity(12345678.901, 3)).toBe('12,345,678.901');
+    // Story UI-2 (W13) — en-IN grouping (was en-US '12,345,678.901'); identical below one lakh.
+    expect(formatQuantity(12345678.901, 3)).toBe('1,23,45,678.901');
+    expect(formatQuantity(1234567, 0)).toBe('12,34,567');
+    expect(formatQuantity(99999, 0)).toBe('99,999');
   });
 
   test('float dust is absorbed at render, not by rounding the value', () => {
@@ -72,7 +77,9 @@ describe('quantityLabel', () => {
     // The same sentence family on every surface — never a bare number, never
     // a guessed unit or precision.
     expect(quantityLabel(2.5, null)).toBe('2.5 units');
-    expect(quantityLabel(3000, null)).toBe('3000 units');
+    // Story UI-2 (W13) — the fallback groups (was '3000 units') but still never rounds.
+    expect(quantityLabel(3000, null)).toBe('3,000 units');
+    expect(quantityLabel(2.12345, null)).toBe('2.12345 units');
   });
 });
 
@@ -121,5 +128,26 @@ describe('parseQuantityInput (shape, never precision)', () => {
     expect(parseQuantityInput('Infinity')).toBeNull();
     expect(parseQuantityInput('abc')).toBeNull();
     expect(parseQuantityInput('')).toBeNull();
+  });
+});
+
+describe('formatCount (story UI-2, W13)', () => {
+  test('en-IN grouping, never rounding', () => {
+    expect(formatCount(0)).toBe('0');
+    expect(formatCount(999)).toBe('999');
+    expect(formatCount(123456)).toBe('1,23,456');
+    expect(formatCount(1234567)).toBe('12,34,567');
+    expect(formatCount(1234567.5)).toBe('12,34,567.5');
+  });
+});
+
+describe('groupIndianDigits (story UI-2, W13)', () => {
+  test('last three, then pairs; short strings untouched', () => {
+    expect(groupIndianDigits('7')).toBe('7');
+    expect(groupIndianDigits('999')).toBe('999');
+    expect(groupIndianDigits('1000')).toBe('1,000');
+    expect(groupIndianDigits('123456')).toBe('1,23,456');
+    expect(groupIndianDigits('1234567')).toBe('12,34,567');
+    expect(groupIndianDigits('123456789')).toBe('12,34,56,789');
   });
 });

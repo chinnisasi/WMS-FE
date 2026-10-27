@@ -25,7 +25,10 @@ import { CountTasks } from './count-tasks';
  * variance-queue link needs `variances.resolve` — hidden, never "blocked".
  * The handheld counts blind; this is where a supervisor sees the numbers.
  */
-export function CountsScreen({ initialTab = null }: { initialTab?: CountsTab | null } = {}) {
+export function CountsScreen({
+  initialTab = null,
+  initialCreating = false,
+}: { initialTab?: CountsTab | null; /** Story UI-2 — ⌘K "New count" (`?new=count`). */ initialCreating?: boolean } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -45,10 +48,10 @@ export function CountsScreen({ initialTab = null }: { initialTab?: CountsTab | n
       </Section>
     );
   }
-  return <CountsSessioned initialTab={initialTab} />;
+  return <CountsSessioned initialTab={initialTab} initialCreating={initialCreating} />;
 }
 
-function CountsSessioned({ initialTab }: { initialTab: CountsTab | null }) {
+function CountsSessioned({ initialTab, initialCreating }: { initialTab: CountsTab | null; initialCreating: boolean }) {
   const [tab, selectTab] = usePageTab(COUNTS_PAGE_TABS, COUNTS_PAGE_TABS.initial(null, initialTab), false);
   const active = useActiveClient();
   const warehouses = useOutboundWarehouses();
@@ -134,6 +137,7 @@ function CountsSessioned({ initialTab }: { initialTab: CountsTab | null }) {
             canResolve={canResolve}
             viewerId={viewerId}
             active={active}
+            initialCreating={initialCreating}
           />
         )}
         {tab === 'schedule' && (

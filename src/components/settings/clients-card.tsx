@@ -229,7 +229,9 @@ function ClientsCardSessioned() {
         <DataTable<ClientDto>
           columns={columns}
           rows={clients.state === 'ready' ? clients.data : []}
-          emptyMessage={clients.state === 'loading' ? 'Loading clients…' : 'No clients yet.'}
+          emptyMessage="No clients yet."
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={clients.state === 'loading' ? 'Loading clients…' : undefined}
         />
       )}
 

@@ -127,6 +127,8 @@ function ProductsCardSessioned() {
     {
       key: 'name',
       header: 'Product',
+      // Story UI-2 (A4) — client-side sort; offered only while the page is the whole list.
+      sortValue: (product) => product.name,
       // The row's disclosure: surface-owned aria-expanded / aria-controls
       // (the 4-2b pattern), announcing the matrix it opens (UX-DR28).
       render: (product) => (
@@ -158,6 +160,7 @@ function ProductsCardSessioned() {
       key: 'skuCount',
       header: 'Variants',
       numeric: true,
+      sortValue: (product) => product.skuCount,
       render: (product) => String(product.skuCount),
     },
     ...(canEditSku
@@ -219,9 +222,9 @@ function ProductsCardSessioned() {
         rows={products.state === 'ready' ? products.data.items : []}
         nextCursor={products.state === 'ready' ? products.data.nextCursor : null}
         onCursor={products?.onCursor}
-        emptyMessage={
-          products.state === 'loading' ? 'Loading products…' : 'No products yet — create one above.'
-        }
+        emptyMessage="No products yet — create one above."
+        // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+        loading={products.state === 'loading' ? 'Loading products…' : undefined}
         renderExpanded={(product) =>
           expandedId === product.id ? (
             <VariantMatrix product={product} canEditSku={canEditSku} onNotify={setOutcome} />

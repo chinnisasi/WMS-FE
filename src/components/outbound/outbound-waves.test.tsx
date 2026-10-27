@@ -558,6 +558,106 @@ describe('pressing the row actions', () => {
   });
 });
 
+describe('story UI-2: bulk release (UI-PATTERNS §3.5)', () => {
+  const box = (rendered: Rendered, label: string) =>
+    rendered.container.querySelector<HTMLInputElement>(`input[type="checkbox"][aria-label="${label}"]`);
+
+  test('only planned waves can be picked; N releases, each its own key; one refusal is named and stays selected', async () => {
+    waveRows = [wave({ id: 'w-1' }), wave({ id: 'w-2' }), wave({ id: 'w-3', status: 'released' }), wave({ id: 'w-4' })];
+    const refusal = 'Policy "Evening courier" cuts off at 18:00 Asia/Kolkata; it is 18:20 there now.';
+    releaseResponder = () => {
+      const last = mutations().at(-1)!;
+      return last.pathname.includes('/w-2/')
+        ? { status: 409, body: { code: 'cutoff-passed', title: refusal, status: 409, detail: refusal } }
+        : { status: 200, body: { wave: { ...wave({ status: 'released' }), picklists: [picklist({ status: 'ready' })] } } };
+    };
+    view = await mount('ops_manager');
+
+    expect(box(view, 'Select wave w-3')).toBeNull(); // released: nothing to release
+    await act(async () => box(view!, 'Select all waves on this page')!.click());
+    expect(text(view)).toContain('3 waves selected');
+    // Per-row actions are off while rows are selected.
+    expect(buttons(view).filter((b) => b.textContent === 'Release').every((b) => b.disabled)).toBe(true);
+
+    await pressButton(view, 'Release 3 waves');
+    expect(view.container.querySelector('[data-testid="bulk-release-confirm"]')).not.toBeNull();
+    expect(mutations()).toHaveLength(0); // the bar only opens the confirmation
+    const listReadsBefore = waveListReads().length;
+    waveRows = [wave({ id: 'w-1', status: 'released' }), wave({ id: 'w-2' }), wave({ id: 'w-3', status: 'released' }), wave({ id: 'w-4', status: 'released' })];
+    await act(async () => {
+      buttons(view!).find((b) => b.textContent === 'Release 3 waves' && b.closest('[data-testid="bulk-release-confirm"]'))!.click();
+    });
+    await settle();
+
+    const posts = mutations();
+    expect(posts.map((p) => p.pathname.split('/').at(-2))).toEqual(['w-1', 'w-2', 'w-4']);
+    expect(new Set(posts.map((p) => p.idempotencyKey)).size).toBe(3);
+    expect(text(view)).toContain('2 of 3 released');
+    expect(text(view)).toContain('Wave w-2: ' + refusal);
+    // The list refetched ONCE for the whole run, not once per wave.
+    expect(waveListReads().length - listReadsBefore).toBe(1);
+    // The refused wave is still selected (still planned); the released ones dropped out.
+    expect(box(view, 'Select wave w-2')!.checked).toBe(true);
+    expect(text(view)).toContain('1 wave selected');
+  });
+
+  async function bulkRelease(rendered: Rendered, n: number) {
+    await pressButton(rendered, `Release ${n} ${n === 1 ? 'wave' : 'waves'}`);
+    await act(async () => {
+      buttons(rendered)
+        .find((b) => b.textContent === `Release ${n} ${n === 1 ? 'wave' : 'waves'}` && b.closest('[data-testid="bulk-release-confirm"]'))!
+        .click();
+    });
+    await settle();
+  }
+
+  test('key fate at the call site: a refusal re-mints on retry; no answer replays the SAME key and is never "refused"', async () => {
+    waveRows = [wave({ id: 'w-1' }), wave({ id: 'w-2' })];
+    let attempt = 0;
+    const realFetch = globalThis.fetch;
+    releaseResponder = () => ({ status: 409, body: { code: 'cutoff-passed', title: 'Too late', status: 409, detail: 'Too late' } });
+    stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init);
+      if (request.method === 'POST' && new URL(request.url).pathname.includes('/w-2/release')) {
+        attempt += 1;
+        requests.push({ method: 'POST', pathname: new URL(request.url).pathname, search: '', idempotencyKey: request.headers.get('Idempotency-Key') });
+        throw new TypeError('Failed to fetch');
+      }
+      return realFetch(input as RequestInfo, init);
+    }) as unknown as typeof fetch);
+    view = await mount('ops_manager');
+    await act(async () => box(view!, 'Select all waves on this page')!.click());
+    await bulkRelease(view, 2);
+    expect(text(view)).toContain('not confirmed');
+    expect(text(view)).not.toContain('2 refused');
+
+    // Both stay planned and selected; run again.
+    await bulkRelease(view, 2);
+    const posts = mutations();
+    const w1 = posts.filter((p) => p.pathname.includes('/w-1/')).map((p) => p.idempotencyKey);
+    const w2 = posts.filter((p) => p.pathname.includes('/w-2/')).map((p) => p.idempotencyKey);
+    expect(w1).toHaveLength(2);
+    expect(w1[0]).not.toBe(w1[1]); // refused (409) → the key was dropped
+    expect(w2).toHaveLength(2);
+    expect(w2[0]).toBe(w2[1]); // no answer → the key is kept for a safe replay
+    expect(attempt).toBe(2);
+  });
+
+  test('a page move clears the selection, and an Operator gets no checkboxes', async () => {
+    waveRows = [wave({ id: 'w-1' })];
+    waveNextCursor = 'page-2-cursor';
+    view = await mount('ops_manager');
+    await act(async () => box(view!, 'Select wave w-1')!.click());
+    expect(text(view)).toContain('1 wave selected');
+    await pressButton(view, 'Next');
+    await settle();
+    expect(text(view)).not.toContain('selected');
+    view.unmount();
+    view = await mount('operator');
+    expect(view.container.querySelector('input[type="checkbox"]')).toBeNull();
+  });
+});
+
 describe('the waves.manage gate', () => {
   test('an Operator reads the list and the stops, and is offered nothing to press', async () => {
     waveRows = [wave()];

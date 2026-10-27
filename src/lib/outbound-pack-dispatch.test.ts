@@ -168,7 +168,7 @@ describe('the pack draft', () => {
       EMPTY_MEASUREMENTS,
     );
     expect(parsed.body).toBeNull();
-    expect(parsed.problem).toBe(`A scanned quantity is at most ${MAX_QUANTITY_BASE.toLocaleString('en-US')}.`);
+    expect(parsed.problem).toBe(`A scanned quantity is at most ${MAX_QUANTITY_BASE.toLocaleString('en-IN')}.`);
     const atTheBound = parsePackDraft(
       [scan('ol-1', 'sku-1', 4, String(MAX_QUANTITY_BASE))],
       EMPTY_MEASUREMENTS,
@@ -195,7 +195,7 @@ describe('the pack draft', () => {
     }
     const tooHeavy = parsePackDraft([], { ...EMPTY_MEASUREMENTS, weightGrams: String(MAX_WEIGHT_GRAMS + 1) });
     expect(tooHeavy.body).toBeNull();
-    expect(tooHeavy.problem).toBe('Weight is at most 1,000,000 grams.');
+    expect(tooHeavy.problem).toBe('Weight is at most 10,00,000 grams.');
   });
 
   test('dimensions are all three sides together, or none of them', () => {
@@ -229,7 +229,7 @@ describe('the pack draft', () => {
       widthMm: '200',
       heightMm: '100',
     });
-    expect(tooLong.problem).toBe('Each dimension is at most 100,000 mm.');
+    expect(tooLong.problem).toBe('Each dimension is at most 1,00,000 mm.');
   });
 
   test('an over-precise scanned value is NOT clamped — the backend is the authority', () => {
@@ -598,7 +598,7 @@ describe('the label and manifest step (4.6c)', () => {
     expect(partial.body).toBeNull();
     expect(partial.problem).toBe('Dimensions are all three sides together, or none of them.');
     const heavy = parseLabelDraft('conn-1', { ...EMPTY_MEASUREMENTS, weightGrams: String(MAX_WEIGHT_GRAMS + 1) });
-    expect(heavy.problem).toBe('Weight is at most 1,000,000 grams.');
+    expect(heavy.problem).toBe('Weight is at most 10,00,000 grams.');
   });
 
   test('the manifest selection goes as given — the set is the server intent', () => {

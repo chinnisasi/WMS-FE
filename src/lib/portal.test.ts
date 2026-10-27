@@ -88,7 +88,7 @@ describe('portal figures', () => {
   test('quantities are grouped, never rounded and never assumed integral', () => {
     expect(portalQuantity(1500)).toBe('1,500');
     expect(portalQuantity(2.5)).toBe('2.5');
-    expect(portalQuantity(1234567.125)).toBe('1,234,567.125');
+    expect(portalQuantity(1234567.125)).toBe('12,34,567.125');
     expect(portalQuantity(0)).toBe('0');
     expect(receivedOfLabel(12, 20.5)).toBe('12 of 20.5 received');
   });

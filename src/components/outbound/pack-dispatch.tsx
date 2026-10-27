@@ -264,12 +264,10 @@ function PackDispatchTable({
             ) : null
           }
           emptyMessage={
-            orders.state === 'loading'
-              ? 'Loading orders…'
-              : loaded.length === 0
-                ? 'No orders in this warehouse yet.'
-                : 'No orders on this page match that status.'
+            loaded.length === 0 ? 'No orders in this warehouse yet.' : 'No orders on this page match that status.'
           }
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={orders.state === 'loading' ? 'Loading orders…' : undefined}
         />
       )}
 

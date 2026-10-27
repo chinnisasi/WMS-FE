@@ -135,10 +135,12 @@ function UsersCardSessioned() {
   };
 
   const columns: readonly DataTableColumn<UserRow>[] = [
-    { key: 'email', header: 'Email' },
+    // Story UI-2 (A4) — client-side sort; offered only while the page is the whole list.
+    { key: 'email', header: 'Email', sortValue: (user) => user.email },
     {
       key: 'role',
       header: 'Role',
+      sortValue: (user) => ROLE_LABELS[user.role] ?? user.role,
       render: (user) =>
         // Story 21-7 — a client-portal user's role is fixed at invite: shown
         // read-only, with its client's code, never as a select.

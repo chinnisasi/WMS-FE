@@ -146,8 +146,9 @@ function PartnersCardSessioned() {
   const rows = partners.state === 'ready' ? partners.data.items : [];
 
   const columns: readonly DataTableColumn<PartnerDto>[] = [
-    { key: 'code', header: 'Code', render: (partner) => <span className="font-mono">{partner.code}</span> },
-    { key: 'name', header: 'Partner', render: (partner) => partner.name },
+    // Story UI-2 (A4) — client-side sort; offered only while the page is the whole list.
+    { key: 'code', header: 'Code', sortValue: (partner) => partner.code, render: (partner) => <span className="font-mono">{partner.code}</span> },
+    { key: 'name', header: 'Partner', sortValue: (partner) => partner.name, render: (partner) => partner.name },
     { key: 'roles', header: 'Roles', render: (partner) => rolesLabel(partner.roles) },
     { key: 'gstin', header: 'GSTIN', render: (partner) => <span className="font-mono text-xs">{partner.gstin ?? 'Unregistered'}</span> },
     { key: 'status', header: 'Status', render: (partner) => partnerStatusLabel(partner) },
@@ -191,7 +192,9 @@ function PartnersCardSessioned() {
           rows={rows}
           nextCursor={partners.state === 'ready' ? partners.data.nextCursor : null}
           onCursor={partners.onCursor}
-          emptyMessage={partners.state === 'loading' ? 'Loading partners…' : 'No partners yet.'}
+          emptyMessage="No partners yet."
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={partners.state === 'loading' ? 'Loading partners…' : undefined}
         />
       )}
 

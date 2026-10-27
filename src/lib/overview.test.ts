@@ -27,6 +27,7 @@ describe('formatFigure', () => {
 
   test('each kind', () => {
     expect(formatFigure(12, 'count')).toBe('12');
+    expect(formatFigure(123456, 'count')).toBe('1,23,456'); // UI-2 W13 — en-IN grouping
     expect(formatFigure(42.4, 'minutes')).toBe('42 min');
     expect(formatFigure(3.333, 'per1000')).toBe('3.3 per 1,000');
     expect(formatFigure(0, 'per1000')).toBe('0.0 per 1,000');

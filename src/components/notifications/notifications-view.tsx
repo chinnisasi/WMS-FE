@@ -8,6 +8,7 @@ import { NOTIFICATIONS_EMPTY, type NotificationEntry } from '@/lib/notifications
 import { useNotificationLookups, useNotifications } from '@/lib/use-notifications';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { EmptyState } from '@/components/shared/empty-state';
 import { ReadFailure, Section } from '@/components/shared/surface';
 import { NotificationEntryLink } from './notification-entry';
 
@@ -69,7 +70,8 @@ function NotificationsTable() {
           nextCursor={entries.state === 'ready' ? entries.data.nextCursor : null}
           onCursor={entries.onCursor}
           loading={entries.state === 'loading' ? 'Loading notifications…' : undefined}
-          emptyMessage={NOTIFICATIONS_EMPTY}
+          // Story UI-2 (§5, W4) — nothing waiting is a good state, and reads as one.
+          emptyMessage={<EmptyState kind="cleared">{NOTIFICATIONS_EMPTY}</EmptyState>}
         />
       )}
     </Section>

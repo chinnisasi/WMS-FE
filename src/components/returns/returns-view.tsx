@@ -38,6 +38,7 @@ import { ulid } from '@/lib/ulid';
 import { readActiveWarehouseId, subscribeActiveWarehouse, writeActiveWarehouseId } from '@/lib/warehouses';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { EmptyState } from '@/components/shared/empty-state';
 import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import {
@@ -365,7 +366,7 @@ export function ReturnsList({
           onCursor={returns.onCursor}
           renderExpanded={(rma) => (expandedId === rma.id ? <ReturnDetail tenantId={tenantId} rma={rma} skus={skuMap} /> : null)}
           loading={returns.state === 'loading' ? 'Loading returns…' : undefined}
-          emptyMessage='No returns yet'
+          emptyMessage={<EmptyState kind="first-use">No returns yet</EmptyState>}
         />
       )}
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}

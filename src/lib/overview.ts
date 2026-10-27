@@ -1,5 +1,6 @@
 import type { ReportingOverviewResponse, SyncConnectionHealthDto } from '@/lib/api/generated';
 import { drillLinkHref } from '@/lib/drill-routes';
+import { formatCount } from '@/lib/format-quantity';
 import type { Capability } from '@/lib/users';
 
 /**
@@ -28,7 +29,7 @@ export function formatFigure(value: number | null, kind: FigureKind): string {
   if (value === null) return NO_DATA;
   switch (kind) {
     case 'count':
-      return String(value);
+      return formatCount(value);
     case 'minutes':
       return `${formatMinutes(value)}`;
     case 'per1000':

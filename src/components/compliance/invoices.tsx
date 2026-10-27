@@ -205,12 +205,10 @@ function InvoicesSessioned({ drill, clearHref }: { drill: InvoicesDrill | null; 
           nextCursor={list.state === 'ready' ? list.data.nextCursor : null}
           onCursor={list.onCursor}
           emptyMessage={
-            list.state === 'loading'
-              ? 'Loading invoices…'
-              : drill !== null
-                ? 'No invoices match this figure.'
-                : 'No invoices yet — they are generated when orders dispatch.'
+            drill !== null ? 'No invoices match this figure.' : 'No invoices yet — they are generated when orders dispatch.'
           }
+          // Story UI-2 (C14) — a cold load is a skeleton, never an empty-row sentence.
+          loading={list.state === 'loading' ? 'Loading invoices…' : undefined}
           renderExpanded={(row) =>
             row.id === openId ? (
               <InvoiceDetail invoiceId={row.id} canGenerate={canGenerate} skus={skus} onGenerated={onGenerated} />
