@@ -35,6 +35,11 @@ import {
   storageClassLabel,
   type PackBarcodeRow,
   type PackLevelRow,
+  SERIAL_FORMAT_OPTIONS,
+  serialFormatEditField,
+  serialFormatOf,
+  trackingLabel,
+  type SerialFormat,
 } from '@/lib/sku-admin';
 import { skuPhysicalLabel } from '@/lib/sku-attributes';
 import {
@@ -221,10 +226,8 @@ function SkuTableCardSessioned() {
     {
       key: 'flags',
       header: 'Tracking',
-      render: (sku) =>
-        [sku.batchTracked ? 'Batch' : null, sku.serialTracked ? 'Serial' : null, sku.catchWeightTracked ? 'Catch weight' : null]
-          .filter((flag) => flag !== null)
-          .join(' + ') || '—',
+      // Story 2-6a — an IMEI SKU reads "Serial (IMEI)".
+      render: (sku) => trackingLabel(sku),
     },
     // Story 12-7 — the 12-1/12-2 class columns, finally visible on the web:
     // the labels are lib derivations (null hazard renders the no-rule dash),
@@ -687,6 +690,9 @@ function SkuEditForm({
   const [hsn, setHsn] = useState(sku.hsn ?? '');
   const [batchTracked, setBatchTracked] = useState(sku.batchTracked);
   const [serialTracked, setSerialTracked] = useState(sku.serialTracked);
+  // Story 2-6a — the serial format; unticking serial tracking shows `free`
+  // (the server resets the format when tracking ends — A15).
+  const [serialFormat, setSerialFormat] = useState<SerialFormat>(serialFormatOf(sku));
   // Story 1-4 — catch weight, the ABC class and the shelf life join the form.
   const [catchWeightTracked, setCatchWeightTracked] = useState(sku.catchWeightTracked);
   const [abcClass, setAbcClass] = useState<string>((sku.abcClass as string | null) ?? '');
@@ -803,6 +809,7 @@ function SkuEditForm({
           hsn: trimmedHsn === '' ? null : trimmedHsn,
           batchTracked,
           serialTracked,
+          ...serialFormatEditField(sku, serialTracked, serialFormat),
           catchWeightTracked,
           weightGrams: weight,
           lengthMm: length,
@@ -1042,9 +1049,33 @@ function SkuEditForm({
           Batch tracked
         </label>
         <label className="flex items-center gap-2 text-xs">
-          <input type="checkbox" checked={serialTracked} onChange={(e) => setSerialTracked(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={serialTracked}
+            onChange={(e) => {
+              setSerialTracked(e.target.checked);
+              if (!e.target.checked) setSerialFormat('free');
+            }}
+          />
           Serial tracked
         </label>
+        {serialTracked ? (
+          <label className="flex items-center gap-2 text-xs">
+            <span className={labelClass}>Serial format</span>
+            <select
+              className={inputClass}
+              aria-label="Serial format"
+              value={serialFormat}
+              onChange={(e) => setSerialFormat(e.target.value as SerialFormat)}
+            >
+              {SERIAL_FORMAT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="flex items-center gap-2 text-xs">
           <input
             type="checkbox"

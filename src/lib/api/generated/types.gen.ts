@@ -743,6 +743,10 @@ export type SkuResponse = {
     batchTracked: boolean;
     serialTracked: boolean;
     /**
+     * Story 2-6a — the serial format, consulted only while serialTracked: `free` (any 1–64 printable characters) or `imei` (a 15-digit, Luhn-valid IMEI 1). Absent on a SKU write replayed from before 2-6a
+     */
+    serialFormat?: 'free' | 'imei';
+    /**
      * Story 10.3: handled by unit, priced by weight — each physical unit received carries its own captured weight on a handling_units row. Mutually exclusive with serialTracked.
      */
     catchWeightTracked: boolean;
@@ -954,6 +958,10 @@ export type CreateSkuDto = {
     batchTracked: boolean;
     serialTracked: boolean;
     /**
+     * Story 2-6a — `free` (default) or `imei`: an IMEI SKU's receipt accepts only a 15-digit, Luhn-valid IMEI 1 per unit. `imei` without serialTracked is a 400
+     */
+    serialFormat?: 'free' | 'imei';
+    /**
      * Handled by unit, priced by weight. Mutually exclusive with serialTracked
      */
     catchWeightTracked: boolean;
@@ -1135,6 +1143,10 @@ export type PatchSkuDto = {
     hsn?: string | null;
     batchTracked?: boolean;
     serialTracked?: boolean;
+    /**
+     * Story 2-6a — `free` | `imei`. Absent = unchanged, except that an edit ending serial tracking resets it to `free`. `imei` on a SKU that will not be serial-tracked is a 400. Changing it affects new captures only
+     */
+    serialFormat?: 'free' | 'imei';
     /**
      * Story 10.3: handled by unit, priced by weight. Turning it on for a serial-tracked SKU (or the reverse) is a 400 — two per-unit identity systems over one unit is unsupported.
      */
@@ -4039,6 +4051,14 @@ export type GrnLineInputDto = {
      * Story 2-5a — the line's damage photos, by the ULID the handheld minted at capture (each photo's own upload op's Idempotency-Key), in capture order. At most 10 per line and 50 per receipt, unique across the receipt. A photo uploaded first is attached by this receipt; one that arrives later fills the placeholder this receipt leaves. A ref that is unknown to this device, or already bound, is skipped — never a refusal. Omit when the line has none (an empty array means the same)
      */
     photoRefs?: Array<string>;
+    /**
+     * Story 2-6a — the line's serial numbers (one per GOOD unit, in capture order), required on a serial-tracked SKU's line and refused on any other: `qty` must equal the count. Each is trimmed, then must be 1–64 printable ASCII characters with no whitespace; case-sensitive; none may repeat for the same SKU across the receipt; ≤ 500 per line (with unreadableSerialQty) and ≤ 1,000 per receipt — each a 400. On an `imei` SKU each must be a 15-digit, Luhn-valid IMEI. A serial already in stock, in transit, on a pending over-receipt, dispatched on an order, blocked, or (imei) badly formed is refused PER SERIAL into `rejectedLines` (`serialsOnly`) and the rest of the line books. Omit (or send an empty array) when the line has none
+     */
+    serials?: Array<string> | null;
+    /**
+     * Story 2-6a — units of a serial-tracked line whose serial could not be read: RECORDED on the line, never booked or credited (set them aside and report). Needs at least one serial on the line; counts toward the 500-per-line cap. Omit (or 0) when none
+     */
+    unreadableSerialQty?: number | null;
 };
 
 export type SubmitGoodsReceiptDto = {
@@ -4134,6 +4154,22 @@ export type GrnLineDto = {
      * Catch weight (story 10.3): the handling units this line produced, in the order their weights were supplied — present only on a catch-weight line. These ids are what a unit label carries and what the pack bench scans back.
      */
     handlingUnitIds?: Array<string>;
+    /**
+     * Story 2-6a — the serial numbers this line BOOKED now (one `grn.received` each), in capture order; present only on a serial line that booked some
+     */
+    serials?: Array<string>;
+    /**
+     * Story 2-6a — the serial numbers set aside on this line's over-receipt (they book, in order, when it is approved); present only when some pend
+     */
+    pendingSerials?: Array<string>;
+    /**
+     * Story 2-6a — units recorded without a readable serial (not booked); present only when > 0
+     */
+    unreadableSerialQty?: number;
+    /**
+     * Story 2-6a — present on a serial line of a QC-on-receipt client's receipt: it booked UNHELD (QC on receipt does not hold serial-tracked lines)
+     */
+    qcSkipped?: 'serial-tracked';
 };
 
 export type MissingLicenceDto = {
@@ -4149,6 +4185,25 @@ export type MissingLicenceDto = {
      * The receipt's site code — the site a site licence is missing at, or a client licence is missing for
      */
     siteCode?: string;
+};
+
+export type RejectedSerialDetailDto = {
+    /**
+     * The refused serial number, as sent (trimmed)
+     */
+    serial: string;
+    /**
+     * The bin code it is in (in stock), or the in-transit bin
+     */
+    binCode?: string;
+    /**
+     * That bin's warehouse code
+     */
+    warehouseCode?: string;
+    /**
+     * An imei SKU: the OTHER SKU this IMEI is held under
+     */
+    skuCode?: string;
 };
 
 export type RejectedGrnLineDto = {
@@ -4182,9 +4237,9 @@ export type RejectedGrnLineDto = {
      */
     shortReasonCode?: 'not-shipped' | 'short-packed' | 'lost-in-transit' | 'other';
     /**
-     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only). Story 1-2a: `client-departed` — a line of ANY receipt whose SKU's client has departed; also to review (Discard only — re-receive after an owner reactivates the client). Story 1-2b — the expiry rules, each per line: `expiry-on-untracked`, `expiry-before-mfg`, `batch-expiry-mismatch`, `expiry-required` (review, Discard only) and `shelf-life-short` (its own review row — Accept anyway with a note, or Discard). Story 1-6d: `licence-not-covered` — licence enforcement is on and no valid client and site licence covers the line's drug or food goods on the receipt's IST date; its own review row (`grn.licence-refused` — an owner may accept it anyway with a note, or discard it)
+     * Machine reason. Only an OPEN document rejects a line. `po-line-not-open` is defensive since story 21-9 (an open PO has no cancelled or carried line) and stays in the enum for older clients. Story 1-1: `sku-client-mismatch` — a BLIND receipt's line whose SKU belongs to another client than the receipt's; it goes to the review queue (Discard only). Story 1-2a: `client-departed` — a line of ANY receipt whose SKU's client has departed; also to review (Discard only — re-receive after an owner reactivates the client). Story 1-2b — the expiry rules, each per line: `expiry-on-untracked`, `expiry-before-mfg`, `batch-expiry-mismatch`, `expiry-required` (review, Discard only) and `shelf-life-short` (its own review row — Accept anyway with a note, or Discard). Story 1-6d: `licence-not-covered` — licence enforcement is on and no valid client and site licence covers the line's drug or food goods on the receipt's IST date; its own review row (`grn.licence-refused` — an owner may accept it anyway with a note, or discard it). Story 2-6a — serial capture, all to `grn.lines-refused` (Discard only): the WHOLE line is refused `serials-required` (a serial-tracked SKU sent without serials — an older build or queued op) or `serials-on-untracked` (serials on a SKU that is not serial-tracked); PER SERIAL (`serialsOnly`, the rest books — or the whole line when every serial is refused): `serial-format-invalid` (not a valid IMEI on an imei SKU), `serial-in-stock` (on hand in any bin of any warehouse, or — imei — under another imei SKU), `serial-in-transit` (on a transfer), `serial-pending-approval` (on another receipt's open over-receipt), `serial-dispatched-use-returns` (it left on an order — receive it as a return) and `serial-blocked`
      */
-    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found' | 'sku-client-mismatch' | 'client-departed' | 'expiry-on-untracked' | 'expiry-before-mfg' | 'batch-expiry-mismatch' | 'expiry-required' | 'shelf-life-short' | 'licence-not-covered';
+    code: 'po-line-not-found' | 'po-line-not-open' | 'asn-line-not-found' | 'sku-client-mismatch' | 'client-departed' | 'expiry-on-untracked' | 'expiry-before-mfg' | 'batch-expiry-mismatch' | 'expiry-required' | 'shelf-life-short' | 'licence-not-covered' | 'serials-required' | 'serials-on-untracked' | 'serial-format-invalid' | 'serial-in-stock' | 'serial-in-transit' | 'serial-pending-approval' | 'serial-dispatched-use-returns' | 'serial-blocked';
     /**
      * Human-readable reason naming the line state
      */
@@ -4209,6 +4264,22 @@ export type RejectedGrnLineDto = {
      * Story 1-6d — `licence-not-covered` only: each need no valid licence covers on the receipt's IST date, and which holder lacks it (the entry also carries `index`)
      */
     missing?: Array<MissingLicenceDto>;
+    /**
+     * Story 2-6a — the refused serial numbers (a serial refusal), or the refused line's serials (a `serials-*` line refusal)
+     */
+    serials?: Array<string>;
+    /**
+     * Story 2-6a — ONLY these serials of line `index` were refused; the rest of the line booked (qty = the refused count)
+     */
+    serialsOnly?: true;
+    /**
+     * Story 2-6a — per refused serial: where it is, or the other IMEI SKU holding it
+     */
+    serialDetails?: Array<RejectedSerialDetailDto>;
+    /**
+     * Story 2-6a — a whole-line refusal's unreadable units (not booked); present only when > 0
+     */
+    unreadableSerialQty?: number;
 };
 
 export type UnmatchedGrnLineDto = {
@@ -4397,6 +4468,10 @@ export type CatalogSnapshotSkuDto = {
     batchTracked: boolean;
     serialTracked: boolean;
     /**
+     * Story 2-6a: the serial format (`free` | `imei`) — the device's offline serial gate. A device whose snapshot lacks it (a pre-2-6a server) refuses to receive a serial-tracked SKU rather than capture anonymously
+     */
+    serialFormat: 'free' | 'imei';
+    /**
      * Story 10.3: the SKU is handled by unit and priced by weight. It rides the snapshot so the device can PROMPT for a per-unit weight at receipt while offline — a prompt only the server knows about never happens on the floor.
      */
     catchWeightTracked: boolean;
@@ -4558,6 +4633,10 @@ export type PutawayTaskDto = {
      * The one-line capacity-only rationale
      */
     rationale: string;
+    /**
+     * Story 2-6a — present only on a SERIAL-TRACKED task: the GRN line's booked serial numbers still in the Receiving bin, in capture order (qty is their count). The handheld verifies each scan against this list offline; a serial task without it (an older server, a legacy anonymous line) cannot be placed from the handheld
+     */
+    serialNumbers?: Array<string>;
 };
 
 export type PickTaskDto = {
@@ -5064,6 +5143,21 @@ export type GoodsReceiptListResponse = {
     nextCursor?: string | null;
 };
 
+export type GrnLineSerialEntryDto = {
+    /**
+     * The serial number (IMEI 1 on an imei SKU)
+     */
+    serial: string;
+    /**
+     * `applied` — booked; `pending` — awaiting the over-receipt approval; `rejected` — that approval was rejected
+     */
+    state: 'applied' | 'pending' | 'rejected';
+    /**
+     * Present when this serial was received again after a write-off
+     */
+    afterWriteOff?: true;
+};
+
 export type GoodsReceiptLineEntryDto = {
     id: string;
     skuId: string;
@@ -5103,6 +5197,18 @@ export type GoodsReceiptLineEntryDto = {
      * Story 2-5a — the line's photos the receipt named that have not arrived yet (awaited)
      */
     pendingPhotoCount: number;
+    /**
+     * Story 2-6a — the line's captured serials in capture order, each with its state; present only on a line that captured serials
+     */
+    serials?: Array<GrnLineSerialEntryDto>;
+    /**
+     * Story 2-6a — units recorded without a readable serial (not booked); present only when > 0
+     */
+    unreadableSerialQty?: number;
+    /**
+     * Story 2-6a — QC on receipt was skipped for this serial line (it booked unheld; derived: serial rows, no receipt hold, and the receipt's client has QC on receipt NOW)
+     */
+    qcSkipped?: 'serial-tracked';
 };
 
 export type GoodsReceiptLinesResponse = {
@@ -5160,6 +5266,10 @@ export type OverReceiptDto = {
      * Story 1-2b — on an approval's answer only: the receipt QC hold the approved excess was put on (the client's QC on receipt)
      */
     qcHoldId?: string;
+    /**
+     * Story 2-6a — on a serial line's over-receipt: the serial numbers of the excess, in capture order (they book when approved). Present only when the excess carries serials
+     */
+    serials?: Array<string>;
 };
 
 export type OverReceiptListResponse = {
@@ -17109,7 +17219,7 @@ export type ReceivingControllerSubmitGoodsReceiptData = {
 
 export type ReceivingControllerSubmitGoodsReceiptErrors = {
     /**
-     * Missing or malformed Idempotency-Key, or an invalid body (validation-failed) — story 1-1: a clientId beside a poId or an asnId; story 2-4a: a damaged or short quantity without its reason, a reason with 0 or outside its vocabulary, a negative or over-maximum quantity, a line with qty + damagedQty = 0, or damage on a serial-tracked or catch-weight SKU
+     * Missing or malformed Idempotency-Key, or an invalid body (validation-failed) — story 1-1: a clientId beside a poId or an asnId; story 2-4a: a damaged or short quantity without its reason, a reason with 0 or outside its vocabulary, a negative or over-maximum quantity, a line with qty + damagedQty = 0, or damage on a serial-tracked or catch-weight SKU; story 2-6a: a serial that is blank, over 64 characters or holds whitespace after trimming, a serial named twice for one SKU, serials not one per good unit, unreadable units without a serial, over 500 serial units on a line or 1,000 serials on a receipt
      */
     400: ProblemDetailsDto;
     /**
@@ -17337,7 +17447,7 @@ export type ReceivingControllerApproveOverReceiptErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Already approved/rejected (over-receipt-decided), the SKU became a kit since the GRN — the excess can never apply to it (kit-cannot-hold-stock, naming it), or a concurrent idempotent request (conflict)
+     * Already approved/rejected (over-receipt-decided), the SKU became a kit since the GRN — the excess can never apply to it (kit-cannot-hold-stock, naming it), story 2-6a: a serial of the excess can no longer book — it is now in stock or in transit (serial-in-stock / serial-in-transit, naming the serial and its bin), on another receipt's pending excess (serial-pending-approval), left on an order (serial-dispatched-use-returns) or blocked (serial-blocked) — reject the excess instead; or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**

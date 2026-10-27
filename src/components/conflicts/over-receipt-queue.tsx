@@ -17,6 +17,8 @@ import {
   isUnmatchedOverReceipt,
   openQtyLabel,
   overReceiptDocumentLabel,
+  EXCESS_SERIALS_SHOWN,
+  excessSerialsLabel,
 } from '@/lib/over-receipt';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -301,6 +303,8 @@ function OverReceiptCard({
           {!late && <> · {openQtyLabel({ openQty: line.openQty, receivedQty: line.receivedQty, expected: line.expected }, sku)} open</>}
         </div>
       )}
+      {/* Story 2-6a (A5) — a serial line's excess names its serials; the full list on demand. */}
+      <ExcessSerials serials={entry.serials} status={entry.status} />
       <div className="text-xs text-(--muted-foreground)">
         Requested by {requestedBy ?? 'unknown user'} ·{' '}
         <time dateTime={entry.requestedAt}>{new Date(entry.requestedAt).toLocaleString()}</time>
@@ -338,5 +342,26 @@ function OverReceiptCard({
         </div>
       )}
     </article>
+  );
+}
+
+/** Story 2-6a — the excess's serials: a one-line summary, the whole list (monospace) behind a disclosure. */
+function ExcessSerials({ serials, status }: { serials: readonly string[] | undefined; status: 'pending' | 'approved' | 'rejected' }) {
+  const label = excessSerialsLabel(serials, status);
+  if (label === null || serials === undefined) return null;
+  return (
+    <div className="text-xs" data-testid="over-receipt-serials">
+      <span className="font-mono">{label}</span>
+      {serials.length > EXCESS_SERIALS_SHOWN && (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-(--muted-foreground)">Show all {serials.length} serials</summary>
+          <ol className="mt-1 max-h-48 overflow-y-auto rounded-sm border border-(--border) px-2 py-1 font-mono">
+            {serials.map((serial) => (
+              <li key={serial}>{serial}</li>
+            ))}
+          </ol>
+        </details>
+      )}
+    </div>
   );
 }

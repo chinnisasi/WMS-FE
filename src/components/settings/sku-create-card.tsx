@@ -19,6 +19,8 @@ import {
   STORAGE_CLASSES,
   UOM_OPTIONS,
   type SkuCreateDraft,
+  SERIAL_FORMAT_OPTIONS,
+  type SerialFormat,
 } from '@/lib/sku-admin';
 import { ulid } from '@/lib/ulid';
 import { roleHasCapability } from '@/lib/users';
@@ -305,6 +307,24 @@ function SkuCreateCardAllowed() {
               <input type="checkbox" checked={draft.serialTracked} onChange={(e) => edit({ serialTracked: e.target.checked })} />
               Serial tracked
             </label>
+            {/* Story 2-6a — the serial format, only while serial tracking is on. */}
+            {draft.serialTracked ? (
+              <label className="flex items-center gap-2 text-xs">
+                <span className={labelClass}>Serial format</span>
+                <select
+                  className={inputClass}
+                  aria-label="Serial format"
+                  value={draft.serialFormat}
+                  onChange={(e) => edit({ serialFormat: e.target.value as SerialFormat })}
+                >
+                  {SERIAL_FORMAT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={draft.catchWeightTracked} onChange={(e) => edit({ catchWeightTracked: e.target.checked })} />
               Catch weight

@@ -485,7 +485,8 @@ describe('story 1-1 — a blind receipt\'s lines of another client (grn.lines-re
   test('every GRN line refusal reason has words', () => {
     expect(GRN_REFUSAL_LABEL['sku-client-mismatch']).toBe("another client's SKU");
     expect(Object.keys(GRN_REFUSAL_LABEL).sort()).toEqual(
-      // Story 1-2a adds `client-departed`; story 1-2b the five expiry codes; story 1-6d `licence-not-covered`.
+      // Story 1-2a adds `client-departed`; story 1-2b the five expiry codes; story 1-6d `licence-not-covered`;
+      // story 2-6a the eight serial codes.
       [
         'asn-line-not-found',
         'batch-expiry-mismatch',
@@ -496,6 +497,14 @@ describe('story 1-1 — a blind receipt\'s lines of another client (grn.lines-re
         'licence-not-covered',
         'po-line-not-found',
         'po-line-not-open',
+        'serial-blocked',
+        'serial-dispatched-use-returns',
+        'serial-format-invalid',
+        'serial-in-stock',
+        'serial-in-transit',
+        'serial-pending-approval',
+        'serials-on-untracked',
+        'serials-required',
         'shelf-life-short',
         'sku-client-mismatch',
       ],

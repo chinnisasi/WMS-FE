@@ -42,6 +42,7 @@ import { clientFilterForDrill, clientFilterKey, hiddenByClientFilterNote } from 
 import { poCreatedOutcome } from '@/lib/purchase-orders';
 import { grnGateInLabel } from '@/lib/gate-ins';
 import { grnDamagedSuffix, grnLineAppliedLabel, grnLineConditionLabel, grnShortSuffix } from '@/lib/grn-lines';
+import { GrnLineSerials } from '@/components/inbound/grn-line-serials';
 import { useGoodsReceiptLines } from '@/lib/use-grn-lines';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { ulid } from '@/lib/ulid';
@@ -724,6 +725,8 @@ function GoodsReceiptLinesPanel({
               · {grnLineConditionLabel(line, sku)}
               {grnLineAppliedLabel(line, sku)}
               <LinePhotosButton line={line} canAttach={canAttach} onOpen={() => onPhotos(line.id)} />
+              {/* Story 2-6a — the line's serials, unreadable units and QC skip. */}
+              <GrnLineSerials line={line} />
             </div>
           );
         })

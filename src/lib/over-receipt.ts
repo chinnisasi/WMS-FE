@@ -192,3 +192,20 @@ export function releaseReceiptReason(error: unknown): string {
   }
   return qcReason(error);
 }
+
+/** Story 2-6a — the serials an over-receipt card names before "and N more". */
+export const EXCESS_SERIALS_SHOWN = 10;
+
+/**
+ * Story 2-6a (A5) — the excess's serials in words: `Serials (3): A, B, C`,
+ * the first `EXCESS_SERIALS_SHOWN` spelled out and the rest counted; null
+ * when the excess carries none (a non-serial line, or one received before
+ * serial capture).
+ */
+export function excessSerialsLabel(serials: readonly string[] | undefined, status: 'pending' | 'approved' | 'rejected'): string | null {
+  if (serials === undefined || serials.length === 0) return null;
+  const head = serials.slice(0, EXCESS_SERIALS_SHOWN).join(', ');
+  const rest = serials.length - EXCESS_SERIALS_SHOWN;
+  const verb = status === 'pending' ? 'book on approval' : status === 'approved' ? 'booked' : 'not booked';
+  return `Serials (${serials.length}, ${verb}): ${head}${rest > 0 ? ` and ${rest} more` : ''}`;
+}
