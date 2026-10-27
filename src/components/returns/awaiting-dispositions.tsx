@@ -304,6 +304,9 @@ export function AwaitingDispositions({
                   // panel closes — its draft was for figures that no longer hold).
                   setOpenId(null);
                   setOutcome({ tone: 'rejected', word: 'Not recorded', reason });
+                  // Back to page one with a fresh cursor stack (the RETURNS_CHANGED reset).
+                  onCursor(null);
+                  setPageEpoch((epoch) => epoch + 1);
                   queue.reload();
                 }}
               />
