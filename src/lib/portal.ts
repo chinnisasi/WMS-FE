@@ -657,6 +657,8 @@ export function orderTimeline(order: Pick<PortalOrderRowDto, 'status' | 'created
   // A status a newer backend added and this build does not know: Placed alone, never a guess.
   const rest = Object.hasOwn(ORDER_TIMELINE, order.status) ? ORDER_TIMELINE[order.status] : [];
   return [{ label: 'Placed', state: 'done', time: portalDateTime(order.createdAt) }, ...rest];
+}
+
 // ── returns (story 4-7a) ─────────────────────────────────────────────────────
 
 /** A return's status in the client's words — a `Record` over the generated union. */

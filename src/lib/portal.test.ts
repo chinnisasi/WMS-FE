@@ -432,6 +432,9 @@ describe('story UI-1 — Home counts, nav, and the order timeline', () => {
   test('orderTimeline: a status this build does not know reads Placed alone', () => {
     const steps = orderTimeline({ status: 'on_hold' as never, createdAt: placed });
     expect(steps.map((s) => s.label)).toEqual(['Placed']);
+  });
+});
+
 describe('story 4-7a — the portal returns', () => {
   const totals = { receivedTotal: 0, restockedTotal: 0, onHoldTotal: 0, failedInspectionTotal: 0, scrappedTotal: 0, openTotal: 0 };
 
