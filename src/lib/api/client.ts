@@ -208,6 +208,15 @@ import {
   clientsControllerEditContact,
   clientsControllerRemoveContact,
   clientInvoicesControllerDiscard,
+  clientInvoiceNotesControllerCreate,
+  clientInvoiceNotesControllerDiscard,
+  clientInvoiceNotesControllerGet,
+  clientInvoiceNotesControllerGetPolicy,
+  clientInvoiceNotesControllerIssue,
+  clientInvoiceNotesControllerNotesOfInvoice,
+  clientInvoiceNotesControllerPutPolicy,
+  clientInvoiceNotesControllerRegister,
+  clientInvoiceNotesControllerVoid,
   clientInvoicesControllerDispute,
   clientInvoicesControllerGet,
   clientInvoicesControllerIssue,
@@ -224,6 +233,8 @@ import {
   portalControllerGoodsReceipts,
   portalControllerGoodsReceipt,
   portalControllerInvoice,
+  portalControllerInvoiceNote,
+  portalControllerInvoiceNotes,
   portalControllerInvoices,
   portalControllerMe,
   portalControllerOrder,
@@ -265,6 +276,8 @@ import type {
   PortalCreateAsnDto,
   PortalCreateOrderDto,
   PortalInvoiceDetailResponse,
+  PortalInvoiceNotesResponse,
+  PortalNoteDetailResponse,
   PortalInvoicePageResponse,
   PortalMeResponse,
   PortalOrderDetailResponse,
@@ -291,6 +304,12 @@ import type {
   ClientInvoiceListResponse,
   StorageBreakdownResponse,
   ClientInvoiceResponse,
+  CreateNoteDto,
+  InvoiceNotesResponse,
+  IssueNoteResponse,
+  NoteDto,
+  NotePolicyResponse,
+  NoteRegisterResponse,
   IssueClientInvoiceResponse,
   PrepareClientInvoicesResponse,
   UpdateClientStatusDto,
@@ -1768,6 +1787,85 @@ export async function fetchApiTransitionClientInvoice(
     throw unwrapError(error, 400);
   }
   return data.invoice;
+}
+
+/* ------------------------------------------------------------------ */
+/* Credit and debit notes (story 5-6a) — GST s.34 notes against an     */
+/* issued client invoice. Reads are member-open; the mutations need    */
+/* `billing.invoice`, the policy PUT the owner-only `billing.configure`.*/
+/* ------------------------------------------------------------------ */
+
+/** Draft a credit or debit note against an issued invoice (201 `{note}`). */
+export async function fetchApiCreateClientInvoiceNote(tenantId: string, invoiceId: string, body: CreateNoteDto, idempotencyKey: string): Promise<NoteDto> {
+  const { data, error } = await clientInvoiceNotesControllerCreate({
+    path: { tenantId, invoiceId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data.note;
+}
+
+/** One invoice's notes (drafts included) and its document value after the issued ones. */
+export async function fetchApiClientInvoiceNotes(tenantId: string, invoiceId: string, options?: { signal?: AbortSignal }): Promise<InvoiceNotesResponse> {
+  const { data, error } = await clientInvoiceNotesControllerNotesOfInvoice({ path: { tenantId, invoiceId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiGetClientInvoiceNote(tenantId: string, noteId: string, options?: { signal?: AbortSignal }): Promise<NoteDto> {
+  const { data, error } = await clientInvoiceNotesControllerGet({ path: { tenantId, noteId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data.note;
+}
+
+/** Issue a draft note: `{note, invoice?}` — `invoice` when the note settled its dispute. A NEW key per click. */
+export async function fetchApiIssueClientInvoiceNote(tenantId: string, noteId: string, idempotencyKey: string): Promise<IssueNoteResponse> {
+  const { data, error } = await clientInvoiceNotesControllerIssue({ path: { tenantId, noteId }, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiDiscardClientInvoiceNote(tenantId: string, noteId: string, idempotencyKey: string): Promise<void> {
+  const { error } = await clientInvoiceNotesControllerDiscard({ path: { tenantId, noteId }, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error) throw unwrapError(error, 400);
+}
+
+export async function fetchApiVoidClientInvoiceNote(tenantId: string, noteId: string, voidNote: string, idempotencyKey: string): Promise<NoteDto> {
+  const { data, error } = await clientInvoiceNotesControllerVoid({
+    path: { tenantId, noteId },
+    body: { voidNote },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data.note;
+}
+
+/** The notes register (GSTR-1 CDNR fields) of one supplying GSTIN over inclusive IST dates. */
+export async function fetchApiClientInvoiceNoteRegister(
+  tenantId: string,
+  query: { gstin: string; from: string; to: string; kind?: 'credit' | 'debit'; status?: 'issued' | 'void'; cursor?: string; limit?: number },
+  options?: { signal?: AbortSignal },
+): Promise<NoteRegisterResponse> {
+  const { data, error } = await clientInvoiceNotesControllerRegister({ path: { tenantId }, query, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiNotePolicy(tenantId: string, options?: { signal?: AbortSignal }): Promise<NotePolicyResponse> {
+  const { data, error } = await clientInvoiceNotesControllerGetPolicy({ path: { tenantId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiPutNotePolicy(tenantId: string, requireSecondApprover: boolean, idempotencyKey: string): Promise<NotePolicyResponse> {
+  const { data, error } = await clientInvoiceNotesControllerPutPolicy({
+    path: { tenantId },
+    body: { requireSecondApprover },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
 }
 
 /* ------------------------------------------------------------------ */
@@ -5220,6 +5318,28 @@ export async function fetchApiPortalInvoice(
   options?: { signal?: AbortSignal },
 ): Promise<PortalInvoiceDetailResponse> {
   const { data, error } = await portalControllerInvoice({ path: { tenantId, invoiceId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 5-6a — one of this client's invoices' issued and void notes, and the document value after them. */
+export async function fetchApiPortalInvoiceNotes(
+  tenantId: string,
+  invoiceId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalInvoiceNotesResponse> {
+  const { data, error } = await portalControllerInvoiceNotes({ path: { tenantId, invoiceId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 5-6a — one issued or void note of this client. */
+export async function fetchApiPortalInvoiceNote(
+  tenantId: string,
+  noteId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalNoteDetailResponse> {
+  const { data, error } = await portalControllerInvoiceNote({ path: { tenantId, noteId }, signal: options?.signal });
   if (error || !data) throw portalError(error);
   return data;
 }

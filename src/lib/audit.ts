@@ -38,6 +38,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   channel_connection: 'Channel connection',
   client: 'Client',
   client_invoice: 'Client invoice',
+  client_invoice_note: 'Credit/debit note',
+  client_invoice_note_policy: 'Credit-note approval setting',
   count_task: 'Count task',
   count_variance: 'Count variance',
   count_variance_policy: 'Variance policy',

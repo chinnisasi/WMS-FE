@@ -10,6 +10,8 @@ import {
   fetchApiPortalSkus,
   fetchApiPortalWarehouses,
   fetchApiPortalInvoice,
+  fetchApiPortalInvoiceNote,
+  fetchApiPortalInvoiceNotes,
   fetchApiPortalInvoices,
   fetchApiPortalOrder,
   fetchApiPortalOrders,
@@ -26,6 +28,8 @@ import type {
   PortalGoodsReceiptDetailDto,
   PortalGoodsReceiptRowDto,
   PortalInvoiceDetailResponse,
+  PortalInvoiceNotesResponse,
+  PortalNoteDetailResponse,
   PortalInvoiceRowDto,
   PortalOrderDetailResponse,
   PortalOrderRowDto,
@@ -271,6 +275,16 @@ export function usePortalInvoices() {
 
 export function usePortalInvoice(invoiceId: string | null): ResourceState<PortalInvoiceDetailResponse> & Reloadable {
   return usePortalDetail(invoiceId, 'This invoice', fetchApiPortalInvoice);
+}
+
+/** Story 5-6a — one invoice's issued and void credit and debit notes, and the document value after them. */
+export function usePortalInvoiceNotes(invoiceId: string | null): ResourceState<PortalInvoiceNotesResponse> & Reloadable {
+  return usePortalDetail(invoiceId, 'This invoice', fetchApiPortalInvoiceNotes);
+}
+
+/** Story 5-6a — one issued or void note. */
+export function usePortalInvoiceNote(noteId: string | null): ResourceState<PortalNoteDetailResponse> & Reloadable {
+  return usePortalDetail(noteId, 'This note', fetchApiPortalInvoiceNote);
 }
 
 // ── story 21-7b: the announce form's reads ──────────────────────────────────

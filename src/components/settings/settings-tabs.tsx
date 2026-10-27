@@ -9,6 +9,7 @@ import { ClientsCard } from '@/components/settings/clients-card';
 import { DevicesCard } from '@/components/settings/devices-card';
 import { PartnersCard } from '@/components/settings/partners-card';
 import { ImportCatalogCard } from '@/components/settings/import-catalog';
+import { NotePolicyCard } from '@/components/settings/note-policy-card';
 import { ProductsCard } from '@/components/settings/products-card';
 import { RateCardsCard } from '@/components/settings/rate-cards-card';
 import { SegregationMatrixCard } from '@/components/settings/segregation-matrix-card';
@@ -72,6 +73,8 @@ function SettingsTabsKnown({ initialTab }: { initialTab: SettingsTab | null }) {
             <>
               <ClientsCard />
               <RateCardsCard />
+              {/* Story 5-6a — the credit-note maker/checker switch (owner changes it). */}
+              <NotePolicyCard />
             </>
           )}
           {tab === 'partners' && <PartnersCard />}

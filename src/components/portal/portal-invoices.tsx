@@ -15,6 +15,7 @@ import { usePortalTenantId, usePortalInvoice, usePortalInvoices } from '@/lib/us
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { EmptyState } from '@/components/shared/empty-state';
+import { PortalInvoiceNotes } from '@/components/portal/portal-invoice-notes';
 import { ReadFailure, Section, rowButtonClass } from '@/components/shared/surface';
 
 /**
@@ -76,7 +77,13 @@ function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
   const invoice = usePortalInvoice(invoiceId);
   if (invoice.state === 'loading') return <div className="text-(--muted-foreground)">Loading the invoice…</div>;
   if (invoice.state === 'failed') return <ReadFailure word="Invoice not loaded" reason={invoice.reason} onRetry={invoice.reload} />;
-  return <InvoiceDocument invoice={invoice.data} />;
+  return (
+    <div className="flex flex-col gap-3">
+      <InvoiceDocument invoice={invoice.data} />
+      {/* Story 5-6a — the invoice's credit and debit notes (issued and void, never a draft). */}
+      <PortalInvoiceNotes invoiceId={invoiceId} />
+    </div>
+  );
 }
 
 function InvoiceDocument({ invoice }: { invoice: PortalInvoiceDetailResponse }) {
