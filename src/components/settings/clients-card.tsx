@@ -50,6 +50,7 @@ import { ConfirmRow } from '@/components/settings/confirm-row';
 import { ClientContactsPanel } from '@/components/settings/client-contacts';
 import { ClientAddressesPanel } from '@/components/settings/client-addresses';
 import { ClientReceivingPolicyPanel } from '@/components/settings/client-receiving-policy';
+import { ClientAllocationPolicyPanel } from '@/components/settings/client-allocation-policy';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -71,6 +72,8 @@ type Panel =
   | { kind: 'contacts'; client: ClientDto }
   | { kind: 'addresses'; client: ClientDto }
   | { kind: 'receiving'; client: ClientDto }
+  // Story 4-3a — the outbound allocation policy, beside the receiving policy.
+  | { kind: 'allocation'; client: ClientDto }
   | { kind: ClientStatusAction; client: ClientDto };
 
 /** The panel's name in the discard question. */
@@ -82,6 +85,8 @@ function panelName(panel: Panel): string {
       return `${panel.client.code}'s addresses`;
     case 'receiving':
       return `${panel.client.code}'s receiving policy`;
+    case 'allocation':
+      return `${panel.client.code}'s allocation policy`;
     default:
       return panel.client.code;
   }
@@ -197,6 +202,7 @@ function ClientsCardSessioned() {
             {rowButton('Contacts', `Contacts of ${client.code}`, { kind: 'contacts', client })}
             {rowButton('Addresses', `Addresses of ${client.code}`, { kind: 'addresses', client })}
             {rowButton('Receiving', `Receiving policy of ${client.code}`, { kind: 'receiving', client })}
+            {rowButton('Allocation', `Allocation policy of ${client.code}`, { kind: 'allocation', client })}
             {statusActions.includes('suspend') ? rowButton('Suspend', `Suspend ${client.code}`, { kind: 'suspend', client }) : null}
             {statusActions.includes('depart') ? rowButton('Depart', `Depart ${client.code}`, { kind: 'depart', client }) : null}
           </div>
@@ -297,6 +303,17 @@ function ClientsCardSessioned() {
 
       {panel?.kind === 'addresses' ? (
         <ClientAddressesPanel
+          key={panel.client.id}
+          client={panel.client}
+          canManage={canManage}
+          onClose={() => show(null)}
+          onSaved={() => notifyClientsChanged()}
+          onDirtyChange={onDirtyChange}
+        />
+      ) : null}
+
+      {panel?.kind === 'allocation' ? (
+        <ClientAllocationPolicyPanel
           key={panel.client.id}
           client={panel.client}
           canManage={canManage}

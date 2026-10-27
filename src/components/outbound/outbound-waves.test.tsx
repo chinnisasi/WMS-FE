@@ -774,6 +774,35 @@ describe('Waves: the client filter (story 1-5a)', () => {
     expect(shipBy).toEqual(['Ship by 01 Jan · Overdue', 'Ship by 02 Jan']);
   });
 
+  test('story 4-3a: each stop names its batch, its expiry (or lot first received) and the frozen rule; a pre-4-3a line shows none of it', async () => {
+    waveRows = [wave()];
+    const base = picklist();
+    waveDetail = {
+      ...wave(),
+      picklists: [
+        {
+          ...base,
+          lines: [
+            { ...base.lines[0], batchId: 'b-1', batchCode: 'L1', batchExpiryDate: '2027-03-31', batchReceivedOn: '2026-01-03', allocationRule: 'fefo', minOutboundShelfLifeDays: 90 },
+            { ...base.lines[1], batchId: 'b-7', batchCode: 'L7', batchExpiryDate: null, batchReceivedOn: '2026-01-03', allocationRule: 'fifo', minOutboundShelfLifeDays: null },
+          ],
+        },
+        { ...base, id: 'pl-2', lines: [{ ...base.lines[0], id: 'line-9', picklistId: 'pl-2' }] },
+      ],
+    };
+    view = await mount('operator');
+    const toggle = buttons(view).find((b) => b.textContent?.includes('wave-planned'))!;
+    await act(async () => {
+      toggle.click();
+    });
+    await settle();
+    const rows = [...view.container.querySelectorAll('[data-testid="line-allocation"]')].map((c) => c.textContent);
+    expect(rows).toEqual([
+      'batch L1 · exp 31 Mar 2027 · earliest expiry first · needs ≥ 90 days',
+      'batch L7 · lot first received 3 Jan 2026 · oldest first',
+    ]);
+  });
+
   test('a mixed wave’s detail names each order’s client', async () => {
     waveRows = [wave()];
     skuClients = { 'sku-1': 'c-glow', 'sku-2': 'c-self' };

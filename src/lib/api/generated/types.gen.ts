@@ -3669,7 +3669,7 @@ export type PicklistLineDto = {
      */
     binCode: string | null;
     /**
-     * Suggested batch (FEFO within the bin); null when the SKU carries no batch stock
+     * Suggested batch (ranked by the client's allocation rule, story 4-3a); null when the SKU carries no batch stock
      */
     batchId: string | null;
     /**
@@ -3701,6 +3701,26 @@ export type PicklistLineDto = {
      * ISO-8601 UTC creation time
      */
     createdAt: string;
+    /**
+     * Story 4-3a — the suggested batch's code; null when none
+     */
+    batchCode?: string | null;
+    /**
+     * Story 4-3a — the suggested batch's expiry date (IST, YYYY-MM-DD); null when undated or none
+     */
+    batchExpiryDate?: string | null;
+    /**
+     * Story 4-3a — the IST date the suggested batch's LOT was first received in the tenant (batches.created_at — a lot received again keeps its first date); null when none
+     */
+    batchReceivedOn?: string | null;
+    /**
+     * Story 4-3a — the allocation rule this line was planned under (frozen at generate); null on a line planned before 4-3a (drawn as fefo with no minimum)
+     */
+    allocationRule?: 'fefo' | 'fifo' | null;
+    /**
+     * Story 4-3a — the minimum remaining shelf life (IST days) this line was planned under (frozen); null when none
+     */
+    minOutboundShelfLifeDays?: number | null;
 };
 
 export type PicklistDto = {
@@ -4587,6 +4607,22 @@ export type PickTaskDto = {
      * Story 4-2a — the task's order ship-by date (IST, YYYY-MM-DD); null when none.
      */
     orderShipByDate: string | null;
+    /**
+     * Story 4-3a — the suggested batch's expiry date (IST, YYYY-MM-DD); null when undated or none
+     */
+    batchExpiryDate?: string | null;
+    /**
+     * Story 4-3a — the IST date the suggested batch's LOT was first received in the tenant (batches.created_at — a lot received again keeps its first date); null when none
+     */
+    batchReceivedOn?: string | null;
+    /**
+     * Story 4-3a — the allocation rule this line was planned under (frozen at generate); null on a line planned before 4-3a (drawn as fefo with no minimum)
+     */
+    allocationRule?: 'fefo' | 'fifo' | null;
+    /**
+     * Story 4-3a — the minimum remaining shelf life (IST days) this line was planned under (frozen); null when none
+     */
+    minOutboundShelfLifeDays?: number | null;
 };
 
 export type CatalogPackTaskDto = {
@@ -8484,6 +8520,17 @@ export type ClientReceivingPolicyDto = {
     minShelfLifeDays: number | null;
 };
 
+export type ClientAllocationPolicyDto = {
+    /**
+     * `fefo` — earliest expiry first (batches with no expiry: lot first received first); `fifo` — lot first received first. Untracked SKUs are drawn in bin walk order under either. Applies to waves generated after it is saved
+     */
+    allocationRule: 'fefo' | 'fifo';
+    /**
+     * The minimum remaining shelf life at dispatch, in IST calendar days: a batch with less left is never allocated to this client's orders, and is not promised (ATP). Limits DATED batches only — a batch with no expiry is never limited. null = none
+     */
+    minOutboundShelfLifeDays: number | null;
+};
+
 export type ClientDto = {
     id: string;
     tenantId: string;
@@ -8524,6 +8571,10 @@ export type ClientDto = {
      * Story 1-2b — the receiving policy. Optional: a mutation answer stored before 1-2b replays without it; every fresh read carries it
      */
     receivingPolicy?: ClientReceivingPolicyDto;
+    /**
+     * Story 4-3a — the outbound allocation policy. Optional: a mutation answer stored before 4-3a replays without it; every fresh read carries it
+     */
+    allocationPolicy?: ClientAllocationPolicyDto;
 };
 
 export type ClientListResponse = {
@@ -8641,6 +8692,34 @@ export type UpdateClientReceivingPolicyDto = {
      * IST calendar days; null for none. Requires expiryRequired
      */
     minShelfLifeDays: number | null;
+};
+
+export type ClientAllocationPolicyResponse = {
+    /**
+     * `fefo` — earliest expiry first (batches with no expiry: lot first received first); `fifo` — lot first received first. Untracked SKUs are drawn in bin walk order under either. Applies to waves generated after it is saved
+     */
+    allocationRule: 'fefo' | 'fifo';
+    /**
+     * The minimum remaining shelf life at dispatch, in IST calendar days: a batch with less left is never allocated to this client's orders, and is not promised (ATP). Limits DATED batches only — a batch with no expiry is never limited. null = none
+     */
+    minOutboundShelfLifeDays: number | null;
+    clientId: string;
+    /**
+     * How many of the client's SKUs are NOT batch-tracked (kits excluded) — they are drawn in bin walk order under either rule
+     */
+    untrackedSkuCount: number;
+    /**
+     * Distinct active batches of the client's SKUs with NO expiry date and stock on hand (outside the QC-hold, damaged, returns and in-transit system bins), across warehouses — the minimum cannot limit them
+     */
+    undatedBatchesOnHand: number;
+};
+
+export type UpdateClientAllocationPolicyDto = {
+    allocationRule: 'fefo' | 'fifo';
+    /**
+     * IST calendar days; null for none (required — send null explicitly)
+     */
+    minOutboundShelfLifeDays: number | null;
 };
 
 export type ClientContactDto = {
@@ -22257,6 +22336,100 @@ export type ClientsControllerUpdateReceivingPolicyResponses = {
 };
 
 export type ClientsControllerUpdateReceivingPolicyResponse = ClientsControllerUpdateReceivingPolicyResponses[keyof ClientsControllerUpdateReceivingPolicyResponses];
+
+export type ClientsControllerGetAllocationPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/allocation-policy';
+};
+
+export type ClientsControllerGetAllocationPolicyErrors = {
+    /**
+     * A malformed clientId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientsControllerGetAllocationPolicyError = ClientsControllerGetAllocationPolicyErrors[keyof ClientsControllerGetAllocationPolicyErrors];
+
+export type ClientsControllerGetAllocationPolicyResponses = {
+    200: ClientAllocationPolicyResponse;
+};
+
+export type ClientsControllerGetAllocationPolicyResponse = ClientsControllerGetAllocationPolicyResponses[keyof ClientsControllerGetAllocationPolicyResponses];
+
+export type ClientsControllerUpdateAllocationPolicyData = {
+    body: UpdateClientAllocationPolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/allocation-policy';
+};
+
+export type ClientsControllerUpdateAllocationPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, or a field that breaks its rule — a rule outside fefo|fifo, a minimum outside 1-3650 whole days, or a missing key (validation-failed, naming the field)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerUpdateAllocationPolicyError = ClientsControllerUpdateAllocationPolicyErrors[keyof ClientsControllerUpdateAllocationPolicyErrors];
+
+export type ClientsControllerUpdateAllocationPolicyResponses = {
+    200: ClientResponse;
+};
+
+export type ClientsControllerUpdateAllocationPolicyResponse = ClientsControllerUpdateAllocationPolicyResponses[keyof ClientsControllerUpdateAllocationPolicyResponses];
 
 export type ClientsControllerListContactsData = {
     body?: never;

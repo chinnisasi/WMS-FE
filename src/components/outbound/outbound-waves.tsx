@@ -58,6 +58,7 @@ import { readyClients } from '@/lib/use-clients';
 import { roleHasCapability } from '@/lib/users';
 import { WAVE_ORDER_CLIENTS_HEADING, waveOrderClientLabel, waveOrderClients } from '@/lib/wave-clients';
 import { ulid } from '@/lib/ulid';
+import { allocationReason } from '@/lib/allocation-policy';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -1097,6 +1098,8 @@ function PicklistPanel({
             here, because the batching guarantee is about that exact path. */}
         {picklist.lines.map((line) => {
           const reason = pickReasonLabel(line.reasonCode);
+          // Story 4-3a — which batch, and why (absent on a pre-4-3a wave).
+          const allocation = allocationReason(line);
           return (
             <li key={line.id} className="flex flex-wrap items-center gap-2 text-xs">
               <span className="data w-6 text-(--muted-foreground)">{line.walkSeq + 1}.</span>
@@ -1117,6 +1120,11 @@ function PicklistPanel({
                 {pickLineStatusLabel(line.status)}
               </span>
               {reason !== null && <span className="text-(--muted-foreground)">{reason}</span>}
+              {allocation !== null && (
+                <span data-testid="line-allocation" className="text-(--muted-foreground)">
+                  {allocation}
+                </span>
+              )}
             </li>
           );
         })}
