@@ -7,7 +7,7 @@ import { emptyOrderFieldsDraft, type OrderFieldsDraft } from '@/lib/order-fields
 import { orderTypeLabel } from '@/lib/order-fields';
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
-import { ApiProblem, fetchApiPortalPlaceOrder } from '@/lib/api/client';
+import { ApiProblem, fetchApiPortalImportOrders, fetchApiPortalPlaceOrder } from '@/lib/api/client';
 import type { PortalOrderRowDto, PortalPlacedOrderResponse } from '@/lib/api/generated';
 import type { AsnDraftLine, LineOption } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -44,6 +44,8 @@ import { OrderSearch } from '@/components/shared/order-search';
 import { ShipToFieldset } from '@/components/shared/ship-to-fieldset';
 import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
 import { WarehousesFailure } from '@/components/shared/warehouses-failure';
+// Story 4-1c — the order import panel, shared with the staff Orders page.
+import { OrderImport } from '@/components/shared/order-import';
 import { StatusChip } from '@/components/shared/status-chip';
 import { StatusTimeline } from '@/components/shared/status-timeline';
 import { orderStatusTone } from '@/lib/status-tone';
@@ -72,6 +74,8 @@ export function PortalOrders() {
   const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
   const canPlace = roleHasCapability(role, 'orders.place');
   const [placing, setPlacing] = useState(false);
+  // Story 4-1c — "Import from file" beside Place an order.
+  const [importing, setImporting] = useState(false);
   const [placed, setPlaced] = useState<PortalPlacedOrderResponse | null>(null);
   // Remounts the table on success, so its Prev/Next state starts on page one.
   const [pageEpoch, setPageEpoch] = useState(0);
@@ -109,16 +113,31 @@ export function PortalOrders() {
       title="Orders"
       action={
         canPlace && !placing ? (
-          <button
-            type="button"
-            className={primaryClass}
-            onClick={() => {
-              setPlaced(null);
-              setPlacing(true);
-            }}
-          >
-            Place an order
-          </button>
+          <div className="flex gap-2">
+            {!importing && (
+              <button
+                type="button"
+                className={buttonClass}
+                onClick={() => {
+                  setPlaced(null);
+                  setImporting(true);
+                }}
+              >
+                Import from file
+              </button>
+            )}
+            <button
+              type="button"
+              className={primaryClass}
+              onClick={() => {
+                setPlaced(null);
+                setImporting(false);
+                setPlacing(true);
+              }}
+            >
+              Place an order
+            </button>
+          </div>
         ) : undefined
       }
     >
@@ -140,6 +159,17 @@ export function PortalOrders() {
         />
       )}
       {placed !== null && <FeedbackBanner tone="accepted" {...placedOrderBanner(placed)} />}
+      {importing && !placing && (
+        <PortalOrderImport
+          onClose={() => setImporting(false)}
+          onImported={() => {
+            setOpenId(null);
+            setReference(null);
+            orders.reset();
+            setPageEpoch((epoch) => epoch + 1);
+          }}
+        />
+      )}
       <OrderSearch
         // Remounted when the search changes from outside (a placed order clears it), so the box never shows a stale query.
         key={JSON.stringify(reference)}
@@ -177,6 +207,55 @@ export function PortalOrders() {
         />
       </div>
     </Section>
+  );
+}
+
+/**
+ * Story 4-1c — the portal's "Import from file": the shared two-step panel over
+ * `portal/order-imports`, with the place form's warehouse select (one
+ * warehouse needs no pick). The panel is keyed by the chosen warehouse — the
+ * import's fingerprint includes it — so changing the warehouse starts over.
+ */
+function PortalOrderImport({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const todayIst = useTodayIst();
+  const tenantId = usePortalTenantId();
+  const warehouses = usePortalWarehouses();
+  const [warehouseId, setWarehouseId] = useState('');
+  const options = warehouses.state === 'ready' ? portalWarehouseOptions(warehouses.data) : [];
+  const chosen = warehouseId !== '' ? warehouseId : options.length === 1 ? options[0]!.id : '';
+  if (warehouses.state === 'failed') return <WarehousesFailure state={warehouses} />;
+  if (warehouses.state === 'loading') return <div className="text-(--muted-foreground)">Loading the warehouses…</div>;
+  if (options.length === 0) return <div role="status" className="text-(--muted-foreground)">{PORTAL_ORDER_NO_WAREHOUSES_MESSAGE}</div>;
+  return (
+    <OrderImport
+      key={chosen}
+      surface="portal"
+      warehouseId={chosen === '' || tenantId === null ? null : chosen}
+      todayIst={todayIst}
+      run={(file, warehouse, step) => {
+        if (tenantId === null) throw new Error(PORTAL_SESSION_EXPIRED);
+        return fetchApiPortalImportOrders(tenantId, file, warehouse, step);
+      }}
+      onImported={(result) => {
+        if (result.acceptedCount > 0) onImported();
+      }}
+      onClose={onClose}
+      warehousePicker={
+        options.length > 1 ? (
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="font-medium">Warehouse</span>
+            <select aria-label="Warehouse" value={chosen} onChange={(event) => setWarehouseId(event.target.value)} className={`${selectClass} w-auto`}>
+              <option value="">Pick the warehouse…</option>
+              {options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : undefined
+      }
+    />
   );
 }
 

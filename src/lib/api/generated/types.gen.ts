@@ -3025,6 +3025,104 @@ export type OrderResponse = {
     order: OrderDto;
 };
 
+export type OrderImportOrderDto = {
+    /**
+     * The created order; null on a dry run
+     */
+    orderId: string | null;
+    /**
+     * The client order number (the order_ref cell, trimmed)
+     */
+    clientOrderRef: string;
+    /**
+     * Top-level lines (a kit line counts once)
+     */
+    lineCount: number;
+    /**
+     * The spreadsheet row of the order’s first line
+     */
+    firstRow: number;
+    /**
+     * True when an earlier run of the same import created this order (it replayed)
+     */
+    replayed: boolean;
+    clientId: string;
+    /**
+     * The client as people read it (the tenant’s own: "<name> (your company)")
+     */
+    clientLabel: string;
+    /**
+     * Top-level lines left backordered (a kit counts once); null on a dry run
+     */
+    backorderedLineCount: number | null;
+};
+
+export type OrderImportRowErrorDto = {
+    /**
+     * The spreadsheet row — the header is row 1
+     */
+    rowNumber: number;
+    /**
+     * The row’s order_ref (trimmed); null when blank
+     */
+    orderRef: string | null;
+    /**
+     * Why the row (and with it its whole order) was refused — the file’s rules, the create’s own refusal passed through with its detail (an order’s refusal sits on its first row), order-changed-since-first-run, or order-refused (any other code, named in the detail)
+     */
+    code: 'missing-value' | 'unknown-client' | 'unknown-warehouse' | 'wrong-warehouse' | 'unknown-sku' | 'sku-client-mismatch' | 'mixed-client' | 'client-required' | 'invalid-quantity' | 'quantity-precision' | 'invalid-rate' | 'invalid-cod-amount' | 'invalid-ship-by' | 'order-rows-disagree' | 'duplicate-sku-in-order' | 'duplicate-order-in-file' | 'too-many-lines' | 'validation-failed' | 'not-found' | 'duplicate-client-order-ref' | 'client-departed' | 'client-suspended' | 'sku-inactive' | 'licence-not-covered' | 'order-catalog-changed' | 'order-backorder-rejected' | 'order-changed-since-first-run' | 'order-refused';
+    detail: string;
+    /**
+     * The row’s sku cell as written; null when blank
+     */
+    sku: string | null;
+    /**
+     * The row’s quantity cell as written; null when blank
+     */
+    quantity: string | null;
+};
+
+export type OrderImportResponseDto = {
+    /**
+     * The import (its audit row’s target); null on a dry run and on an incomplete run
+     */
+    importId: string | null;
+    dryRun: boolean;
+    warehouseId: string;
+    /**
+     * SHA-256 of the uploaded file (hex) — with the warehouse, the import’s idempotency fingerprint
+     */
+    fileSha256: string;
+    /**
+     * Data rows read (blank rows not counted)
+     */
+    rowCount: number;
+    /**
+     * Orders the file describes
+     */
+    orderCount: number;
+    /**
+     * Orders created — on a dry run, ready to create
+     */
+    acceptedCount: number;
+    /**
+     * Orders refused whole (an order with any bad row)
+     */
+    refusedCount: number;
+    /**
+     * False when the 15-second budget stopped the run before every order was tried (answered 200, nothing stored) — Import again with the same file to finish
+     */
+    complete: boolean;
+    /**
+     * Orders the run did not reach (0 when complete)
+     */
+    notAttemptedCount: number;
+    orders: Array<OrderImportOrderDto>;
+    /**
+     * Every refused row, in sheet order
+     */
+    errors: Array<OrderImportRowErrorDto>;
+};
+
 export type CancelOrderDto = {
     [key: string]: unknown;
 };
@@ -8695,7 +8793,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -8722,7 +8820,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -10812,6 +10910,71 @@ export type PortalPlacedOrderResponse = {
      * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect). Absent only on a replay of an order placed before 4-2a — read absent as null.
      */
     codAmountPaise?: number | null;
+};
+
+export type PortalOrderImportOrderDto = {
+    /**
+     * The placed order; null on a dry run
+     */
+    orderId: string | null;
+    /**
+     * Your order number (the order_ref cell, trimmed)
+     */
+    clientOrderRef: string;
+    /**
+     * Lines on the order
+     */
+    lineCount: number;
+    /**
+     * The spreadsheet row of the order’s first line
+     */
+    firstRow: number;
+    /**
+     * True when an earlier run of the same import placed this order (it replayed)
+     */
+    replayed: boolean;
+};
+
+export type PortalOrderImportResponseDto = {
+    /**
+     * The import; null on a dry run and on an incomplete run
+     */
+    importId: string | null;
+    dryRun: boolean;
+    warehouseId: string;
+    /**
+     * SHA-256 of the uploaded file (hex)
+     */
+    fileSha256: string;
+    /**
+     * Data rows read (blank rows not counted)
+     */
+    rowCount: number;
+    /**
+     * Orders the file describes
+     */
+    orderCount: number;
+    /**
+     * Orders placed — on a dry run, ready to place
+     */
+    acceptedCount: number;
+    /**
+     * Orders refused whole (an order with any bad row)
+     */
+    refusedCount: number;
+    /**
+     * False when the 15-second budget stopped the run before every order was tried — Import again with the same file to finish
+     */
+    complete: boolean;
+    /**
+     * Orders the run did not reach (0 when complete)
+     */
+    notAttemptedCount: number;
+    orders: Array<PortalOrderImportOrderDto>;
+    /**
+     * Every refused row, in sheet order
+     */
+    errors: Array<OrderImportRowErrorDto>;
 };
 
 export type PortalOrderComponentDto = {
@@ -17455,6 +17618,87 @@ export type OutboundControllerCreateOrderResponses = {
 
 export type OutboundControllerCreateOrderResponse = OutboundControllerCreateOrderResponses[keyof OutboundControllerCreateOrderResponses];
 
+export type OutboundControllerImportOrdersData = {
+    body: {
+        /**
+         * CSV or XLSX — header row required (sku, quantity, order_ref, ship_to_name, ship_to_phone, ship_to_line1, ship_to_city, ship_to_state, ship_to_pincode; optional rate, client, warehouse, ship_to_line2, consignee_gstin, consignee_legal_name, order_type, priority, ship_by, cod_amount; other columns ignored)
+         */
+        file: Blob | File;
+        /**
+         * The warehouse every order is for
+         */
+        warehouseId: string;
+        /**
+         * `true`: Check file — nothing written, no Idempotency-Key needed
+         */
+        dryRun?: 'true' | 'false';
+    };
+    headers?: {
+        /**
+         * Client-generated ULID key — required for an import, ignored on a dry run; a replay returns the stored response, and a retry of an unfinished import with the same file creates only the orders still missing
+         */
+        'Idempotency-Key'?: string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/order-imports';
+};
+
+export type OutboundControllerImportOrdersErrors = {
+    /**
+     * Missing or malformed Idempotency-Key on an import, no file, a malformed warehouseId or dryRun (validation-failed), a file that cannot be read (file-unreadable), or a header without a required column (missing-columns, naming each)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks orders.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * This import is still running under the same Idempotency-Key (import-in-progress — wait, then Import again to read its result), or a concurrent import with the same key committed first (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a .csv/.xlsx file (unsupported-file-type)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * More than 5 MB, 2,000 data rows or 200 orders (import-too-large), or the Idempotency-Key reused with a different file or warehouse (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The stock reservation store is unreachable (reservation-store-unavailable) — the detail says how many orders were created; Import again with the same file to finish without duplicates
+     */
+    503: ProblemDetailsDto;
+};
+
+export type OutboundControllerImportOrdersError = OutboundControllerImportOrdersErrors[keyof OutboundControllerImportOrdersErrors];
+
+export type OutboundControllerImportOrdersResponses = {
+    /**
+     * Check file (dryRun=true): what would be created and every refused row — nothing written; or an Import the time budget stopped (complete: false, notAttemptedCount > 0, nothing stored for the import itself)
+     */
+    200: OrderImportResponseDto;
+    /**
+     * Import, complete: the created orders and every refused row (a 201 can carry refusals) — the idempotency snapshot
+     */
+    201: OrderImportResponseDto;
+};
+
+export type OutboundControllerImportOrdersResponse = OutboundControllerImportOrdersResponses[keyof OutboundControllerImportOrdersResponses];
+
 export type OutboundControllerCancelOrderData = {
     body: CancelOrderDto;
     headers: {
@@ -24007,7 +24251,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -27775,6 +28019,87 @@ export type PortalControllerPlaceOrderResponses = {
 };
 
 export type PortalControllerPlaceOrderResponse = PortalControllerPlaceOrderResponses[keyof PortalControllerPlaceOrderResponses];
+
+export type PortalControllerImportOrdersData = {
+    body: {
+        /**
+         * CSV or XLSX — header row required (sku, quantity, order_ref, ship_to_name, ship_to_phone, ship_to_line1, ship_to_city, ship_to_state, ship_to_pincode; optional warehouse, ship_to_line2, consignee_gstin, consignee_legal_name, order_type, priority, ship_by, cod_amount; other columns ignored)
+         */
+        file: Blob | File;
+        /**
+         * The warehouse every order is placed into
+         */
+        warehouseId: string;
+        /**
+         * `true`: Check file — nothing written, no Idempotency-Key needed
+         */
+        dryRun?: 'true' | 'false';
+    };
+    headers?: {
+        /**
+         * Client-generated ULID key — required for an import, ignored on a dry run; a retry of an unfinished import with the same file places only the orders still missing
+         */
+        'Idempotency-Key'?: string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/order-imports';
+};
+
+export type PortalControllerImportOrdersErrors = {
+    /**
+     * Missing or malformed Idempotency-Key on an import, no file, a malformed warehouseId or dryRun (validation-failed), a file that cannot be read (file-unreadable), or a header without a required column (missing-columns)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a); or the user may not place orders for this client (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse is not the tenant's (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * This import is still running under the same Idempotency-Key (import-in-progress), or a concurrent import with the same key committed first (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a .csv/.xlsx file (unsupported-file-type)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * More than 5 MB, 2,000 data rows or 200 orders (import-too-large), or the Idempotency-Key reused with a different file or warehouse (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The stock reservation store is unreachable (reservation-store-unavailable) — Import again with the same file to finish without duplicates
+     */
+    503: ProblemDetailsDto;
+};
+
+export type PortalControllerImportOrdersError = PortalControllerImportOrdersErrors[keyof PortalControllerImportOrdersErrors];
+
+export type PortalControllerImportOrdersResponses = {
+    /**
+     * Check file (dryRun=true) — nothing written; or an Import the time budget stopped (complete: false)
+     */
+    200: PortalOrderImportResponseDto;
+    /**
+     * Import, complete: the placed orders and every refused row (the stored replay)
+     */
+    201: PortalOrderImportResponseDto;
+};
+
+export type PortalControllerImportOrdersResponse = PortalControllerImportOrdersResponses[keyof PortalControllerImportOrdersResponses];
 
 export type PortalControllerOrderData = {
     body?: never;

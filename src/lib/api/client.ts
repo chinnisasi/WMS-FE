@@ -72,6 +72,7 @@ import {
   gateInControllerList,
   gateInControllerUnloadWeb,
   inboundControllerImportAsns,
+  outboundControllerImportOrders,
   inboundControllerGetAsn,
   inboundControllerGetPurchaseOrder,
   inboundControllerListAsns,
@@ -258,6 +259,7 @@ import {
   portalControllerOrder,
   portalControllerOrders,
   portalControllerPlaceOrder,
+  portalControllerImportOrders,
   portalControllerPortalRecall,
   portalControllerPortalRecallReport,
   portalControllerPortalRecalls,
@@ -532,6 +534,8 @@ import type {
   PortalControllerPortalReturnsData,
   AsnListResponse,
   AsnImportResponseDto,
+  OrderImportResponseDto,
+  PortalOrderImportResponseDto,
   AsnResponse,
   CreateAsnDto,
   CreatePurchaseOrderDto,
@@ -3076,6 +3080,49 @@ export async function fetchApiImportAsns(
   step: { readonly dryRun: true } | { readonly dryRun: false; readonly idempotencyKey: string },
 ): Promise<AsnImportResponseDto> {
   const { data, error } = await inboundControllerImportAsns({
+    path: { tenantId },
+    body: { file, warehouseId, ...(step.dryRun ? { dryRun: 'true' as const } : {}) },
+    ...(step.dryRun ? {} : { headers: { 'Idempotency-Key': step.idempotencyKey } }),
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 4-1c — one step of an order import: Check file (no key) or Import (the checked file's key). */
+export type OrderImportStep = { readonly dryRun: true } | { readonly dryRun: false; readonly idempotencyKey: string };
+
+/**
+ * Story 4-1c — the staff order import (`orders.manage`): Check file
+ * (`dryRun`, 200, nothing written) or Import (201 complete, 200 when the
+ * server's time budget stopped it — `complete: false`).
+ */
+export async function fetchApiImportOrders(
+  tenantId: string,
+  file: File,
+  warehouseId: string,
+  step: OrderImportStep,
+): Promise<OrderImportResponseDto> {
+  const { data, error } = await outboundControllerImportOrders({
+    path: { tenantId },
+    body: { file, warehouseId, ...(step.dryRun ? { dryRun: 'true' as const } : {}) },
+    ...(step.dryRun ? {} : { headers: { 'Idempotency-Key': step.idempotencyKey } }),
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 4-1c — the client portal's order import (`orders.place`; the client is the session's). */
+export async function fetchApiPortalImportOrders(
+  tenantId: string,
+  file: File,
+  warehouseId: string,
+  step: OrderImportStep,
+): Promise<PortalOrderImportResponseDto> {
+  const { data, error } = await portalControllerImportOrders({
     path: { tenantId },
     body: { file, warehouseId, ...(step.dryRun ? { dryRun: 'true' as const } : {}) },
     ...(step.dryRun ? {} : { headers: { 'Idempotency-Key': step.idempotencyKey } }),
