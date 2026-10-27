@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from '@/lib/api/client';
 import type { GoodsReceiptLineEntryDto } from '@/lib/api/generated';
-import { SERIAL_STATE_LABEL, filterSerials, grnSerialSummary, qcSkippedLabel, unreadableSerialLabel } from './grn-lines';
+import { SERIAL_STATE_LABEL, filterSerials, grnLineRecallLabel, grnSerialSummary, qcSkippedLabel, unreadableSerialLabel } from './grn-lines';
 import { EXCESS_SERIALS_SHOWN, decisionReason, excessSerialsLabel } from './over-receipt';
 import { GRN_REFUSAL_LABEL, GRN_SERIAL_IN_STOCK_GUIDANCE, GRN_SERIAL_FORMAT_GUIDANCE, GRN_SERIALS_REQUIRED_GUIDANCE, rejectedOpGuidance } from './review-queue';
 import {
@@ -50,6 +50,9 @@ describe('GRN line serials (A19, A22)', () => {
     expect(unreadableSerialLabel({})).toBeNull();
     expect(qcSkippedLabel({ qcSkipped: 'serial-tracked' })).toBe('QC on receipt skipped — serial-tracked');
     expect(qcSkippedLabel({})).toBeNull();
+    // Story 3-7a — the line's lot is on an open live recall.
+    expect(grnLineRecallLabel({ recallCode: 'RCL-000003' })).toBe('Under recall RCL-000003 — keep it apart');
+    expect(grnLineRecallLabel({})).toBeNull();
   });
 });
 

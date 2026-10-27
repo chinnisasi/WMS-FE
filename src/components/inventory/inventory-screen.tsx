@@ -43,16 +43,19 @@ import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { readActiveWarehouseId, subscribeActiveWarehouse } from '@/lib/warehouses';
 import { roleHasCapability } from '@/lib/users';
 import { writeOffOffered } from '@/lib/write-off';
-import { batchBlockOutcome, batchLifecycleLabel } from '@/lib/batch-block';
+import { batchBlockOutcome, batchLifecycleLabel, batchRecallCode, underRecallSentence } from '@/lib/batch-block';
+import { recallHref } from '@/lib/recalls';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AdjustBanner, AdjustForm } from '@/components/inventory/adjust-form';
 import { BatchBlockDialog } from '@/components/inventory/batch-block-dialog';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { Ledger } from '@/components/inventory/ledger';
+import { RecallsSection } from '@/components/inventory/recalls/recalls-section';
 import { WriteOffBanner, WriteOffPanel, type WriteOffResult } from '@/components/inventory/write-off';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { LoadingStatus, SkeletonRows } from '@/components/shared/skeleton';
+import { statusChipClass } from '@/components/shared/status-chip';
 import { buttonClass, inputClass, ReadFailure, rowButtonClass, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
@@ -72,7 +75,10 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
  * Stock and Batches only — the Ledger owns its own warehouse resolution and
  * failure arms, so a failed warehouses read never shows twice.
  */
-export function InventoryScreen({ initialTab = null }: { initialTab?: InventoryTab | null } = {}) {
+export function InventoryScreen({
+  initialTab = null,
+  initialRecall = null,
+}: { initialTab?: InventoryTab | null; initialRecall?: string | null } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -92,7 +98,7 @@ export function InventoryScreen({ initialTab = null }: { initialTab?: InventoryT
       </Section>
     );
   }
-  return <InventorySessioned initialTab={initialTab} />;
+  return <InventorySessioned initialTab={initialTab} initialRecall={initialRecall} />;
 }
 
 /** Story 3-2a — the tabs a role sees: Adjust only with `stock.adjust`. */
@@ -100,7 +106,7 @@ export function inventoryVisibleTabs(canAdjust: boolean): readonly InventoryTab[
   return INVENTORY_PAGE_TABS.tabs.map((t) => t.id).filter((id) => canAdjust || id !== 'adjust');
 }
 
-function InventorySessioned({ initialTab }: { initialTab: InventoryTab | null }) {
+function InventorySessioned({ initialTab, initialRecall }: { initialTab: InventoryTab | null; initialRecall: string | null }) {
   // No drill on this page: ledger drills stay on /inventory/ledger.
   const [tab, selectTab] = usePageTab(INVENTORY_PAGE_TABS, INVENTORY_PAGE_TABS.initial(null, initialTab), false);
   // Story 3-2a — the role through the subscription (the /me bootstrap rewrites it after mount).
@@ -131,16 +137,16 @@ function InventorySessioned({ initialTab }: { initialTab: InventoryTab | null })
         </div>
       ) : (
         <PageTabPanel def={INVENTORY_PAGE_TABS} active={tab}>
-          {tab === 'ledger' ? <Ledger /> : <WarehouseGate tab={tab} />}
+          {tab === 'ledger' ? <Ledger /> : tab === 'recalls' ? <RecallsSection initialRecall={initialRecall} /> : <WarehouseGate tab={tab} />}
         </PageTabPanel>
       )}
     </div>
   );
 }
 
-const SECTION_TITLE: Record<Exclude<InventoryTab, 'ledger'>, string> = { stock: 'Stock', batches: 'Batches', adjust: 'Adjust' };
+const SECTION_TITLE: Record<Exclude<InventoryTab, 'ledger' | 'recalls'>, string> = { stock: 'Stock', batches: 'Batches', adjust: 'Adjust' };
 
-function WarehouseGate({ tab }: { tab: Exclude<InventoryTab, 'ledger'> }) {
+function WarehouseGate({ tab }: { tab: Exclude<InventoryTab, 'ledger' | 'recalls'> }) {
   const title = SECTION_TITLE[tab];
   // Story 1-5a — one clients read for the section: the switcher filters
   // Stock; Batches (per SKU) is not filtered and says "All clients".
@@ -894,7 +900,16 @@ function BatchList({
     { key: 'code', header: 'Batch', render: (b) => <span className="font-mono text-xs">{b.code}</span> },
     { key: 'mfg', header: 'Manufactured', render: (b) => (b.mfgDate === null ? '—' : istDateLabel(b.mfgDate)) },
     { key: 'expiry', header: 'Expires', render: (b) => (b.expiryDate === null ? '—' : istDateLabel(b.expiryDate)) },
-    { key: 'status', header: 'Status', render: (b) => <span data-testid={`batch-status-${b.code}`}>{batchLifecycleLabel(b)}</span> },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (b) => (
+        <span className="flex flex-col items-start gap-0.5">
+          <span data-testid={`batch-status-${b.code}`}>{batchLifecycleLabel(b)}</span>
+          <RecallBadge code={batchRecallCode(b)} />
+        </span>
+      ),
+    },
     { key: 'quantity', header: 'Here', numeric: true, render: (b) => batchQuantityLabel(b.quantity, sku) },
     {
       key: 'open',
@@ -914,7 +929,9 @@ function BatchList({
             <button
               type="button"
               className={rowButtonClass}
-              disabled={dialog !== null}
+              // Story 3-7a (A4) — a lot under an open live recall is released only by closing the recall.
+              disabled={dialog !== null || (b.status === 'blocked' && batchRecallCode(b) !== null)}
+              title={b.status === 'blocked' && batchRecallCode(b) !== null ? `${underRecallSentence(batchRecallCode(b), b.blockedReason)}.` : undefined}
               onClick={() => {
                 setBanner(null);
                 setDialog({ mode: b.status === 'blocked' ? 'unblock' : 'block', batch: b });
@@ -977,7 +994,8 @@ function BatchList({
                   <button
                     type="button"
                     className={rowButtonClass}
-                    disabled={dialog !== null}
+                    disabled={dialog !== null || (b.status === 'blocked' && batchRecallCode(b) !== null)}
+                    title={b.status === 'blocked' && batchRecallCode(b) !== null ? `${underRecallSentence(batchRecallCode(b), b.blockedReason)}.` : undefined}
                     onClick={() => {
                       setBanner(null);
                       setDialog({ mode: b.status === 'blocked' ? 'unblock' : 'block', batch: b });
@@ -992,6 +1010,17 @@ function BatchList({
         }
       />
     </div>
+  );
+}
+
+/** Story 3-7a — "Under recall RCL-x", linked to the recall (nothing when no open live recall names the batch). */
+function RecallBadge({ code }: { code: string | null }) {
+  if (code === null) return null;
+  return (
+    <Link href={recallHref(code)} className={statusChipClass('warning')} data-testid="batch-recall-badge">
+      <span aria-hidden>⚑</span>
+      Under recall {code}
+    </Link>
   );
 }
 
@@ -1030,6 +1059,12 @@ function BatchDetail({
         )}
         {action !== null && <span className="ml-2">{action}</span>}
       </div>
+      {batchRecallCode(detail.data) !== null && (
+        <div data-testid="batch-detail-recall">
+          <RecallBadge code={batchRecallCode(detail.data)} />{' '}
+          <span className="text-(--muted-foreground)">{underRecallSentence(batchRecallCode(detail.data), detail.data.status === 'blocked' ? detail.data.blockedReason : null)}.</span>
+        </div>
+      )}
       <div className="font-medium">Bins in this warehouse</div>
       {here.length === 0 ? (
         <div className="text-(--muted-foreground)">None of this batch is in this warehouse.</div>

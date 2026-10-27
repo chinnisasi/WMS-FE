@@ -258,7 +258,20 @@ import {
   portalControllerOrder,
   portalControllerOrders,
   portalControllerPlaceOrder,
+  portalControllerPortalRecall,
+  portalControllerPortalRecallReport,
+  portalControllerPortalRecalls,
   portalControllerPortalReturn,
+  recallsControllerAddBatches,
+  recallsControllerBins,
+  recallsControllerCandidates,
+  recallsControllerClose,
+  recallsControllerDetail,
+  recallsControllerList,
+  recallsControllerOpen,
+  recallsControllerReceipts,
+  recallsControllerReport,
+  recallsControllerShipments,
   portalControllerPortalReturns,
   portalControllerPurchaseOrder,
   portalControllerPurchaseOrders,
@@ -502,6 +515,19 @@ import type {
   DisposeReturnDto,
   ReturnDispositionResultDto,
   PortalReturnPageResponse,
+  PortalRecallDetailResponse,
+  PortalRecallListResponse,
+  AddRecallBatchesDto,
+  CloseRecallDto,
+  OpenRecallDto,
+  RecallBinsResponse,
+  RecallCandidatesResponse,
+  RecallDetailResponse,
+  RecallListResponse,
+  RecallReceiptsResponse,
+  RecallResponse,
+  RecallShipmentsResponse,
+  RecallsControllerListData,
   PortalReturnDetailResponse,
   PortalControllerPortalReturnsData,
   AsnListResponse,
@@ -3614,6 +3640,115 @@ export async function fetchApiUnblockBatch(
   return data;
 }
 
+// ── story 3-7a — batch recalls ──────────────────────────────────────────────
+
+export type RecallListQuery = NonNullable<RecallsControllerListData['query']>;
+
+/** The tenant's recalls, newest first; only the set filters are sent (a first page sends no cursor). */
+export async function fetchApiListRecalls(
+  tenantId: string,
+  query: RecallListQuery,
+  options?: { signal?: AbortSignal },
+): Promise<RecallListResponse> {
+  const sent = Object.fromEntries(Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+  const { data, error } = await recallsControllerList({
+    path: { tenantId },
+    query: Object.keys(sent).length === 0 ? undefined : (sent as RecallListQuery),
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** One client's lots matching a lot code (exact or normalised) — the open dialog's checklist. */
+export async function fetchApiRecallCandidates(
+  tenantId: string,
+  clientId: string,
+  code: string,
+  options?: { signal?: AbortSignal },
+): Promise<RecallCandidatesResponse> {
+  const { data, error } = await recallsControllerCandidates({ path: { tenantId }, query: { clientId, code }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Open a recall (`qc.manage`) — keyed per draft. */
+export async function fetchApiOpenRecall(tenantId: string, body: OpenRecallDto, idempotencyKey: string): Promise<RecallResponse> {
+  const { data, error } = await recallsControllerOpen({ path: { tenantId }, body, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** One recall: header, lots and live figures, where it sits, held orders, planned picks. */
+export async function fetchApiRecallDetail(tenantId: string, recallId: string, options?: { signal?: AbortSignal }): Promise<RecallDetailResponse> {
+  const { data, error } = await recallsControllerDetail({ path: { tenantId, recallId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+type TracePage = { cursor?: string; limit?: number; signal?: AbortSignal };
+
+function tracePageQuery(options?: TracePage): { cursor?: string; limit?: number } | undefined {
+  if (options?.cursor === undefined && options?.limit === undefined) return undefined;
+  return {
+    ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
+  };
+}
+
+/** Every bin holding a lot of the recall (staff only), paged. */
+export async function fetchApiRecallBins(tenantId: string, recallId: string, options?: TracePage): Promise<RecallBinsResponse> {
+  const { data, error } = await recallsControllerBins({ path: { tenantId, recallId }, query: tracePageQuery(options), signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Where the recalled lots went — one row per dispatched pick, paged. */
+export async function fetchApiRecallShipments(tenantId: string, recallId: string, options?: TracePage): Promise<RecallShipmentsResponse> {
+  const { data, error } = await recallsControllerShipments({ path: { tenantId, recallId }, query: tracePageQuery(options), signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Where the recalled lots came from — one row per goods receipt, paged. */
+export async function fetchApiRecallReceipts(tenantId: string, recallId: string, options?: TracePage): Promise<RecallReceiptsResponse> {
+  const { data, error } = await recallsControllerReceipts({ path: { tenantId, recallId }, query: tracePageQuery(options), signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * The recall report as a file (CSV streams every row; XLSX at most 200,000
+ * rows), as a Blob (`parseAs: 'blob'`, the `fetchApiBinLabels` pattern). A
+ * refusal is still problem+json and becomes an `ApiProblem`. The server's
+ * filename is not readable cross-origin — the caller names the file
+ * (`recallReportFilename`). Every download is audited server-side.
+ */
+export async function fetchApiRecallReport(tenantId: string, recallId: string, format: 'csv' | 'xlsx'): Promise<Blob> {
+  const { data, error, response } = await recallsControllerReport({ path: { tenantId, recallId }, query: { format }, parseAs: 'blob' });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data as unknown as Blob;
+}
+
+/** Add lots to an open recall (`qc.manage`) — keyed per draft. */
+export async function fetchApiAddRecallBatches(
+  tenantId: string,
+  recallId: string,
+  body: AddRecallBatchesDto,
+  idempotencyKey: string,
+): Promise<RecallResponse> {
+  const { data, error } = await recallsControllerAddBatches({ path: { tenantId, recallId }, body, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Close a recall (`qc.manage`) — freezes the figures, releases the named lots; keyed per draft. */
+export async function fetchApiCloseRecall(tenantId: string, recallId: string, body: CloseRecallDto, idempotencyKey: string): Promise<RecallResponse> {
+  const { data, error } = await recallsControllerClose({ path: { tenantId, recallId }, body, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
 /**
  * Story 3-1 — move stock between two bins of one warehouse (`stock.move`).
  * The key is per draft (reused on a retry of the unchanged draft, cleared on
@@ -5597,6 +5732,30 @@ export async function fetchApiPortalInvoiceNote(
   const { data, error } = await portalControllerInvoiceNote({ path: { tenantId, noteId }, signal: options?.signal });
   if (error || !data) throw portalError(error);
   return data;
+}
+
+/** Story 3-7a — this client's recalls, newest first. */
+export async function fetchApiPortalRecalls(tenantId: string, options?: PortalPageOptions): Promise<PortalRecallListResponse> {
+  const { data, error } = await portalControllerPortalRecalls({ path: { tenantId }, query: portalPageQuery(options), signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 3-7a — one of this client's recalls (no bin, no actor — the server's allowlist). */
+export async function fetchApiPortalRecall(tenantId: string, recallId: string, options?: { signal?: AbortSignal }): Promise<PortalRecallDetailResponse> {
+  const { data, error } = await portalControllerPortalRecall({ path: { tenantId, recallId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/**
+ * Story 3-7a — this client's recall report as a file, as a Blob (`parseAs:
+ * 'blob'`); the caller names the file (CORS hides `Content-Disposition`).
+ */
+export async function fetchApiPortalRecallReport(tenantId: string, recallId: string, format: 'csv' | 'xlsx'): Promise<Blob> {
+  const { data, error } = await portalControllerPortalRecallReport({ path: { tenantId, recallId }, query: { format }, parseAs: 'blob' });
+  if (error || !data) throw portalError(error);
+  return data as unknown as Blob;
 }
 
 /**

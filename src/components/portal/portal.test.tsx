@@ -34,6 +34,7 @@ let PortalInvoices: ComponentType;
 let PortalService: ComponentType;
 let PortalHome: ComponentType;
 let PortalReturns: ComponentType;
+let PortalRecalls: ComponentType;
 
 beforeAll(async () => {
   const real = await import('next/navigation');
@@ -55,6 +56,7 @@ beforeAll(async () => {
   ({ PortalService } = await import('./portal-service'));
   ({ PortalHome } = await import('./portal-home'));
   ({ PortalReturns } = await import('./portal-returns'));
+  ({ PortalRecalls } = await import('./portal-recalls'));
 });
 
 const TENANT_ID = '0198f7a2-1b3c-7d4e-8f90-112233445566';
@@ -214,7 +216,7 @@ describe('PortalShell', () => {
     expect(requests).toEqual([]);
   });
 
-  test("a portal session renders the client's name, the six portal surfaces and reads portal/me only", async () => {
+  test("a portal session renders the client's name, the portal surfaces and reads portal/me only", async () => {
     writeSession(PORTAL_SESSION);
     routes = { '/portal/me': [200, PORTAL_ME] };
     view = render(
@@ -225,7 +227,7 @@ describe('PortalShell', () => {
     await settle();
     expect(view.container.querySelector('[data-testid="portal-company"]')!.textContent).toBe('Brand A Apparel');
     const nav = [...view.container.querySelectorAll('nav[aria-label="Portal"] a')].map((a) => a.textContent);
-    expect(nav).toEqual(['Home', 'Stock', 'Orders', 'Inbound', 'Returns', 'Invoices', 'Service']); // UI-1 adds Home, 4-7a Returns
+    expect(nav).toEqual(['Home', 'Stock', 'Orders', 'Inbound', 'Returns', 'Recalls', 'Invoices', 'Service']); // UI-1 adds Home, 4-7a Returns, 3-7a Recalls
     // On /portal/stock, Stock is current and Home is not (Home matches exact /portal only).
     const current = [...view.container.querySelectorAll('nav[aria-label="Portal"] a[aria-current="page"]')].map((a) => a.textContent);
     expect(current).toEqual(['Stock']);
@@ -1656,5 +1658,57 @@ describe('story 4-7a — the portal Returns', () => {
     expect(detail).toContain('IST');
     // Every request stayed on the portal routes.
     expect(requests.every((request) => request.includes('/portal/'))).toBe(true);
+  });
+});
+
+describe('story 3-7a — the portal Recalls', () => {
+  const RECALL_ID = '0198f7a2-1b3c-7d4e-8f90-0000000003a1';
+  const ZERO = { received: 0, receivedDamaged: 0, onHand: 0, inTransit: 0, heldInOpenOrders: 0, dispatched: 0, returned: 0, returnScrapped: 0, adjustedOut: 0, unaccounted: 0 };
+  const ROW = { id: RECALL_ID, code: 'RCL-000001', mode: 'live', status: 'open', externalRef: 'BR-77', openedAt: '2026-10-27T05:00:00.000Z', closedAt: null, lotCount: 1 };
+
+  test('the list and the detail: lots with figures, on hand per warehouse and location (never a bin), its own held orders, the report — portal routes only', async () => {
+    writeSession(PORTAL_SESSION);
+    routes = {
+      '/portal/recalls': [200, { items: [ROW, { ...ROW, id: 'r-2', code: 'RCL-000002', mode: 'mock', status: 'closed', closedAt: '2026-10-28T05:00:00.000Z' }], nextCursor: null }],
+      [`/portal/recalls/${RECALL_ID}`]: [
+        200,
+        {
+          ...ROW,
+          reasonNote: 'Undeclared peanut',
+          closeNote: null,
+          lots: [{ batchId: 'b-1', batchCode: 'AB123', skuCode: 'SERUM-30', skuName: 'Serum', uom: 'each', expiryDate: '2027-01-01', figures: { ...ZERO, received: 10, onHand: 4, dispatched: 6 }, closeFigures: null }],
+          onHandByWarehouse: [{ warehouseCode: 'BLR', role: 'QC-HOLD', batchCode: 'AB123', quantity: 4 }],
+          heldOrders: [{ orderLabel: 'SO-1042', clientOrderRef: 'MY-PO-9', batchCode: 'AB123', quantity: 2 }],
+        },
+      ],
+    };
+    view = render(<PortalRecalls />);
+    await settle();
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('RCL-000001');
+    expect(text).toContain('Your ref BR-77');
+    expect(view.container.querySelectorAll('[data-testid="recall-mock-chip"]')).toHaveLength(1);
+    await act(async () => {
+      (view!.container.querySelector('button[aria-label="Show recall RCL-000001"]') as HTMLButtonElement).click();
+    });
+    await settle();
+    const detail = view.container.querySelector('[data-testid="portal-recall-detail"]')!;
+    const detailText = detail.textContent ?? '';
+    expect(detailText).toContain('Undeclared peanut');
+    expect(detail.querySelector('[data-testid="recall-figures"]')?.textContent).toContain('Dispatched');
+    expect(detail.querySelector('[data-testid="recall-on-hand"]')?.textContent).toContain('QC hold');
+    expect(detail.querySelector('[data-testid="portal-recall-held"]')?.textContent).toContain('MY-PO-9');
+    expect(detailText).not.toContain('Bin');
+    expect([...detail.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Download CSV', 'Download XLSX']);
+    expect(requests.every((request) => request.includes('/portal/'))).toBe(true);
+  });
+
+  test('a failed list renders the reason with Retry, never an empty list', async () => {
+    writeSession(PORTAL_SESSION);
+    routes = { '/portal/recalls': [503, { code: 'report-unavailable', status: 503, title: 'Slow' }] };
+    view = render(<PortalRecalls />);
+    await settle();
+    expect(view.container.textContent).toContain('Recalls not loaded');
+    expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Retry')).toBe(true);
   });
 });

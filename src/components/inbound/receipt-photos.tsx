@@ -6,7 +6,8 @@ import { ApiProblem, fetchApiAddReceiptPhoto, fetchApiRemoveReceiptPhoto } from 
 import type { GoodsReceiptLineEntryDto, ReceiptPhotoViewDto, SkuResponse } from '@/lib/api/generated';
 import { notifyInboundChanged } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { grnLineConditionLabel } from '@/lib/grn-lines';
+import { grnLineConditionLabel, grnLineRecallLabel } from '@/lib/grn-lines';
+import { StatusChip } from '@/components/shared/status-chip';
 import {
   MAX_REMOVE_REASON_LENGTH,
   PHOTO_ACCEPT,
@@ -359,6 +360,14 @@ function LineSection({
                 {' '}
                 · batch <span className="font-mono">{line.batchCode}</span>
               </span>
+            )}
+            {grnLineRecallLabel(line) !== null && (
+              <>
+                {' '}
+                <StatusChip tone="warning" glyph="⚑" data-testid="grn-line-recall">
+                  {grnLineRecallLabel(line)}
+                </StatusChip>
+              </>
             )}
           </span>
           <span className="text-xs text-(--muted-foreground)">

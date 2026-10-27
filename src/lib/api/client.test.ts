@@ -4,6 +4,19 @@ import { restoreGlobals, stubGlobal } from '../test/globals';
 
 import {
   ApiProblem,
+  fetchApiAddRecallBatches,
+  fetchApiCloseRecall,
+  fetchApiListRecalls,
+  fetchApiOpenRecall,
+  fetchApiPortalRecall,
+  fetchApiPortalRecallReport,
+  fetchApiPortalRecalls,
+  fetchApiRecallBins,
+  fetchApiRecallCandidates,
+  fetchApiRecallDetail,
+  fetchApiRecallReceipts,
+  fetchApiRecallReport,
+  fetchApiRecallShipments,
   fetchApiAdjustStock,
   fetchApiListGoodsReceiptLines,
   fetchApiCorrectSkuClient,
@@ -3177,6 +3190,109 @@ describe('story 4-7a — the disposition wrappers', () => {
     stubFetch(200, { id: RMA, lines: [], dispositions: [] });
     await fetchApiPortalReturn(SESSION.tenant.id, RMA);
     expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/returns/${RMA}`);
+    clearSession();
+  });
+});
+
+describe('story 3-7a — the recall wrappers', () => {
+  const T = SESSION.tenant.id;
+  const R = '0198f7a2-1b3c-7d4e-8f90-0000000003a1';
+  const C = '0198f7a2-1b3c-7d4e-8f90-cccccccccc0a';
+  const path = () => new URL(lastRequest!.url).pathname;
+  const query = () => Object.fromEntries(new URL(lastRequest!.url).searchParams);
+
+  test('reads: the list sends only the set filters (none on a bare first page); candidates, detail and the paged traces', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListRecalls(T, {});
+    expect(lastRequest!.method).toBe('GET');
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListRecalls(T, { clientId: C, status: 'open', mode: 'mock', externalRef: 'BR-7', cursor: 'CUR', limit: 25 });
+    expect(query()).toEqual({ clientId: C, status: 'open', mode: 'mock', externalRef: 'BR-7', cursor: 'CUR', limit: '25' });
+    await fetchApiListRecalls(T, { code: 'RCL-000001', clientId: C, status: 'open', limit: 1 });
+    expect(query()).toEqual({ code: 'RCL-000001', clientId: C, status: 'open', limit: '1' });
+
+    stubFetch(200, { normalisedCode: 'AB123', items: [] });
+    await fetchApiRecallCandidates(T, C, 'ab-12/3');
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls/candidates`);
+    expect(query()).toEqual({ clientId: C, code: 'ab-12/3' });
+
+    stubFetch(200, { recall: {}, asOf: 'x', lots: [], onHandByWarehouse: [], heldOrders: [], plannedPicks: [] });
+    await fetchApiRecallDetail(T, R);
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls/${R}`);
+
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiRecallBins(T, R);
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls/${R}/bins`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiRecallShipments(T, R, { cursor: 'C2', limit: 25 });
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls/${R}/shipments`);
+    expect(query()).toEqual({ cursor: 'C2', limit: '25' });
+    await fetchApiRecallReceipts(T, R, { limit: 25 });
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls/${R}/receipts`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    clearSession();
+  });
+
+  test('commands carry the Idempotency-Key and the body as given', async () => {
+    writeSession(SESSION);
+    const snapshot = { recall: { id: R, code: 'RCL-000001', lots: [] } };
+    stubFetch(201, snapshot);
+    await fetchApiOpenRecall(T, { batchIds: ['b1'], reasonNote: 'Allergen', mode: 'live' }, 'KEY-OPEN');
+    expect(lastRequest!.method).toBe('POST');
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe('KEY-OPEN');
+    expect(await lastRequest!.clone().json()).toEqual({ batchIds: ['b1'], reasonNote: 'Allergen', mode: 'live' });
+
+    await fetchApiAddRecallBatches(T, R, { batchIds: ['b2'] }, 'KEY-ADD');
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls/${R}/batches`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe('KEY-ADD');
+
+    await fetchApiCloseRecall(T, R, { note: 'Done', releaseBatchIds: ['b1'] }, 'KEY-CLOSE');
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls/${R}/close`);
+    expect(await lastRequest!.clone().json()).toEqual({ note: 'Done', releaseBatchIds: ['b1'] });
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe('KEY-CLOSE');
+
+    stubFetch(409, { code: 'batch-already-recalled', status: 409, title: 'Already recalled', detail: 'x', recallCodes: ['RCL-000003'] });
+    const refused = await fetchApiOpenRecall(T, { batchIds: ['b1'], reasonNote: 'x' }, 'K').catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(ApiProblem);
+    expect((refused as ApiProblem).extensions.recallCodes).toEqual(['RCL-000003']);
+    clearSession();
+  });
+
+  test('the report files (staff and portal) are Blobs with the format in the query and no key; a refusal is an ApiProblem', async () => {
+    writeSession(SESSION);
+    stubGlobal('fetch', (async (input: RequestInfo | URL) => {
+      lastRequest = input instanceof Request ? input : new Request(input.toString());
+      return new Response('section,client_code\r\n', { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8' } });
+    }) as unknown as typeof fetch);
+    const blob = await fetchApiRecallReport(T, R, 'csv');
+    expect(path()).toBe(`/api/v1/tenants/${T}/inventory/recalls/${R}/report`);
+    expect(query()).toEqual({ format: 'csv' });
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(blob).toBeInstanceOf(Blob);
+    expect(await blob.text()).toBe('section,client_code\r\n');
+    await fetchApiPortalRecallReport(T, R, 'xlsx');
+    expect(path()).toBe(`/api/v1/tenants/${T}/portal/recalls/${R}/report`);
+    expect(query()).toEqual({ format: 'xlsx' });
+
+    stubFetch(422, { code: 'report-too-large', status: 422, title: 'Too large', detail: 'Over 200,000 rows' });
+    const refused = await fetchApiRecallReport(T, R, 'xlsx').catch((error: unknown) => error);
+    expect((refused as ApiProblem).code).toBe('report-too-large');
+    expect((refused as ApiProblem).status).toBe(422);
+    clearSession();
+  });
+
+  test('the portal reads stay on the portal routes', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiPortalRecalls(T);
+    expect(path()).toBe(`/api/v1/tenants/${T}/portal/recalls`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    stubFetch(200, { id: R });
+    await fetchApiPortalRecall(T, R);
+    expect(path()).toBe(`/api/v1/tenants/${T}/portal/recalls/${R}`);
     clearSession();
   });
 });

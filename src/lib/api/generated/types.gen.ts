@@ -2193,6 +2193,10 @@ export type BatchListItemDto = {
      */
     expired: boolean;
     /**
+     * Story 3-7a — the OPEN LIVE recall naming this batch (it is unblocked only by closing that recall); null when none
+     */
+    recallCode?: string | null;
+    /**
      * On-hand of this batch in the queried warehouse (the bin filter applied; 0 when none)
      */
     quantity: number;
@@ -2290,6 +2294,10 @@ export type BatchDetailResponse = {
      */
     expired: boolean;
     /**
+     * Story 3-7a — the OPEN LIVE recall naming this batch (it is unblocked only by closing that recall); null when none
+     */
+    recallCode?: string | null;
+    /**
      * Per-bin on-hand rows across every warehouse of the tenant
      */
     bins: Array<BatchBinOnHandDto>;
@@ -2353,6 +2361,10 @@ export type BatchLifecycleDto = {
      * The server judged the batch past its expiry instant — expired stock is on hand but never promised or default-drawn (blocked or not)
      */
     expired: boolean;
+    /**
+     * Story 3-7a — the OPEN LIVE recall naming this batch (release it by closing the recall); null when none. Absent on a response stored before 3-7a (read as null)
+     */
+    recallCode?: string | null;
 };
 
 export type BatchBlockResponse = {
@@ -4293,6 +4305,12 @@ export type UnmatchedGrnLineDto = {
     reason: 'no-line-reference' | 'line-sku-mismatch';
 };
 
+export type GoodsReceiptRecalledLotDto = {
+    batchId: string;
+    batchCode: string;
+    recallCode: string;
+};
+
 export type GoodsReceiptDto = {
     id: string;
     tenantId: string;
@@ -4378,6 +4396,10 @@ export type GoodsReceiptDto = {
      * Story 1-2b — how many booked lines of a QC-on-receipt client were NOT held because the SKU is serial-tracked or catch-weight; present only when > 0
      */
     qcSkippedLines?: number;
+    /**
+     * Story 3-7a — the booked lots that sit on an open live recall: the receipt is booked and the lot stays blocked — keep the units apart. Present only when there is one
+     */
+    recalledLots?: Array<GoodsReceiptRecalledLotDto>;
 };
 
 export type RefusedReceiptDto = {
@@ -5209,6 +5231,10 @@ export type GoodsReceiptLineEntryDto = {
      * Story 2-6a — QC on receipt was skipped for this serial line (it booked unheld; derived: serial rows, no receipt hold, and the receipt's client has QC on receipt NOW)
      */
     qcSkipped?: 'serial-tracked';
+    /**
+     * Story 3-7a — the OPEN LIVE recall naming this line's lot (the lot stays blocked — keep the units apart); present only when one does
+     */
+    recallCode?: string;
 };
 
 export type GoodsReceiptLinesResponse = {
@@ -8669,7 +8695,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -8696,7 +8722,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -11195,6 +11221,105 @@ export type PortalReturnDetailResponse = {
     dispositions: Array<PortalReturnDispositionDto>;
 };
 
+export type PortalRecallListEntryDto = {
+    id: string;
+    code: string;
+    mode: 'live' | 'mock';
+    status: 'open' | 'closed';
+    externalRef: string | null;
+    openedAt: string;
+    closedAt: string | null;
+    lotCount: number;
+};
+
+export type PortalRecallListResponse = {
+    items: Array<PortalRecallListEntryDto>;
+    nextCursor: string | null;
+};
+
+export type RecallFiguresDto = {
+    /**
+     * Σ received (grn.received), base units
+     */
+    received: number;
+    /**
+     * Σ received damaged (grn.damaged)
+     */
+    receivedDamaged: number;
+    /**
+     * On hand in every warehouse, excluding in-transit
+     */
+    onHand: number;
+    /**
+     * In an IN-TRANSIT bin (a transfer not yet confirmed)
+     */
+    inTransit: number;
+    /**
+     * Picked into open orders (net per order line)
+     */
+    heldInOpenOrders: number;
+    /**
+     * Picked into dispatched orders (net per order line)
+     */
+    dispatched: number;
+    /**
+     * Σ returned (return.received)
+     */
+    returned: number;
+    /**
+     * Σ returned units scrapped (return.scrapped)
+     */
+    returnScrapped: number;
+    /**
+     * Σ written off (negative stock adjustments)
+     */
+    adjustedOut: number;
+    /**
+     * The ledger history − on hand − in transit: 0 unless the projection diverged (or the lot sits in a quarantined scope)
+     */
+    unaccounted: number;
+};
+
+export type PortalRecallLotDto = {
+    batchId: string;
+    batchCode: string;
+    skuCode: string;
+    skuName: string;
+    uom: string;
+    expiryDate: string | null;
+    figures: RecallFiguresDto;
+    closeFigures: RecallFiguresDto | null;
+};
+
+export type PortalRecallOnHandDto = {
+    warehouseCode: string;
+    role: string;
+    batchCode: string;
+    quantity: number;
+};
+
+export type PortalRecallHeldOrderDto = {
+    orderLabel: string;
+    clientOrderRef: string | null;
+    batchCode: string;
+    quantity: number;
+};
+
+export type PortalRecallDetailResponse = {
+    id: string;
+    code: string;
+    mode: 'live' | 'mock';
+    status: 'open' | 'closed';
+    externalRef: string | null;
+    reasonNote: string;
+    openedAt: string;
+    closedAt: string | null;
+    closeNote: string | null;
+    lots: Array<PortalRecallLotDto>;
+    onHandByWarehouse: Array<PortalRecallOnHandDto>;
+    heldOrders: Array<PortalRecallHeldOrderDto>;
+};
+
 export type PortalInvoiceTotalsDto = {
     subtotal: number;
     cgst: number;
@@ -11875,6 +12000,391 @@ export type NotificationStatusResponse = {
      * Show the bell’s dot: an open entry you can act on surfaced since you last opened the panel (or you never have). Never a count
      */
     hasNew: boolean;
+};
+
+export type RecallOnRecallDto = {
+    recallId: string;
+    code: string;
+    mode: 'live' | 'mock';
+};
+
+export type RecallCandidateDto = {
+    batchId: string;
+    batchCode: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    uom: string;
+    status: 'active' | 'blocked';
+    blockedReason: string | null;
+    expiryDate: string | null;
+    /**
+     * `exact` — the stored code equals the input; `normalised` — only letters and digits match: a similar code, check the label
+     */
+    match: 'exact' | 'normalised';
+    /**
+     * On hand across every warehouse (in transit included), base units
+     */
+    onHand: number;
+    /**
+     * The open recall naming this batch, null when none
+     */
+    onRecall: RecallOnRecallDto | null;
+    /**
+     * An open recall of the client naming another batch of the same lot code — add this one to it (A14); null when none
+     */
+    sameCodeOnOpenRecall: string | null;
+};
+
+export type RecallCandidatesResponse = {
+    /**
+     * The code as matched — letters and digits, upper-cased
+     */
+    normalisedCode: string;
+    /**
+     * More batches matched than the 200 listed — narrow the code (the checklist is not complete)
+     */
+    truncated: boolean;
+    items: Array<RecallCandidateDto>;
+};
+
+export type RecallListEntryDto = {
+    id: string;
+    code: string;
+    clientId: string;
+    clientCode: string;
+    mode: 'live' | 'mock';
+    status: 'open' | 'closed';
+    reasonNote: string;
+    externalRef: string | null;
+    openedAt: string;
+    closedAt: string | null;
+    lotCount: number;
+};
+
+export type RecallListResponse = {
+    items: Array<RecallListEntryDto>;
+    nextCursor: string | null;
+};
+
+export type OpenRecallDto = {
+    /**
+     * The batches (lots) recalled — 1–50 distinct batch ids, every one a SKU of ONE client (resolve them from client + lot code with GET …/inventory/recalls/candidates)
+     */
+    batchIds: Array<string>;
+    /**
+     * Why the lot is recalled — VISIBLE TO THE CLIENT on its portal and in the report. Trimmed, 1–500 characters
+     */
+    reasonNote: string;
+    /**
+     * The brand's own recall reference (one vendor lot across several clients is one recall per client, linked by this). Trimmed, blank = none, at most 100 characters
+     */
+    externalRef?: string | null;
+    /**
+     * `live` blocks every active lot it names; `mock` (a drill) blocks nothing and affects no pick, dispatch, unblock or wind-down — its trace and report are identical, labelled MOCK
+     */
+    mode?: 'live' | 'mock';
+};
+
+export type CloseSummaryLotDto = {
+    batchId: string;
+    batchCode: string;
+    skuId: string;
+    figures: RecallFiguresDto;
+    /**
+     * Written off per adjustment reason code
+     */
+    adjustedOutByReason: {
+        [key: string]: number;
+    };
+    released: boolean;
+    overrideReason: string | null;
+    dispositionNote: string | null;
+};
+
+export type CloseSummaryDto = {
+    v: 1;
+    /**
+     * The close instant the figures are as of
+     */
+    asOf: string;
+    lots: Array<CloseSummaryLotDto>;
+    acknowledgedUnaccounted: boolean;
+    evidenceRef: string | null;
+};
+
+export type RecallLotSnapshotDto = {
+    batchId: string;
+    batchCode: string;
+    skuId: string;
+    /**
+     * True when this recall blocked the lot; false when it was already blocked for another reason (it keeps that reason), and on every mock lot
+     */
+    blockedByRecall: boolean;
+};
+
+export type RecallSnapshotDto = {
+    id: string;
+    code: string;
+    clientId: string;
+    mode: 'live' | 'mock';
+    status: 'open' | 'closed';
+    reasonNote: string;
+    externalRef: string | null;
+    openedAt: string;
+    openedBy: string;
+    closedAt: string | null;
+    closedBy: string | null;
+    closeNote: string | null;
+    /**
+     * The lots the close unblocked; null while open
+     */
+    releasedBatchIds: Array<string> | null;
+    closeSummary: CloseSummaryDto | null;
+    lots: Array<RecallLotSnapshotDto>;
+};
+
+export type RecallResponse = {
+    recall: RecallSnapshotDto;
+};
+
+export type RecallHeaderDto = {
+    id: string;
+    code: string;
+    mode: 'live' | 'mock';
+    status: 'open' | 'closed';
+    clientId: string;
+    clientCode: string;
+    clientName: string;
+    reasonNote: string;
+    externalRef: string | null;
+    openedAt: string;
+    openedBy: string;
+    openedByName: string | null;
+    closedAt: string | null;
+    closedBy: string | null;
+    closedByName: string | null;
+    closeNote: string | null;
+    evidenceRef: string | null;
+    acknowledgedUnaccounted: boolean | null;
+    /**
+     * The first report download (any surface)
+     */
+    firstReportAt: string | null;
+    /**
+     * Seconds from open to the first report download — null before one
+     */
+    timeToReportSeconds: number | null;
+};
+
+export type RecallLotDto = {
+    batchId: string;
+    batchCode: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    uom: string;
+    expiryDate: string | null;
+    /**
+     * The batch now
+     */
+    status: 'active' | 'blocked';
+    blockedReason: string | null;
+    expired: boolean;
+    blockedByRecall: boolean;
+    /**
+     * The close released this lot
+     */
+    released: boolean;
+    /**
+     * Live, as of the read
+     */
+    figures: RecallFiguresDto;
+    adjustedOutByReason: {
+        [key: string]: number;
+    };
+    /**
+     * Frozen at close; null while open
+     */
+    closeFigures: RecallFiguresDto | null;
+    closeAdjustedOutByReason: {
+        [key: string]: number;
+    } | null;
+    overrideReason: string | null;
+    dispositionNote: string | null;
+};
+
+export type RecallOnHandDto = {
+    warehouseId: string;
+    warehouseCode: string;
+    /**
+     * `storage`, or a system bin: RECEIVING, QC-HOLD, DAMAGED, RETURNS, IN-TRANSIT
+     */
+    role: string;
+    batchId: string;
+    batchCode: string;
+    quantity: number;
+};
+
+export type RecallHeldOrderDto = {
+    orderId: string;
+    /**
+     * The client's order number, else the channel reference, else the id's last eight characters
+     */
+    orderLabel: string;
+    clientOrderRef: string | null;
+    channelOrderRef: string | null;
+    status: string;
+    warehouseId: string;
+    warehouseCode: string;
+    batchId: string;
+    batchCode: string;
+    quantity: number;
+    lastPickedAt: string;
+};
+
+export type RecallPlannedPickDto = {
+    picklistLineId: string;
+    orderId: string;
+    orderLabel: string;
+    warehouseCode: string;
+    binCode: string;
+    skuCode: string;
+    quantity: number;
+};
+
+export type RecallDetailResponse = {
+    recall: RecallHeaderDto;
+    /**
+     * The instant the live figures are as of
+     */
+    asOf: string;
+    lots: Array<RecallLotDto>;
+    /**
+     * Per lot × warehouse × location role — never a bin
+     */
+    onHandByWarehouse: Array<RecallOnHandDto>;
+    /**
+     * Open orders holding picked units — dispatch refuses them while the recall is open
+     */
+    heldOrders: Array<RecallHeldOrderDto>;
+    /**
+     * Planned picks at a bin holding a recalled lot — they refuse until the recalled units are moved out
+     */
+    plannedPicks: Array<RecallPlannedPickDto>;
+};
+
+export type RecallBinDto = {
+    warehouseCode: string;
+    binCode: string;
+    role: string;
+    batchCode: string;
+    skuCode: string;
+    quantity: number;
+};
+
+export type RecallBinsResponse = {
+    items: Array<RecallBinDto>;
+    nextCursor: string | null;
+};
+
+export type RecallShipmentDto = {
+    orderId: string;
+    orderLabel: string;
+    clientOrderRef: string | null;
+    channelOrderRef: string | null;
+    consigneeLegalName: string | null;
+    consigneeGstin: string | null;
+    destinationCity: string | null;
+    destinationState: string | null;
+    destinationPincode: string | null;
+    warehouseCode: string;
+    batchCode: string;
+    skuCode: string;
+    quantity: number;
+    dispatchedAt: string | null;
+    carrier: string | null;
+    awb: string | null;
+    /**
+     * Dispatched after the recall opened
+     */
+    duringRecall: boolean;
+};
+
+export type RecallShipmentsResponse = {
+    items: Array<RecallShipmentDto>;
+    nextCursor: string | null;
+};
+
+export type RecallReceiptDto = {
+    grnCode: string;
+    /**
+     * `PO <code>`, `ASN <code>` or `blind <reason>`
+     */
+    document: string | null;
+    /**
+     * The PO's vendor; null on an ASN or blind receipt
+     */
+    vendorName: string | null;
+    warehouseCode: string;
+    batchCode: string;
+    skuCode: string;
+    quantity: number;
+    receivedAt: string;
+    /**
+     * Received after the recall opened (the lot stayed blocked)
+     */
+    duringRecall: boolean;
+};
+
+export type RecallReceiptsResponse = {
+    items: Array<RecallReceiptDto>;
+    nextCursor: string | null;
+};
+
+export type AddRecallBatchesDto = {
+    /**
+     * 1–50 more batches of the recall's client
+     */
+    batchIds: Array<string>;
+};
+
+export type RecallDispositionNoteDto = {
+    /**
+     * A lot of this recall
+     */
+    batchId: string;
+    /**
+     * What became of the lot (destroyed under certificate …, returned to the brand …) — 1–500 characters
+     */
+    note: string;
+};
+
+export type CloseRecallDto = {
+    /**
+     * Why the recall is closed — trimmed, 1–500 characters
+     */
+    note: string;
+    /**
+     * The lots to unblock (0–50, distinct): each must be one THIS recall blocked and still blocked for the recall. A lot with stock on hand, in transit or in open orders needs overrideReason. Every other lot stays blocked (unblock it later through the batch)
+     */
+    releaseBatchIds?: Array<string>;
+    /**
+     * Why released lots may carry stock — audited on each lot’s unblock. Trimmed, blank = none
+     */
+    overrideReason?: string | null;
+    /**
+     * Close even though a lot’s stock does not match its ledger history (unaccounted ≠ 0) — audited
+     */
+    acknowledgeUnaccounted?: boolean;
+    /**
+     * Up to one note per lot, frozen in the close summary
+     */
+    dispositionNotes?: Array<RecallDispositionNoteDto>;
+    /**
+     * A destruction certificate number or similar — 1–200 characters, blank = none
+     */
+    evidenceRef?: string | null;
 };
 
 export type ReturnAuthorizationLineInputDto = {
@@ -16161,7 +16671,7 @@ export type InventoryControllerUnblockBatchErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The batch is not blocked (batch-not-blocked), or a concurrent request on the same Idempotency-Key (conflict)
+     * The batch is not blocked (batch-not-blocked); story 3-7a — the batch is on an open live recall, released only by closing it (batch-under-recall, member recallCode); or a concurrent request on the same Idempotency-Key (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -17100,7 +17610,7 @@ export type OutboundControllerDispatchOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The order is already dispatched under a different key, or is not packed — it reads accepted or cancelled (conflict, naming the status); or a concurrent idempotent request (conflict). Nothing is written
+     * The order is already dispatched under a different key, or is not packed — it reads accepted or cancelled (conflict, naming the status); story 3-7a — its picks drew a lot that is on an OPEN LIVE recall: release the lot from the recall (close it with the lot in releaseBatchIds) or wait for the packed-order cancel/unpack (order-holds-recalled-batch, members batchCodes and recallCodes); a lot blocked for any other reason still ships; or a concurrent idempotent request (conflict). Nothing is written
      */
     409: ProblemDetailsDto;
     /**
@@ -18038,7 +18548,7 @@ export type OutboundControllerRecordPickErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * AD-14 case 3 — the bin’s state_epoch moved and it no longer covers the draw (pick-bin-short, naming the bin and its live on-hand; RE-PLANNABLE, the client keeps the op). AD-14 case 4 — a premise moved terminally: the hold is expired/terminal, or the line, picklist, wave or order was cancelled or already picked (pick-unresolvable; TERMINAL, the client quarantines with session attribution). Also: the wave is not yet released / the picklist is not yet ready (conflict, retryable), a concurrent idempotent request (conflict), or a serial that does not live in the scanned bin (serial-elsewhere). None of these persist anything and none consume the idempotency key
+     * AD-14 case 3 — the bin’s state_epoch moved and it no longer covers the draw (pick-bin-short, naming the bin and its live on-hand; RE-PLANNABLE, the client keeps the op). AD-14 case 4 — a premise moved terminally: the hold is expired/terminal, or the line, picklist, wave or order was cancelled or already picked (pick-unresolvable; TERMINAL, the client quarantines with session attribution). Also: the wave is not yet released / the picklist is not yet ready (conflict, retryable), a concurrent idempotent request (conflict), or a serial that does not live in the scanned bin (serial-elsewhere); story 3-7a — the scanned bin holds on-hand of a batch of this SKU on an OPEN LIVE recall: an unscanned draw cannot tell the recalled units from good ones, so move them out first (recalled-lot-in-bin, members binCode, batchCodes, recallCodes; TERMINAL for the queued op — it lands in review). None of these persist anything and none consume the idempotency key
      */
     409: ProblemDetailsDto;
     /**
@@ -23497,7 +24007,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -23904,7 +24414,7 @@ export type ClientsControllerUpdateClientStatusErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A departed client asked to be suspended — it can only be reactivated (client-not-active); a departure while work remains (client-not-wound-down — `blockers: [{kind, count, codes?}]` lists every blocker: stock, open-purchase-orders, open-asns, pending-over-receipts, open-orders, open-rmas, pending-adjustments, open-counts, open-review-items, unsettled-invoices, unbilled-charges — story 5-5a, channel-mappings); or a concurrent request with the same Idempotency-Key (conflict)
+     * A departed client asked to be suspended — it can only be reactivated (client-not-active); a departure while work remains (client-not-wound-down — `blockers: [{kind, count, codes?}]` lists every blocker: stock, open-purchase-orders, open-asns, pending-over-receipts, open-orders, open-rmas, open-recalls — story 3-7a, pending-adjustments, open-counts, open-review-items, unsettled-invoices, unbilled-charges — story 5-5a, channel-mappings); or a concurrent request with the same Idempotency-Key (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -27820,6 +28330,147 @@ export type PortalControllerPortalReturnResponses = {
 
 export type PortalControllerPortalReturnResponse = PortalControllerPortalReturnResponses[keyof PortalControllerPortalReturnResponses];
 
+export type PortalControllerPortalRecallsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/portal/recalls';
+};
+
+export type PortalControllerPortalRecallsErrors = {
+    /**
+     * A malformed cursor (invalid-cursor) or a limit outside 1–100 (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerPortalRecallsError = PortalControllerPortalRecallsErrors[keyof PortalControllerPortalRecallsErrors];
+
+export type PortalControllerPortalRecallsResponses = {
+    200: PortalRecallListResponse;
+};
+
+export type PortalControllerPortalRecallsResponse = PortalControllerPortalRecallsResponses[keyof PortalControllerPortalRecallsResponses];
+
+export type PortalControllerPortalRecallData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        recallId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/recalls/{recallId}';
+};
+
+export type PortalControllerPortalRecallErrors = {
+    /**
+     * Malformed recallId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such recall of this client — unknown, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The read did not finish within its budget (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type PortalControllerPortalRecallError = PortalControllerPortalRecallErrors[keyof PortalControllerPortalRecallErrors];
+
+export type PortalControllerPortalRecallResponses = {
+    200: PortalRecallDetailResponse;
+};
+
+export type PortalControllerPortalRecallResponse = PortalControllerPortalRecallResponses[keyof PortalControllerPortalRecallResponses];
+
+export type PortalControllerPortalRecallReportData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        recallId: string;
+    };
+    query: {
+        /**
+         * `csv` (streamed, every row, ends in a `section=end` row carrying the count) or `xlsx` (built whole, capped at 200,000 rows)
+         */
+        format: 'csv' | 'xlsx';
+    };
+    url: '/tenants/{tenantId}/portal/recalls/{recallId}/report';
+};
+
+export type PortalControllerPortalRecallReportErrors = {
+    /**
+     * Malformed recallId, or a format outside csv | xlsx (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such recall of this client — unknown, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The XLSX would pass 200,000 rows — download the CSV (report-too-large)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * A recall report is already being prepared, or the read did not finish within its budget (report-unavailable; Retry-After: 5)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type PortalControllerPortalRecallReportError = PortalControllerPortalRecallReportErrors[keyof PortalControllerPortalRecallReportErrors];
+
+export type PortalControllerPortalRecallReportResponses = {
+    /**
+     * The file
+     */
+    200: Blob | File;
+};
+
+export type PortalControllerPortalRecallReportResponse = PortalControllerPortalRecallReportResponses[keyof PortalControllerPortalRecallReportResponses];
+
 export type PortalControllerInvoicesData = {
     body?: never;
     path: {
@@ -28077,6 +28728,536 @@ export type NotificationsControllerOpenedResponses = {
 };
 
 export type NotificationsControllerOpenedResponse = NotificationsControllerOpenedResponses[keyof NotificationsControllerOpenedResponses];
+
+export type RecallsControllerCandidatesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query: {
+        /**
+         * The client whose SKUs are searched
+         */
+        clientId: string;
+        /**
+         * The lot code as printed — matched on letters and digits only, case-insensitively (`ab-12/3` finds `AB123`)
+         */
+        code: string;
+    };
+    url: '/tenants/{tenantId}/inventory/recalls/candidates';
+};
+
+export type RecallsControllerCandidatesErrors = {
+    /**
+     * A malformed clientId, or a code with no letter or digit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such client in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The read did not finish within its budget (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type RecallsControllerCandidatesError = RecallsControllerCandidatesErrors[keyof RecallsControllerCandidatesErrors];
+
+export type RecallsControllerCandidatesResponses = {
+    200: RecallCandidatesResponse;
+};
+
+export type RecallsControllerCandidatesResponse = RecallsControllerCandidatesResponses[keyof RecallsControllerCandidatesResponses];
+
+export type RecallsControllerListData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * One client's recalls
+         */
+        clientId?: string;
+        status?: 'open' | 'closed';
+        mode?: 'live' | 'mock';
+        /**
+         * The brand's reference, exactly (one vendor lot recalled for several clients shares it)
+         */
+        externalRef?: string;
+        /**
+         * One recall by its code, exactly — how a link that names a recall code (a batch under recall) finds it
+         */
+        code?: string;
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/inventory/recalls';
+};
+
+export type RecallsControllerListErrors = {
+    /**
+     * A malformed filter, cursor or limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type RecallsControllerListError = RecallsControllerListErrors[keyof RecallsControllerListErrors];
+
+export type RecallsControllerListResponses = {
+    200: RecallListResponse;
+};
+
+export type RecallsControllerListResponse = RecallsControllerListResponses[keyof RecallsControllerListResponses];
+
+export type RecallsControllerOpenData = {
+    body: OpenRecallDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/recalls';
+};
+
+export type RecallsControllerOpenErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; 0 or over 50 batch ids, a malformed or repeated id, a blank or over-500-character reason note, an over-100-character reference, or a mode outside live | mock (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks qc.manage — owner and ops manager only (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A batch id names no batch of this tenant — every missing id is named (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The lots belong to more than one client (mixed-client); a live recall naming a lot already on an open live recall — the detail names it (batch-already-recalled, member recallCodes); or a concurrent request on the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * A lot is being picked, dispatched, blocked or recalled right now and the command waited 5 s — nothing was changed, retry (recall-open-contended)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type RecallsControllerOpenError = RecallsControllerOpenErrors[keyof RecallsControllerOpenErrors];
+
+export type RecallsControllerOpenResponses = {
+    201: RecallResponse;
+};
+
+export type RecallsControllerOpenResponse = RecallsControllerOpenResponses[keyof RecallsControllerOpenResponses];
+
+export type RecallsControllerDetailData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        recallId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/recalls/{recallId}';
+};
+
+export type RecallsControllerDetailErrors = {
+    /**
+     * Malformed recallId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No recall with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The read did not finish within its budget (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type RecallsControllerDetailError = RecallsControllerDetailErrors[keyof RecallsControllerDetailErrors];
+
+export type RecallsControllerDetailResponses = {
+    200: RecallDetailResponse;
+};
+
+export type RecallsControllerDetailResponse = RecallsControllerDetailResponses[keyof RecallsControllerDetailResponses];
+
+export type RecallsControllerBinsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        recallId: string;
+    };
+    query?: {
+        /**
+         * Opaque cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/inventory/recalls/{recallId}/bins';
+};
+
+export type RecallsControllerBinsErrors = {
+    /**
+     * Malformed recallId, cursor or limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No recall with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The read did not finish within its budget (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type RecallsControllerBinsError = RecallsControllerBinsErrors[keyof RecallsControllerBinsErrors];
+
+export type RecallsControllerBinsResponses = {
+    200: RecallBinsResponse;
+};
+
+export type RecallsControllerBinsResponse = RecallsControllerBinsResponses[keyof RecallsControllerBinsResponses];
+
+export type RecallsControllerShipmentsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        recallId: string;
+    };
+    query?: {
+        /**
+         * Opaque cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/inventory/recalls/{recallId}/shipments';
+};
+
+export type RecallsControllerShipmentsErrors = {
+    /**
+     * Malformed recallId, cursor or limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No recall with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The read did not finish within its budget (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type RecallsControllerShipmentsError = RecallsControllerShipmentsErrors[keyof RecallsControllerShipmentsErrors];
+
+export type RecallsControllerShipmentsResponses = {
+    200: RecallShipmentsResponse;
+};
+
+export type RecallsControllerShipmentsResponse = RecallsControllerShipmentsResponses[keyof RecallsControllerShipmentsResponses];
+
+export type RecallsControllerReceiptsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        recallId: string;
+    };
+    query?: {
+        /**
+         * Opaque cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/inventory/recalls/{recallId}/receipts';
+};
+
+export type RecallsControllerReceiptsErrors = {
+    /**
+     * Malformed recallId, cursor or limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No recall with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The read did not finish within its budget (report-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type RecallsControllerReceiptsError = RecallsControllerReceiptsErrors[keyof RecallsControllerReceiptsErrors];
+
+export type RecallsControllerReceiptsResponses = {
+    200: RecallReceiptsResponse;
+};
+
+export type RecallsControllerReceiptsResponse = RecallsControllerReceiptsResponses[keyof RecallsControllerReceiptsResponses];
+
+export type RecallsControllerReportData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        recallId: string;
+    };
+    query: {
+        /**
+         * `csv` (streamed, every row, ends in a `section=end` row carrying the count) or `xlsx` (built whole, capped at 200,000 rows)
+         */
+        format: 'csv' | 'xlsx';
+    };
+    url: '/tenants/{tenantId}/inventory/recalls/{recallId}/report';
+};
+
+export type RecallsControllerReportErrors = {
+    /**
+     * Malformed recallId, or a format outside csv | xlsx (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — "This is an operator surface." (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No recall with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The XLSX would pass 200,000 rows — download the CSV (report-too-large)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * A recall report is already being prepared, or the read did not finish within its 60 s budget (report-unavailable; Retry-After: 5)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type RecallsControllerReportError = RecallsControllerReportErrors[keyof RecallsControllerReportErrors];
+
+export type RecallsControllerReportResponses = {
+    /**
+     * The file
+     */
+    200: Blob | File;
+};
+
+export type RecallsControllerReportResponse = RecallsControllerReportResponses[keyof RecallsControllerReportResponses];
+
+export type RecallsControllerAddBatchesData = {
+    body: AddRecallBatchesDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        recallId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/recalls/{recallId}/batches';
+};
+
+export type RecallsControllerAddBatchesErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; 0 or over 50 batch ids, or a malformed or repeated id (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks qc.manage — owner and ops manager only (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such recall, or a batch id names no batch of this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The recall is closed (recall-not-open); a lot of another client (mixed-client); a lot already on this or another open live recall (batch-already-recalled); more than 50 lots in all (recall-too-many-lots); or a concurrent request on the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * A lot is being picked, dispatched, blocked or recalled right now and the command waited 5 s — nothing was changed, retry (recall-open-contended)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type RecallsControllerAddBatchesError = RecallsControllerAddBatchesErrors[keyof RecallsControllerAddBatchesErrors];
+
+export type RecallsControllerAddBatchesResponses = {
+    201: RecallResponse;
+};
+
+export type RecallsControllerAddBatchesResponse = RecallsControllerAddBatchesResponses[keyof RecallsControllerAddBatchesResponses];
+
+export type RecallsControllerCloseData = {
+    body: CloseRecallDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        recallId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/inventory/recalls/{recallId}/close';
+};
+
+export type RecallsControllerCloseErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; a blank or over-500-character note or override reason, over 50 or repeated release ids or disposition notes, or an over-200-character evidence reference (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks qc.manage — owner and ops manager only (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No recall with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The recall is already closed (recall-not-open); a release or note names a batch that is not a lot of this recall (recall-batch-not-on-recall); a lot this recall did not block, or no longer blocked for the recall (recall-release-not-eligible, member batchCodes); a released lot still has stock and no overrideReason (recall-release-has-stock, member batchCodes); a lot whose stock does not match its ledger and no acknowledgeUnaccounted (recall-unaccounted, member batchCodes); or a concurrent request on the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * A lot is being picked, dispatched, blocked or recalled right now and the command waited 5 s — nothing was changed, retry (recall-open-contended)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type RecallsControllerCloseError = RecallsControllerCloseErrors[keyof RecallsControllerCloseErrors];
+
+export type RecallsControllerCloseResponses = {
+    201: RecallResponse;
+};
+
+export type RecallsControllerCloseResponse = RecallsControllerCloseResponses[keyof RecallsControllerCloseResponses];
 
 export type ReturnsControllerListData = {
     body?: never;

@@ -103,6 +103,15 @@ export function unreadableSerialLabel(line: Pick<GoodsReceiptLineEntryDto, 'unre
   return count > 0 ? `${count} unit${count === 1 ? '' : 's'} — serial unreadable` : null;
 }
 
+/**
+ * Story 3-7a (A14) — the line's lot sits on an open live recall: the receipt
+ * booked, the lot stays blocked — "Under recall RCL-000001 — keep it apart",
+ * or null.
+ */
+export function grnLineRecallLabel(line: Pick<GoodsReceiptLineEntryDto, 'recallCode'>): string | null {
+  return typeof line.recallCode === 'string' && line.recallCode !== '' ? `Under recall ${line.recallCode} — keep it apart` : null;
+}
+
 /** The QC-on-receipt skip in words (A22), or null. */
 export function qcSkippedLabel(line: Pick<GoodsReceiptLineEntryDto, 'qcSkipped'>): string | null {
   return line.qcSkipped === 'serial-tracked' ? 'QC on receipt skipped — serial-tracked' : null;

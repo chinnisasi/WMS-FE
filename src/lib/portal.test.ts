@@ -63,6 +63,7 @@ describe('portal routing (story 21-7)', () => {
       ['Orders', '/portal/orders'],
       ['Inbound', '/portal/inbound'],
       ['Returns', '/portal/returns'],
+      ['Recalls', '/portal/recalls'],
       ['Invoices', '/portal/invoices'],
       ['Service', '/portal/service'],
     ]);

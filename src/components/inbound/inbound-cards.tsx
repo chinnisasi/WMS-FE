@@ -41,8 +41,9 @@ import { readyClients } from '@/lib/use-clients';
 import { clientFilterForDrill, clientFilterKey, hiddenByClientFilterNote } from '@/lib/active-client';
 import { poCreatedOutcome } from '@/lib/purchase-orders';
 import { grnGateInLabel } from '@/lib/gate-ins';
-import { grnDamagedSuffix, grnLineAppliedLabel, grnLineConditionLabel, grnShortSuffix } from '@/lib/grn-lines';
+import { grnDamagedSuffix, grnLineAppliedLabel, grnLineConditionLabel, grnLineRecallLabel, grnShortSuffix } from '@/lib/grn-lines';
 import { GrnLineSerials } from '@/components/inbound/grn-line-serials';
+import { StatusChip } from '@/components/shared/status-chip';
 import { useGoodsReceiptLines } from '@/lib/use-grn-lines';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { ulid } from '@/lib/ulid';
@@ -720,6 +721,14 @@ function GoodsReceiptLinesPanel({
                 <>
                   {' '}
                   · batch <span className="font-mono">{line.batchCode}</span>
+                </>
+              )}
+              {grnLineRecallLabel(line) !== null && (
+                <>
+                  {' '}
+                  <StatusChip tone="warning" glyph="⚑" data-testid="grn-line-recall">
+                    {grnLineRecallLabel(line)}
+                  </StatusChip>
                 </>
               )}{' '}
               · {grnLineConditionLabel(line, sku)}

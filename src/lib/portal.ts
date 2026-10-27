@@ -125,7 +125,7 @@ export const SESSION_ENDED_NOTICE: Readonly<Record<string, string>> = {
 };
 
 export interface PortalNavItem {
-  readonly id: 'home' | 'stock' | 'orders' | 'inbound' | 'returns' | 'invoices' | 'service';
+  readonly id: 'home' | 'stock' | 'orders' | 'inbound' | 'returns' | 'recalls' | 'invoices' | 'service';
   readonly label: string;
   readonly href: string;
 }
@@ -138,6 +138,8 @@ export const PORTAL_NAV: readonly PortalNavItem[] = [
   { id: 'inbound', label: 'Inbound', href: '/portal/inbound' },
   // Story 4-7a — the client's returns and what became of each unit.
   { id: 'returns', label: 'Returns', href: '/portal/returns' },
+  // Story 3-7a — this company's batch recalls: lots, figures, where they sit, the report.
+  { id: 'recalls', label: 'Recalls', href: '/portal/recalls' },
   { id: 'invoices', label: 'Invoices', href: '/portal/invoices' },
   // Story 21-8 — how the operation performed for this client.
   { id: 'service', label: 'Service', href: '/portal/service' },

@@ -147,6 +147,8 @@ export const INVENTORY_PAGE_TABS = definePageTabs({
   tabs: [
     { id: 'stock', label: 'Stock' },
     { id: 'batches', label: 'Batches' },
+    // Story 3-7a — batch recalls (tenant-wide: a recall blocks a lot in every warehouse).
+    { id: 'recalls', label: 'Recalls' },
     { id: 'ledger', label: 'Ledger' },
     // Story 3-2a — the stock adjustment form; shown only to a role holding
     // `stock.adjust` (the screen passes a role-filtered `visibleTabs`).

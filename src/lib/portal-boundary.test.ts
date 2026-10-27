@@ -182,6 +182,9 @@ describe('portal boundary — no operator hook or component reaches the portal',
     // Story 4-7a — the returns page and its route.
     expect(entries).toContain('components/portal/portal-returns.tsx');
     expect(entries).toContain('app/(portal)/portal/returns/page.tsx');
+    // Story 3-7a — the recalls page and its route (it reaches the shared recall pieces and pure lib/recalls only).
+    expect(entries).toContain('components/portal/portal-recalls.tsx');
+    expect(entries).toContain('app/(portal)/portal/recalls/page.tsx');
     expect(entries).toContain('app/(portal)/layout.tsx');
     expect(entries).toContain('lib/portal.ts');
     expect(entries).toContain('lib/use-portal.ts');

@@ -543,6 +543,8 @@ describe('story 1-2a — departure, no new work, contacts and addresses', () => 
       '2 other open items (brand-new-kind)',
     ]);
     expect(departureBlockerLine({ kind: 'pending-adjustments', count: 1, codes: [] })).toBe('1 stock adjustment awaiting approval');
+    // Story 3-7a — an open live recall blocks the departure.
+    expect(departureBlockerLine({ kind: 'open-recalls', count: 2, codes: ['RCL-000001', 'RCL-000002'] })).toBe('2 open recalls: RCL-000001, RCL-000002');
     expect(departureBlockerLine({ kind: 'channel-mappings', count: 2, codes: ['EXT-1', 'EXT-2'] })).toBe(
       '2 channel mappings of its SKUs: EXT-1, EXT-2',
     );
