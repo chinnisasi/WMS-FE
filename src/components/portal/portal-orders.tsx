@@ -213,8 +213,8 @@ export function PortalOrders() {
 /**
  * Story 4-1c — the portal's "Import from file": the shared two-step panel over
  * `portal/order-imports`, with the place form's warehouse select (one
- * warehouse needs no pick). The panel is keyed by the chosen warehouse — the
- * import's fingerprint includes it — so changing the warehouse starts over.
+ * warehouse needs no pick). Changing the warehouse drops the panel's checked
+ * result and key (the import's fingerprint includes it), never the file.
  */
 function PortalOrderImport({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
   const todayIst = useTodayIst();
@@ -226,36 +226,38 @@ function PortalOrderImport({ onClose, onImported }: { onClose: () => void; onImp
   if (warehouses.state === 'failed') return <WarehousesFailure state={warehouses} />;
   if (warehouses.state === 'loading') return <div className="text-(--muted-foreground)">Loading the warehouses…</div>;
   if (options.length === 0) return <div role="status" className="text-(--muted-foreground)">{PORTAL_ORDER_NO_WAREHOUSES_MESSAGE}</div>;
+  // The picker sits above the panel; the panel drops its checked result and
+  // key itself when the warehouse changes (the fingerprint includes it), and a
+  // first pick keeps the file already chosen.
   return (
-    <OrderImport
-      key={chosen}
-      surface="portal"
-      warehouseId={chosen === '' || tenantId === null ? null : chosen}
-      todayIst={todayIst}
-      run={(file, warehouse, step) => {
-        if (tenantId === null) throw new Error(PORTAL_SESSION_EXPIRED);
-        return fetchApiPortalImportOrders(tenantId, file, warehouse, step);
-      }}
-      onImported={(result) => {
-        if (result.acceptedCount > 0) onImported();
-      }}
-      onClose={onClose}
-      warehousePicker={
-        options.length > 1 ? (
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-medium">Warehouse</span>
-            <select aria-label="Warehouse" value={chosen} onChange={(event) => setWarehouseId(event.target.value)} className={`${selectClass} w-auto`}>
-              <option value="">Pick the warehouse…</option>
-              {options.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : undefined
-      }
-    />
+    <div className="flex flex-col gap-2">
+      {options.length > 1 && (
+        <label className="flex flex-col gap-1 text-xs sm:max-w-md">
+          <span className="font-medium">Warehouse for the imported orders</span>
+          <select aria-label="Warehouse" value={chosen} onChange={(event) => setWarehouseId(event.target.value)} className={selectClass}>
+            <option value="">Pick the warehouse…</option>
+            {options.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <OrderImport
+        surface="portal"
+        warehouseId={chosen === '' || tenantId === null ? null : chosen}
+        todayIst={todayIst}
+        run={(file, warehouse, step) => {
+          if (tenantId === null) throw new Error(PORTAL_SESSION_EXPIRED);
+          return fetchApiPortalImportOrders(tenantId, file, warehouse, step);
+        }}
+        onImported={(result) => {
+          if (result.acceptedCount > 0) onImported();
+        }}
+        onClose={onClose}
+      />
+    </div>
   );
 }
 

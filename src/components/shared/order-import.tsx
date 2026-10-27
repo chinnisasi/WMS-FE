@@ -41,9 +41,8 @@ const headClass = 'h-9 border-b border-(--border) px-3 text-left font-medium tex
  * Check, reused by every Import of that file — also after re-picking the
  * same file (same name, size and last-modified) following a timeout, so the
  * retry resumes instead of refusing every order as a used number — and
- * dropped for any other file. An unfinished run (`complete: false`) keeps
- * Import enabled: pressing it again finishes the file. The caller mounts it
- * keyed by warehouse, so a switch starts over.
+ * dropped for any other file or warehouse. An unfinished run (`complete:
+ * false`) keeps Import enabled: pressing it again finishes the file.
  */
 export function OrderImport({
   surface,
@@ -66,15 +65,21 @@ export function OrderImport({
   warehousePicker?: ReactNode;
 }) {
   const [file, setFile] = useState<File | null>(null);
-  const [checked, setChecked] = useState<{ file: File; result: OrderImportResult } | null>(null);
-  const [imported, setImported] = useState<{ file: File; result: OrderImportResult } | null>(null);
+  // Each result and the key belong to ONE (file, warehouse): the import's
+  // fingerprint is the file's bytes and the warehouse, so a switch of either
+  // invalidates them in the same render (no reset effect, no remount — a
+  // first warehouse pick keeps the file already chosen).
+  const [checked, setChecked] = useState<{ file: File; warehouseId: string; result: OrderImportResult } | null>(null);
+  const [imported, setImported] = useState<{ file: File; warehouseId: string; result: OrderImportResult } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState<'check' | 'import' | null>(null);
-  const keyRef = useRef<{ file: File; key: string } | null>(null);
+  const keyRef = useRef<{ file: File; warehouseId: string; key: string } | null>(null);
   const inFlight = useRef(false);
 
-  const checkResult = checked !== null && sameOrderImportFile(checked.file, file) ? checked.result : null;
-  const importResult = imported !== null && sameOrderImportFile(imported.file, file) ? imported.result : null;
+  const holds = (entry: { file: File; warehouseId: string } | null): boolean =>
+    entry !== null && entry.warehouseId === warehouseId && sameOrderImportFile(entry.file, file);
+  const checkResult = holds(checked) ? checked!.result : null;
+  const importResult = holds(imported) ? imported!.result : null;
   const result = importResult ?? checkResult;
   const tooLarge = file !== null && file.size > MAX_ORDER_IMPORT_BYTES;
   const finished = importResult !== null && importResult.complete;
@@ -101,13 +106,16 @@ export function OrderImport({
         setProblem(orderImportFileReadProblem(file.name));
         return;
       }
-      if (keyRef.current === null || !sameOrderImportFile(keyRef.current.file, file)) keyRef.current = { file, key: ulid() };
+      const current = keyRef.current;
+      if (current === null || current.warehouseId !== warehouseId || !sameOrderImportFile(current.file, file)) {
+        keyRef.current = { file, warehouseId, key: ulid() };
+      }
       if (kind === 'check') {
-        setChecked({ file, result: await run(file, warehouseId, { dryRun: true }) });
+        setChecked({ file, warehouseId, result: await run(file, warehouseId, { dryRun: true }) });
         setImported(null);
       } else {
-        const response = await run(file, warehouseId, { dryRun: false, idempotencyKey: keyRef.current.key });
-        setImported({ file, result: response });
+        const response = await run(file, warehouseId, { dryRun: false, idempotencyKey: keyRef.current!.key });
+        setImported({ file, warehouseId, result: response });
         onImported(response);
       }
     } catch (error) {
@@ -121,7 +129,19 @@ export function OrderImport({
   const outcome = result === null ? null : orderImportOutcome(result, surface);
   const importLabel = importResult !== null && !importResult.complete ? 'Import again' : 'Import';
   const disabledWhy =
-    warehouseId === null ? 'Choose a warehouse first.' : file === null ? 'Pick a file first.' : checkResult === null ? 'Check the file before importing it.' : null;
+    warehouseId === null
+      ? 'Choose a warehouse first.'
+      : file === null
+        ? 'Pick a file first.'
+        : tooLarge
+          ? 'The file is over 5 MB — split it.'
+          : checkResult === null
+            ? 'Check the file before importing it.'
+            : finished
+              ? 'This file is imported — pick another file to import more.'
+              : checkResult.acceptedCount === 0
+                ? 'No order in this file is ready — fix the refused rows, then check it again.'
+                : null;
 
   return (
     <section aria-label="Import orders from a file" className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">

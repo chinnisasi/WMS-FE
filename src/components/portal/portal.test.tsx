@@ -1780,7 +1780,7 @@ describe('Import orders from a file (4-1c)', () => {
     // No client or rate column is offered to a client.
     expect(panel.textContent).not.toContain('rate (rupees');
     expect(buttonNamed(panel, 'Check file').disabled).toBe(true);
-    setValue(panel.querySelector<HTMLSelectElement>('[aria-label="Warehouse"]')!, W1);
+    setValue(view.container.querySelector<HTMLSelectElement>('[aria-label="Warehouse"]')!, W1);
     await settle();
     const fresh = view.container.querySelector<HTMLElement>('section[aria-label="Import orders from a file"]')!;
     pick(fresh, new File(['order_ref,sku,quantity\n'], 'orders.csv', { type: 'text/csv' }));
@@ -1799,6 +1799,39 @@ describe('Import orders from a file (4-1c)', () => {
     expect(fresh.textContent).toContain('1 order placed');
     expect(fresh.textContent).toContain('Not enough stock');
     expect(requests.filter((entry) => entry.endsWith('/portal/orders')).length).toBeGreaterThan(listReads);
+  });
+
+  test('C16: a file picked before the warehouse is kept; switching the warehouse drops the checked result and the next Import sends a new key', async () => {
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Import from file'));
+    await settle();
+    const panel = (): HTMLElement => view!.container.querySelector<HTMLElement>('section[aria-label="Import orders from a file"]')!;
+    const select = (): HTMLSelectElement => view!.container.querySelector<HTMLSelectElement>('[aria-label="Warehouse"]')!;
+    pick(panel(), new File(['order_ref,sku,quantity\n'], 'orders.csv', { type: 'text/csv', lastModified: 7 }));
+    setValue(select(), W1);
+    await settle();
+    expect(panel().textContent).toContain('Selected: orders.csv');
+    postReplies.push([200, result(true)]);
+    click(buttonNamed(panel(), 'Check file'));
+    await settle();
+    postReplies.push([200, { ...result(false), importId: null, complete: false, notAttemptedCount: 1 }]);
+    click(buttonNamed(panel(), 'Import'));
+    await settle();
+    const first = posts.at(-1)!.key;
+    expect(panel().textContent).toContain('Import again');
+    setValue(select(), W2);
+    await settle();
+    expect(panel().querySelector('[data-testid="order-import-result"]')).toBeNull();
+    expect(buttonNamed(panel(), 'Import').disabled).toBe(true);
+    postReplies.push([200, { ...result(true), warehouseId: W2 }]);
+    click(buttonNamed(panel(), 'Check file'));
+    await settle();
+    postReplies.push([201, { ...result(false), warehouseId: W2 }]);
+    click(buttonNamed(panel(), 'Import'));
+    await settle();
+    expect(posts.at(-1)!.body).toEqual({ file: 'orders.csv', warehouseId: W2 });
+    expect(posts.at(-1)!.key).not.toBe(first);
   });
 
   test('without orders.place there is no "Import from file"', async () => {

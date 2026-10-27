@@ -1392,7 +1392,7 @@ export const outboundControllerCreateOrder = <ThrowOnError extends boolean = fal
 });
 
 /**
- * Imports orders from a CSV/XLSX file (orders.manage) — one row per order line, grouped by client + order_ref; each order is created exactly as the create form would (its own derived key, its own reservations, backorders as usual), and an order with any bad row is refused whole. dryRun=true checks the file through the create's rules and writes nothing (no stock is promised). ≤ 2,000 rows, ≤ 200 orders, ≤ 200 lines per order, ≤ 5 MB; a run stops starting orders after 15 s (complete: false — Import again with the same file)
+ * Imports orders from a CSV/XLSX file (orders.manage) — one row per order line, grouped by client + order_ref; each order is created exactly as the create form would (its own derived key, its own reservations, backorders as usual), and an order with any bad row is refused whole. dryRun=true checks the file through the create's rules and writes nothing (no stock is promised). ≤ 300 rows, ≤ 100 orders, ≤ 200 lines per order, ≤ 5 MB; a run stops starting orders after 15 s (complete: false — Import again with the same file; a Check stopped so leaves the rest unchecked)
  */
 export const outboundControllerImportOrders = <ThrowOnError extends boolean = false>(options: Options<OutboundControllerImportOrdersData, ThrowOnError>): RequestResult<OutboundControllerImportOrdersResponses, OutboundControllerImportOrdersErrors, ThrowOnError> => (options.client ?? client).post<OutboundControllerImportOrdersResponses, OutboundControllerImportOrdersErrors, ThrowOnError>({
     ...formDataBodySerializer,
@@ -4362,7 +4362,7 @@ export const portalControllerPlaceOrder = <ThrowOnError extends boolean = false>
 });
 
 /**
- * Imports this client's orders from a CSV/XLSX file (orders.place) — one row per order line, grouped by order_ref; each order is placed exactly as Place order would (your own active SKUs, every line reserved in full or that order is refused), and an order with any bad row is refused whole. dryRun=true checks the file and writes nothing (it cannot promise stock). ≤ 2,000 rows, ≤ 200 orders, ≤ 200 lines per order, ≤ 5 MB
+ * Imports this client's orders from a CSV/XLSX file (orders.place) — one row per order line, grouped by order_ref; each order is placed exactly as Place order would (your own active SKUs, every line reserved in full or that order is refused), and an order with any bad row is refused whole. dryRun=true checks the file and writes nothing (it cannot promise stock). A run stops starting orders after 15 s (complete: false — Import again with the same file; a Check stopped so leaves the rest unchecked). ≤ 300 rows, ≤ 100 orders, ≤ 200 lines per order, ≤ 5 MB
  */
 export const portalControllerImportOrders = <ThrowOnError extends boolean = false>(options: Options<PortalControllerImportOrdersData, ThrowOnError>): RequestResult<PortalControllerImportOrdersResponses, PortalControllerImportOrdersErrors, ThrowOnError> => (options.client ?? client).post<PortalControllerImportOrdersResponses, PortalControllerImportOrdersErrors, ThrowOnError>({
     ...formDataBodySerializer,

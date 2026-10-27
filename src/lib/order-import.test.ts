@@ -131,6 +131,19 @@ describe('order import (story 4-1c)', () => {
     });
   });
 
+  test('C3/C18: a Check the budget stopped says what was not checked; an unfinished Import keeps its refused-row sentence', () => {
+    expect(orderImportOutcome(staff({ complete: false, notAttemptedCount: 1 }), 'staff')).toEqual({
+      tone: 'warning',
+      word: '2 of 3 orders checked',
+      reason:
+        '1 order was not reached in the time allowed and not checked; 1 order refused — 1 row with problems, listed below. Import checks every order as it creates it, or split the file and check each part.',
+    });
+    const partial = orderImportOutcome(staff({ dryRun: false, complete: false, notAttemptedCount: 1, acceptedCount: 1, refusedCount: 1 }), 'staff');
+    expect(partial.reason).toBe(
+      '1 order created so far; 1 order refused — 1 row with problems, listed below. Import again with the same file to finish — the orders already created are not created twice.',
+    );
+  });
+
   test('A14: the error report carries every refused row and keeps formulas inert; its name is the import’s or the file’s', () => {
     const report = orderImportErrorReport({
       errors: [

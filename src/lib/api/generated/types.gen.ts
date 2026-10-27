@@ -3109,7 +3109,7 @@ export type OrderImportResponseDto = {
      */
     refusedCount: number;
     /**
-     * False when the 15-second budget stopped the run before every order was tried (answered 200, nothing stored) — Import again with the same file to finish
+     * False when the 15-second budget stopped the run before every order was tried (answered 200, nothing stored) — Import again with the same file to finish; on a Check, the orders not reached were not checked
      */
     complete: boolean;
     /**
@@ -10963,7 +10963,7 @@ export type PortalOrderImportResponseDto = {
      */
     refusedCount: number;
     /**
-     * False when the 15-second budget stopped the run before every order was tried — Import again with the same file to finish
+     * False when the 15-second budget stopped the run before every order was tried — Import again with the same file to finish; on a Check, the orders not reached were not checked
      */
     complete: boolean;
     /**
@@ -17675,7 +17675,7 @@ export type OutboundControllerImportOrdersErrors = {
      */
     415: ProblemDetailsDto;
     /**
-     * More than 5 MB, 2,000 data rows or 200 orders (import-too-large), or the Idempotency-Key reused with a different file or warehouse (idempotency-key-reuse)
+     * More than 5 MB, 300 data rows or 100 orders (import-too-large), or the Idempotency-Key reused with a different file or warehouse (idempotency-key-reuse)
      */
     422: ProblemDetailsDto;
     /**
@@ -28077,7 +28077,7 @@ export type PortalControllerImportOrdersErrors = {
      */
     415: ProblemDetailsDto;
     /**
-     * More than 5 MB, 2,000 data rows or 200 orders (import-too-large), or the Idempotency-Key reused with a different file or warehouse (idempotency-key-reuse)
+     * More than 5 MB, 300 data rows or 100 orders (import-too-large), or the Idempotency-Key reused with a different file or warehouse (idempotency-key-reuse)
      */
     422: ProblemDetailsDto;
     /**

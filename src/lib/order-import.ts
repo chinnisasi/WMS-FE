@@ -218,6 +218,18 @@ export function orderImportOutcome(
       : (result.refusedCount > 0 ? `${plural(result.refusedCount, 'order', 'orders')} refused — ` : '') +
         `${plural(rows, 'row', 'rows')} with problems, listed below`;
   const created = surface === 'portal' ? 'placed' : 'created';
+  if (result.dryRun && !result.complete) {
+    // A Check stopped by the server's time budget: the orders it did not reach were not checked.
+    const checkedCount = result.orderCount - result.notAttemptedCount;
+    return {
+      tone: 'warning',
+      word: `${checkedCount.toLocaleString('en-IN')} of ${plural(result.orderCount, 'order', 'orders')} checked`,
+      reason:
+        `${plural(result.notAttemptedCount, 'order was', 'orders were')} not reached in the time allowed and not checked` +
+        (refused === null ? '' : `; ${refused}`) +
+        '. Import checks every order as it creates it, or split the file and check each part.',
+    };
+  }
   if (result.dryRun) {
     const stock =
       surface === 'portal'
@@ -237,7 +249,10 @@ export function orderImportOutcome(
     return {
       tone: 'warning',
       word: `${processed.toLocaleString('en-IN')} of ${plural(result.orderCount, 'order', 'orders')} processed`,
-      reason: `${plural(result.acceptedCount, 'order', 'orders')} ${created} so far. Import again with the same file to finish — the orders already ${created} are not ${created} twice.`,
+      reason:
+        `${plural(result.acceptedCount, 'order', 'orders')} ${created} so far` +
+        (refused === null ? '' : `; ${refused}`) +
+        `. Import again with the same file to finish — the orders already ${created} are not ${created} twice.`,
     };
   }
   const backorders = backorderSummary(result);
