@@ -57,6 +57,7 @@ import { FeedbackBanner } from '@/components/feedback/banner';
 import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass } from '@/components/outbound/shell';
 
+import { InvoiceNotesPanel, NoteView, type NoteDraftRequest } from './client-invoice-notes';
 import { LineRecordsPanel } from './line-records';
 
 /**
@@ -313,6 +314,10 @@ function ClientInvoiceDetail({
   const detail = useClientInvoiceDetail(invoiceId);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  // Story 5-6a (A22): an open note REPLACES the invoice view — the invoice's
+  // printable unmounts, so the note holds the only `data-print-root`.
+  const [openNoteId, setOpenNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<NoteDraftRequest | null>(null);
   // A pre-render double-click fires both handlers before `disabled` renders.
   const inFlight = useRef(false);
 
@@ -320,6 +325,9 @@ function ClientInvoiceDetail({
   if (detail.state === 'loading') return <div className="text-(--muted-foreground)">Loading…</div>;
   const invoice = detail.data;
   const actions = clientInvoiceActions(invoice.status);
+  if (openNoteId !== null) {
+    return <NoteView key={openNoteId} noteId={openNoteId} canInvoice={canInvoice} onBack={() => setOpenNoteId(null)} onOutcome={onOutcome} />;
+  }
 
   async function run(work: (tenantId: string) => Promise<ClientInvoiceOutcome>, word: string) {
     const session = readSession();
@@ -441,8 +449,24 @@ function ClientInvoiceDetail({
       {invoice.statusNote !== null ? <div className="text-xs print:hidden">Note: {invoice.statusNote}</div> : null}
 
       <PrintableClientInvoice invoice={invoice} />
-      {/* Story 21-5b: the dispute drill — screen-only, OUTSIDE data-print-root. */}
-      <LineRecordsPanel invoice={invoice} />
+      {/* Story 21-5b: the dispute drill — screen-only, OUTSIDE data-print-root.
+          Story 5-6a: on a disputed invoice a line offers "Credit this line". */}
+      <LineRecordsPanel
+        invoice={invoice}
+        onCreditLine={canInvoice && invoice.status === 'disputed' ? (lineId) => setNoteDraft({ kind: 'credit', presetLineId: lineId, settles: true }) : undefined}
+      />
+      {/* Story 5-6a: the credit and debit notes — screen-only, OUTSIDE data-print-root. */}
+      <InvoiceNotesPanel
+        invoice={invoice}
+        canInvoice={canInvoice}
+        draft={noteDraft}
+        onDraft={setNoteDraft}
+        onOpenNote={(noteId) => {
+          setNoteDraft(null);
+          setOpenNoteId(noteId);
+        }}
+        onOutcome={onOutcome}
+      />
     </div>
   );
 }

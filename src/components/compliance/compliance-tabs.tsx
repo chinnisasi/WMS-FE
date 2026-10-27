@@ -8,6 +8,7 @@ import { COMPLIANCE_PAGE_TABS, type ComplianceTab } from '@/lib/page-tabs';
 import { useActiveClient } from '@/lib/use-active-client';
 
 import { ClientInvoices } from '@/components/compliance/client-invoices';
+import { NotesRegister } from '@/components/compliance/client-invoice-notes';
 import { ColdChainTrace } from '@/components/compliance/cold-chain-trace';
 import { EwayBills } from '@/components/compliance/eway-bills';
 import { HsnSummary } from '@/components/compliance/hsn-summary';
@@ -58,6 +59,13 @@ function ComplianceTabsKnown({ drill, initialTab }: { drill: ParsedDrill; initia
         )}
         {/* Story 21-5 — the 3PL's services invoices to its client brands. */}
         {tab === 'client-invoices' && <ClientInvoices />}
+        {/* Story 5-6a — the credit and debit notes register (never filtered by client: a GSTIN's month). */}
+        {tab === 'notes' && (
+          <>
+            <UnfilteredNote />
+            <NotesRegister />
+          </>
+        )}
         {tab === 'eway' && <EwayBills key={`eway-${key}`} drill={drill} clearHref={COMPLIANCE_PAGE_TABS.href('eway')} />}
         {tab === 'hsn' && (
           <>

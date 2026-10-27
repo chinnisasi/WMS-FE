@@ -63,7 +63,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 3-2b adds `stock.adjust.request` (owner + ops_manager + operator — the handheld adjustment request) — 48 became 49.
     // Story 2-5a adds `receipt.attach` (owner + ops_manager + operator — a web damage photo) and
     // `receipt.photo-remove` (owner + ops_manager — evidence is removed by a manager) — 49 became 51.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(51);
+    // Story 5-6a: + billing.configure (owner-only).
+    expect(ROLE_CAPABILITIES.owner.length).toBe(52);
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'receipt.attach')),
     ).toEqual(['owner', 'ops_manager', 'operator']);

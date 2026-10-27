@@ -176,6 +176,12 @@ export const CAPABILITIES = [
   // /compliance Client invoices actions and the clients card's tax-details
   // form; every member reads the invoices.
   'billing.invoice',
+  // Story 5-6a — the billing configuration: whether a credit note needs a
+  // second person to issue it and another to void it. OWNER-ONLY (see
+  // OWNER_ONLY_CAPABILITIES — the person who sets the bar for money leaving
+  // the business). Gates the Settings "Require a second person to issue
+  // credit notes" toggle; every member reads the setting.
+  'billing.configure',
   // Story 21-6 — advance shipment notices: create, amend, close (short) and
   // cancel an ASN. Owner + Ops Manager, the `po.manage` holder set (an ASN is
   // the PO's mirror). Gates the Inbound surface's ASN card actions; every
@@ -270,6 +276,8 @@ const OWNER_ONLY_CAPABILITIES: readonly Capability[] = [
   'ledger.acknowledge',
   // Story 1-6c — the drug and FSSAI licences are the owner's to manage.
   'licences.manage',
+  // Story 5-6a — the credit-note maker/checker switch is the owner's.
+  'billing.configure',
 ];
 
 /**

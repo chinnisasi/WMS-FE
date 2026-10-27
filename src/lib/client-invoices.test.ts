@@ -104,7 +104,8 @@ describe('client invoices — vocabulary and actions', () => {
   });
 
   test('the void warning names GSTR-1 and the credit note; the stale word is the spec’s', () => {
-    expect(VOID_WARNING).toContain('already reported in GSTR-1, a credit note is the correct fix — not supported yet');
+    // Story 5-6a: credit and debit notes exist — the warning points at them.
+    expect(VOID_WARNING).toContain('already reported in GSTR-1, do not void it — raise a credit or debit note instead');
     expect(STALE_WORD).toBe('Figures changed — review and issue again');
   });
 });

@@ -438,6 +438,8 @@ describe('the portal surfaces — ready, empty, failed', () => {
     };
     routes = {
       '/portal/invoices': [200, { items: [row], nextCursor: null }],
+      // Story 5-6a — the invoice's notes (none here; the notes have their own test).
+      '/portal/invoices/i-1/notes': [200, { notes: [], netDocument: row.totals, netDocumentPayable: row.totals.payable }],
       '/portal/invoices/i-1': [
         200,
         {

@@ -107,6 +107,8 @@ describe('page-tabs — the pages', () => {
     expect(COMPLIANCE_PAGE_TABS.tabs.map((t) => [t.id, t.label])).toEqual([
       ['invoices', 'Invoices'],
       ['client-invoices', 'Client invoices'],
+      // Story 5-6a — the credit and debit notes register.
+      ['notes', 'Credit and debit notes'],
       ['eway', 'E-way bills'],
       ['hsn', 'HSN summary'],
       ['cold-chain', 'Cold-chain trace'],

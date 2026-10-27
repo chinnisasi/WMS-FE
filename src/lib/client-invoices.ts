@@ -121,7 +121,7 @@ export const VERB_REFUSED_WORD: Readonly<Record<ClientInvoiceVerb, string>> = { 
 
 /** The void form's standing warning (the spec's wording). */
 export const VOID_WARNING =
-  'If this invoice was already reported in GSTR-1, a credit note is the correct fix — not supported yet. A void keeps its number; the next Prepare for its month drafts a replacement.';
+  'If this invoice was already reported in GSTR-1, do not void it — raise a credit or debit note instead (Credit and debit notes, below the invoice). A void keeps its number; the next Prepare for its month drafts a replacement, and any draft notes are discarded with it.';
 
 /** The banner an issue answered `stale` shows (the spec's wording). */
 export const STALE_WORD = 'Figures changed — review and issue again';
@@ -383,6 +383,8 @@ export function clientInvoiceActionReason(error: unknown): string {
         return 'This invoice is no longer a draft — the list has been refreshed.';
       case 'invoice-transition-invalid':
         return error.detail ?? 'That status change is not allowed from here.';
+      case 'invoice-has-notes':
+        return 'This invoice has issued credit/debit notes — void its notes first.';
       case 'nothing-to-invoice':
         return 'This draft has no billable line — discard it.';
       case 'not-found':

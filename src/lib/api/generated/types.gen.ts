@@ -8669,7 +8669,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -8696,7 +8696,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -9913,6 +9913,217 @@ export type ClientInvoiceNoteDto = {
     note?: string;
 };
 
+export type NoteLineRequestDto = {
+    /**
+     * A line of the invoice the note amends (one note line per invoice line)
+     */
+    invoiceLineId: string;
+    /**
+     * The taxable delta, positive integer paise (the kind gives the sign)
+     */
+    amountPaise: number;
+    /**
+     * A DEBIT line above its invoice line’s taxable value needs a reason (409 debit-needs-override without one); refused on a credit
+     */
+    overrideReason?: string;
+};
+
+export type CreateNoteDto = {
+    kind: 'credit' | 'debit';
+    /**
+     * credit: deficiency-in-service | post-supply-discount | excess-billed; debit: short-billed
+     */
+    reason: 'deficiency-in-service' | 'post-supply-discount' | 'excess-billed' | 'short-billed';
+    /**
+     * Why — 1–500 characters. Printed on the note the client receives
+     */
+    reasonNote: string;
+    /**
+     * A credit note that settles the invoice’s dispute when issued (the invoice must be disputed). Never on a debit
+     */
+    settlesDispute?: boolean;
+    lines: Array<NoteLineRequestDto>;
+};
+
+export type NoteLineDto = {
+    id: string;
+    invoiceLineId: string;
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    uom: string | null;
+    /**
+     * IST date, inclusive (the invoice line’s segment)
+     */
+    segmentFrom: string;
+    /**
+     * IST date, inclusive
+     */
+    segmentTo: string;
+    sac: string;
+    gstBps: number;
+    placeOfSupply: string;
+    supplyType: 'intra' | 'inter';
+    /**
+     * Taxable value, positive integer paise
+     */
+    amountPaise: number;
+    cgstPaise: number;
+    /**
+     * SGST/UTGST
+     */
+    sgstPaise: number;
+    igstPaise: number;
+    overrideReason: string | null;
+};
+
+export type NoteDto = {
+    id: string;
+    invoiceId: string;
+    clientId: string;
+    kind: 'credit' | 'debit';
+    status: 'draft' | 'issued' | 'void';
+    reason: 'deficiency-in-service' | 'post-supply-discount' | 'excess-billed' | 'short-billed';
+    reasonNote: string;
+    settlesDispute: boolean;
+    noteNo: string | null;
+    fyLabel: string | null;
+    supplierGstin: string;
+    placeOfSupply: string;
+    supplyType: 'intra' | 'inter';
+    /**
+     * Positive magnitudes, integer paise; a credit subtracts, a debit adds
+     */
+    totals: ClientInvoiceTotalsDto;
+    issuedAt: string | null;
+    issuedBy: string | null;
+    voidNote: string | null;
+    voidedAt: string | null;
+    voidedBy: string | null;
+    createdBy: string;
+    createdAt: string;
+    invoiceNo: string | null;
+    /**
+     * ISO-8601 UTC
+     */
+    invoiceIssuedAt: string | null;
+    /**
+     * A credit’s last IST day to issue (CGST Act s.34(2)); null for a debit
+     */
+    creditDeadline: string | null;
+    /**
+     * The invoice’s frozen party, copied verbatim
+     */
+    party: ClientInvoicePartyDto;
+    lines: Array<NoteLineDto>;
+};
+
+export type NoteResponse = {
+    note: NoteDto;
+};
+
+export type NoteEntryDto = {
+    id: string;
+    invoiceId: string;
+    clientId: string;
+    kind: 'credit' | 'debit';
+    status: 'draft' | 'issued' | 'void';
+    reason: 'deficiency-in-service' | 'post-supply-discount' | 'excess-billed' | 'short-billed';
+    reasonNote: string;
+    settlesDispute: boolean;
+    noteNo: string | null;
+    fyLabel: string | null;
+    supplierGstin: string;
+    placeOfSupply: string;
+    supplyType: 'intra' | 'inter';
+    /**
+     * Positive magnitudes, integer paise; a credit subtracts, a debit adds
+     */
+    totals: ClientInvoiceTotalsDto;
+    issuedAt: string | null;
+    issuedBy: string | null;
+    voidNote: string | null;
+    voidedAt: string | null;
+    voidedBy: string | null;
+    createdBy: string;
+    createdAt: string;
+};
+
+export type InvoiceNotesResponse = {
+    notes: Array<NoteEntryDto>;
+    /**
+     * The invoice after its ISSUED notes (− credits, + debits). The document value, not an outstanding balance
+     */
+    netDocument: ClientInvoiceTotalsDto;
+    /**
+     * `netDocument.payable`
+     */
+    netDocumentPayable: number;
+};
+
+export type NoteRegisterRowDto = {
+    noteId: string;
+    noteNo: string;
+    /**
+     * The note’s IST date
+     */
+    noteDate: string;
+    kind: 'credit' | 'debit';
+    status: 'issued' | 'void';
+    voided: boolean;
+    recipientGstin: string | null;
+    recipientName: string;
+    placeOfSupply: string;
+    supplyType: 'intra' | 'inter';
+    invoiceNo: string;
+    /**
+     * The original invoice’s IST date
+     */
+    invoiceDate: string;
+    gstBps: number;
+    taxablePaise: number;
+    igstPaise: number;
+    cgstPaise: number;
+    sgstPaise: number;
+    /**
+     * The whole note’s payable value (repeated on each of its rate rows)
+     */
+    noteValuePaise: number;
+};
+
+export type NoteRegisterResponse = {
+    /**
+     * One row per (note, GST rate), oldest first
+     */
+    rows: Array<NoteRegisterRowDto>;
+    nextCursor: string | null;
+};
+
+export type IssueNoteResponse = {
+    note: NoteDto;
+    /**
+     * The invoice, present when the note settled its dispute
+     */
+    invoice?: ClientInvoiceDto;
+};
+
+export type VoidNoteDto = {
+    /**
+     * Why the note is voided — required, 1–500 characters
+     */
+    voidNote: string;
+};
+
+export type NotePolicyResponse = {
+    requireSecondApprover: boolean;
+};
+
+export type NotePolicyDto = {
+    /**
+     * Whether a credit note needs a second person to issue it (and another to void it). A tenant with no setting requires one
+     */
+    requireSecondApprover: boolean;
+};
+
 export type PortalUserDto = {
     id: string;
     email: string;
@@ -10619,6 +10830,92 @@ export type PortalInvoiceDetailResponse = {
     totals: PortalInvoiceTotalsDto;
     party: PortalInvoicePartyDto;
     lines: Array<PortalInvoiceLineDto>;
+};
+
+export type PortalNoteRowDto = {
+    id: string;
+    kind: 'credit' | 'debit';
+    noteNo: string;
+    fyLabel: string;
+    /**
+     * ISO-8601 UTC
+     */
+    issuedAt: string;
+    /**
+     * Never draft — a portal sees issued documents only
+     */
+    status: 'issued' | 'void';
+    reason: 'deficiency-in-service' | 'post-supply-discount' | 'excess-billed' | 'short-billed';
+    /**
+     * Why — as printed on the note
+     */
+    reasonNote: string;
+    /**
+     * Positive magnitudes, integer paise; a credit subtracts, a debit adds
+     */
+    totals: PortalInvoiceTotalsDto;
+};
+
+export type PortalInvoiceNotesResponse = {
+    notes: Array<PortalNoteRowDto>;
+    /**
+     * The invoice after its issued notes — the document value, not a balance due
+     */
+    netDocument: PortalInvoiceTotalsDto;
+    netDocumentPayable: number;
+};
+
+export type PortalNoteLineDto = {
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    uom: string | null;
+    /**
+     * IST date, inclusive
+     */
+    segmentFrom: string;
+    /**
+     * IST date, inclusive
+     */
+    segmentTo: string;
+    sac: string;
+    gstBps: number;
+    amountPaise: number;
+    cgstPaise: number;
+    sgstPaise: number;
+    igstPaise: number;
+};
+
+export type PortalNoteDetailResponse = {
+    id: string;
+    kind: 'credit' | 'debit';
+    noteNo: string;
+    fyLabel: string;
+    /**
+     * ISO-8601 UTC
+     */
+    issuedAt: string;
+    /**
+     * Never draft — a portal sees issued documents only
+     */
+    status: 'issued' | 'void';
+    reason: 'deficiency-in-service' | 'post-supply-discount' | 'excess-billed' | 'short-billed';
+    /**
+     * Why — as printed on the note
+     */
+    reasonNote: string;
+    /**
+     * Positive magnitudes, integer paise; a credit subtracts, a debit adds
+     */
+    totals: PortalInvoiceTotalsDto;
+    invoiceNo: string;
+    /**
+     * ISO-8601 UTC
+     */
+    invoiceIssuedAt: string;
+    placeOfSupply: string;
+    supplyType: 'intra' | 'inter';
+    party: PortalInvoicePartyDto;
+    lines: Array<PortalNoteLineDto>;
 };
 
 export type StockAdjustmentSummaryDto = {
@@ -22664,7 +22961,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -24877,7 +25174,7 @@ export type ClientInvoicesControllerVoidErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Only an issued or disputed invoice can be voided (invoice-transition-invalid), or a concurrent request (conflict)
+     * Only an issued or disputed invoice can be voided (invoice-transition-invalid), it has issued credit or debit notes — void them first (invoice-has-notes), or a concurrent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -24893,6 +25190,443 @@ export type ClientInvoicesControllerVoidResponses = {
 };
 
 export type ClientInvoicesControllerVoidResponse = ClientInvoicesControllerVoidResponses[keyof ClientInvoicesControllerVoidResponses];
+
+export type ClientInvoiceNotesControllerNotesOfInvoiceData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}/notes';
+};
+
+export type ClientInvoiceNotesControllerNotesOfInvoiceErrors = {
+    /**
+     * A malformed invoiceId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client invoice with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientInvoiceNotesControllerNotesOfInvoiceError = ClientInvoiceNotesControllerNotesOfInvoiceErrors[keyof ClientInvoiceNotesControllerNotesOfInvoiceErrors];
+
+export type ClientInvoiceNotesControllerNotesOfInvoiceResponses = {
+    200: InvoiceNotesResponse;
+};
+
+export type ClientInvoiceNotesControllerNotesOfInvoiceResponse = ClientInvoiceNotesControllerNotesOfInvoiceResponses[keyof ClientInvoiceNotesControllerNotesOfInvoiceResponses];
+
+export type ClientInvoiceNotesControllerCreateData = {
+    body: CreateNoteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoices/{invoiceId}/notes';
+};
+
+export type ClientInvoiceNotesControllerCreateErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed invoiceId, a kind or reason outside its vocabulary, a blank or over-long reasonNote, 0 or more than 100 lines, a duplicate line, an amount that is not a positive whole number, settlesDispute on a debit, or an overrideReason on a credit (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such invoice in this tenant, or a line that is not on it (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A draft or void invoice (invoice-not-noteable), a debit on a disputed or settled invoice (invoice-not-debitable), settlesDispute on an invoice that is not disputed (invoice-not-disputed), a credit past its s.34(2) date (credit-note-time-barred), a credit over what the invoice line still holds — the `lines` member names each (credit-exceeds-invoice), a debit over its invoice line without an override reason (debit-needs-override), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoiceNotesControllerCreateError = ClientInvoiceNotesControllerCreateErrors[keyof ClientInvoiceNotesControllerCreateErrors];
+
+export type ClientInvoiceNotesControllerCreateResponses = {
+    /**
+     * The draft note
+     */
+    201: NoteResponse;
+};
+
+export type ClientInvoiceNotesControllerCreateResponse = ClientInvoiceNotesControllerCreateResponses[keyof ClientInvoiceNotesControllerCreateResponses];
+
+export type ClientInvoiceNotesControllerRegisterData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * The supplying GSTIN — required
+         */
+        gstin?: string;
+        /**
+         * First IST date (inclusive) — required
+         */
+        from?: string;
+        /**
+         * Last IST date (inclusive) — required; at most 366 days
+         */
+        to?: string;
+        kind?: 'credit' | 'debit';
+        status?: 'issued' | 'void';
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/client-invoice-notes';
+};
+
+export type ClientInvoiceNotesControllerRegisterErrors = {
+    /**
+     * A missing or malformed gstin, from or to, a window over 366 days or inverted, a kind or status outside its vocabulary, a limit outside 1–500 (validation-failed), or a malformed cursor (invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ClientInvoiceNotesControllerRegisterError = ClientInvoiceNotesControllerRegisterErrors[keyof ClientInvoiceNotesControllerRegisterErrors];
+
+export type ClientInvoiceNotesControllerRegisterResponses = {
+    200: NoteRegisterResponse;
+};
+
+export type ClientInvoiceNotesControllerRegisterResponse = ClientInvoiceNotesControllerRegisterResponses[keyof ClientInvoiceNotesControllerRegisterResponses];
+
+export type ClientInvoiceNotesControllerDiscardData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        noteId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoice-notes/{noteId}';
+};
+
+export type ClientInvoiceNotesControllerDiscardErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed noteId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No note with this id — including one already discarded under another key (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The note is not a draft (note-not-draft), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoiceNotesControllerDiscardError = ClientInvoiceNotesControllerDiscardErrors[keyof ClientInvoiceNotesControllerDiscardErrors];
+
+export type ClientInvoiceNotesControllerDiscardResponses = {
+    /**
+     * Discarded (a replay under the same key answers 204 too)
+     */
+    204: void;
+};
+
+export type ClientInvoiceNotesControllerDiscardResponse = ClientInvoiceNotesControllerDiscardResponses[keyof ClientInvoiceNotesControllerDiscardResponses];
+
+export type ClientInvoiceNotesControllerGetData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        noteId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoice-notes/{noteId}';
+};
+
+export type ClientInvoiceNotesControllerGetErrors = {
+    /**
+     * A malformed noteId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No note with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientInvoiceNotesControllerGetError = ClientInvoiceNotesControllerGetErrors[keyof ClientInvoiceNotesControllerGetErrors];
+
+export type ClientInvoiceNotesControllerGetResponses = {
+    200: NoteResponse;
+};
+
+export type ClientInvoiceNotesControllerGetResponse = ClientInvoiceNotesControllerGetResponses[keyof ClientInvoiceNotesControllerGetResponses];
+
+export type ClientInvoiceNotesControllerIssueData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        noteId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoice-notes/{noteId}/issue';
+};
+
+export type ClientInvoiceNotesControllerIssueErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed noteId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No note with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Not a draft (note-not-draft), the invoice can no longer take it (invoice-not-noteable, invoice-not-debitable, invoice-not-disputed), the creator issuing a credit under the second-approver policy (note-needs-second-approver), past the s.34(2) date (credit-note-time-barred), another credit issued since the draft (credit-exceeds-invoice — `lines` — or note-figures-changed), an e-invoicing GSTIN with a registered client (einvoice-required), the series exhausted (note-series-exhausted), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoiceNotesControllerIssueError = ClientInvoiceNotesControllerIssueErrors[keyof ClientInvoiceNotesControllerIssueErrors];
+
+export type ClientInvoiceNotesControllerIssueResponses = {
+    200: IssueNoteResponse;
+};
+
+export type ClientInvoiceNotesControllerIssueResponse = ClientInvoiceNotesControllerIssueResponses[keyof ClientInvoiceNotesControllerIssueResponses];
+
+export type ClientInvoiceNotesControllerVoidData = {
+    body: VoidNoteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        noteId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-invoice-notes/{noteId}/void';
+};
+
+export type ClientInvoiceNotesControllerVoidErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed noteId, or a blank or over-long voidNote (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No note with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Not issued (note-not-issued), a credit that settled a dispute (note-settles-dispute), past the GSTR-1 due date of its month — the 12th of the next month, IST (note-period-closed), its issuer voiding a credit under the second-approver policy (note-needs-second-approver), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoiceNotesControllerVoidError = ClientInvoiceNotesControllerVoidErrors[keyof ClientInvoiceNotesControllerVoidErrors];
+
+export type ClientInvoiceNotesControllerVoidResponses = {
+    200: NoteResponse;
+};
+
+export type ClientInvoiceNotesControllerVoidResponse = ClientInvoiceNotesControllerVoidResponses[keyof ClientInvoiceNotesControllerVoidResponses];
+
+export type ClientInvoiceNotesControllerGetPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/billing/note-policy';
+};
+
+export type ClientInvoiceNotesControllerGetPolicyErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ClientInvoiceNotesControllerGetPolicyError = ClientInvoiceNotesControllerGetPolicyErrors[keyof ClientInvoiceNotesControllerGetPolicyErrors];
+
+export type ClientInvoiceNotesControllerGetPolicyResponses = {
+    200: NotePolicyResponse;
+};
+
+export type ClientInvoiceNotesControllerGetPolicyResponse = ClientInvoiceNotesControllerGetPolicyResponses[keyof ClientInvoiceNotesControllerGetPolicyResponses];
+
+export type ClientInvoiceNotesControllerPutPolicyData = {
+    body: NotePolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/billing/note-policy';
+};
+
+export type ClientInvoiceNotesControllerPutPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or requireSecondApprover not a boolean (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.configure — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientInvoiceNotesControllerPutPolicyError = ClientInvoiceNotesControllerPutPolicyErrors[keyof ClientInvoiceNotesControllerPutPolicyErrors];
+
+export type ClientInvoiceNotesControllerPutPolicyResponses = {
+    200: NotePolicyResponse;
+};
+
+export type ClientInvoiceNotesControllerPutPolicyResponse = ClientInvoiceNotesControllerPutPolicyResponses[keyof ClientInvoiceNotesControllerPutPolicyResponses];
 
 export type PortalControllerMeData = {
     body?: never;
@@ -25702,6 +26436,78 @@ export type PortalControllerInvoiceResponses = {
 };
 
 export type PortalControllerInvoiceResponse = PortalControllerInvoiceResponses[keyof PortalControllerInvoiceResponses];
+
+export type PortalControllerInvoiceNotesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        invoiceId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/invoices/{invoiceId}/notes';
+};
+
+export type PortalControllerInvoiceNotesErrors = {
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such invoice of this client — unknown, malformed, a draft, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerInvoiceNotesError = PortalControllerInvoiceNotesErrors[keyof PortalControllerInvoiceNotesErrors];
+
+export type PortalControllerInvoiceNotesResponses = {
+    200: PortalInvoiceNotesResponse;
+};
+
+export type PortalControllerInvoiceNotesResponse = PortalControllerInvoiceNotesResponses[keyof PortalControllerInvoiceNotesResponses];
+
+export type PortalControllerInvoiceNoteData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        noteId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/invoice-notes/{noteId}';
+};
+
+export type PortalControllerInvoiceNoteErrors = {
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such note of this client — unknown, malformed, a draft, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerInvoiceNoteError = PortalControllerInvoiceNoteErrors[keyof PortalControllerInvoiceNoteErrors];
+
+export type PortalControllerInvoiceNoteResponses = {
+    200: PortalNoteDetailResponse;
+};
+
+export type PortalControllerInvoiceNoteResponse = PortalControllerInvoiceNoteResponses[keyof PortalControllerInvoiceNoteResponses];
 
 export type NotificationsControllerListData = {
     body?: never;

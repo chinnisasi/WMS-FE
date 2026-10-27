@@ -45,7 +45,14 @@ import { ReadFailure, buttonClass, rowButtonClass } from '@/components/outbound/
  * at 50,000 rows (decision 1). A storage day expands to its per-SKU
  * breakdown on demand.
  */
-export function LineRecordsPanel({ invoice }: { invoice: ClientInvoiceDto }) {
+export function LineRecordsPanel({
+  invoice,
+  onCreditLine,
+}: {
+  invoice: ClientInvoiceDto;
+  /** Story 5-6a — on a disputed invoice, for `billing.invoice`: open the credit-note form preset to the line, settling the dispute. */
+  onCreditLine?: ((lineId: string) => void) | undefined;
+}) {
   const [openLine, setOpenLine] = useState<string | null>(null);
   const headingId = `line-records-${invoice.id}`;
   // A refreshed draft rewrites its lines: an open id that is gone simply closes.
@@ -74,6 +81,11 @@ export function LineRecordsPanel({ invoice }: { invoice: ClientInvoiceDto }) {
                 >
                   {expanded ? 'Hide records' : 'Show records'} — {lineDescription(line)} · {lineQuantityLabel(line)}
                 </button>
+                {onCreditLine !== undefined ? (
+                  <button type="button" className={`${rowButtonClass} ml-2`} onClick={() => onCreditLine(line.id)}>
+                    Credit this line
+                  </button>
+                ) : null}
               </div>
               {expanded ? <LineRecords key={line.id} id={panelId} invoice={invoice} line={line} /> : null}
             </li>

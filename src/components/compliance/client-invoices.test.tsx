@@ -143,6 +143,10 @@ function stubRouter(): void {
     }
     requests.push({ method, pathname, search: new URL(request.url).searchParams, body, key: request.headers.get('Idempotency-Key') });
     if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: clientRows });
+    // Story 5-6a — an invoice's notes (none in these tests; client-invoice-notes.test.tsx covers them).
+    if (method === 'GET' && /\/client-invoices\/[^/]+\/notes$/.test(pathname)) {
+      return json(200, { notes: [], netDocument: { subtotal: 0, cgst: 0, sgst: 0, igst: 0, tax: 0, roundOff: 0, payable: 0 }, netDocumentPayable: 0 });
+    }
     if (method === 'GET' && pathname.endsWith('/client-invoices')) {
       return json(200, { items: Object.values(invoices).map(entryOf), nextCursor: null });
     }
@@ -419,7 +423,7 @@ describe('ClientInvoices', () => {
     expect(buttons(view.container, 'Issue')).toHaveLength(0);
     expect(buttons(view.container, 'Discard')).toHaveLength(0);
     await press(buttons(view.container, 'Void')[0]);
-    expect(view.container.textContent).toContain('a credit note is the correct fix — not supported yet');
+    expect(view.container.textContent).toContain('do not void it — raise a credit or debit note instead');
     await press(buttons(view.container, 'Void invoice')[0]);
     expect(view.container.textContent).toContain('a note is required to void');
     expect(requests.some((r) => r.pathname.endsWith('/void'))).toBe(false);
