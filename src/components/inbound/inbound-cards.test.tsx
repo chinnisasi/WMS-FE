@@ -210,9 +210,18 @@ function stubRouter(): void {
         ],
       });
     }
+    // Story 2-5a — one GRN's damage photos (the photos dialog).
+    if (pathname === `${base}/receiving/goods-receipts/g-2/lines`) {
+      return json(200, {
+        items: [{ id: 'gl-9', skuId: 's-acme', skuCode: 'TSHIRT-M', skuName: 'T-shirt M', batchId: null, batchCode: null, qty: 3, appliedQty: 3, photoCount: 2, pendingPhotoCount: 1 }],
+      });
+    }
+    if (pathname === `${base}/receiving/goods-receipts/g-2/photos`) {
+      return json(200, { storageEnabled: true, photos: [] });
+    }
     if (pathname === `${base}/receiving/goods-receipts`) {
       return json(200, {
-        items: [{ ...grn('g-1', 'GRN-0001', 'c-acme'), damagedUnits: 6, shortUnits: 1 }, grn('g-2', 'GRN-0002', 'c-self'), grn('g-3', 'GRN-0003')],
+        items: [{ ...grn('g-1', 'GRN-0001', 'c-acme'), damagedUnits: 6, shortUnits: 1 }, { ...grn('g-2', 'GRN-0002', 'c-self'), photoCount: 2 }, grn('g-3', 'GRN-0003')],
         nextCursor: url.searchParams.has('cursor') ? null : grnNextCursor,
       });
     }
@@ -621,8 +630,9 @@ describe('Goods receipts — damaged and short (story 2-4a)', () => {
     expect(requests.some((r) => r.url.pathname.endsWith('/receiving/goods-receipts/g-1/lines'))).toBe(true);
     const lines = [...view.container.querySelectorAll('[data-testid="grn-line"]')].map((line) => line.textContent ?? '');
     expect(lines).toEqual([
-      'TSHIRT-M T-shirt M · batch LOT-9 · good 3 · damaged 2 (Crushed) · short 1 (Not shipped)',
-      'TSHIRT-M T-shirt M · good 0 · damaged 4 (Wet)',
+      // Story 2-5a — an owner (receipt.attach) is offered "Add photo" on a line with none.
+      'TSHIRT-M T-shirt M · batch LOT-9 · good 3 · damaged 2 (Crushed) · short 1 (Not shipped) Add photo',
+      'TSHIRT-M T-shirt M · good 0 · damaged 4 (Wet) Add photo',
     ]);
     // Toggling again hides it.
     await act(async () => {
@@ -850,5 +860,47 @@ describe('QC holds — the inspection outcome (story 2-8a)', () => {
     const d = view.container.querySelector('[role="dialog"]') as HTMLElement;
     expect(d.textContent).toContain('Your session expired — sign in again.');
     expect(d.textContent).not.toContain('Loading');
+  });
+});
+
+describe('Goods receipts — damage photos (story 2-5a)', () => {
+  test('the Photos column shows the count only where there are photos; it opens the dialog on every line', async () => {
+    view = render(<InboundCards initialTab="grns" />);
+    await settle();
+    const photosColumn = headers().indexOf('Photos');
+    expect(rows().map((cells) => cells[photosColumn])).toEqual(['—', '2', '—']);
+    await act(async () => {
+      (view!.container.querySelector('button[aria-label="Open the 2 photos of GRN-0002"]') as HTMLButtonElement).click();
+    });
+    await settle();
+    const dialog = view.container.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('Damage photos · GRN-0002');
+    expect(dialog.textContent).toContain('Every line of this receipt');
+    expect(requests.some((r) => r.url.pathname.endsWith('/receiving/goods-receipts/g-2/photos'))).toBe(true);
+  });
+
+  test('a line with photos reads its counts and opens that line; a reader without receipt.attach gets no Add on an empty line', async () => {
+    view = render(<InboundCards initialTab="grns" />);
+    await settle();
+    await act(async () => {
+      (view!.container.querySelector('button[aria-label="Show the lines of GRN-0002"]') as HTMLButtonElement).click();
+    });
+    await settle();
+    const lineButton = view.container.querySelector('button[aria-label="Open the photos of TSHIRT-M: 2 photos · 1 on its way"]') as HTMLButtonElement;
+    expect(lineButton).not.toBeNull();
+    await act(async () => {
+      lineButton.click();
+    });
+    await settle();
+    expect(view.container.querySelector('[role="dialog"]')!.textContent).toContain('TSHIRT-M');
+    view.unmount();
+    writeSession({ ...SESSION, user: { ...SESSION.user, role: 'accountant' } } as StoredSession);
+    view = render(<InboundCards initialTab="grns" />);
+    await settle();
+    await act(async () => {
+      (view!.container.querySelector('button[aria-label="Show the lines of GRN-0001"]') as HTMLButtonElement).click();
+    });
+    await settle();
+    expect(view.container.querySelector('button[aria-label^="Add a photo"]')).toBeNull();
   });
 });

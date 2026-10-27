@@ -484,6 +484,8 @@ export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'p
   if (entry.opType === 'stock.move') return [STOCK_MOVE_GUIDANCE];
   // Story 3-2b — a refused handheld adjustment: Apply re-submits it, or Discard.
   if (entry.opType === 'stock.adjust') return [STOCK_ADJUST_GUIDANCE];
+  // Story 2-5a — a refused damage photo: Discard only; the receipt booked regardless.
+  if (entry.opType === 'receipt-photo.stage') return [RECEIPT_PHOTO_GUIDANCE];
   if (entry.opType === 'grn.shelf-life-refused') return [GRN_SHELF_LIFE_GUIDANCE];
   // Story 2-4a — the whole receipt was refused for the DAMAGED code collision.
   if (entry.opType === 'grn.submit' && entry.problemCode === 'damaged-bin-conflict') return [GRN_DAMAGED_BIN_CONFLICT_GUIDANCE];
@@ -714,6 +716,7 @@ export function rejectedOpSummary(
   if (entry.opType === 'gate-in.unload') return gateInUnloadSummary(entry);
   if (entry.opType === 'stock.move') return stockMoveSummary(entry, skuCode);
   if (entry.opType === 'stock.adjust') return stockAdjustSummary(entry, skuCode);
+  if (entry.opType === 'receipt-photo.stage') return receiptPhotoSummary(entry);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
   const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;
@@ -1142,4 +1145,48 @@ function stockAdjustSummary(
   if (typeof payload['note'] === 'string' && payload['note'] !== '') parts.push(`“${payload['note']}”`);
   const problem = STOCK_ADJUST_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
   return { heading: `${sku} ${signed} — not adjusted`, lines: [`${parts.join(' · ')} — ${problem}`] };
+}
+
+// ── story 2-5a: a refused handheld damage photo (a receipt-photo.stage row) ──
+
+/**
+ * The remedy a `receipt-photo.stage` row's reviewer reads (Discard only —
+ * the photo's bytes are gone with the refusal; the receipt booked as
+ * captured either way).
+ */
+export const RECEIPT_PHOTO_GUIDANCE =
+  'The receipt is not affected. If the damage still needs evidence, add a photo to the receipt line on the web (Inbound → Goods receipt notes), then discard this row.';
+
+/** Why the photo was refused, in words (the row's whole-op `problemCode`); an unknown code reads as itself. */
+export const RECEIPT_PHOTO_PROBLEM_WORDS: Readonly<Record<string, string>> = {
+  'attachment-type-unsupported': 'not a JPEG, PNG or WebP photo',
+  'attachment-too-large': 'larger than 10 MB',
+  'attachment-content-invalid': 'the image was damaged or over 8,000 px a side',
+  'attachment-ref-conflict': 'a different photo was already stored under the same id',
+  'attachment-staging-limit': 'the device had too many photos waiting for their receipts',
+  'file-storage-unavailable': 'photo storage was off for over 7 days',
+  'photo-file-missing': 'the photo file was missing on the device',
+  'validation-failed': 'the upload was malformed',
+  'role-denied': 'the operator may not receive goods',
+  'idempotency-key-reuse': 'the op id was reused with a different photo',
+  'device-revoked': 'the device was revoked',
+};
+
+/**
+ * A `receipt-photo.stage` row's summary — "Damage photo not uploaded": the
+ * photo (a short form of its ref — the device payload carries no code), the
+ * receipt line it was for, the capture time in IST, then the refusal in
+ * words. The payload is the device's own body, read defensively.
+ */
+function receiptPhotoSummary(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): { heading: string; lines: readonly string[] } {
+  const payload = entry.payload;
+  const ref = typeof payload['ref'] === 'string' && payload['ref'] !== '' ? payload['ref'] : null;
+  const lineIndex = typeof payload['lineIndex'] === 'number' && Number.isInteger(payload['lineIndex']) ? payload['lineIndex'] : null;
+  const capturedAt =
+    typeof payload['capturedAt'] === 'string' && !Number.isNaN(Date.parse(payload['capturedAt'])) ? payload['capturedAt'] : null;
+  const parts = [ref === null ? 'Photo' : `Photo …${ref.slice(-8)}`];
+  if (lineIndex !== null) parts.push(`receipt line ${lineIndex + 1}`);
+  if (capturedAt !== null) parts.push(`taken ${istDateTimeLabel(capturedAt)} IST`);
+  const problem = RECEIPT_PHOTO_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return { heading: 'Damage photo not uploaded', lines: [`${parts.join(' · ')} — ${problem}`] };
 }

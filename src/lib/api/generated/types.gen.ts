@@ -1441,7 +1441,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage';
     /**
      * The replay fate the server refused with
      */
@@ -1517,7 +1517,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -4035,6 +4035,10 @@ export type GrnLineInputDto = {
      * Catch weight (story 10.3): one captured weight in whole GRAMS per physical unit on this line — required for a catch-weight-tracked SKU, refused for every other SKU, and exactly qty entries long. It is a per-unit actual weight, never a quantity and never the parcel weight pack records.
      */
     weightsGrams?: Array<number> | null;
+    /**
+     * Story 2-5a — the line's damage photos, by the ULID the handheld minted at capture (each photo's own upload op's Idempotency-Key), in capture order. At most 10 per line and 50 per receipt, unique across the receipt. A photo uploaded first is attached by this receipt; one that arrives later fills the placeholder this receipt leaves. A ref that is unknown to this device, or already bound, is skipped — never a refusal. Omit when the line has none (an empty array means the same)
+     */
+    photoRefs?: Array<string>;
 };
 
 export type SubmitGoodsReceiptDto = {
@@ -4863,6 +4867,25 @@ export type CatalogOpenGateInDto = {
     documents: Array<CatalogOpenGateInDocumentDto>;
 };
 
+export type CatalogReceiptPhotosDto = {
+    /**
+     * False under FILE_STORE=none — the handheld hides its Photo button
+     */
+    enabled: boolean;
+    /**
+     * The live photos one receipt line may carry (attached + awaited)
+     */
+    maxPerLine: number;
+    /**
+     * The live photos one receipt may carry
+     */
+    maxPerReceipt: number;
+    /**
+     * The largest photo upload, in bytes
+     */
+    maxBytes: number;
+};
+
 export type CatalogMoveReasonDto = {
     code: 'consolidate' | 're-slot' | 'make-room' | 'found-misplaced' | 'client-request' | 'other';
     /**
@@ -4942,6 +4965,10 @@ export type CatalogSnapshotResponse = {
      * Story 2-4a (additive): the short reason vocabulary — the Short control's gate, as receiptDamageReasons
      */
     receiptShortReasons: Array<'not-shipped' | 'short-packed' | 'lost-in-transit' | 'other'>;
+    /**
+     * Story 2-5a (additive): damage photos on a receipt line — whether storage is on (the Photo button's gate) and the caps the draft must respect. An older server omits it, and the handheld then offers no Photo
+     */
+    receiptPhotos: CatalogReceiptPhotosDto;
     /**
      * Story 3-1 (additive): the bin-to-bin move's reason vocabulary, in order — the handheld's reason chips. A reason with noteRequired needs a note (up to 200 characters). An older server omits it, and the handheld then offers no Move stock
      */
@@ -5023,6 +5050,10 @@ export type GoodsReceiptEntryDto = {
      */
     shortUnits: number;
     /**
+     * Story 2-5a — the receipt's attached damage photos across all lines; 0 when none
+     */
+    photoCount: number;
+    /**
      * Row creation time (the keyset cursor field), ISO-8601 UTC
      */
     createdAt: string;
@@ -5064,6 +5095,14 @@ export type GoodsReceiptLineEntryDto = {
      * Present only beside shortQty
      */
     shortReasonCode?: 'not-shipped' | 'short-packed' | 'lost-in-transit' | 'other';
+    /**
+     * Story 2-5a — the line's attached damage photos
+     */
+    photoCount: number;
+    /**
+     * Story 2-5a — the line's photos the receipt named that have not arrived yet (awaited)
+     */
+    pendingPhotoCount: number;
 };
 
 export type GoodsReceiptLinesResponse = {
@@ -5403,6 +5442,135 @@ export type QcHoldDetailResponse = {
      * Present once the hold is inspected; null otherwise
      */
     inspection: QcInspectionDto | null;
+};
+
+export type ReceiptPhotoUploadResponse = {
+    /**
+     * The photo's ULID — its Idempotency-Key and the ref its receipt names
+     */
+    ref: string;
+    /**
+     * `staged`: stored, waiting for its receipt; `attached`: it filled the placeholder its receipt left; `removed`: the same bytes were already stored and removed since (a late duplicate)
+     */
+    status: 'staged' | 'attached' | 'removed';
+};
+
+export type ReceiptPhotoViewDto = {
+    id: string;
+    /**
+     * The goods-receipt line it is evidence for
+     */
+    grnLineId: string;
+    status: 'awaited' | 'attached' | 'removed' | 'expired';
+    /**
+     * Null while awaited, and on a cancelled placeholder
+     */
+    contentType: 'image/jpeg' | 'image/png' | 'image/webp' | null;
+    /**
+     * The stored (metadata-stripped) size in bytes
+     */
+    byteSize: number | null;
+    width: number | null;
+    height: number | null;
+    /**
+     * The device's capture time (clamped to [now − 60 d, now + 10 min]); null for a web photo
+     */
+    capturedAt: string | null;
+    /**
+     * When the server received the bytes; null while awaited
+     */
+    uploadedAt: string | null;
+    source: 'handheld' | 'web';
+    /**
+     * Present on a removed photo
+     */
+    removedAt?: string;
+    /**
+     * The line's position in the receipt (1-based, receipt order)
+     */
+    lineNo: number;
+    /**
+     * A server-built ASCII file name, `<grnCode>-L<lineNo>-<k>.<ext>`
+     */
+    fileName: string;
+    /**
+     * A short-lived presigned GET URL; null when the photo holds no bytes (awaited, expired, removed), or storage is off
+     */
+    url: string | null;
+    /**
+     * When `url` stops working (≤ ATTACHMENT_URL_TTL_SECONDS) — refetch the list after it
+     */
+    urlExpiresAt: string | null;
+    /**
+     * Row creation time
+     */
+    createdAt: string;
+    /**
+     * Present on a removed photo
+     */
+    removedBy?: string;
+    /**
+     * The remover's name, when known
+     */
+    removedByName?: string;
+    /**
+     * Present on a removed photo (1–200 characters)
+     */
+    removedReason?: string;
+};
+
+export type ReceiptPhotosResponse = {
+    /**
+     * False under FILE_STORE=none — no URLs, and adding a photo answers 503
+     */
+    storageEnabled: boolean;
+    /**
+     * Every live photo (attached + awaited) in receipt order, then at most the 50 newest removed/expired
+     */
+    photos: Array<ReceiptPhotoViewDto>;
+};
+
+export type ReceiptPhotoDto = {
+    id: string;
+    /**
+     * The goods-receipt line it is evidence for
+     */
+    grnLineId: string;
+    status: 'awaited' | 'attached' | 'removed' | 'expired';
+    /**
+     * Null while awaited, and on a cancelled placeholder
+     */
+    contentType: 'image/jpeg' | 'image/png' | 'image/webp' | null;
+    /**
+     * The stored (metadata-stripped) size in bytes
+     */
+    byteSize: number | null;
+    width: number | null;
+    height: number | null;
+    /**
+     * The device's capture time (clamped to [now − 60 d, now + 10 min]); null for a web photo
+     */
+    capturedAt: string | null;
+    /**
+     * When the server received the bytes; null while awaited
+     */
+    uploadedAt: string | null;
+    source: 'handheld' | 'web';
+    /**
+     * Present on a removed photo
+     */
+    removedAt?: string;
+};
+
+export type ReceiptPhotoResponse = {
+    attachment: ReceiptPhotoDto;
+};
+
+export type RemoveReceiptPhotoDto = {
+    /**
+     * Why the photo is removed (or the placeholder cancelled) — kept on the record; trimmed, then 1–200 characters
+     */
+    reason: string;
 };
 
 export type GateInDocumentInputDto = {
@@ -8387,7 +8555,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -8414,7 +8582,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -9945,6 +10113,112 @@ export type PortalAsnDetailResponse = {
     receivedTotal: number;
     createdAt: string;
     lines: Array<PortalAsnLineDto>;
+};
+
+export type PortalGoodsReceiptRowDto = {
+    id: string;
+    code: string;
+    warehouseName: string;
+    /**
+     * The purchase order received against, when any
+     */
+    poCode: string | null;
+    /**
+     * The advance shipment notice received against, when any
+     */
+    asnCode: string | null;
+    lineCount: number;
+    /**
+     * Good units across the lines (base units, indicative across UoMs)
+     */
+    receivedTotal: number;
+    /**
+     * Damaged units across the lines
+     */
+    damagedTotal: number;
+    /**
+     * Short units across the lines
+     */
+    shortTotal: number;
+    /**
+     * Attached damage photos across the lines
+     */
+    photoCount: number;
+    /**
+     * When the goods were received (the device time)
+     */
+    receivedAt: string;
+    createdAt: string;
+};
+
+export type PortalGoodsReceiptListResponse = {
+    items: Array<PortalGoodsReceiptRowDto>;
+    nextCursor: string | null;
+};
+
+export type PortalReceiptPhotoDto = {
+    id: string;
+    /**
+     * `removed`: shown as "Removed by the warehouse" — no image, no reason
+     */
+    status: 'attached' | 'removed';
+    url: string | null;
+    urlExpiresAt: string | null;
+    width: number | null;
+    height: number | null;
+    capturedAt: string | null;
+};
+
+export type PortalGoodsReceiptLineDto = {
+    lineNo: number;
+    skuCode: string;
+    skuName: string;
+    /**
+     * Good units
+     */
+    qty: number;
+    damagedQty: number;
+    damageReasonCode: string | null;
+    shortQty: number;
+    shortReasonCode: string | null;
+    photos: Array<PortalReceiptPhotoDto>;
+};
+
+export type PortalGoodsReceiptDetailDto = {
+    id: string;
+    code: string;
+    warehouseName: string;
+    /**
+     * The purchase order received against, when any
+     */
+    poCode: string | null;
+    /**
+     * The advance shipment notice received against, when any
+     */
+    asnCode: string | null;
+    lineCount: number;
+    /**
+     * Good units across the lines (base units, indicative across UoMs)
+     */
+    receivedTotal: number;
+    /**
+     * Damaged units across the lines
+     */
+    damagedTotal: number;
+    /**
+     * Short units across the lines
+     */
+    shortTotal: number;
+    /**
+     * Attached damage photos across the lines
+     */
+    photoCount: number;
+    /**
+     * When the goods were received (the device time)
+     */
+    receivedAt: string;
+    createdAt: string;
+    lines: Array<PortalGoodsReceiptLineDto>;
 };
 
 export type PortalPurchaseOrderRowDto = {
@@ -17464,6 +17738,252 @@ export type ReceivingControllerGetQcHoldResponses = {
 
 export type ReceivingControllerGetQcHoldResponse = ReceivingControllerGetQcHoldResponses[keyof ReceivingControllerGetQcHoldResponses];
 
+export type ReceivingControllerUploadReceiptPhotoData = {
+    body: {
+        /**
+         * The capture instant, ISO-8601 UTC ending in Z
+         */
+        capturedAt: string;
+        /**
+         * The photo — JPEG, PNG or WebP, at most 10 MB and 8,000 px a side
+         */
+        file: Blob | File;
+    };
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+        /**
+         * The capturing operator's user id — the photo is attributed to them, whoever is badged in now
+         */
+        'x-op-operator': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/receipt-photos';
+};
+
+export type ReceivingControllerUploadReceiptPhotoErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, x-op-operator, capturedAt or file, or too many parts (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked), or the operator does not hold a floor role (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The ref is already stored with different bytes (attachment-ref-conflict), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a JPEG, PNG or WebP by its bytes — HEIC, SVG, GIF, PDF, an animated PNG or WebP (attachment-type-unsupported)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * Over 10 MB (attachment-too-large), a malformed image or a side outside 1–8,000 px (attachment-content-invalid), or the key reused with a different photo (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * This device has 200 photos waiting for their receipts (attachment-staging-limit) — retried
+     */
+    429: ProblemDetailsDto;
+    /**
+     * No file storage configured (file-storage-unavailable), the store failed (file-storage-failed), or too many uploads in flight (file-storage-busy) — retried
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ReceivingControllerUploadReceiptPhotoError = ReceivingControllerUploadReceiptPhotoErrors[keyof ReceivingControllerUploadReceiptPhotoErrors];
+
+export type ReceivingControllerUploadReceiptPhotoResponses = {
+    /**
+     * Stored (staged until its receipt binds it, or attached to the placeholder its receipt left) — the idempotency snapshot; no URL
+     */
+    201: ReceiptPhotoUploadResponse;
+};
+
+export type ReceivingControllerUploadReceiptPhotoResponse = ReceivingControllerUploadReceiptPhotoResponses[keyof ReceivingControllerUploadReceiptPhotoResponses];
+
+export type ReceivingControllerListReceiptPhotosData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        grnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/photos';
+};
+
+export type ReceivingControllerListReceiptPhotosErrors = {
+    /**
+     * Malformed grnId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No goods receipt with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReceivingControllerListReceiptPhotosError = ReceivingControllerListReceiptPhotosErrors[keyof ReceivingControllerListReceiptPhotosErrors];
+
+export type ReceivingControllerListReceiptPhotosResponses = {
+    200: ReceiptPhotosResponse;
+};
+
+export type ReceivingControllerListReceiptPhotosResponse = ReceivingControllerListReceiptPhotosResponses[keyof ReceivingControllerListReceiptPhotosResponses];
+
+export type ReceivingControllerAddReceiptPhotoData = {
+    body: {
+        /**
+         * The photo — JPEG, PNG or WebP, at most 10 MB and 8,000 px a side
+         */
+        file: Blob | File;
+    };
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        grnId: string;
+        lineId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/lines/{lineId}/photos';
+};
+
+export type ReceivingControllerAddReceiptPhotoErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, grnId, lineId or file, or too many parts (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks receipt.attach (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such line on this goods receipt in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The line holds 10 photos or the receipt 50 (attachment-limit-reached), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a JPEG, PNG or WebP by its bytes (attachment-type-unsupported) — a HEIC photo says so
+     */
+    415: ProblemDetailsDto;
+    /**
+     * Over 10 MB (attachment-too-large), a malformed image or a side outside 1–8,000 px (attachment-content-invalid), or the key reused with a different photo (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * No file storage configured (file-storage-unavailable), the store failed (file-storage-failed), or too many uploads in flight (file-storage-busy)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ReceivingControllerAddReceiptPhotoError = ReceivingControllerAddReceiptPhotoErrors[keyof ReceivingControllerAddReceiptPhotoErrors];
+
+export type ReceivingControllerAddReceiptPhotoResponses = {
+    /**
+     * The attached photo (the idempotency snapshot — no URL; read the list for one)
+     */
+    201: ReceiptPhotoResponse;
+};
+
+export type ReceivingControllerAddReceiptPhotoResponse = ReceivingControllerAddReceiptPhotoResponses[keyof ReceivingControllerAddReceiptPhotoResponses];
+
+export type ReceivingControllerRemoveReceiptPhotoData = {
+    body: RemoveReceiptPhotoDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        grnId: string;
+        attachmentId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/photos/{attachmentId}/remove';
+};
+
+export type ReceivingControllerRemoveReceiptPhotoErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, grnId or attachmentId, or a reason outside 1–200 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks receipt.photo-remove (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such photo on this goods receipt (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The photo is already removed, or never arrived (attachment-not-attached), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerRemoveReceiptPhotoError = ReceivingControllerRemoveReceiptPhotoErrors[keyof ReceivingControllerRemoveReceiptPhotoErrors];
+
+export type ReceivingControllerRemoveReceiptPhotoResponses = {
+    /**
+     * The removed photo (a matching Idempotency-Key replays it)
+     */
+    200: ReceiptPhotoResponse;
+};
+
+export type ReceivingControllerRemoveReceiptPhotoResponse = ReceivingControllerRemoveReceiptPhotoResponses[keyof ReceivingControllerRemoveReceiptPhotoResponses];
+
 export type GateInControllerListData = {
     body?: never;
     path: {
@@ -21762,7 +22282,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -24347,6 +24867,87 @@ export type PortalControllerAsnResponses = {
 };
 
 export type PortalControllerAsnResponse = PortalControllerAsnResponses[keyof PortalControllerAsnResponses];
+
+export type PortalControllerGoodsReceiptsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/portal/inbound/goods-receipts';
+};
+
+export type PortalControllerGoodsReceiptsErrors = {
+    /**
+     * A malformed cursor (invalid-cursor), a limit outside 1–100 or a status outside its vocabulary (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerGoodsReceiptsError = PortalControllerGoodsReceiptsErrors[keyof PortalControllerGoodsReceiptsErrors];
+
+export type PortalControllerGoodsReceiptsResponses = {
+    200: PortalGoodsReceiptListResponse;
+};
+
+export type PortalControllerGoodsReceiptsResponse = PortalControllerGoodsReceiptsResponses[keyof PortalControllerGoodsReceiptsResponses];
+
+export type PortalControllerGoodsReceiptData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        grnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/inbound/goods-receipts/{grnId}';
+};
+
+export type PortalControllerGoodsReceiptErrors = {
+    /**
+     * Malformed grnId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such goods receipt of this client — unknown, another client's, or unattributed (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerGoodsReceiptError = PortalControllerGoodsReceiptErrors[keyof PortalControllerGoodsReceiptErrors];
+
+export type PortalControllerGoodsReceiptResponses = {
+    200: PortalGoodsReceiptDetailDto;
+};
+
+export type PortalControllerGoodsReceiptResponse = PortalControllerGoodsReceiptResponses[keyof PortalControllerGoodsReceiptResponses];
 
 export type PortalControllerPurchaseOrdersData = {
     body?: never;

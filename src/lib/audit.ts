@@ -24,6 +24,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   advance_shipment_notice: 'ASN',
   // The ASN import (2026-10-17) — one file's run; each ASN it created has its own 'ASN' row.
   asn_import: 'ASN import',
+  // Story 2-5a — a damage photo on a goods-receipt line (uploaded, attached, added, removed, purged).
+  attachment: 'Photo',
   audit_export: 'Audit export',
   // Story 3-3a — a batch (lot) blocked or unblocked.
   batch: 'Batch',

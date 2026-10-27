@@ -51,8 +51,13 @@ export function useGoodsReceiptLines(grnId: string | null): ResourceState<readon
     };
   }, [tenantId, grnId, revision]);
 
-  const reload = useCallback(() => setRevision((r) => r + 1), []);
-  const stale =
-    tenantId === null || grnId === null || result === null || result.tenantId !== tenantId || result.grnId !== grnId || result.revision !== revision;
+  // Story 2-5a — an inbound change refetches QUIETLY (the last-good lines
+  // stay until the answer lands: a photo added in the photos dialog must not
+  // blank the expanded row behind it); Retry (`reload`) clears first.
+  const reload = useCallback(() => {
+    setResult(null);
+    setRevision((r) => r + 1);
+  }, []);
+  const stale = tenantId === null || grnId === null || result === null || result.tenantId !== tenantId || result.grnId !== grnId;
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
 }

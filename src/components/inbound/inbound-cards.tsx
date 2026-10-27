@@ -29,6 +29,7 @@ import {
 import { quantityLabel } from '@/lib/format-quantity';
 import type {
   GoodsReceiptEntryDto,
+  GoodsReceiptLineEntryDto,
   PurchaseOrderLineDto,
   PutawayTaskDto,
   QcHoldEntryDto,
@@ -72,6 +73,9 @@ import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
 import { QcInspectDialog } from '@/components/inbound/qc-inspect-dialog';
+import { ReceiptPhotosDialog } from '@/components/inbound/receipt-photos';
+import { CameraGlyph } from '@/components/shared/photo-viewer';
+import { linePhotosLabel, photoCountLabel } from '@/lib/receipt-photos';
 import { inspectedResultLabel, inspectionSummary } from '@/lib/qc-inspection';
 import { GateInsCard } from '@/components/inbound/gate-ins-card';
 import { PoCreateForm } from '@/components/inbound/po-create-form';
@@ -479,6 +483,12 @@ function GoodsReceiptsCard({
   // (guide §1.5): a warehouse switch closes it.
   const [expandedFor, setExpandedFor] = useState<{ warehouseId: string | null; grnId: string } | null>(null);
   const expandedId = expandedFor !== null && expandedFor.warehouseId === warehouseId ? expandedFor.grnId : null;
+  // Story 2-5a — the photos dialog (one at a time), keyed to its warehouse
+  // like the expanded row: a warehouse switch closes it.
+  const [photosFor, setPhotosFor] = useState<{ warehouseId: string | null; grnId: string; grnCode: string; lineId: string | null } | null>(null);
+  const openPhotos = photosFor !== null && photosFor.warehouseId === warehouseId ? photosFor : null;
+  const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
+  const canAttach = roleHasCapability(role, 'receipt.attach');
   const skuMap = useSkuMap();
   // Story 1-1 — the receipt's client (the PO's, the ASN's, or a blind
   // receipt's chosen one), shown once the tenant holds more than its own
@@ -560,6 +570,27 @@ function GoodsReceiptsCard({
       ),
     },
     {
+      // Story 2-5a — the receipt's attached damage photos; the count opens them (every line).
+      key: 'photos',
+      header: 'Photos',
+      render: (grn) => {
+        const count = (grn as { photoCount?: number }).photoCount ?? 0;
+        return count === 0 ? (
+          <span className="text-(--muted-foreground)">—</span>
+        ) : (
+          <button
+            type="button"
+            aria-label={`Open the ${photoCountLabel(count)} of ${grn.code}`}
+            onClick={() => setPhotosFor({ warehouseId, grnId: grn.id, grnCode: grn.code, lineId: null })}
+            className="inline-flex items-center gap-1 rounded-sm border border-(--border) px-1.5 py-0.5 text-xs hover:bg-(--muted)"
+          >
+            <CameraGlyph />
+            <span className="data">{count}</span>
+          </button>
+        );
+      },
+    },
+    {
       key: 'recordedAt',
       header: 'Recorded',
       render: (grn) => <time dateTime={grn.recordedAt}>{new Date(grn.recordedAt).toLocaleString()}</time>,
@@ -590,7 +621,7 @@ function GoodsReceiptsCard({
         <div className="text-(--muted-foreground)">
           {warehouseLabel === null
             ? 'Pick a warehouse to review its receipts.'
-            : `${warehouseLabel} — newest first. Each receipt names its document — a PO, an ASN, or Blind; "(+N pending)" units wait on an over-receipt decision; "+N damaged" units went to the DAMAGED bin (not sellable). Open a code for its lines.`}
+            : `${warehouseLabel} — newest first. Each receipt names its document — a PO, an ASN, or Blind; "(+N pending)" units wait on an over-receipt decision; "+N damaged" units went to the DAMAGED bin (not sellable). Open a code for its lines, and the camera count for its damage photos.`}
         </div>
       </div>
 
@@ -604,7 +635,16 @@ function GoodsReceiptsCard({
           rows={grns.state === 'ready' ? grns.data.items : []}
           nextCursor={grns.state === 'ready' ? grns.data.nextCursor : null}
           onCursor={grns.onCursor}
-          renderExpanded={(grn) => (expandedId === grn.id ? <GoodsReceiptLinesPanel grnId={grn.id} skuMap={skuMap} /> : null)}
+          renderExpanded={(grn) =>
+            expandedId === grn.id ? (
+              <GoodsReceiptLinesPanel
+                grnId={grn.id}
+                skuMap={skuMap}
+                canAttach={canAttach}
+                onPhotos={(lineId) => setPhotosFor({ warehouseId, grnId: grn.id, grnCode: grn.code, lineId })}
+              />
+            ) : null
+          }
           loading={grns.state === 'loading' ? 'Loading receipts…' : undefined}
           emptyMessage={
             // Story UI-2 (§5, W4).
@@ -614,6 +654,16 @@ function GoodsReceiptsCard({
               <EmptyState kind="first-use">{warehouseId === null ? 'Create a warehouse first.' : 'No receipts recorded yet.'}</EmptyState>
             )
           }
+        />
+      )}
+      {openPhotos !== null && (
+        <ReceiptPhotosDialog
+          key={`${openPhotos.grnId}:${openPhotos.lineId ?? 'all'}`}
+          grnId={openPhotos.grnId}
+          grnCode={openPhotos.grnCode}
+          focusLineId={openPhotos.lineId}
+          skuMap={skuMap}
+          onClose={() => setPhotosFor(null)}
         />
       )}
     </section>
@@ -642,9 +692,15 @@ function qcHoldableBin(bin: { readonly code: string; readonly systemOwned: boole
 function GoodsReceiptLinesPanel({
   grnId,
   skuMap,
+  canAttach,
+  onPhotos,
 }: {
   grnId: string;
   skuMap: Readonly<Record<string, SkuResponse>> | null;
+  /** Story 2-5a — `receipt.attach`: a line with no photos offers "Add photo". */
+  canAttach: boolean;
+  /** Story 2-5a — open the photos dialog on one line. */
+  onPhotos: (lineId: string) => void;
 }) {
   const lines = useGoodsReceiptLines(grnId);
   if (lines.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading the lines…</div>;
@@ -667,11 +723,44 @@ function GoodsReceiptLinesPanel({
               )}{' '}
               · {grnLineConditionLabel(line, sku)}
               {grnLineAppliedLabel(line, sku)}
+              <LinePhotosButton line={line} canAttach={canAttach} onOpen={() => onPhotos(line.id)} />
             </div>
           );
         })
       )}
     </div>
+  );
+}
+
+/**
+ * Story 2-5a — a line's photo affordance: "2 photos · 1 on its way" opens
+ * them; a line with none offers "Add photo" to a `receipt.attach` holder and
+ * nothing to anyone else (hide, never block — guide §4).
+ */
+function LinePhotosButton({
+  line,
+  canAttach,
+  onOpen,
+}: {
+  line: Pick<GoodsReceiptLineEntryDto, 'skuCode' | 'photoCount' | 'pendingPhotoCount'>;
+  canAttach: boolean;
+  onOpen: () => void;
+}) {
+  const label = linePhotosLabel(line.photoCount ?? 0, line.pendingPhotoCount ?? 0);
+  if (label === null && !canAttach) return null;
+  return (
+    <>
+      {' '}
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={label === null ? `Add a photo to ${line.skuCode}` : `Open the photos of ${line.skuCode}: ${label}`}
+        className="ml-1 inline-flex items-center gap-1 rounded-sm border border-(--border) px-1.5 py-0.5 align-middle text-xs hover:bg-(--muted)"
+      >
+        <CameraGlyph className="h-3 w-3" />
+        <span className="data">{label ?? 'Add photo'}</span>
+      </button>
+    </>
   );
 }
 

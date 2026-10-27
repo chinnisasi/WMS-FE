@@ -234,6 +234,15 @@ export const CAPABILITIES = [
   // (derived below) + Operator. The web Adjust form still gates on
   // `stock.adjust`, so an operator does not see it.
   'stock.adjust.request',
+  // Story 2-5a — add a damage photo to a goods-receipt line from the web
+  // (the Inbound photos dialog's Add). Owner + Ops Manager (derived below) +
+  // OPERATOR — the dock records the evidence it sees. The handheld's own
+  // upload needs no capability (it runs the `grn.submit` device gate).
+  'receipt.attach',
+  // Story 2-5a (A20) — remove a damage photo (soft: the record, who and why
+  // stay) or cancel an awaited one. Owner + Ops Manager only — the photo is
+  // evidence in a vendor or client claim, so the floor cannot take it back.
+  'receipt.photo-remove',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -315,6 +324,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     // Story 3-2b — the floor requests an adjustment (always pended for the
     // owner); never `stock.adjust` itself.
     'stock.adjust.request',
+    // Story 2-5a — the dock adds a damage photo from the web; never
+    // `receipt.photo-remove` (evidence is removed by a manager).
+    'receipt.attach',
   ],
   // Story 8-2b: read-only except the e-way paperwork (finance work); story
   // 21-3: and the client rate cards (finance work); story 21-5: and the
