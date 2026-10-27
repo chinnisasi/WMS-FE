@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { CONFLICTS_QUEUES, parseQueueParam } from './conflicts-queues';
 import { parseDrill, type DrillScreen } from './drill';
 import { parseInboundQcGrn, parseInboundTab } from './inbound-tabs';
-import { COMPLIANCE_PAGE_TABS } from './page-tabs';
+import { COMPLIANCE_PAGE_TABS, SETTINGS_PAGE_TABS } from './page-tabs';
 import {
   bellLabel,
   knownNotifications,
@@ -58,6 +58,13 @@ const ENTRIES: Readonly<Record<NotificationEntry['sourceType'], NotificationEntr
     warehouseId: W,
     summary: { licenceId: LICENCE, kind: 'drug-20g', number: 'MH/PUN/20G-1', holder: 'client', holderName: 'Acme Foods', siteCode: 'WH-PUN', validUntil: '2026-12-31', state: 'upcoming' },
   },
+  // Story 5-2a — a client webhook endpoint auto-disabled for failing.
+  'webhook-disabled': {
+    ...base,
+    sourceType: 'webhook-disabled',
+    warehouseId: null,
+    summary: { endpointId: LICENCE, clientId: GRN, host: 'hooks.acme.in', reason: 'failing' },
+  },
 };
 
 function resolved(entry: NotificationEntry, resolution: string): NotificationEntry {
@@ -79,6 +86,7 @@ describe('notification copy', () => {
       'Ledger integrity',
       'Held for QC on receipt',
       'Licence expiring',
+      'Client webhook disabled',
     ]);
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
     expect(notificationCategory(expiring)).toBe('Batch nearing expiry');
@@ -98,6 +106,7 @@ describe('notification copy', () => {
       'Ledger chain broken at #1042 — MAIN Chennai DC',
       'GRN-0042: 3 lines held for QC on receipt · MAIN Chennai DC',
       'Form 20G MH/PUN/20G-1 — Acme Foods at WH-PUN · valid until 31 Dec 2026',
+      'hooks.acme.in — deliveries kept failing for a day; new events are held until it is re-enabled',
     ]);
     // The expiry arm names the IST date (18:30Z is the next IST day).
     const expiring = { ...ENTRIES['batch-alert'], summary: { kind: 'expiry_upcoming', skuId: SKU, batchCode: 'LOT-8', expiryDate: '2026-10-20T18:30:00.000Z' } } as NotificationEntry;
@@ -157,6 +166,14 @@ describe('notification copy', () => {
     }
   });
 
+  test('the webhook entry (5-2a): a 410 reads as gone; it resolves re-enabled, deleted or manually disabled', () => {
+    const gone = { ...ENTRIES['webhook-disabled'], summary: { ...ENTRIES['webhook-disabled'].summary, reason: 'gone' } } as NotificationEntry;
+    expect(notificationDescription(gone, LOOKUPS)).toBe('hooks.acme.in — the receiver answered 410 Gone; nothing is sent until it is re-enabled');
+    expect(notificationResolvedLabel(resolved(ENTRIES['webhook-disabled'], 're-enabled'))).toBe('Resolved · re-enabled');
+    expect(notificationResolvedLabel(resolved(ENTRIES['webhook-disabled'], 'manually-disabled'))).toBe('Resolved · disabled by staff');
+    expect(notificationResolvedLabel(resolved(ENTRIES['webhook-disabled'], 'deleted'))).toBe('Resolved · deleted');
+  });
+
   test('resolved: null while open; "Resolved · {resolution}" once cleared', () => {
     expect(notificationResolvedLabel(ENTRIES['over-receipt'])).toBeNull();
     expect(notificationResolvedLabel(resolved(ENTRIES['over-receipt'], 'approved'))).toBe('Resolved · approved');
@@ -198,6 +215,8 @@ describe('click-through links', () => {
       'qc-receipt': [`/inbound?tab=qc-holds&grnId=${GRN}`, `/inbound?tab=qc-holds&grnId=${GRN}`],
       // Story 1-6c — Compliance → Licences.
       'licence-expiry': ['/compliance?tab=licences', '/compliance?tab=licences'],
+      // Story 5-2a — Settings → Clients.
+      'webhook-disabled': ['/settings?tab=clients', '/settings?tab=clients'],
     };
     for (const [sourceType, entry] of Object.entries(ENTRIES)) {
       const [open, done] = expected[sourceType as NotificationEntry['sourceType']];
@@ -239,6 +258,11 @@ describe('click-through links', () => {
         // page-tabs — a tab link (1-6c's Licences): not a drill, a tab Compliance knows.
         expect(parseDrill('compliance', params)).toBeNull();
         expect(COMPLIANCE_PAGE_TABS.parse(params)).toBe('licences');
+        continue;
+      }
+      if (params.list === undefined && path === '/settings') {
+        // page-tabs — a tab link (5-2a's client webhooks): not a drill, a tab Settings knows.
+        expect(SETTINGS_PAGE_TABS.parse(params)).toBe('clients');
         continue;
       }
       if (params.list === undefined) {

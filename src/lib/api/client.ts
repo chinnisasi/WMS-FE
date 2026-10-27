@@ -207,6 +207,16 @@ import {
   clientsControllerAddContact,
   clientsControllerEditContact,
   clientsControllerRemoveContact,
+  clientWebhooksControllerList,
+  clientWebhooksControllerCreate,
+  clientWebhooksControllerUpdate,
+  clientWebhooksControllerRemove,
+  clientWebhooksControllerRotateSecret,
+  clientWebhooksControllerTest,
+  clientWebhooksControllerDeliveries,
+  clientWebhooksControllerBulkRedeliver,
+  clientWebhooksControllerDelivery,
+  clientWebhooksControllerRedeliver,
   clientInvoicesControllerDiscard,
   clientInvoiceNotesControllerCreate,
   clientInvoiceNotesControllerDiscard,
@@ -275,6 +285,16 @@ import {
 import { refreshAccessToken } from '../session-refresh';
 import { getApiBaseUrl } from './base-url';
 import type {
+  BulkRedeliverWebhooksDto,
+  CreateWebhookEndpointDto,
+  UpdateWebhookEndpointDto,
+  WebhookBulkRedeliverResponse,
+  WebhookDeliveryDetailDto,
+  WebhookDeliveryDto,
+  WebhookDeliveryListResponse,
+  WebhookEndpointListResponse,
+  WebhookEndpointResponse,
+  WebhookTestResponse,
   ReportingControllerDownloadRegisterData,
   PortalAsnDetailResponse,
   PortalAsnPageResponse,
@@ -1628,6 +1648,155 @@ export async function fetchApiRemoveClientContact(
     throw unwrapError(error, 400);
   }
   return data.contact;
+}
+
+/* ------------------------------------------------------------------ */
+/* Client webhooks (story 5-2a) — owner-only (`clients.manage`), reads  */
+/* too. The signing secret arrives ONCE, in a fresh create or rotate.   */
+/* ------------------------------------------------------------------ */
+
+/** A client's live webhook endpoints, plus the server's `webhooks-unavailable` warning. */
+export async function fetchApiListWebhookEndpoints(
+  tenantId: string,
+  clientId: string,
+  options?: { signal?: AbortSignal },
+): Promise<WebhookEndpointListResponse> {
+  const { data, error } = await clientWebhooksControllerList({ path: { tenantId, clientId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiCreateWebhookEndpoint(
+  tenantId: string,
+  clientId: string,
+  body: CreateWebhookEndpointDto,
+  idempotencyKey: string,
+): Promise<WebhookEndpointResponse> {
+  const { data, error } = await clientWebhooksControllerCreate({
+    path: { tenantId, clientId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiUpdateWebhookEndpoint(
+  tenantId: string,
+  clientId: string,
+  endpointId: string,
+  body: UpdateWebhookEndpointDto,
+  idempotencyKey: string,
+): Promise<WebhookEndpointResponse> {
+  const { data, error } = await clientWebhooksControllerUpdate({
+    path: { tenantId, clientId, endpointId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiDeleteWebhookEndpoint(
+  tenantId: string,
+  clientId: string,
+  endpointId: string,
+  idempotencyKey: string,
+): Promise<WebhookEndpointResponse> {
+  const { data, error } = await clientWebhooksControllerRemove({
+    path: { tenantId, clientId, endpointId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiRotateWebhookSecret(
+  tenantId: string,
+  clientId: string,
+  endpointId: string,
+  revokePrevious: boolean,
+  idempotencyKey: string,
+): Promise<WebhookEndpointResponse> {
+  const { data, error } = await clientWebhooksControllerRotateSecret({
+    path: { tenantId, clientId, endpointId },
+    body: { revokePrevious },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiTestWebhookEndpoint(
+  tenantId: string,
+  clientId: string,
+  endpointId: string,
+  idempotencyKey: string,
+): Promise<WebhookTestResponse> {
+  const { data, error } = await clientWebhooksControllerTest({
+    path: { tenantId, clientId, endpointId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiListWebhookDeliveries(
+  tenantId: string,
+  clientId: string,
+  endpointId: string,
+  query: { cursor?: string; limit?: number; status?: WebhookDeliveryDto['status'] },
+  options?: { signal?: AbortSignal },
+): Promise<WebhookDeliveryListResponse> {
+  const { data, error } = await clientWebhooksControllerDeliveries({
+    path: { tenantId, clientId, endpointId },
+    query,
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiGetWebhookDelivery(
+  tenantId: string,
+  clientId: string,
+  endpointId: string,
+  deliveryId: string,
+): Promise<WebhookDeliveryDetailDto> {
+  const { data, error } = await clientWebhooksControllerDelivery({ path: { tenantId, clientId, endpointId, deliveryId } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data.delivery;
+}
+
+export async function fetchApiRedeliverWebhook(
+  tenantId: string,
+  clientId: string,
+  endpointId: string,
+  deliveryId: string,
+  idempotencyKey: string,
+): Promise<WebhookDeliveryDto> {
+  const { data, error } = await clientWebhooksControllerRedeliver({
+    path: { tenantId, clientId, endpointId, deliveryId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data.delivery;
+}
+
+export async function fetchApiBulkRedeliverWebhooks(
+  tenantId: string,
+  clientId: string,
+  endpointId: string,
+  body: BulkRedeliverWebhooksDto,
+  idempotencyKey: string,
+): Promise<WebhookBulkRedeliverResponse> {
+  const { data, error } = await clientWebhooksControllerBulkRedeliver({
+    path: { tenantId, clientId, endpointId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
 }
 
 /* ------------------------------------------------------------------ */

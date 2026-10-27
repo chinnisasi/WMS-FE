@@ -8669,7 +8669,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -8696,7 +8696,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -9076,6 +9076,261 @@ export type UpdateClientContactDto = {
      * true makes this the primary contact (the previous primary is cleared). false is refused — make another contact primary instead
      */
     isPrimary?: boolean;
+};
+
+export type WebhookEndpointListEntryDto = {
+    id: string;
+    clientId: string;
+    url: string;
+    description: string | null;
+    eventTypes: Array<'receipt.recorded' | 'order.dispatched'>;
+    status: 'active' | 'disabled' | 'deleted';
+    /**
+     * `manual` — by staff; `failing` — ten final failures over 24 h (deliveries held); `gone` — the receiver answered 410; `client-departed`
+     */
+    disabledReason: 'manual' | 'failing' | 'gone' | 'client-departed' | null;
+    disabledAt: string | null;
+    schemaVersion: 1;
+    /**
+     * The signing secret’s last four characters (the secret itself is shown once)
+     */
+    secretHint: string;
+    /**
+     * When the previous secret stops signing (a rotation’s overlap)
+     */
+    previousSecretExpiresAt: string | null;
+    /**
+     * Consecutive FINAL delivery failures (reset by any success)
+     */
+    consecutiveFailures: number;
+    failingSince: string | null;
+    lastSuccessAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+    /**
+     * Deliveries held while the endpoint was failing
+     */
+    heldCount: number;
+};
+
+export type WebhookEndpointListResponse = {
+    /**
+     * Oldest first; deleted endpoints are not listed
+     */
+    items: Array<WebhookEndpointListEntryDto>;
+    /**
+     * `webhooks-unavailable` — sending is off on this server (deliveries are paused)
+     */
+    warnings: Array<'webhooks-unavailable'>;
+};
+
+export type CreateWebhookEndpointDto = {
+    /**
+     * An https URL with a public DNS host (no IP literal, no localhost / .local / .internal / .home.arpa), port 443 or 1024–65535, no user name or #fragment. Stored normalised (lower-case host, default port dropped)
+     */
+    url: string;
+    /**
+     * What the endpoint is for (blank for none)
+     */
+    description?: string | null;
+    /**
+     * The event types it receives — at least one, none twice
+     */
+    eventTypes: Array<'receipt.recorded' | 'order.dispatched'>;
+};
+
+export type WebhookEndpointDto = {
+    id: string;
+    clientId: string;
+    url: string;
+    description: string | null;
+    eventTypes: Array<'receipt.recorded' | 'order.dispatched'>;
+    status: 'active' | 'disabled' | 'deleted';
+    /**
+     * `manual` — by staff; `failing` — ten final failures over 24 h (deliveries held); `gone` — the receiver answered 410; `client-departed`
+     */
+    disabledReason: 'manual' | 'failing' | 'gone' | 'client-departed' | null;
+    disabledAt: string | null;
+    schemaVersion: 1;
+    /**
+     * The signing secret’s last four characters (the secret itself is shown once)
+     */
+    secretHint: string;
+    /**
+     * When the previous secret stops signing (a rotation’s overlap)
+     */
+    previousSecretExpiresAt: string | null;
+    /**
+     * Consecutive FINAL delivery failures (reset by any success)
+     */
+    consecutiveFailures: number;
+    failingSince: string | null;
+    lastSuccessAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type WebhookEndpointResponse = {
+    endpoint: WebhookEndpointDto;
+    /**
+     * The raw `whsec_…` signing secret — ONLY in the response to a fresh create or rotate; null on every replay and every other write. It is never shown again: rotate to get a new one
+     */
+    signingSecret: string | null;
+    /**
+     * A re-enable: the held deliveries released to send
+     */
+    heldReleased?: number;
+    /**
+     * A re-enable: the held deliveries discarded
+     */
+    heldDiscarded?: number;
+    warnings: Array<'webhooks-unavailable'>;
+};
+
+export type UpdateWebhookEndpointDto = {
+    /**
+     * A new URL (the same rules as on create); resets the failure counters
+     */
+    url?: string;
+    description?: string | null;
+    /**
+     * Narrowing fails the dropped types’ pending and held deliveries (`unsubscribed`)
+     */
+    eventTypes?: Array<'receipt.recorded' | 'order.dispatched'>;
+    /**
+     * `disabled` — by staff (its pending and held deliveries fail); `active` — re-enable (counters cleared)
+     */
+    status?: 'active' | 'disabled';
+    /**
+     * Required when re-enabling an endpoint that holds deliveries: `release` sends them, `discard` fails them
+     */
+    held?: 'release' | 'discard';
+};
+
+export type RotateWebhookSecretDto = {
+    /**
+     * true — the old secret stops signing now (no 24-hour overlap)
+     */
+    revokePrevious?: boolean;
+};
+
+export type WebhookTestResultDto = {
+    /**
+     * The receiver’s HTTP status; null when no response came back
+     */
+    statusCode: number | null;
+    /**
+     * null on a 2xx; else `http-<status>`, or `network`, `timeout`, `dns-failed`, `tls-handshake`, `tls-cert`, `target-blocked`, `secret-unavailable`
+     */
+    errorCode: string | null;
+    durationMs: number;
+};
+
+export type WebhookTestResponse = {
+    test: WebhookTestResultDto;
+    warnings: Array<'webhooks-unavailable'>;
+};
+
+export type WebhookDeliveryDto = {
+    id: string;
+    endpointId: string;
+    /**
+     * The webhook event id — the `webhook-id` header and the body’s `id`
+     */
+    eventId: string;
+    eventType: 'receipt.recorded' | 'order.dispatched';
+    /**
+     * The receipt (GRN) id or the order id
+     */
+    subjectId: string;
+    status: 'pending' | 'sending' | 'held' | 'succeeded' | 'failed';
+    attempts: number;
+    /**
+     * A pending delivery’s next try
+     */
+    nextAttemptAt: string | null;
+    lastAttemptAt: string | null;
+    lastStatusCode: number | null;
+    /**
+     * A bounded code (`http-500`, `timeout`, `expired`, …) — never a message
+     */
+    lastErrorCode: string | null;
+    lastDurationMs: number | null;
+    succeededAt: string | null;
+    redeliveryCount: number;
+    createdAt: string;
+};
+
+export type WebhookDeliveryListResponse = {
+    /**
+     * Newest first
+     */
+    items: Array<WebhookDeliveryDto>;
+    nextCursor: string | null;
+};
+
+export type BulkRedeliverWebhooksDto = {
+    /**
+     * Deliveries created at or after this instant
+     */
+    since: string;
+    /**
+     * `failed` — every failed delivery (the default); `expired` — only those that expired undelivered
+     */
+    statuses?: Array<'failed' | 'expired'>;
+};
+
+export type WebhookBulkRedeliverResponse = {
+    /**
+     * Deliveries put back to pending (at most 1000)
+     */
+    redelivered: number;
+    /**
+     * Matching failed deliveries still left — call again to continue
+     */
+    remaining: number;
+};
+
+export type WebhookDeliveryDetailDto = {
+    id: string;
+    endpointId: string;
+    /**
+     * The webhook event id — the `webhook-id` header and the body’s `id`
+     */
+    eventId: string;
+    eventType: 'receipt.recorded' | 'order.dispatched';
+    /**
+     * The receipt (GRN) id or the order id
+     */
+    subjectId: string;
+    status: 'pending' | 'sending' | 'held' | 'succeeded' | 'failed';
+    attempts: number;
+    /**
+     * A pending delivery’s next try
+     */
+    nextAttemptAt: string | null;
+    lastAttemptAt: string | null;
+    lastStatusCode: number | null;
+    /**
+     * A bounded code (`http-500`, `timeout`, `expired`, …) — never a message
+     */
+    lastErrorCode: string | null;
+    lastDurationMs: number | null;
+    succeededAt: string | null;
+    redeliveryCount: number;
+    createdAt: string;
+    /**
+     * The exact JSON body every attempt sends
+     */
+    body: string;
+};
+
+export type WebhookDeliveryDetailResponse = {
+    delivery: WebhookDeliveryDetailDto;
+};
+
+export type WebhookRedeliverResponse = {
+    delivery: WebhookDeliveryDto;
 };
 
 export type PartnerLinkDto = {
@@ -11571,11 +11826,47 @@ export type LicenceExpiryNotificationDto = {
     resolution: 'renewed' | 'withdrawn' | 'expired' | null;
 };
 
+export type WebhookDisabledSummaryDto = {
+    endpointId: string;
+    clientId: string;
+    /**
+     * The endpoint URL’s host only
+     */
+    host: string;
+    /**
+     * `failing` — ten final failures over 24 hours; `gone` — the receiver answered 410
+     */
+    reason: 'failing' | 'gone';
+};
+
+export type WebhookDisabledNotificationDto = {
+    id: string;
+    /**
+     * The source occurrence’s own id (the pending adjustment, the over-receipt, the episode…)
+     */
+    sourceId: string;
+    /**
+     * The warehouse the source belongs to; null for a device op or a channel
+     */
+    warehouseId: string | null;
+    /**
+     * When the source raised it (the list orders by this, newest first)
+     */
+    raisedAt: string;
+    /**
+     * When the source cleared; null while open
+     */
+    resolvedAt: string | null;
+    sourceType: 'webhook-disabled';
+    summary: WebhookDisabledSummaryDto;
+    resolution: 're-enabled' | 'deleted' | 'manually-disabled' | null;
+};
+
 export type NotificationListResponse = {
     /**
      * Visible entries, newest first. A member sees only the sources it can act on.
      */
-    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto | AuditExportNotificationDto | LedgerChainBreakNotificationDto | QcReceiptNotificationDto | LicenceExpiryNotificationDto>;
+    items: Array<StockAdjustmentNotificationDto | CountVarianceNotificationDto | OverReceiptNotificationDto | RejectedOpNotificationDto | ReorderBreachNotificationDto | BatchAlertNotificationDto | QcHoldNotificationDto | ChannelSyncNotificationDto | AuditExportNotificationDto | LedgerChainBreakNotificationDto | QcReceiptNotificationDto | LicenceExpiryNotificationDto | WebhookDisabledNotificationDto>;
     nextCursor: string | null;
 };
 
@@ -23206,7 +23497,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -24084,6 +24375,544 @@ export type ClientsControllerEditContactResponses = {
 };
 
 export type ClientsControllerEditContactResponse = ClientsControllerEditContactResponses[keyof ClientsControllerEditContactResponses];
+
+export type ClientWebhooksControllerListData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints';
+};
+
+export type ClientWebhooksControllerListErrors = {
+    /**
+     * A malformed clientId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerListError = ClientWebhooksControllerListErrors[keyof ClientWebhooksControllerListErrors];
+
+export type ClientWebhooksControllerListResponses = {
+    200: WebhookEndpointListResponse;
+};
+
+export type ClientWebhooksControllerListResponse = ClientWebhooksControllerListResponses[keyof ClientWebhooksControllerListResponses];
+
+export type ClientWebhooksControllerCreateData = {
+    body: CreateWebhookEndpointDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints';
+};
+
+export type ClientWebhooksControllerCreateErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, a URL that breaks a rule (scheme, userinfo, fragment, host, port, length — named), an unknown or repeated event type, a description over 200 characters, or the warehouse’s own client (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The client already has 5 endpoints (webhook-endpoint-limit), another of its endpoints has this URL (duplicate-webhook-url), the client has departed (client-departed), WEBHOOK_SEAL_KEY is not configured (webhooks-unavailable), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerCreateError = ClientWebhooksControllerCreateErrors[keyof ClientWebhooksControllerCreateErrors];
+
+export type ClientWebhooksControllerCreateResponses = {
+    /**
+     * The endpoint and its one-time signing secret
+     */
+    201: WebhookEndpointResponse;
+};
+
+export type ClientWebhooksControllerCreateResponse = ClientWebhooksControllerCreateResponses[keyof ClientWebhooksControllerCreateResponses];
+
+export type ClientWebhooksControllerRemoveData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        endpointId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints/{endpointId}';
+};
+
+export type ClientWebhooksControllerRemoveErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed id (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id, or no live webhook endpoint with this id for this client (not-found — another client’s endpoint is the same 404)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerRemoveError = ClientWebhooksControllerRemoveErrors[keyof ClientWebhooksControllerRemoveErrors];
+
+export type ClientWebhooksControllerRemoveResponses = {
+    200: WebhookEndpointResponse;
+};
+
+export type ClientWebhooksControllerRemoveResponse = ClientWebhooksControllerRemoveResponses[keyof ClientWebhooksControllerRemoveResponses];
+
+export type ClientWebhooksControllerUpdateData = {
+    body: UpdateWebhookEndpointDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        endpointId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints/{endpointId}';
+};
+
+export type ClientWebhooksControllerUpdateErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed id, a URL or event type that breaks its rule, or `held` without `status: active` (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id, or no live webhook endpoint with this id for this client (not-found — another client’s endpoint is the same 404)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Another endpoint of the client has this URL (duplicate-webhook-url), re-enabling with held deliveries and no `held` decision (held-decision-required, `heldCount`), re-enabling for a departed client (client-departed), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerUpdateError = ClientWebhooksControllerUpdateErrors[keyof ClientWebhooksControllerUpdateErrors];
+
+export type ClientWebhooksControllerUpdateResponses = {
+    200: WebhookEndpointResponse;
+};
+
+export type ClientWebhooksControllerUpdateResponse = ClientWebhooksControllerUpdateResponses[keyof ClientWebhooksControllerUpdateResponses];
+
+export type ClientWebhooksControllerRotateSecretData = {
+    body?: RotateWebhookSecretDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        endpointId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints/{endpointId}/rotate-secret';
+};
+
+export type ClientWebhooksControllerRotateSecretErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed id (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id, or no live webhook endpoint with this id for this client (not-found — another client’s endpoint is the same 404)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * WEBHOOK_SEAL_KEY is not configured (webhooks-unavailable), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerRotateSecretError = ClientWebhooksControllerRotateSecretErrors[keyof ClientWebhooksControllerRotateSecretErrors];
+
+export type ClientWebhooksControllerRotateSecretResponses = {
+    200: WebhookEndpointResponse;
+};
+
+export type ClientWebhooksControllerRotateSecretResponse = ClientWebhooksControllerRotateSecretResponses[keyof ClientWebhooksControllerRotateSecretResponses];
+
+export type ClientWebhooksControllerTestData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        endpointId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints/{endpointId}/test';
+};
+
+export type ClientWebhooksControllerTestErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed id (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id, or no live webhook endpoint with this id for this client (not-found — another client’s endpoint is the same 404)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Sending is off on this server — WEBHOOK_GATEWAY=off (webhooks-unavailable), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * More than 10 test sends and redeliveries this minute on this endpoint (rate-limited; `retryAfterSeconds`)
+     */
+    429: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerTestError = ClientWebhooksControllerTestErrors[keyof ClientWebhooksControllerTestErrors];
+
+export type ClientWebhooksControllerTestResponses = {
+    200: WebhookTestResponse;
+};
+
+export type ClientWebhooksControllerTestResponse = ClientWebhooksControllerTestResponses[keyof ClientWebhooksControllerTestResponses];
+
+export type ClientWebhooksControllerDeliveriesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        endpointId: string;
+    };
+    query?: {
+        /**
+         * The previous page’s nextCursor
+         */
+        cursor?: string;
+        limit?: number;
+        status?: 'pending' | 'sending' | 'held' | 'succeeded' | 'failed';
+    };
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints/{endpointId}/deliveries';
+};
+
+export type ClientWebhooksControllerDeliveriesErrors = {
+    /**
+     * A malformed id, cursor, limit or status (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client, or no endpoint with this id for this client (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerDeliveriesError = ClientWebhooksControllerDeliveriesErrors[keyof ClientWebhooksControllerDeliveriesErrors];
+
+export type ClientWebhooksControllerDeliveriesResponses = {
+    200: WebhookDeliveryListResponse;
+};
+
+export type ClientWebhooksControllerDeliveriesResponse = ClientWebhooksControllerDeliveriesResponses[keyof ClientWebhooksControllerDeliveriesResponses];
+
+export type ClientWebhooksControllerBulkRedeliverData = {
+    body: BulkRedeliverWebhooksDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        endpointId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints/{endpointId}/deliveries/redeliver';
+};
+
+export type ClientWebhooksControllerBulkRedeliverErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed id, `since` not an instant with a zone, or an unknown status (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id, or no live webhook endpoint with this id for this client (not-found — another client’s endpoint is the same 404)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The endpoint is not active (webhook-endpoint-disabled), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * More than 10 test sends and redeliveries this minute on this endpoint (rate-limited; `retryAfterSeconds`)
+     */
+    429: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerBulkRedeliverError = ClientWebhooksControllerBulkRedeliverErrors[keyof ClientWebhooksControllerBulkRedeliverErrors];
+
+export type ClientWebhooksControllerBulkRedeliverResponses = {
+    200: WebhookBulkRedeliverResponse;
+};
+
+export type ClientWebhooksControllerBulkRedeliverResponse = ClientWebhooksControllerBulkRedeliverResponses[keyof ClientWebhooksControllerBulkRedeliverResponses];
+
+export type ClientWebhooksControllerDeliveryData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        endpointId: string;
+        deliveryId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints/{endpointId}/deliveries/{deliveryId}';
+};
+
+export type ClientWebhooksControllerDeliveryErrors = {
+    /**
+     * A malformed id (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client, endpoint or delivery with this id (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The delivery is older than 30 days and was purged (delivery-purged)
+     */
+    410: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerDeliveryError = ClientWebhooksControllerDeliveryErrors[keyof ClientWebhooksControllerDeliveryErrors];
+
+export type ClientWebhooksControllerDeliveryResponses = {
+    200: WebhookDeliveryDetailResponse;
+};
+
+export type ClientWebhooksControllerDeliveryResponse = ClientWebhooksControllerDeliveryResponses[keyof ClientWebhooksControllerDeliveryResponses];
+
+export type ClientWebhooksControllerRedeliverData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+        endpointId: string;
+        deliveryId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/webhook-endpoints/{endpointId}/deliveries/{deliveryId}/redeliver';
+};
+
+export type ClientWebhooksControllerRedeliverErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed id (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client, live endpoint or delivery with this id (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The delivery is still pending, sending or held (delivery-in-progress), the endpoint is not active (webhook-endpoint-disabled), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The delivery is older than 30 days and was purged (delivery-purged)
+     */
+    410: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * More than 10 test sends and redeliveries this minute on this endpoint (rate-limited; `retryAfterSeconds`)
+     */
+    429: ProblemDetailsDto;
+};
+
+export type ClientWebhooksControllerRedeliverError = ClientWebhooksControllerRedeliverErrors[keyof ClientWebhooksControllerRedeliverErrors];
+
+export type ClientWebhooksControllerRedeliverResponses = {
+    200: WebhookRedeliverResponse;
+};
+
+export type ClientWebhooksControllerRedeliverResponse = ClientWebhooksControllerRedeliverResponses[keyof ClientWebhooksControllerRedeliverResponses];
 
 export type PartnersControllerListPartnersData = {
     body?: never;

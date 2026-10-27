@@ -488,8 +488,9 @@ describe('ClientsCard', () => {
       await settle();
       // Story 4-3a — every row, self and departed included, also offers Allocation (the policy is not work).
       expect(rowButtons('self')).toEqual(['Contacts', 'Addresses', 'Receiving', 'Allocation']);
-      expect(rowButtons('GONE')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Allocation']);
-      expect(rowButtons('GLOBEX')).toEqual(['Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Allocation', 'Suspend', 'Depart']);
+      // Story 5-2a — an owner also gets Webhooks on every non-self row (a departed one too: its log and Delete).
+      expect(rowButtons('GONE')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Allocation', 'Webhooks']);
+      expect(rowButtons('GLOBEX')).toEqual(['Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Allocation', 'Webhooks', 'Suspend', 'Depart']);
     });
 
     test('a refused departure lists every blocker in an alert under the confirm, which stays open; the retry reuses the key and departs', async () => {
@@ -518,7 +519,7 @@ describe('ClientsCard', () => {
       expect(departs.map((r) => r.body)).toEqual([{ status: 'departed' }, { status: 'departed' }]);
       expect(departs[1]!.key).toBe(departs[0]!.key);
       expect(view.container.textContent).toContain('Globex Ltd has departed — it takes no new work, and its history stays.');
-      expect(rowButtons('GLOBEX')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Allocation']);
+      expect(rowButtons('GLOBEX')).toEqual(['Reactivate', 'Rename', 'Tax details', 'Contacts', 'Addresses', 'Receiving', 'Allocation', 'Webhooks']);
     });
 
     test('Contacts: any staff session reads the list, the owner adds (roles as checkboxes), makes one primary and removes one', async () => {

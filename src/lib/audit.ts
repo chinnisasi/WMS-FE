@@ -95,6 +95,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   warehouse: 'Warehouse',
   wave: 'Wave',
   wave_policy: 'Wave policy',
+  // Story 5-2a — a client webhook endpoint (created, edited, deleted, secret rotated, test sent, redelivered, auto-disabled).
+  webhook_endpoint: 'Webhook endpoint',
   zone: 'Zone',
 };
 

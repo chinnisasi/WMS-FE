@@ -3,7 +3,7 @@ import { conflictsQueueHref } from '@/lib/conflicts-queues';
 import { inboundQcHoldsHref, inboundTabHref } from '@/lib/inbound-tabs';
 import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 import { LICENCE_KIND_LABEL } from '@/lib/licences';
-import { COMPLIANCE_PAGE_TABS } from '@/lib/page-tabs';
+import { COMPLIANCE_PAGE_TABS, SETTINGS_PAGE_TABS } from '@/lib/page-tabs';
 import { formatIstDate } from '@/lib/rate-cards';
 
 /**
@@ -42,6 +42,7 @@ const KNOWN_SOURCE_TYPES = {
   'ledger-chain-break': true,
   'qc-receipt': true,
   'licence-expiry': true,
+  'webhook-disabled': true,
 } as const satisfies Record<SourceType, true>;
 
 /** The entries this build can render — an unknown `sourceType` is dropped. */
@@ -109,6 +110,9 @@ export function notificationCategory(entry: NotificationEntry): string {
     // Story 1-6c — one entry per warning: 60 days before validUntil, and once past it.
     case 'licence-expiry':
       return entry.summary.state === 'expired' ? 'Licence expired' : 'Licence expiring';
+    // Story 5-2a — a client webhook endpoint the sender turned off.
+    case 'webhook-disabled':
+      return 'Client webhook disabled';
     default:
       return unknownSource(entry, 'Notification');
   }
@@ -225,6 +229,9 @@ export function notificationDescription(entry: NotificationEntry, lookups: Notif
     // Story 1-6c — `Form 20G MH/PUN/20G-1 — ACME Brand at WH-PUN · valid until 31 Dec 2026`.
     case 'licence-expiry':
       return licenceExpiryLine(entry.summary);
+    // Story 5-2a — `hooks.acme.in — 10 failed deliveries over a day; new events are held`.
+    case 'webhook-disabled':
+      return webhookDisabledLine(entry.summary);
     default:
       return unknownSource(entry, '');
   }
@@ -249,6 +256,15 @@ export function licenceExpiryLine(s: LicenceExpirySummary): string {
   return `${kind} ${s.number} — ${holder} · ${date}`;
 }
 
+type WebhookDisabledSummary = Extract<NotificationEntry, { sourceType: 'webhook-disabled' }>['summary'];
+
+/** Story 5-2a — the host and why the sender stopped (never the URL's path or query). */
+export function webhookDisabledLine(s: WebhookDisabledSummary): string {
+  return s.reason === 'gone'
+    ? `${s.host} — the receiver answered 410 Gone; nothing is sent until it is re-enabled`
+    : `${s.host} — deliveries kept failing for a day; new events are held until it is re-enabled`;
+}
+
 /** Story 1-2b — `GRN-0042: 3 lines held for QC on receipt`. */
 export function qcReceiptLine(grnCode: string, count: number): string {
   return `${grnCode}: ${count} ${count === 1 ? 'line' : 'lines'} held for QC on receipt`;
@@ -256,6 +272,8 @@ export function qcReceiptLine(grnCode: string, count: number): string {
 
 const RESOLUTION_WORD: Readonly<Record<string, string>> = {
   'policy-removed': 'policy removed',
+  // Story 5-2a — a webhook entry staff closed by disabling the endpoint by hand.
+  'manually-disabled': 'disabled by staff',
   // A batch alert auto-resolves when its stock runs out: "Resolved ·
   // resolved" says nothing, "cleared" says what happened.
   resolved: 'cleared',
@@ -315,6 +333,9 @@ export function notificationHref(entry: NotificationEntry): string {
     // Story 1-6c — Compliance → Licences (open and resolved alike).
     case 'licence-expiry':
       return COMPLIANCE_PAGE_TABS.href('licences');
+    // Story 5-2a — Settings → Clients (each client's Webhooks panel).
+    case 'webhook-disabled':
+      return SETTINGS_PAGE_TABS.href('clients');
     default:
       return unknownSource(entry, '/notifications');
   }
