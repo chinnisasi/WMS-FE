@@ -1002,7 +1002,18 @@ function QcHoldsCard({
     {
       key: 'kind',
       header: 'Kind',
-      render: (hold) => <span className="text-xs">{qcHoldKindLabel(hold.kind)}</span>,
+      render: (hold) => (
+        <span className="text-xs">
+          {qcHoldKindLabel(hold.kind)}
+          {/* Story 4-7a (A14) — a return hold names its return authorization. */}
+          {hold.kind === 'return' && hold.rmaCode !== undefined && (
+            <>
+              {' · '}
+              <span className="font-mono">{hold.rmaCode}</span>
+            </>
+          )}
+        </span>
+      ),
     },
     {
       key: 'grn',
@@ -1272,9 +1283,10 @@ function PlaceQcHoldForm({
   // until the bin codes load, nothing is offered rather than guessing.
   // Story 1-2b — only a MANUAL open hold blocks its scope (the one-open
   // index is `kind = 'manual'`); a receipt hold on the same (sku, Receiving)
-  // scope leaves it holdable.
+  // scope leaves it holdable. Story 4-7a — an allowlist: a return hold (its
+  // origin is the Returns bin, never a manual scope) blocks nothing either.
   const heldScopes = new Set(
-    (openHolds?.items ?? []).filter((hold) => hold.kind !== 'receipt').map((hold) => `${hold.skuId}:${hold.binId}`),
+    (openHolds?.items ?? []).filter((hold) => hold.kind === 'manual').map((hold) => `${hold.skuId}:${hold.binId}`),
   );
   const offerable =
     scopesData === null || bins === null

@@ -229,14 +229,18 @@ import {
   portalControllerOrder,
   portalControllerOrders,
   portalControllerPlaceOrder,
+  portalControllerPortalReturn,
+  portalControllerPortalReturns,
   portalControllerPurchaseOrder,
   portalControllerPurchaseOrders,
   portalControllerSkus,
   portalControllerStock,
   portalControllerWarehouses,
   putawayControllerListPutawayTasks,
+  returnsControllerAwaiting,
   returnsControllerCancel,
   returnsControllerCreate,
+  returnsControllerDispose,
   returnsControllerGet,
   returnsControllerList,
   returnsControllerReturnable,
@@ -442,6 +446,12 @@ import type {
   ReturnableOrderDto,
   ReturnAuthorizationDto,
   ReturnAuthorizationListResponse,
+  AwaitingDispositionListResponse,
+  DisposeReturnDto,
+  ReturnDispositionResultDto,
+  PortalReturnPageResponse,
+  PortalReturnDetailResponse,
+  PortalControllerPortalReturnsData,
   AsnListResponse,
   AsnImportResponseDto,
   AsnResponse,
@@ -5108,6 +5118,32 @@ export async function fetchApiPortalGoodsReceipt(
   return data;
 }
 
+/**
+ * Story 4-7a — this client's returns with their disposition totals, newest
+ * first; optionally only those still awaiting a decision or only decided ones.
+ */
+export async function fetchApiPortalReturns(
+  tenantId: string,
+  options?: PortalPageOptions & { dispositionState?: NonNullable<NonNullable<PortalControllerPortalReturnsData['query']>['dispositionState']> },
+): Promise<PortalReturnPageResponse> {
+  const page = portalPageQuery(options);
+  const query = options?.dispositionState === undefined ? page : { ...page, dispositionState: options.dispositionState };
+  const { data, error } = await portalControllerPortalReturns({ path: { tenantId }, query, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 4-7a — one of this client's returns: its lines and what was decided for each unit. Another client's is a 404. */
+export async function fetchApiPortalReturn(
+  tenantId: string,
+  rmaId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalReturnDetailResponse> {
+  const { data, error } = await portalControllerPortalReturn({ path: { tenantId, rmaId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
 export async function fetchApiPortalPurchaseOrder(
   tenantId: string,
   poId: string,
@@ -5328,6 +5364,50 @@ export async function fetchApiCancelReturn(
   const { data, error } = await returnsControllerCancel({
     path: { tenantId, rmaId },
     body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+// ── Story 4-7a — returns disposition ───────────────────────────────────────
+
+/**
+ * The received return-receipt lines still awaiting a disposition, OLDEST
+ * first (keyset ASC), optionally one warehouse's or one client's. Any staff
+ * role. A first page with no option sends no query.
+ */
+export async function fetchApiListAwaitingReturns(
+  tenantId: string,
+  options?: { warehouseId?: string; clientId?: string; cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<AwaitingDispositionListResponse> {
+  const { data, error } = await returnsControllerAwaiting({
+    path: { tenantId },
+    query: definedQuery({
+      warehouseId: options?.warehouseId,
+      clientId: options?.clientId,
+      cursor: options?.cursor,
+      limit: options?.limit,
+    }),
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * Records one disposition of a received return-receipt line — restock (to a
+ * storage bin), quarantine (a QC hold) or scrap (`returns.manage`). The key
+ * is per draft: reused on a retry of the same draft, new for a changed one.
+ */
+export async function fetchApiDisposeReturn(
+  tenantId: string,
+  body: DisposeReturnDto,
+  idempotencyKey: string,
+): Promise<ReturnDispositionResultDto> {
+  const { data, error } = await returnsControllerDispose({
+    path: { tenantId },
+    body,
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) throw unwrapError(error, 400);

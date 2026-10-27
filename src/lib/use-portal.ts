@@ -15,6 +15,8 @@ import {
   fetchApiPortalOrders,
   fetchApiPortalPurchaseOrder,
   fetchApiPortalPurchaseOrders,
+  fetchApiPortalReturn,
+  fetchApiPortalReturns,
   fetchApiPortalService,
   fetchApiPortalStock,
 } from '@/lib/api/client';
@@ -29,13 +31,15 @@ import type {
   PortalOrderRowDto,
   PortalPurchaseOrderDetailResponse,
   PortalPurchaseOrderRowDto,
+  PortalReturnDetailResponse,
+  PortalReturnRowDto,
   PortalSkuDto,
   PortalStockRowDto,
   PortalWarehouseDto,
   ServiceReportDto,
 } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { PORTAL_SKU_MAX_PAGES, PORTAL_SKU_PAGE_LIMIT, portalReadReason } from '@/lib/portal';
+import { PORTAL_SKU_MAX_PAGES, PORTAL_SKU_PAGE_LIMIT, portalReadReason, portalReturnFilterQuery, type PortalReturnFilter } from '@/lib/portal';
 import { portalServiceReason } from '@/lib/service-report';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
 
@@ -240,6 +244,23 @@ export function usePortalGoodsReceipts() {
 /** Story 2-5a — one receipt's lines and damage photos; `refresh()` re-reads quietly when a photo URL expires. */
 export function usePortalGoodsReceipt(grnId: string | null) {
   return usePortalDetail<PortalGoodsReceiptDetailDto>(grnId, 'This receipt', fetchApiPortalGoodsReceipt);
+}
+
+/**
+ * Story 4-7a — this client's returns, newest first; the filter (every return,
+ * awaiting a decision, fully decided) is part of the scope, so a new filter
+ * starts on page one and a cursor from another filter is never replayed.
+ */
+export function usePortalReturns(filter: PortalReturnFilter) {
+  const state = portalReturnFilterQuery(filter);
+  return usePortalList<PortalReturnRowDto>(`returns:${filter}`, 'your returns', (tenantId, cursor) =>
+    fetchApiPortalReturns(tenantId, { ...cursorOption(cursor), ...(state === null ? {} : { dispositionState: state }) }),
+  );
+}
+
+/** Story 4-7a — one return's lines and the decisions on its units, oldest first. */
+export function usePortalReturn(rmaId: string | null): ResourceState<PortalReturnDetailResponse> & Reloadable {
+  return usePortalDetail(rmaId, 'This return', fetchApiPortalReturn);
 }
 
 export function usePortalInvoices() {

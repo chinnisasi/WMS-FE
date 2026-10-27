@@ -400,6 +400,14 @@ describe('QC holds — receipt holds (story 1-2b)', () => {
     expect(column('Held')).toEqual(['12 each', '4 each']);
   });
 
+  test('story 4-7a (A14) — a return hold reads "Return · RMA-…" and offers no Release receipt', async () => {
+    qcHolds = [hold('h-ret', { kind: 'return', rmaCode: 'RMA-0007', grnLineId: undefined, grnId: null, grnCode: null, reason: 'return RMA-0007 · damaged' }), MANUAL];
+    view = render(<InboundCards initialTab="qc-holds" />);
+    await settle();
+    expect(column('Kind')).toEqual(['Return · RMA-0007', 'Manual']);
+    expect([...panel().querySelectorAll('button')].filter((b) => b.textContent === 'Release receipt')).toHaveLength(0);
+  });
+
   test('Release receipt (qc.manage) POSTs {grnId} with a fresh key, guards a double click, then re-reads the list', async () => {
     qcHolds = [hold('h-1'), hold('h-2'), MANUAL];
     view = render(<InboundCards initialTab="qc-holds" />);

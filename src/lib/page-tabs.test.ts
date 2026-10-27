@@ -9,6 +9,7 @@ import {
   INVENTORY_PAGE_TABS,
   OUTBOUND_PAGE_TABS,
   REPLENISHMENT_PAGE_TABS,
+  RETURNS_PAGE_TABS,
   SETTINGS_PAGE_TABS,
   setupStepHref,
   type PageTabs,
@@ -76,7 +77,7 @@ describe('page-tabs — the shared definition', () => {
   });
 
   test('a tab link is a plain visit, never a drill', () => {
-    const defs: readonly PageTabs<string>[] = [INBOUND_PAGE_TABS, OUTBOUND_PAGE_TABS, REPLENISHMENT_PAGE_TABS, COMPLIANCE_PAGE_TABS, SETTINGS_PAGE_TABS, INVENTORY_PAGE_TABS, COUNTS_PAGE_TABS];
+    const defs: readonly PageTabs<string>[] = [INBOUND_PAGE_TABS, OUTBOUND_PAGE_TABS, REPLENISHMENT_PAGE_TABS, COMPLIANCE_PAGE_TABS, SETTINGS_PAGE_TABS, INVENTORY_PAGE_TABS, COUNTS_PAGE_TABS, RETURNS_PAGE_TABS];
     for (const def of defs) {
       for (const t of def.tabs) {
         const url = new URL(`http://x${def.href(t.id)}`);
@@ -125,6 +126,16 @@ describe('page-tabs — the pages', () => {
     expect(INVENTORY_PAGE_TABS.href('adjust')).toBe('/inventory?tab=adjust');
     expect(INVENTORY_PAGE_TABS.href('stock')).toBe('/inventory');
     expect(INVENTORY_PAGE_TABS.href('ledger')).toBe('/inventory?tab=ledger');
+    // Story 4-7a — Returns: Authorizations (the bare route) and the disposition queue; no drill.
+    expect(RETURNS_PAGE_TABS.tabs.map((t) => [t.id, t.label])).toEqual([
+      ['authorizations', 'Authorizations'],
+      ['awaiting', 'Awaiting disposition'],
+    ]);
+    expect(RETURNS_PAGE_TABS.href('authorizations')).toBe('/returns');
+    expect(RETURNS_PAGE_TABS.href('awaiting')).toBe('/returns?tab=awaiting');
+    expect(RETURNS_PAGE_TABS.parse({ tab: 'awaiting' })).toBe('awaiting');
+    expect(RETURNS_PAGE_TABS.parse({ tab: 'nope' })).toBeNull();
+    expect(RETURNS_PAGE_TABS.id).toBe('returns');
     // Story 3-5a — counts under Moves: Tasks (the bare route) and Schedule; no drill.
     expect(COUNTS_PAGE_TABS.tabs.map((t) => [t.id, t.label])).toEqual([
       ['tasks', 'Tasks'],

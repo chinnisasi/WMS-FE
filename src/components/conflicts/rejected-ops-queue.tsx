@@ -367,7 +367,7 @@ function RejectedOpCard({
             ))}
           </ul>
           {open &&
-            rejectedOpGuidance(entry).map((guidance) => (
+            rejectedOpGuidance(entry, binCode).map((guidance) => (
               <div key={guidance} className="text-(--muted-foreground)">
                 {guidance}
               </div>

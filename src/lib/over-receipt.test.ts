@@ -12,6 +12,7 @@ import {
   qcReason,
   qcGrnFilterLabel,
   qcHoldKindLabel,
+  QC_HOLD_KIND_LABEL,
   releaseReceiptOutcome,
   releaseReceiptReason,
 } from './over-receipt';
@@ -206,6 +207,11 @@ describe('story 1-2b — receipt holds', () => {
     expect(qcHoldKindLabel('receipt')).toBe('Auto · QC on receipt');
     expect(qcHoldKindLabel('manual')).toBe('Manual');
     expect(qcHoldKindLabel(undefined)).toBe('Manual');
+    // Story 4-7a — an allowlist over the generated union: a return hold has its own word,
+    // and a kind a newer backend sends reads as itself, never as "Manual".
+    expect(qcHoldKindLabel('return')).toBe('Return');
+    expect(qcHoldKindLabel('brand-new')).toBe('brand-new');
+    expect(Object.keys(QC_HOLD_KIND_LABEL).sort()).toEqual(['manual', 'receipt', 'return']);
   });
 
   test('the GRN filter names the receipt by code, else by the id tail', () => {

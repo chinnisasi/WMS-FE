@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from './api/client';
-import type { ReturnableLineDto } from './api/generated';
+import type { BinResponse, ReturnableLineDto } from './api/generated';
 import {
   EMPTY_RETURN_LINE,
   MAX_RETURN_SERIALS_PER_LINE,
@@ -26,7 +26,30 @@ import {
   selectAllSerials,
   AWAITING_DISPOSITION_BADGE,
   RETURN_CONDITION_LABEL,
+  DISPOSITIONED_BADGE,
+  DISPOSITION_OUTCOME_LABEL,
+  DISPOSITION_REASON_LABEL,
+  DISPOSITION_REASON_OPTIONS,
+  awaitingCaptureText,
+  dispositionActionLabel,
+  dispositionHistoryText,
+  dispositionOutcome,
+  dispositionReason,
+  dispositionRefusalReloads,
+  disposedWhole,
+  emptyDispositionDraft,
   lineAwaitsDisposition,
+  lineDispositionSplit,
+  lineDispositionState,
+  lineDispositionText,
+  parseDisposition,
+  quarantineUnavailable,
+  restockTargetBins,
+  returnAgeLabel,
+  returnAgeNeedsAttention,
+  scrapConfirmText,
+  type AwaitingReturnLine,
+  type DispositionDraft,
   receiptHeading,
   receiptLineText,
   receivedOfAuthorized,
@@ -243,10 +266,9 @@ describe('story 13-2 — receipts and the awaiting badge', () => {
     expect(RETURN_CONDITION_LABEL).toEqual({ resaleable: 'Resaleable', opened: 'Opened', damaged: 'Damaged', 'missing-parts': 'Missing parts' });
   });
 
-  test('the badge is word-first and shows on a line once anything is received', () => {
+  test('the badges are word-first', () => {
     expect(AWAITING_DISPOSITION_BADGE).toBe('↩ Awaiting disposition');
-    expect(lineAwaitsDisposition({ receivedQty: 0 })).toBe(false);
-    expect(lineAwaitsDisposition({ receivedQty: 0.5 })).toBe(true);
+    expect(DISPOSITIONED_BADGE).toBe('✓ Dispositioned');
     expect(receivedOfAuthorized({ receivedQty: 1, authorizedQty: 2 }, { uom: 'pcs', uomPrecision: 0 })).toBe('1 of 2 pcs received');
     expect(receivedOfAuthorized({ receivedQty: 0.5, authorizedQty: 1.25 }, { uom: 'kg', uomPrecision: 3 })).toBe('0.500 of 1.250 kg received');
     expect(receivedOfAuthorized({ receivedQty: 1, authorizedQty: 2 }, null)).toBe('1 of 2 units received');
@@ -262,7 +284,22 @@ describe('story 13-2 — receipts and the awaiting badge', () => {
   test('a receipt and its lines in words', () => {
     expect(receiptHeading({ code: 'RRN-0003', operatorEmail: 'ravi@example.com' })).toBe('RRN-0003 · ravi@example.com');
     expect(receiptHeading({ code: 'RRN-0003', operatorEmail: null })).toBe('RRN-0003 · unknown operator');
-    const base = { rmaLineId: 'l', skuId: 's', qty: 1, condition: 'resaleable' as const, note: null, batchCode: null, serialNumber: null, weightGrams: null };
+    const base = {
+      id: 'rrl-1',
+      rmaLineId: 'l',
+      skuId: 's',
+      qty: 1,
+      condition: 'resaleable' as const,
+      note: null,
+      batchCode: null,
+      serialNumber: null,
+      weightGrams: null,
+      openQty: 1,
+      restockedQty: 0,
+      scrappedQty: 0,
+      onHoldQty: 0,
+      failedInspectionQty: 0,
+    };
     expect(receiptLineText(base)).toBe('1 × Resaleable');
     expect(receiptLineText({ ...base, condition: 'opened', batchCode: 'B1', serialNumber: 'SN-1', note: 'seal cut' })).toBe(
       '1 × Opened · batch B1 · serial SN-1 · “seal cut”',
@@ -271,3 +308,301 @@ describe('story 13-2 — receipts and the awaiting badge', () => {
   });
 });
 
+
+// ── story 4-7a ───────────────────────────────────────────────────────────────
+
+function receiptLine(over: Record<string, unknown> = {}) {
+  return {
+    id: 'rrl-1',
+    rmaLineId: 'rl-1',
+    skuId: 'sku-a',
+    qty: 2,
+    condition: 'resaleable' as const,
+    note: null,
+    batchCode: null,
+    serialNumber: null,
+    weightGrams: null,
+    openQty: 2,
+    restockedQty: 0,
+    scrappedQty: 0,
+    onHoldQty: 0,
+    failedInspectionQty: 0,
+    ...over,
+  };
+}
+
+function awaiting(over: Partial<AwaitingReturnLine> = {}): AwaitingReturnLine {
+  return {
+    receiptLineId: 'rrl-1',
+    receiptCode: 'RRN-0003',
+    receivedAt: '2026-10-20T04:30:00.000Z',
+    rmaId: 'rma-1',
+    rmaCode: 'RMA-0007',
+    orderReference: 'SHOP-#1',
+    clientId: 'client-a',
+    warehouseId: 'w-1',
+    skuId: 'sku-a',
+    skuCode: 'PLAIN-A',
+    skuName: 'Plain A',
+    uom: 'each',
+    condition: 'resaleable',
+    note: null,
+    batchCode: null,
+    serialNumber: null,
+    weightGrams: null,
+    receivedQty: 5,
+    openQty: 5,
+    onHoldQty: 0,
+    priorQuarantines: 0,
+    lastReasonCode: null,
+    ...over,
+  };
+}
+
+const DRAFT: DispositionDraft = { outcome: '', qty: '5', toBinId: '', reasonCode: '', note: '' };
+
+describe('story 4-7a — the RMA-line badge (A7), from the receipts', () => {
+  test('nothing received → none; any receipt line open or on hold → awaiting; all decided → dispositioned', () => {
+    expect(lineDispositionState('rl-1', [])).toBe('none');
+    expect(lineDispositionState('rl-1', [{ lines: [receiptLine({ rmaLineId: 'rl-2' })] }])).toBe('none');
+    expect(lineDispositionState('rl-1', [{ lines: [receiptLine()] }])).toBe('awaiting');
+    // Open 0 but a hold still unsettled: still awaiting.
+    expect(lineDispositionState('rl-1', [{ lines: [receiptLine({ openQty: 0, onHoldQty: 2 })] }])).toBe('awaiting');
+    // One receipt decided, a second still open: awaiting (grouped by RMA line across receipts).
+    expect(
+      lineDispositionState('rl-1', [
+        { lines: [receiptLine({ openQty: 0, restockedQty: 2 })] },
+        { lines: [receiptLine({ id: 'rrl-2', qty: 1, openQty: 1 })] },
+      ]),
+    ).toBe('awaiting');
+    expect(
+      lineDispositionState('rl-1', [
+        { lines: [receiptLine({ openQty: 0, restockedQty: 1, scrappedQty: 1 })] },
+        { lines: [receiptLine({ id: 'rrl-2', qty: 1, openQty: 0, failedInspectionQty: 1 })] },
+      ]),
+    ).toBe('dispositioned');
+    expect(lineAwaitsDisposition('rl-1', [{ lines: [receiptLine()] }])).toBe(true);
+    expect(lineAwaitsDisposition('rl-1', [{ lines: [receiptLine({ openQty: 0, restockedQty: 2 })] }])).toBe(false);
+  });
+
+  test('a figure an older payload lacks reads as undecided — never a false "Dispositioned"', () => {
+    const old = { ...receiptLine(), openQty: undefined, onHoldQty: undefined } as unknown as ReturnType<typeof receiptLine>;
+    expect(lineDispositionState('rl-1', [{ lines: [old] }])).toBe('awaiting');
+  });
+
+  test('the split sums across receipts and reads only its non-zero parts', () => {
+    const split = lineDispositionSplit('rl-1', [
+      { lines: [receiptLine({ qty: 4, openQty: 1, restockedQty: 2, onHoldQty: 1 })] },
+      { lines: [receiptLine({ id: 'rrl-2', qty: 2, openQty: 0, scrappedQty: 1, failedInspectionQty: 1 })] },
+    ])!;
+    expect(split).toMatchObject({ received: 6, open: 1, restocked: 2, onHold: 1, scrapped: 1, failedInspection: 1, undecided: true });
+    expect(lineDispositionText(split, { uom: 'each', uomPrecision: 0 })).toBe('2 restocked · 1 on hold · 1 failed inspection · 1 scrapped · 1 awaiting');
+    expect(lineDispositionText({ ...split, restocked: 0, onHold: 0, scrapped: 0, failedInspection: 0 }, null)).toBeNull();
+    expect(lineDispositionText({ ...split, restocked: 0.5, onHold: 0, scrapped: 0, failedInspection: 0, open: 0 }, { uom: 'kg', uomPrecision: 3 })).toBe(
+      '0.500 restocked',
+    );
+  });
+});
+
+describe('story 4-7a — the disposition vocabulary', () => {
+  test('outcomes and reasons are Records over the generated unions (allowlists)', () => {
+    expect(DISPOSITION_OUTCOME_LABEL).toEqual({ restock: 'Restock', quarantine: 'Quarantine', scrap: 'Scrap' });
+    expect(Object.keys(DISPOSITION_REASON_LABEL)).toEqual([
+      'damaged',
+      'defective',
+      'expired',
+      'missing-parts',
+      'contaminated',
+      'needs-inspection',
+      'client-instruction',
+      'other',
+    ]);
+    expect(DISPOSITION_REASON_OPTIONS.at(-1)).toEqual({ value: 'other', label: 'Other (say why)' });
+  });
+
+  test('a serial unit or a returned case is whole and cannot be quarantined, with the reason in words', () => {
+    expect(disposedWhole(awaiting())).toBe(false);
+    expect(disposedWhole(awaiting({ serialNumber: 'SN-1' }))).toBe(true);
+    expect(disposedWhole(awaiting({ weightGrams: 2340 }))).toBe(true);
+    expect(quarantineUnavailable(awaiting())).toBeNull();
+    expect(quarantineUnavailable(awaiting({ serialNumber: 'SN-1' }))).toContain("A serial unit can't be quarantined");
+    expect(quarantineUnavailable(awaiting({ weightGrams: 2340 }))).toContain("A returned case can't be quarantined");
+  });
+
+  test('captures, age and history (A14)', () => {
+    expect(awaitingCaptureText(awaiting())).toBe('—');
+    expect(awaitingCaptureText(awaiting({ batchCode: 'B1', serialNumber: 'SN-1', weightGrams: 2340 }))).toBe('batch B1 · serial SN-1 · 2.340 kg');
+    const at = Date.parse('2026-10-20T04:30:00.000Z');
+    expect(returnAgeLabel('2026-10-20T04:30:00.000Z', at + 10_000)).toBe('Just now');
+    expect(returnAgeLabel('2026-10-20T04:30:00.000Z', at + 40 * 60_000)).toBe('40 min');
+    expect(returnAgeLabel('2026-10-20T04:30:00.000Z', at + 5 * 3_600_000)).toBe('5 h');
+    expect(returnAgeLabel('2026-10-20T04:30:00.000Z', at + 86_400_000)).toBe('1 day');
+    expect(returnAgeLabel('2026-10-20T04:30:00.000Z', at + 12 * 86_400_000)).toBe('12 days');
+    expect(returnAgeLabel('garbage', at)).toBe('—');
+    expect(returnAgeNeedsAttention('2026-10-20T04:30:00.000Z', at + 6 * 86_400_000)).toBe(false);
+    expect(returnAgeNeedsAttention('2026-10-20T04:30:00.000Z', at + 7 * 86_400_000)).toBe(true);
+    expect(dispositionHistoryText(awaiting())).toBeNull();
+    expect(dispositionHistoryText(awaiting({ priorQuarantines: 2, lastReasonCode: 'damaged' }))).toBe('Quarantined 2× · last: Damaged');
+    expect(dispositionHistoryText(awaiting({ priorQuarantines: 1 }))).toBe('Quarantined 1×');
+    expect(dispositionHistoryText(awaiting({ lastReasonCode: 'other' }))).toBe('Last: Other');
+    expect(dispositionHistoryText(awaiting({ lastReasonCode: 'from-the-future' }))).toBe('Last: from-the-future');
+  });
+});
+
+describe('story 4-7a — restock targets', () => {
+  function bin(id: string, over: Partial<BinResponse> = {}): BinResponse {
+    return {
+      id,
+      tenantId: 't',
+      warehouseId: 'w-1',
+      zoneId: 'z',
+      code: id.toUpperCase(),
+      capacity: 100,
+      lengthMm: null,
+      widthMm: null,
+      heightMm: null,
+      maxWeightGrams: null,
+      storageClass: 'ambient',
+      dedicatedClientId: null,
+      type: 'shelf',
+      blocked: false,
+      retiredAt: null,
+      retiredBy: null,
+      systemOwned: false,
+      createdAt: '',
+      ...over,
+    } as BinResponse;
+  }
+  const bins = [
+    bin('b-2'),
+    bin('b-1'),
+    bin('returns', { systemOwned: true }),
+    bin('retired', { retiredAt: '2026-01-01T00:00:00.000Z' }),
+    bin('blocked', { blocked: true }),
+    bin('cage', { storageClass: 'secure' }),
+    bin('mine', { dedicatedClientId: 'client-a' }),
+    bin('theirs', { dedicatedClientId: 'client-b' }),
+    bin('cold', { storageClass: 'chilled' }),
+  ];
+
+  test('storage bins only: no system, retired, blocked or other-client bin; secure only with secure.move; sorted', () => {
+    const operator = restockTargetBins(bins, null, 'client-a', 'operator').map((b) => b.id);
+    expect(operator).toEqual(['b-1', 'b-2', 'cold', 'mine']);
+    const manager = restockTargetBins(bins, null, 'client-a', 'ops_manager').map((b) => b.id);
+    expect(manager).toContain('cage');
+    expect(manager).not.toContain('theirs');
+  });
+
+  test('with the SKU known, its storage class decides (a chilled SKU never into an ambient bin)', () => {
+    const ids = restockTargetBins(bins, { storageClass: 'chilled', clientId: 'client-a' }, 'client-a', 'operator').map((b) => b.id);
+    expect(ids).toContain('cold');
+    expect(ids).not.toContain('b-1');
+  });
+});
+
+describe('story 4-7a — parseDisposition', () => {
+  test('an outcome is required; the open quantity is pre-filled at the SKU precision', () => {
+    expect(parseDisposition(DRAFT, awaiting(), 'w-1', 0).problem).toContain('Choose what happens');
+    expect(emptyDispositionDraft(awaiting({ openQty: 1.5 }), 3).qty).toBe('1.500');
+    expect(emptyDispositionDraft(awaiting({ openQty: 2 }), null).qty).toBe('2');
+  });
+
+  test('a restock names its bin and never a reason or note', () => {
+    expect(parseDisposition({ ...DRAFT, outcome: 'restock' }, awaiting(), 'w-1', 0).problem).toBe('Pick the storage bin the units go to.');
+    const parsed = parseDisposition({ ...DRAFT, outcome: 'restock', qty: ' 3 ', toBinId: 'b-1', reasonCode: 'damaged', note: 'x' }, awaiting(), 'w-1', 0);
+    expect(parsed.body).toEqual({ warehouseId: 'w-1', receiptLineId: 'rrl-1', outcome: 'restock', qty: 3, toBinId: 'b-1' });
+  });
+
+  test('quarantine and scrap need a reason, a note for Other, ≤ 200 characters; a blank note is absent', () => {
+    expect(parseDisposition({ ...DRAFT, outcome: 'scrap' }, awaiting(), 'w-1', 0).problem).toBe('Pick why these units are scrapped.');
+    expect(parseDisposition({ ...DRAFT, outcome: 'quarantine' }, awaiting(), 'w-1', 0).problem).toBe('Pick why these units are quarantined.');
+    expect(parseDisposition({ ...DRAFT, outcome: 'scrap', reasonCode: 'other', note: '  ' }, awaiting(), 'w-1', 0).problem).toContain('needs a note');
+    expect(parseDisposition({ ...DRAFT, outcome: 'scrap', reasonCode: 'damaged', note: 'x'.repeat(201) }, awaiting(), 'w-1', 0).problem).toContain(
+      '200 characters',
+    );
+    expect(parseDisposition({ ...DRAFT, outcome: 'quarantine', reasonCode: 'needs-inspection', toBinId: 'b-1', note: '  ' }, awaiting(), 'w-1', 0).body).toEqual({
+      warehouseId: 'w-1',
+      receiptLineId: 'rrl-1',
+      outcome: 'quarantine',
+      qty: 5,
+      reasonCode: 'needs-inspection',
+    });
+    expect(parseDisposition({ ...DRAFT, outcome: 'scrap', reasonCode: 'other', note: ' seal cut ' }, awaiting(), 'w-1', 0).body).toMatchObject({
+      reasonCode: 'other',
+      note: 'seal cut',
+    });
+  });
+
+  test('the quantity: positive, at the SKU precision (never rounded), at most what is open', () => {
+    const scrap = { ...DRAFT, outcome: 'scrap' as const, reasonCode: 'damaged' as const };
+    expect(parseDisposition({ ...scrap, qty: '0' }, awaiting(), 'w-1', 0).problem).toBe('Enter a quantity greater than zero.');
+    expect(parseDisposition({ ...scrap, qty: 'abc' }, awaiting(), 'w-1', 0).problem).toBe('Enter a quantity greater than zero.');
+    expect(parseDisposition({ ...scrap, qty: '1.5' }, awaiting(), 'w-1', 0).problem).toBe('PLAIN-A is counted in each — whole numbers only (got 1.5).');
+    // Unknown precision: the server judges it.
+    expect(parseDisposition({ ...scrap, qty: '1.5' }, awaiting(), 'w-1', null).body?.qty).toBe(1.5);
+    expect(parseDisposition({ ...scrap, qty: '6' }, awaiting(), 'w-1', 0).problem).toBe('Only 5 each still await a decision on this line.');
+  });
+
+  test('a serial unit is disposed whole (qty 1, the typed figure ignored) and never quarantined', () => {
+    const serial = awaiting({ serialNumber: 'SN-1', receivedQty: 1, openQty: 1 });
+    expect(parseDisposition({ ...DRAFT, outcome: 'restock', qty: '7', toBinId: 'b-1' }, serial, 'w-1', 0).body?.qty).toBe(1);
+    expect(parseDisposition({ ...DRAFT, outcome: 'quarantine', reasonCode: 'damaged' }, serial, 'w-1', 0).problem).toContain('serial unit');
+    expect(parseDisposition({ ...DRAFT, outcome: 'scrap', reasonCode: 'damaged' }, serial, 'w-1', 0).body?.qty).toBe(1);
+  });
+});
+
+describe('story 4-7a — the words around a decision', () => {
+  test('the action label and the scrap confirmation', () => {
+    expect(dispositionActionLabel('', null)).toBe('Record decision');
+    expect(dispositionActionLabel('restock', '3 each')).toBe('Restock 3 each');
+    expect(dispositionActionLabel('scrap', '2 each')).toBe('Scrap 2 each…');
+    expect(scrapConfirmText(awaiting(), '2 each', 'Damaged')).toBe(
+      "Scrap 2 each of PLAIN-A from RMA-0007 (Damaged)? The units are written off and leave stock — this can't be undone.",
+    );
+  });
+
+  test('the outcome is built from the RESPONSE, summing every disposition', () => {
+    const entry = { id: 'd', receiptLineId: 'rrl-1', rmaId: 'rma-1', qty: 2, toBinId: 'b-1', qcHoldId: null, ledgerEventId: 'e' };
+    expect(dispositionOutcome({ dispositions: [{ ...entry, outcome: 'restock' }, { ...entry, outcome: 'restock', qty: 1 }] }, awaiting(), 'A-01', 0)).toEqual({
+      word: 'Restocked 3 each of PLAIN-A',
+      reason: 'Moved from the Returns bin to A-01 (RMA-0007).',
+    });
+    expect(dispositionOutcome({ dispositions: [{ ...entry, outcome: 'quarantine' }] }, awaiting(), null, 0).word).toBe('Quarantined 2 each of PLAIN-A');
+    expect(dispositionOutcome({ dispositions: [{ ...entry, outcome: 'scrap', qty: 0.5 }] }, { ...awaiting(), uom: 'kg' }, null, 3).word).toBe(
+      'Scrapped 0.500 kg of PLAIN-A',
+    );
+  });
+
+  test('refusals by code: the bound with its figure, the write-off threshold, the gates; the transport arm', () => {
+    const problem = (code: string, extensions: Record<string, unknown> = {}, detail?: string) => new ApiProblem(code, 409, detail, 'x', extensions);
+    expect(dispositionReason(problem('exceeds-awaiting', { awaitingQty: 2 }), 'each')).toBe(
+      'Only 2 each still await a decision on this line — the queue has refreshed.',
+    );
+    expect(dispositionReason(problem('scrap-above-threshold', { awaitingQty: 30, threshold: 10 }), 'each')).toBe(
+      'Above your write-off threshold of 10 each — scrap at most 10 each at a time or raise the threshold in the adjustment policy.',
+    );
+    expect(dispositionReason(problem('disposition-not-supported'))).toContain("can't be quarantined");
+    expect(dispositionReason(problem('batch-expired'))).toContain('expired');
+    expect(dispositionReason(problem('batch-blocked'))).toContain('blocked');
+    expect(dispositionReason(problem('disposition-scope-quarantined'))).toContain('reconcile quarantine');
+    expect(dispositionReason(problem('document-warehouse-mismatch'))).toContain('another warehouse');
+    expect(dispositionReason(problem('bin-client-mismatch'))).toContain('another client');
+    expect(dispositionReason(problem('bin-full', {}, 'A-01 is full (100 of 100)'))).toBe('A-01 is full (100 of 100)');
+    expect(dispositionReason(problem('bin-full'))).toBe('That bin has no room for this — pick another.');
+    for (const code of ['bin-retired', 'bin-blocked', 'bin-storage-mismatch', 'bin-segregation-conflict', 'bin-occupancy-conflict', 'bin-overweight', 'bin-volume-exceeded', 'bin-item-oversize']) {
+      expect(dispositionReason(problem(code))).not.toContain(code);
+    }
+    expect(dispositionReason(new ApiProblem('validation-failed', 400, 'toBinId is a system bin', 'x'))).toBe('toBinId is a system bin');
+    expect(dispositionReason(new ApiProblem('role-denied', 403, undefined, 'x'))).toContain("can't decide returns");
+    expect(dispositionReason(new ApiProblem('brand-new', 409, undefined, 'x'))).toBe('Not recorded (brand-new).');
+    expect(dispositionReason(new Error('offline'))).toBe(UNREACHABLE_REASON);
+  });
+
+  test('the line-moved refusals reload the queue; a gate refusal does not', () => {
+    for (const code of ['exceeds-awaiting', 'not-found', 'document-warehouse-mismatch', 'disposition-not-supported']) {
+      expect(dispositionRefusalReloads(new ApiProblem(code, 409, undefined, 'x'))).toBe(true);
+    }
+    expect(dispositionRefusalReloads(new ApiProblem('bin-full', 409, undefined, 'x'))).toBe(false);
+    expect(dispositionRefusalReloads(new Error('offline'))).toBe(false);
+  });
+});

@@ -37,6 +37,10 @@ import {
   fetchApiListGateIns,
   fetchApiUnloadGateIn,
   fetchApiCancelReturn,
+  fetchApiDisposeReturn,
+  fetchApiListAwaitingReturns,
+  fetchApiPortalReturn,
+  fetchApiPortalReturns,
   fetchApiCreateReturn,
   fetchApiGetReturn,
   fetchApiListReturns,
@@ -3118,6 +3122,61 @@ describe('damage photo wrappers (story 2-5a)', () => {
     stubFetch(200, { id: GRN, lines: [] });
     await fetchApiPortalGoodsReceipt(SESSION.tenant.id, GRN);
     expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/inbound/goods-receipts/${GRN}`);
+    clearSession();
+  });
+});
+
+describe('story 4-7a — the disposition wrappers', () => {
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}`;
+  const KEY_47A = '01JABCDEFGHJKMNPQRSTVWXYZ0';
+  const W = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const RMA = '0198f7a2-1b3c-7d4e-8f90-0000000000b2';
+
+  test('the awaiting queue GETs its path; the first page with no option sends no query, filters ride as params', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListAwaitingReturns(SESSION.tenant.id);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/returns/awaiting`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListAwaitingReturns(SESSION.tenant.id, { warehouseId: W, clientId: 'c-1', cursor: 'c2', limit: 100 });
+    const params = new URL(lastRequest!.url).searchParams;
+    expect(params.get('warehouseId')).toBe(W);
+    expect(params.get('clientId')).toBe('c-1');
+    expect(params.get('cursor')).toBe('c2');
+    expect(params.get('limit')).toBe('100');
+    clearSession();
+  });
+
+  test('dispose POSTs the body with the Idempotency-Key; a 409 carries its extension members', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { dispositions: [] });
+    const body = { warehouseId: W, receiptLineId: RMA, outcome: 'scrap' as const, qty: 2, reasonCode: 'damaged' as const };
+    await fetchApiDisposeReturn(SESSION.tenant.id, body, KEY_47A);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/returns/dispositions`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY_47A);
+    expect(await lastRequest!.json()).toEqual(body);
+    stubFetch(409, { type: 'x', title: 'Above threshold', status: 409, code: 'scrap-above-threshold', awaitingQty: 30, threshold: 10 });
+    await expect(fetchApiDisposeReturn(SESSION.tenant.id, body, KEY_47A)).rejects.toMatchObject({
+      code: 'scrap-above-threshold',
+      extensions: { awaitingQty: 30, threshold: 10 },
+    });
+    clearSession();
+  });
+
+  test('the portal returns: no query on the first page; the filter and cursor ride as params; the detail GETs its id', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiPortalReturns(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/returns`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiPortalReturns(SESSION.tenant.id, { cursor: 'c2', dispositionState: 'awaiting' });
+    expect(new URL(lastRequest!.url).searchParams.get('cursor')).toBe('c2');
+    expect(new URL(lastRequest!.url).searchParams.get('dispositionState')).toBe('awaiting');
+    stubFetch(200, { id: RMA, lines: [], dispositions: [] });
+    await fetchApiPortalReturn(SESSION.tenant.id, RMA);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/returns/${RMA}`);
     clearSession();
   });
 });

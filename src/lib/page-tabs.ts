@@ -166,6 +166,21 @@ export const COUNTS_PAGE_TABS = definePageTabs({
 export type CountsTab = (typeof COUNTS_PAGE_TABS)['defaultTab'];
 
 /**
+ * `/returns` (story 4-7a) — the return authorizations (the bare route, as
+ * before) and the received units still awaiting a disposition
+ * (`?tab=awaiting`): restock, quarantine or scrap.
+ */
+export const RETURNS_PAGE_TABS = definePageTabs({
+  route: '/returns',
+  label: 'Returns lists',
+  tabs: [
+    { id: 'authorizations', label: 'Authorizations' },
+    { id: 'awaiting', label: 'Awaiting disposition' },
+  ],
+});
+export type ReturnsTab = (typeof RETURNS_PAGE_TABS)['defaultTab'];
+
+/**
  * `/settings` — grouped tabs (user decision, 2026-10-17): Warehouses
  * (create form, warehouse list, zones & bins), Catalog (import, products,
  * SKUs, segregation matrix), Clients (clients, rate cards), Partners (story

@@ -146,3 +146,9 @@ describe('auditReason', () => {
     expect(auditReason(new Error('fetch failed'))).toBe(UNREACHABLE_REASON);
   });
 });
+
+describe('story 4-7a — the return disposition audit target', () => {
+  test('named in words', () => {
+    expect(AUDIT_TARGET_LABEL.return_disposition).toBe('Return disposition');
+  });
+});

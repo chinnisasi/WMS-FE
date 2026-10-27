@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiListReturns, fetchApiReturnable } from '@/lib/api/client';
-import type { ReturnableOrderDto, ReturnAuthorizationDto } from '@/lib/api/generated';
+import { fetchApiListAwaitingReturns, fetchApiListReturns, fetchApiReturnable } from '@/lib/api/client';
+import type { AwaitingDispositionDto, ReturnableOrderDto, ReturnAuthorizationDto } from '@/lib/api/generated';
 import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
 import { useClientEpoch } from '@/lib/use-client-epoch';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -146,4 +146,97 @@ export function useReturnable(orderId: string): ResourceState<ReturnableOrderDto
 
   const stale = key === null || result === null || result.key !== key || result.revision !== revision;
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+}
+
+export interface AwaitingReturnsPage {
+  readonly items: readonly AwaitingDispositionDto[];
+  readonly nextCursor: string | null;
+}
+
+/** The queue's page size — the route's ceiling. */
+export const AWAITING_PAGE_LIMIT = 100;
+
+/**
+ * Story 4-7a — one keyset page of the warehouse's received return lines still
+ * awaiting a disposition, OLDEST first (the server's `receivedAt` order — the
+ * longest-waiting unit is the first thing the eye lands on). The `useReturns`
+ * loader shape: session identity through the external store, the cursor
+ * stamped with the scope it was asked for (tenant, warehouse, client and the
+ * client epoch), the stale filter at render, `reload()` clearing first, and a
+ * refetch on `RETURNS_CHANGED_EVENT` (a disposition, a receipt). No polling.
+ */
+export function useAwaitingReturns(
+  warehouseId: string | null,
+  /** Story 1-5a — the screen's active-client filter; pending sends nothing. */
+  clientFilter: ClientFilter,
+): ResourceState<AwaitingReturnsPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const pending = clientFilter === CLIENT_PENDING;
+  const clientId: string | null = clientFilter === CLIENT_PENDING ? null : clientFilter;
+  const clientEpoch = useClientEpoch(clientId, pending);
+  const scope =
+    tenantId === null || warehouseId === null || pending ? null : `${tenantId}|${warehouseId}|${clientId ?? '*'}#${clientEpoch}`;
+  const [requested, setRequested] = useState<{ scope: string; cursor: string | null } | null>(null);
+  const activeCursor = requested !== null && requested.scope === scope ? requested.cursor : null;
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{
+    scope: string;
+    requested: string | null;
+    state: ResourceState<AwaitingReturnsPage>;
+  } | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(RETURNS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(RETURNS_CHANGED_EVENT, onChange);
+  }, []);
+
+  useEffect(() => {
+    if (tenantId === null || warehouseId === null || scope === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const page = await fetchApiListAwaitingReturns(tenantId, {
+          warehouseId,
+          limit: AWAITING_PAGE_LIMIT,
+          ...(clientId === null ? {} : { clientId }),
+          ...(activeCursor === null ? {} : { cursor: activeCursor }),
+        });
+        if (!cancelled) {
+          setResult({
+            scope,
+            requested: activeCursor,
+            state: { state: 'ready', data: { items: page.items, nextCursor: page.nextCursor ?? null } },
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setResult({ scope, requested: activeCursor, state: { state: 'failed', reason: readReason(error, 'the returns awaiting a decision') } });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, warehouseId, clientId, scope, activeCursor, revision]);
+
+  const onCursor = useCallback(
+    (cursor: string | null) => {
+      if (scope === null) return;
+      setRequested({ scope, cursor });
+    },
+    [scope],
+  );
+  const reload = useCallback(() => {
+    setResult(null);
+    setRequested(null);
+    setRevision((r) => r + 1);
+  }, []);
+
+  const stale = scope === null || result === null || result.scope !== scope || result.requested !== activeCursor;
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
 }

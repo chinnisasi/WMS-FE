@@ -4,6 +4,8 @@ import { ApiProblem } from '@/lib/api/client';
 import type { CountVarianceEntryResponseDto } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from './outbound-orders';
 import {
+  RETURN_RESTOCK_PROBLEM_WORDS,
+  returnRestockGuidance,
   RECEIPT_PHOTO_GUIDANCE,
   rejectedOpGuidance as photoGuidance,
   rejectedOpSummary as photoSummary,
@@ -943,5 +945,41 @@ describe('a refused handheld damage photo — receipt-photo.stage (story 2-5a)',
       heading: 'Damage photo not uploaded',
       lines: ['Photo — brand-new-code'],
     });
+  });
+});
+
+describe('story 4-7a — a refused handheld restock (return.restock)', () => {
+  const payload = {
+    warehouseId: 'w-1',
+    skuId: 'sku-1',
+    qty: 4,
+    batchCode: 'B1',
+    serialNumbers: null,
+    toBinId: '0198f7a2-1b3c-7d4e-8f90-0000000000c9',
+    occurredAt: '2026-10-22T05:00:00.000Z',
+  };
+
+  test('the guidance names the bin the units were placed in (A4), and only on a return.restock row', () => {
+    expect(returnRestockGuidance('A-01-02')).toBe(
+      'Units were physically placed in A-01-02 — restock them on the web to that bin, or record a move or count to match the floor.',
+    );
+    expect(photoGuidance({ opType: 'return.restock', problemCode: 'exceeds-awaiting', payload }, 'A-01-02')).toEqual([returnRestockGuidance('A-01-02')]);
+    expect(photoGuidance({ opType: 'return.restock', problemCode: 'exceeds-awaiting', payload })).toEqual([
+      'Units were physically placed in the scanned bin — restock them on the web to that bin, or record a move or count to match the floor.',
+    ]);
+    // Another op type is unchanged by the bin argument.
+    expect(photoGuidance({ opType: 'stock.move', problemCode: 'bin-blocked', payload }, 'A-01-02')).toEqual([STOCK_MOVE_GUIDANCE]);
+  });
+
+  test('the summary: quantity and SKU, Returns → the bin, the batch and time, then the refusal in words', () => {
+    const summary = photoSummary({ opType: 'return.restock', problemCode: 'exceeds-awaiting', payload }, () => 'PLAIN-A');
+    expect(summary?.heading).toBe('PLAIN-A × 4 — not restocked');
+    expect(summary?.lines[0]).toContain('Returns → bin …');
+    expect(summary?.lines[0]).toContain('batch B1');
+    expect(summary?.lines[0]).toContain('IST');
+    expect(summary?.lines[0]).toContain(`— ${RETURN_RESTOCK_PROBLEM_WORDS['exceeds-awaiting']}`);
+    const serial = photoSummary({ opType: 'return.restock', problemCode: 'some-new-code', payload: { ...payload, batchCode: null, serialNumbers: ['SN-1', 'SN-2'] } });
+    expect(serial?.lines[0]).toContain('serials SN-1, SN-2');
+    expect(serial?.lines[0]).toContain('— some-new-code');
   });
 });

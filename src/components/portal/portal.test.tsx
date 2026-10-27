@@ -33,6 +33,7 @@ let PortalInbound: ComponentType;
 let PortalInvoices: ComponentType;
 let PortalService: ComponentType;
 let PortalHome: ComponentType;
+let PortalReturns: ComponentType;
 
 beforeAll(async () => {
   const real = await import('next/navigation');
@@ -53,6 +54,7 @@ beforeAll(async () => {
   ({ PortalInvoices } = await import('./portal-invoices'));
   ({ PortalService } = await import('./portal-service'));
   ({ PortalHome } = await import('./portal-home'));
+  ({ PortalReturns } = await import('./portal-returns'));
 });
 
 const TENANT_ID = '0198f7a2-1b3c-7d4e-8f90-112233445566';
@@ -212,7 +214,7 @@ describe('PortalShell', () => {
     expect(requests).toEqual([]);
   });
 
-  test("a portal session renders the client's name, the five portal surfaces and reads portal/me only", async () => {
+  test("a portal session renders the client's name, the six portal surfaces and reads portal/me only", async () => {
     writeSession(PORTAL_SESSION);
     routes = { '/portal/me': [200, PORTAL_ME] };
     view = render(
@@ -223,7 +225,7 @@ describe('PortalShell', () => {
     await settle();
     expect(view.container.querySelector('[data-testid="portal-company"]')!.textContent).toBe('Brand A Apparel');
     const nav = [...view.container.querySelectorAll('nav[aria-label="Portal"] a')].map((a) => a.textContent);
-    expect(nav).toEqual(['Home', 'Stock', 'Orders', 'Inbound', 'Invoices', 'Service']); // UI-1 adds Home
+    expect(nav).toEqual(['Home', 'Stock', 'Orders', 'Inbound', 'Returns', 'Invoices', 'Service']); // UI-1 adds Home, 4-7a Returns
     // On /portal/stock, Stock is current and Home is not (Home matches exact /portal only).
     const current = [...view.container.querySelectorAll('nav[aria-label="Portal"] a[aria-current="page"]')].map((a) => a.textContent);
     expect(current).toEqual(['Stock']);
@@ -1564,5 +1566,93 @@ describe('Inbound — Receipts and their damage photos (story 2-5a)', () => {
     expect(dialog.querySelector('img')).toBeNull();
     expect(dialog.textContent).toContain('Removed by the warehouse');
     expect(view.container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  });
+});
+
+describe('story 4-7a — the portal Returns', () => {
+  const RMA_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000b2';
+  const ROW = {
+    id: RMA_ID,
+    code: 'RMA-0007',
+    status: 'received',
+    orderId: ORDER_ID,
+    orderReference: 'SHOP-#1001',
+    externalReference: 'CH-77',
+    createdAt: '2026-10-16T04:30:00.000Z',
+    lineCount: 1,
+    receivedTotal: 4,
+    restockedTotal: 2,
+    onHoldTotal: 1,
+    failedInspectionTotal: 0,
+    scrappedTotal: 1,
+    openTotal: 0,
+  };
+
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 10; i++) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+  }
+
+  test('the list shows what became of the units; the filter is server-side; a row expands to its lines and decisions — no bin, user or note', async () => {
+    writeSession(PORTAL_SESSION);
+    routes = {
+      '/portal/returns': [200, { items: [ROW], nextCursor: null }],
+      [`/portal/returns/${RMA_ID}`]: [
+        200,
+        {
+          ...ROW,
+          lines: [
+            {
+              skuCode: 'TEE-RED-M',
+              skuName: 'Red tee M',
+              authorizedQty: 4,
+              receivedQty: 4,
+              returnReasonCode: 'wrong-item',
+              restockedQty: 2,
+              onHoldQty: 1,
+              failedInspectionQty: 0,
+              scrappedQty: 1,
+              openQty: 0,
+            },
+          ],
+          dispositions: [
+            { skuCode: 'TEE-RED-M', outcome: 'restock', qty: 2, reasonCode: null, occurredAt: '2026-10-17T05:00:00.000Z' },
+            { skuCode: 'TEE-RED-M', outcome: 'scrap', qty: 1, reasonCode: 'damaged', occurredAt: '2026-10-17T06:00:00.000Z' },
+          ],
+        },
+      ],
+    };
+    view = render(<PortalReturns />);
+    await flush();
+    const text = view.container.textContent ?? '';
+    for (const expected of ['RMA-0007', 'SHOP-#1001', 'Received', '2 restocked · 1 held for inspection · 1 scrapped', '↩ Awaiting a decision']) {
+      expect(text).toContain(expected);
+    }
+    expect(urls.some((url) => url.endsWith('/portal/returns'))).toBe(true);
+    const select = view.container.querySelector('select[aria-label="Show"]') as HTMLSelectElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(select, 'awaiting');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush();
+    expect(urls.some((url) => url.endsWith('/portal/returns?dispositionState=awaiting'))).toBe(true);
+    const toggle = view.container.querySelector('button[aria-label="Show the lines of RMA-0007"]') as HTMLButtonElement;
+    await act(async () => {
+      toggle.click();
+    });
+    await flush();
+    const detail = view.container.querySelector('[data-testid="portal-return-detail"]')!.textContent ?? '';
+    expect(detail).toContain('TEE-RED-M');
+    expect(detail).toContain('4 of 4 received');
+    expect(detail).toContain('returned as Wrong item');
+    expect(detail).toContain('Restocked 2');
+    expect(detail).toContain('Scrapped 1 · Damaged');
+    expect(detail).toContain('IST');
+    // Every request stayed on the portal routes.
+    expect(requests.every((request) => request.includes('/portal/'))).toBe(true);
   });
 });
