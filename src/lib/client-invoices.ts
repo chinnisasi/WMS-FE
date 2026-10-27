@@ -19,6 +19,7 @@ import type {
 import { formatRupees } from '@/lib/invoices';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { basisLabel, chargeLabel, formatIstDate, istDateOf } from '@/lib/rate-cards';
+import { chargeQuantityText, perUnitLabel } from '@/lib/client-charges';
 import { chargeQuantityLabel } from '@/lib/usage';
 
 // ── the module broadcaster ───────────────────────────────────────────────────
@@ -49,11 +50,17 @@ export const CLIENT_INVOICE_GAP_LABEL: Readonly<Record<string, string>> = {
   'client-billing-address-missing': 'Client billing address incomplete',
   'storage-not-complete': 'Storage not fully measured',
   'line-unpriced': 'Unpriced line',
+  // Story 5-5a — an ad-hoc charge of the month awaits approval; the minimum cannot be computed yet.
+  'adhoc-charge-pending': 'Ad-hoc charge awaiting approval',
+  'minimum-charge-pending': 'Minimum charge not computable yet',
   'einvoice-required': 'E-invoice (IRN) required',
 };
 
 export const CLIENT_INVOICE_WARNING_LABEL: Readonly<Record<string, string>> = {
   'supplier-state-differs': 'Warehouse in another state',
+  // Story 5-5a (A21, A26).
+  'minimum-not-applied-multi-gstin': 'Minimum not applied — more than one GSTIN',
+  'minimum-from-charges-only': 'Minimum met from ad-hoc charges only',
 };
 
 /** A code this build does not know still renders — by its code, never dropped. */
@@ -168,20 +175,38 @@ export function monthLabel(periodStart: string): string {
   return `${MONTHS_LONG[month - 1] ?? periodStart.slice(5, 7)} ${year}`;
 }
 
-/** One line's description: the charge, its base unit for storage, and the segment's dates. */
-export function lineDescription(line: Pick<ClientInvoiceLineDto, 'chargeCode' | 'uom' | 'segmentFrom' | 'segmentTo'>): string {
+/** The line fields every printed line view shares (invoice, portal, note) — `description` on the 5-5a kinds only. */
+type PrintedLine = Pick<ClientInvoiceLineDto, 'chargeCode' | 'uom' | 'segmentFrom' | 'segmentTo'> & { readonly description?: string | undefined };
+
+/**
+ * One line's description. A metered line: the charge, its base unit for
+ * storage, and the segment's dates. Story 5-5a: an ad-hoc line prints its
+ * frozen description and the day of the work; the minimum adjustment prints
+ * its frozen description alone (it names the floor and the charges).
+ */
+export function lineDescription(line: PrintedLine): string {
+  if (line.chargeCode === 'adhoc' && line.description !== undefined) return `${line.description} · ${formatIstDate(line.segmentFrom)}`;
+  if (line.chargeCode === 'minimum_adjustment' && line.description !== undefined) return line.description;
   const unit = line.chargeCode === 'storage' && line.uom !== null ? ` (${line.uom})` : '';
   return `${chargeLabel(line.chargeCode)}${unit} · ${formatIstDate(line.segmentFrom)} – ${formatIstDate(line.segmentTo)}`;
 }
 
-/** The quantity: storage in base-unit-days (`1,500 each-days`), the rest as counts. The one label source is `chargeQuantityLabel` (`usage.ts`). */
+/**
+ * The quantity: storage in base-unit-days (`1,500 each-days`), the counts as
+ * counts — the one label source is `chargeQuantityLabel` (`usage.ts`). Story
+ * 5-5a: an ad-hoc line in its unit (`2.500 hours`); the adjustment is `1`.
+ */
 export function lineQuantityLabel(line: Pick<ClientInvoiceLineDto, 'chargeCode' | 'uom' | 'quantity'>): string {
+  if (line.chargeCode === 'adhoc') return chargeQuantityText(line.quantity, line.uom);
+  if (line.chargeCode === 'minimum_adjustment') return line.quantity;
   return chargeQuantityLabel(line.chargeCode, line.quantity, line.uom);
 }
 
-/** The rate: `₹3.30 per 1,000 units per day` (the line's own stored basis, through the rate cards' `basisLabel`), or "Unpriced" on a draft line nothing prices. */
-export function lineRateLabel(line: Pick<ClientInvoiceLineDto, 'basis' | 'unitAmountPaise'>): string {
-  return line.unitAmountPaise === null ? 'Unpriced' : `${formatRupees(line.unitAmountPaise)} ${basisLabel(line.basis)}`;
+/** The rate: `₹3.30 per 1,000 units per day` (the line's own stored basis, through the rate cards' `basisLabel`; an ad-hoc line per its unit), or "Unpriced" on a draft line nothing prices. */
+export function lineRateLabel(line: Pick<ClientInvoiceLineDto, 'basis' | 'unitAmountPaise'> & { readonly chargeCode?: ClientInvoiceLineDto['chargeCode']; readonly uom?: string | null }): string {
+  if (line.unitAmountPaise === null) return 'Unpriced';
+  if (line.chargeCode === 'adhoc') return `${formatRupees(line.unitAmountPaise)} ${perUnitLabel(line.uom ?? null)}`;
+  return `${formatRupees(line.unitAmountPaise)} ${basisLabel(line.basis)}`;
 }
 
 /** The taxable value: the line amount, or "—" when unpriced. */

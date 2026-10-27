@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRef, useState, useSyncExternalStore } from 'react';
 
 import {
@@ -45,6 +46,7 @@ import {
   type ClientInvoiceVerb,
 } from '@/lib/client-invoices';
 import { amountInWords, formatRoundOff, formatRupees, gstRateLabel, invoiceDateLabel, placeOfSupplyLabel, taxRateLabels } from '@/lib/invoices';
+import { pendingChargesHref } from '@/lib/client-charges';
 import { pricedClients } from '@/lib/rate-cards';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -432,6 +434,15 @@ function ClientInvoiceDetail({
             <li key={`${gap.code}-${index}`}>
               <span className="font-medium">Blocking — {clientInvoiceGapLabel(gap.code)}:</span>{' '}
               <span className="text-(--muted-foreground)">{gap.detail}</span>
+              {gap.code === 'adhoc-charge-pending' ? (
+                // Story 5-5a (A28) — the way out: that client's pending charges billed in this month.
+                <>
+                  {' '}
+                  <Link className="text-(--primary) underline underline-offset-2" href={pendingChargesHref(invoice.clientId, invoice.periodStart)}>
+                    Review {gap.count === undefined ? 'the pending charges' : `${gap.count} pending charge${gap.count === 1 ? '' : 's'}`}
+                  </Link>
+                </>
+              ) : null}
             </li>
           ))}
         </ul>

@@ -19,6 +19,7 @@ import type {
   OrderRefDto,
   StorageBreakdownResponse,
 } from '@/lib/api/generated';
+import { CHARGE_CATEGORY_LABEL } from '@/lib/client-charges';
 import { csvField, csvNumber } from '@/lib/csv';
 import { lineDescription, lineQuantityLabel } from '@/lib/client-invoices';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
@@ -104,7 +105,19 @@ export const RECORD_NOUN: Readonly<Record<LineRecordKind, readonly [string, stri
   pick: ['pick', 'picks'],
   order: ['order', 'orders'],
   'storage-day': ['storage day', 'storage days'],
+  // Story 5-5a — an ad-hoc line drills to its one charge.
+  'adhoc-charge': ['ad-hoc charge', 'ad-hoc charges'],
 };
+
+/**
+ * Story 5-5a — whether a line offers the records toggle: a minimum-charge
+ * adjustment is computed from the other lines and has no records (the
+ * server answers 409 `line-not-drillable`), so the web shows its
+ * description instead.
+ */
+export function lineDrillable(line: Pick<ClientInvoiceLineDto, 'chargeCode'>): boolean {
+  return line.chargeCode !== 'minimum_adjustment';
+}
 
 export function recordCountLabel(kind: LineRecordKind, count: number, more: boolean): string {
   const [one, many] = RECORD_NOUN[kind];
@@ -207,7 +220,14 @@ export async function actorPseudonym(tenantId: string, userId: string): Promise<
 
 /** Every actor of the records, pseudonymised once. */
 export async function pseudonymsOf(tenantId: string, records: readonly LineRecord[]): Promise<Map<string, string>> {
-  const ids = [...new Set(records.flatMap((record) => ('actorId' in record ? [record.actorId] : [])))];
+  // Story 5-5a — an ad-hoc charge names its recorder and its decider (the same pseudonym rule).
+  const ids = [
+    ...new Set(
+      records.flatMap((record) =>
+        'actorId' in record ? [record.actorId] : record.kind === 'adhoc-charge' ? [record.recordedBy, ...(record.decidedBy === null ? [] : [record.decidedBy])] : [],
+      ),
+    ),
+  ];
   const pairs = await Promise.all(ids.map(async (id) => [id, await actorPseudonym(tenantId, id)] as const));
   return new Map(pairs);
 }
@@ -288,7 +308,26 @@ const HEADERS: Readonly<Record<LineRecordKind, readonly string[]>> = {
   pick: ['picked_at_ist', 'ist_date', 'warehouse', 'channel_ref', 'order_id', 'sku_code', 'sku_name', 'qty', 'bin', 'actor', 'order'],
   order: ['dispatched_at_ist', 'ist_date', 'warehouse', 'channel_ref', 'order_id', 'lines', 'carrier', 'tracking', 'actor', 'order'],
   'storage-day': ['ist_date', 'warehouse', 'uom', 'on_hand'],
+  // Story 5-5a — the charge's figures; recorded_by / decided_by pseudonymised (decision 2), never an email.
+  'adhoc-charge': [
+    'charge_date',
+    'warehouse',
+    'category',
+    'description',
+    'unit',
+    'qty',
+    'unit_rate_inr',
+    'amount_inr',
+    'reference',
+    'client_authorization',
+    'status',
+    'recorded_by',
+    'decided_by',
+    'charge_id',
+  ],
 };
+
+const rupeeCell = (paise: number): string => csvNumber(`${Math.trunc(paise / 100)}.${String(paise % 100).padStart(2, '0')}`);
 
 /** One CSV row: text through `csvField` (guarded), numbers through `csvNumber` (plain), the actor as its pseudonym. */
 function recordRow(record: LineRecord, pseudonyms: ReadonlyMap<string, string>): string {
@@ -338,6 +377,23 @@ function recordRow(record: LineRecord, pseudonyms: ReadonlyMap<string, string>):
       ].join(',');
     case 'storage-day':
       return [csvField(record.date), csvField(record.warehouseCode), csvField(record.uom), csvNumber(record.onHand)].join(',');
+    case 'adhoc-charge':
+      return [
+        csvField(record.chargeDate),
+        csvField(record.warehouseCode),
+        csvField(CHARGE_CATEGORY_LABEL[record.category] ?? record.category),
+        csvField(record.description),
+        csvField(record.unit),
+        csvNumber(record.quantity),
+        rupeeCell(record.unitRatePaise),
+        rupeeCell(record.amountPaise),
+        csvField(record.reference ?? ''),
+        csvField(record.clientAuthorizationRef ?? ''),
+        csvField(record.status),
+        actor(record.recordedBy),
+        record.decidedBy === null ? csvField('') : actor(record.decidedBy),
+        csvField(record.chargeId),
+      ].join(',');
   }
 }
 

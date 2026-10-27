@@ -215,6 +215,14 @@ import {
   clientInvoiceNotesControllerIssue,
   clientInvoiceNotesControllerNotesOfInvoice,
   clientInvoiceNotesControllerPutPolicy,
+  clientChargesControllerApprove,
+  clientChargesControllerCancel,
+  clientChargesControllerGet,
+  clientChargesControllerGetPolicy,
+  clientChargesControllerList,
+  clientChargesControllerPutPolicy,
+  clientChargesControllerRecord,
+  clientChargesControllerReject,
   clientInvoiceNotesControllerRegister,
   clientInvoiceNotesControllerVoid,
   clientInvoicesControllerDispute,
@@ -309,6 +317,11 @@ import type {
   IssueNoteResponse,
   NoteDto,
   NotePolicyResponse,
+  ChargePolicyResponse,
+  ClientChargeDto,
+  ClientChargeListResponse,
+  RecordClientChargeDto,
+  RecordClientChargeResponse,
   NoteRegisterResponse,
   IssueClientInvoiceResponse,
   PrepareClientInvoicesResponse,
@@ -1862,6 +1875,79 @@ export async function fetchApiPutNotePolicy(tenantId: string, requireSecondAppro
   const { data, error } = await clientInvoiceNotesControllerPutPolicy({
     path: { tenantId },
     body: { requireSecondApprover },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Ad-hoc charges (story 5-5a) — one billable event for one client in  */
+/* one warehouse on one IST day. Reads are member-open; record (and    */
+/* cancelling one's own pending charge) needs `billing.charge`; approve,*/
+/* reject, cancel-approved and the policy PUT need `billing.invoice`.  */
+/* Every write takes an Idempotency-Key.                               */
+/* ------------------------------------------------------------------ */
+
+export interface ClientChargesQuery {
+  readonly clientId?: string;
+  readonly warehouseId?: string;
+  readonly status?: ClientChargeDto['status'];
+  /** The billing month, `YYYY-MM`. */
+  readonly month?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
+/** The charges, newest first (keyset), each with the invoice that bills it. */
+export async function fetchApiListClientCharges(tenantId: string, query: ClientChargesQuery, options?: { signal?: AbortSignal }): Promise<ClientChargeListResponse> {
+  const { data, error } = await clientChargesControllerList({ path: { tenantId }, query: { ...query }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiGetClientCharge(tenantId: string, chargeId: string, options?: { signal?: AbortSignal }): Promise<ClientChargeDto> {
+  const { data, error } = await clientChargesControllerGet({ path: { tenantId, chargeId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data.charge;
+}
+
+/** Record a charge: 201 `{charge, warnings}` — approved at record or pending. */
+export async function fetchApiRecordClientCharge(tenantId: string, body: RecordClientChargeDto, idempotencyKey: string): Promise<RecordClientChargeResponse> {
+  const { data, error } = await clientChargesControllerRecord({ path: { tenantId }, body, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiApproveClientCharge(tenantId: string, chargeId: string, idempotencyKey: string): Promise<ClientChargeDto> {
+  const { data, error } = await clientChargesControllerApprove({ path: { tenantId, chargeId }, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data.charge;
+}
+
+export async function fetchApiRejectClientCharge(tenantId: string, chargeId: string, note: string, idempotencyKey: string): Promise<ClientChargeDto> {
+  const { data, error } = await clientChargesControllerReject({ path: { tenantId, chargeId }, body: { note }, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data.charge;
+}
+
+export async function fetchApiCancelClientCharge(tenantId: string, chargeId: string, note: string, idempotencyKey: string): Promise<ClientChargeDto> {
+  const { data, error } = await clientChargesControllerCancel({ path: { tenantId, chargeId }, body: { note }, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data.charge;
+}
+
+/** The self-approval limit (no setting = ₹10,000, `isDefault`). */
+export async function fetchApiClientChargePolicy(tenantId: string, options?: { signal?: AbortSignal }): Promise<ChargePolicyResponse> {
+  const { data, error } = await clientChargesControllerGetPolicy({ path: { tenantId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+export async function fetchApiPutClientChargePolicy(tenantId: string, selfApproveLimitPaise: number, idempotencyKey: string): Promise<ChargePolicyResponse> {
+  const { data, error } = await clientChargesControllerPutPolicy({
+    path: { tenantId },
+    body: { selfApproveLimitPaise },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) throw unwrapError(error, 400);

@@ -64,7 +64,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 2-5a adds `receipt.attach` (owner + ops_manager + operator — a web damage photo) and
     // `receipt.photo-remove` (owner + ops_manager — evidence is removed by a manager) — 49 became 51.
     // Story 5-6a: + billing.configure (owner-only).
-    expect(ROLE_CAPABILITIES.owner.length).toBe(52);
+    // Story 5-5a: + billing.charge (owner + ops_manager + accountant — recording ad-hoc charges) — 52 became 53.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(53);
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'receipt.attach')),
     ).toEqual(['owner', 'ops_manager', 'operator']);
@@ -255,6 +256,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         // Story 2-5a — damage photos: add, and remove/cancel (derived).
         'receipt.attach',
         'receipt.photo-remove',
+        // Story 5-5a — recording ad-hoc charges (derived; approving them stays billing.invoice).
+        'billing.charge',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -314,7 +317,15 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // configuration stays owner-only. Story 21-3 — and the client rate cards
     // (decision 2: finance work; reverses 8-1's "the accountant does not set
     // prices" for the client price list only — `invoice.generate` stays off).
-    expect(ROLE_CAPABILITIES.accountant).toEqual(['eway.manage', 'rates.manage', 'billing.invoice']);
+    // Story 5-5a — and recording ad-hoc charges (`billing.charge`).
+    expect(ROLE_CAPABILITIES.accountant).toEqual(['eway.manage', 'rates.manage', 'billing.invoice', 'billing.charge']);
+    // Story 5-5a — the floor knows about the extra work, the office bills it:
+    // owner, ops manager and accountant record a charge; never the operator.
+    expect((['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'billing.charge'))).toEqual([
+      'owner',
+      'ops_manager',
+      'accountant',
+    ]);
     expect(roleHasCapability('operator', 'rates.manage')).toBe(false);
     expect(roleHasCapability('accountant', 'eway.configure')).toBe(false);
     expect(roleHasCapability('ops_manager', 'eway.configure')).toBe(false);

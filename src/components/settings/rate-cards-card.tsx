@@ -15,6 +15,9 @@ import {
   CHARGE_BASIS,
   CHARGE_CODES,
   EMPTY_RATE_DRAFT,
+  MINIMUM_COUNTS,
+  MINIMUM_COUNTS_LABEL,
+  MINIMUM_SCOPE_COPY,
   NOT_BILLED_BANNER,
   activatedOutcome,
   activationMinDate,
@@ -26,6 +29,7 @@ import {
   chargeLabel,
   draftFieldsOf,
   formatIstDate,
+  minimumCell,
   nextChangeSummary,
   notifyRateCardsChanged,
   parseRateDraft,
@@ -33,7 +37,8 @@ import {
   rateCardReason,
   rateCardState,
   showNotBilledBanner,
-  type ChargeCode,
+  type MeteredChargeCode,
+  type MinimumCounts,
   type RateDraftFields,
 } from '@/lib/rate-cards';
 import { roleHasCapability } from '@/lib/users';
@@ -119,7 +124,7 @@ function RateCardsCardSessioned() {
       <div className="flex flex-col gap-0.5">
         <h2 className="font-medium">Rate cards</h2>
         <div className="text-(--muted-foreground)">
-          What each client is charged for storage and handling, and from when. A card is frozen once activated —
+          What each client is charged for storage and handling — and any minimum per month — and from when. A card is frozen once activated —
           a rate change is a new card from a later date. Amounts exclude GST.
         </div>
       </div>
@@ -197,6 +202,8 @@ function ClientRateCards({ client, canManage }: { client: ClientDto; canManage: 
         render: (card) => chargeCell(card, code),
       }),
     ),
+    // Story 5-5a — the minimum monthly charge (per invoice — one per GSTIN).
+    { key: 'minimum', header: 'Minimum / month', numeric: true, render: (card) => minimumCell(card) },
     ...(canManage
       ? [
           {
@@ -368,15 +375,20 @@ function DraftEditor({
     }
   }
 
-  const edit = (code: ChargeCode, value: string) => {
+  const edit = (code: MeteredChargeCode | 'minimum_monthly', value: string) => {
     keyRef.current = null;
     setFields((current) => ({ ...current, [code]: value }));
   };
+  const editCounts = (value: MinimumCounts) => {
+    keyRef.current = null;
+    setFields((current) => ({ ...current, minimumCounts: value }));
+  };
+  const hintId = `minimum-hint-${card?.id ?? 'new'}`;
 
   return (
     <form onSubmit={submit} aria-label={card === null ? 'New rate card' : 'Edit rate card'} className="flex flex-col gap-2">
       <div className="text-(--muted-foreground)">
-        Rupees per unit, excluding GST. Leave a charge blank if the client is not billed for it; ₹0 bills it at zero.
+        Rupees per unit, excluding GST. Leave a charge blank if the client is not billed for it; ₹0 bills it at zero. Each rate is at most ₹1 lakh; a minimum at most ₹1 crore.
       </div>
       <div className="flex flex-wrap gap-2">
         {CHARGE_CODES.map((code) => (
@@ -395,6 +407,44 @@ function DraftEditor({
           </label>
         ))}
       </div>
+      <fieldset className="flex flex-col gap-2 rounded-md border border-(--border) p-2">
+        <legend className="px-1 text-sm font-medium">Minimum monthly charge</legend>
+        <div id={hintId} className="text-xs text-(--muted-foreground)">
+          {MINIMUM_SCOPE_COPY}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <label className="flex min-w-40 flex-1 flex-col gap-1">
+            <span className={labelClass}>
+              Minimum <span className="font-normal text-(--muted-foreground)">₹ per month</span>
+            </span>
+            <input
+              className={inputClass}
+              inputMode="decimal"
+              value={fields.minimum_monthly}
+              aria-label="Minimum monthly charge ₹ per month"
+              aria-describedby={hintId}
+              onChange={(event) => edit('minimum_monthly', event.target.value)}
+              placeholder="No minimum"
+            />
+          </label>
+          <label className="flex min-w-40 flex-1 flex-col gap-1">
+            <span className={labelClass}>Counts toward the minimum</span>
+            <select
+              className={inputClass}
+              value={fields.minimumCounts}
+              aria-label="Counts toward the minimum"
+              disabled={fields.minimum_monthly.trim() === ''}
+              onChange={(event) => editCounts(event.target.value as MinimumCounts)}
+            >
+              {MINIMUM_COUNTS.map((counts) => (
+                <option key={counts} value={counts}>
+                  {MINIMUM_COUNTS_LABEL[counts]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </fieldset>
       <div className="flex gap-2">
         <button type="submit" disabled={busy} className={primaryButtonClass}>
           {busy ? 'Saving…' : card === null ? 'Create draft' : 'Save draft'}

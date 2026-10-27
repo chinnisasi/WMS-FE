@@ -3,10 +3,12 @@
 import { useSyncExternalStore } from 'react';
 
 import { readSession, subscribeSession } from '@/lib/auth';
+import { NO_CHARGE_FILTERS, type ChargeFilters } from '@/lib/client-charges';
 import { drillFor, drillKey, type ParsedDrill } from '@/lib/drill';
 import { COMPLIANCE_PAGE_TABS, type ComplianceTab } from '@/lib/page-tabs';
 import { useActiveClient } from '@/lib/use-active-client';
 
+import { ClientCharges } from '@/components/compliance/client-charges';
 import { ClientInvoices } from '@/components/compliance/client-invoices';
 import { NotesRegister } from '@/components/compliance/client-invoice-notes';
 import { ColdChainTrace } from '@/components/compliance/cold-chain-trace';
@@ -19,7 +21,7 @@ import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page
 
 /**
  * The Compliance page's sections behind a tab bar (page-tabs, 2026-10-17):
- * Invoices · Client invoices · E-way bills · HSN summary · Cold-chain trace ·
+ * Invoices · Client invoices · Credit and debit notes · Ad-hoc charges (5-5a) · E-way bills · HSN summary · Cold-chain trace ·
  * Licences (1-6c),
  * one mounted at a time, `?tab=` linkable. An invoice (`list=invoices`) or
  * e-way (`list=eway`) drill opens on its own list's tab, under its banner;
@@ -32,9 +34,12 @@ import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page
 export function ComplianceTabs({
   drill = null,
   initialTab = null,
+  chargeFilters = NO_CHARGE_FILTERS,
 }: {
   drill?: ParsedDrill;
   initialTab?: ComplianceTab | null;
+  /** Story 5-5a — the Ad-hoc charges tab's filters from the URL (`?clientId&warehouseId&status&month`). */
+  chargeFilters?: ChargeFilters;
 }) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
@@ -42,10 +47,10 @@ export function ComplianceTabs({
     () => null as boolean | null,
   );
   if (sessioned === null) return null;
-  return <ComplianceTabsKnown drill={drill} initialTab={initialTab} />;
+  return <ComplianceTabsKnown drill={drill} initialTab={initialTab} chargeFilters={chargeFilters} />;
 }
 
-function ComplianceTabsKnown({ drill, initialTab }: { drill: ParsedDrill; initialTab: ComplianceTab | null }) {
+function ComplianceTabsKnown({ drill, initialTab, chargeFilters }: { drill: ParsedDrill; initialTab: ComplianceTab | null; chargeFilters: ChargeFilters }) {
   const drilled = drillFor(drill, 'invoices') !== null || drillFor(drill, 'eway') !== null;
   const [tab, selectTab] = usePageTab(COMPLIANCE_PAGE_TABS, COMPLIANCE_PAGE_TABS.initial(drill, initialTab), drilled);
   // Both drilled sections stay keyed on the drill (Story 9-1b), so Clear remounts them.
@@ -66,6 +71,8 @@ function ComplianceTabsKnown({ drill, initialTab }: { drill: ParsedDrill; initia
             <NotesRegister />
           </>
         )}
+        {/* Story 5-5a — ad-hoc charges (filtered by its own client picker, from the URL). */}
+        {tab === 'client-charges' && <ClientCharges key={JSON.stringify(chargeFilters)} initial={chargeFilters} />}
         {tab === 'eway' && <EwayBills key={`eway-${key}`} drill={drill} clearHref={COMPLIANCE_PAGE_TABS.href('eway')} />}
         {tab === 'hsn' && (
           <>

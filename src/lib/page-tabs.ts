@@ -123,6 +123,8 @@ export const COMPLIANCE_PAGE_TABS = definePageTabs({
     { id: 'client-invoices', label: 'Client invoices' },
     // Story 5-6a — the credit and debit notes register (GSTR-1 CDNR fields, CSV).
     { id: 'notes', label: 'Credit and debit notes' },
+    // Story 5-5a — ad-hoc charges (recorded, approved, billed as their own invoice lines).
+    { id: 'client-charges', label: 'Ad-hoc charges' },
     { id: 'eway', label: 'E-way bills' },
     { id: 'hsn', label: 'HSN summary' },
     { id: 'cold-chain', label: 'Cold-chain trace' },

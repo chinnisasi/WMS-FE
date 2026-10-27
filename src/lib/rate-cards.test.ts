@@ -7,19 +7,24 @@ import {
   CHARGE_BASIS,
   CHARGE_CODES,
   EMPTY_RATE_DRAFT,
+  MAX_MINIMUM_AMOUNT_PAISE,
   MAX_RATE_AMOUNT_PAISE,
+  NO_MINIMUM,
   NOT_BILLED,
   NOT_BILLED_BANNER,
   activatedOutcome,
   activationMinDate,
   basisLabel,
   canCancelRateCard,
+  chargeLabel,
   cancelConsequence,
   cancelledOutcome,
   chargeCell,
   draftFieldsOf,
   formatIstDate,
   istDateOf,
+  minimumCell,
+  minimumGstins,
   nextChangeSummary,
   paiseToRupeeText,
   parseRateDraft,
@@ -201,7 +206,8 @@ describe('the draft editor', () => {
     expect(paiseToRupeeText(5)).toBe('0.05');
     expect(paiseToRupeeText(10_000_000)).toBe('100000.00');
     const fields = draftFieldsOf(card({ lines: [storage(330), outbound(0)] }));
-    expect(fields).toEqual({ storage: '3.30', inbound_handling: '', pick: '', outbound_handling: '0.00' });
+    // Story 5-5a — the fields gained the minimum (blank: no minimum) and its counts rule (default `all`).
+    expect(fields).toEqual({ storage: '3.30', inbound_handling: '', pick: '', outbound_handling: '0.00', minimum_monthly: '', minimumCounts: 'all' });
     expect(parseRateDraft(fields).lines).toEqual([storage(330), outbound(0)]);
   });
 });
@@ -234,5 +240,62 @@ describe('outcomes and refusals', () => {
     );
     expect(rateCardReason(problem('conflict', 409), 'activated')).toBe("The client's cards changed meanwhile — reload and try again.");
     expect(rateCardReason(new TypeError('Failed to fetch'), 'drafted')).toBe(UNREACHABLE_REASON);
+  });
+});
+
+describe('story 5-5a — the minimum monthly charge on a card', () => {
+  const minimum = (amountPaise: number, minimumCounts: 'all' | 'metered' = 'all') => ({
+    chargeCode: 'minimum_monthly' as const,
+    basis: 'per_month' as const,
+    amountPaise,
+    minimumCounts,
+  });
+
+  test('every code and basis has words; the metered list stays the four', () => {
+    expect(CHARGE_CODES).not.toContain('minimum_monthly');
+    expect(chargeLabel('minimum_monthly')).toBe('Minimum monthly charge');
+    expect(chargeLabel('adhoc')).toBe('Ad-hoc charge');
+    expect(chargeLabel('minimum_adjustment')).toBe('Minimum charge adjustment');
+    expect(basisLabel('per_month')).toBe('per month');
+    expect(basisLabel('per_unit')).toBe('per unit');
+    expect(basisLabel('per_invoice')).toBe('per invoice');
+  });
+
+  test('A12 — the minimum has its own bound: ₹2 lakh is accepted (a metered rate is refused), ₹1 crore is the cap, ₹0 is refused', () => {
+    expect(parseRateDraft({ ...EMPTY_RATE_DRAFT, minimum_monthly: '200000' }).lines).toEqual([minimum(20_000_000)]);
+    expect(parseRateDraft({ ...EMPTY_RATE_DRAFT, storage: '200000' }).problem).toBe('Storage: at most ₹1,00,000.00 per 1,000 units per day.');
+    expect(parseRateDraft({ ...EMPTY_RATE_DRAFT, minimum_monthly: '10000000' }).lines).toEqual([minimum(MAX_MINIMUM_AMOUNT_PAISE)]);
+    expect(parseRateDraft({ ...EMPTY_RATE_DRAFT, minimum_monthly: '10000000.01' }).problem).toBe('Minimum monthly charge: at most ₹1,00,00,000.00 per month.');
+    expect(parseRateDraft({ ...EMPTY_RATE_DRAFT, minimum_monthly: '0' }).problem).toMatch(/^Minimum monthly charge: at least ₹0.01/);
+    expect(parseRateDraft({ ...EMPTY_RATE_DRAFT, minimum_monthly: 'abc' }).problem).toMatch(/^Minimum monthly charge: /);
+  });
+
+  test('the minimum line carries its counts rule, after the metered lines, and round-trips through the editor', () => {
+    const parsed = parseRateDraft({ ...EMPTY_RATE_DRAFT, pick: '3', minimum_monthly: '50000', minimumCounts: 'metered' });
+    expect(parsed.lines).toEqual([pick(300), minimum(5_000_000, 'metered')]);
+    const fields = draftFieldsOf(card({ lines: parsed.lines! }));
+    expect(fields).toEqual({ ...EMPTY_RATE_DRAFT, pick: '3.00', minimum_monthly: '50000.00', minimumCounts: 'metered' });
+    // A card with no minimum line reads back the default rule; a blank minimum sends no line whatever the rule.
+    expect(draftFieldsOf(card({ lines: [pick(300)] })).minimumCounts).toBe('all');
+    expect(parseRateDraft({ ...EMPTY_RATE_DRAFT, minimumCounts: 'metered' }).lines).toEqual([]);
+  });
+
+  test('the minimum column and the next-change summary name the minimum', () => {
+    expect(minimumCell(card({ lines: [pick(300)] }))).toBe(NO_MINIMUM);
+    expect(minimumCell(card({ lines: [minimum(5_000_000)] }))).toBe('₹50,000.00');
+    expect(minimumCell(card({ lines: [minimum(5_000_000, 'metered')] }))).toBe('₹50,000.00 · metered only');
+    expect(chargeCell(card({ lines: [] }), 'minimum_monthly')).toBe(NO_MINIMUM);
+    const inForce = card({ id: 'a', effectiveFrom: '2026-10-01', lines: [pick(300)] });
+    const next = card({ id: 'b', effectiveFrom: '2026-11-01', lines: [pick(300), minimum(5_000_000)] });
+    expect(nextChangeSummary([inForce, next], inForce, AS_OF)?.changes).toEqual(['Minimum monthly charge No minimum → ₹50,000.00 from 1 Nov 2026']);
+  });
+
+  test('A21 — the multi-GSTIN refusal names the GSTINs from its extension', () => {
+    const refusal = new ApiProblem('minimum-needs-single-gstin', 409, 'detail', 'Title', { gstins: ['29ABCDE1234F1Z5', null] });
+    expect(minimumGstins(refusal)).toEqual(['29ABCDE1234F1Z5', 'no GSTIN']);
+    expect(rateCardReason(refusal, 'activated')).toBe(
+      'A minimum monthly charge applies to each monthly invoice (one per GSTIN), and this client is billed under 2 GSTINs (29ABCDE1234F1Z5, no GSTIN) — it would be charged once per GSTIN. Remove the minimum from the draft, or bill the client from one GSTIN.',
+    );
+    expect(minimumGstins(new ApiProblem('conflict', 409, undefined, 'Title'))).toEqual([]);
   });
 });

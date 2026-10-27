@@ -541,6 +541,8 @@ const BLOCKER_WORDS: Readonly<Record<string, (n: number) => string>> = {
   'open-counts': (n) => plural(n, 'open count', 'open counts'),
   'open-review-items': (n) => `${plural(n, 'item', 'items')} in Conflicts & Reviews`,
   'unsettled-invoices': (n) => plural(n, 'unsettled client invoice', 'unsettled client invoices'),
+  // Story 5-5a — pending charges, and approved ones no issued invoice bills yet (Compliance → Ad-hoc charges).
+  'unbilled-charges': (n) => `${plural(n, 'ad-hoc charge', 'ad-hoc charges')} not yet billed`,
   // Decision 9 — the owner unmaps them first (Channels → mappings).
   'channel-mappings': (n) => `${plural(n, 'channel mapping', 'channel mappings')} of its SKUs`,
 };

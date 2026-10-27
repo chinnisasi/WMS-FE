@@ -37,6 +37,9 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   catalog_import: 'Catalog import',
   channel_connection: 'Channel connection',
   client: 'Client',
+  // Story 5-5a — an ad-hoc charge (recorded, approved, rejected, cancelled) and the self-approval limit.
+  client_charge: 'Ad-hoc charge',
+  client_charge_policy: 'Ad-hoc charge approval limit',
   client_invoice: 'Client invoice',
   client_invoice_note: 'Credit/debit note',
   client_invoice_note_policy: 'Credit-note approval setting',

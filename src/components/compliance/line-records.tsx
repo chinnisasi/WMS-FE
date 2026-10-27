@@ -16,6 +16,7 @@ import {
   exportCapNotice,
   exportProgressLabel,
   formatIstInstant,
+  lineDrillable,
   lineRecordsFilename,
   lineRecordsReason,
   needsInvoiceReload,
@@ -28,6 +29,9 @@ import {
   summaryLabel,
   type LineRecord,
 } from '@/lib/invoice-records';
+import { CHARGE_CATEGORY_LABEL, CHARGE_STATUS_LABEL, chargeQuantityText, perUnitLabel } from '@/lib/client-charges';
+import { formatRupees } from '@/lib/invoices';
+import { chargeLabel } from '@/lib/rate-cards';
 import { groupDecimal } from '@/lib/usage';
 import { useLineRecords } from '@/lib/use-invoice-records';
 
@@ -72,22 +76,30 @@ export function LineRecordsPanel({
           return (
             <li key={line.id} className="flex flex-col gap-2">
               <div>
-                <button
-                  type="button"
-                  className={rowButtonClass}
-                  aria-expanded={expanded}
-                  aria-controls={panelId}
-                  onClick={() => setOpenLine(expanded ? null : line.id)}
-                >
-                  {expanded ? 'Hide records' : 'Show records'} — {lineDescription(line)} · {lineQuantityLabel(line)}
-                </button>
+                {lineDrillable(line) ? (
+                  <button
+                    type="button"
+                    className={rowButtonClass}
+                    aria-expanded={expanded}
+                    aria-controls={panelId}
+                    onClick={() => setOpenLine(expanded ? null : line.id)}
+                  >
+                    {expanded ? 'Hide records' : 'Show records'} — {lineDescription(line)} · {lineQuantityLabel(line)}
+                  </button>
+                ) : (
+                  // Story 5-5a — the minimum adjustment is computed from the other lines: no records, its description says how.
+                  <span className="text-xs" data-not-drillable>
+                    <span className="font-medium">{chargeLabel(line.chargeCode)}</span> — {lineDescription(line)}
+                    <span className="text-(--muted-foreground)"> · computed from the lines above, so it has no records of its own.</span>
+                  </span>
+                )}
                 {onCreditLine !== undefined ? (
                   <button type="button" className={`${rowButtonClass} ml-2`} onClick={() => onCreditLine(line.id)}>
                     Credit this line
                   </button>
                 ) : null}
               </div>
-              {expanded ? <LineRecords key={line.id} id={panelId} invoice={invoice} line={line} /> : null}
+              {expanded && lineDrillable(line) ? <LineRecords key={line.id} id={panelId} invoice={invoice} line={line} /> : null}
             </li>
           );
         })}
@@ -310,6 +322,20 @@ function RecordsTable({
                 <th className={th}>By</th>
               </>
             ) : null}
+            {kind === 'adhoc-charge' ? (
+              <>
+                <th className={th}>Date of work</th>
+                <th className={th}>Warehouse</th>
+                <th className={th}>Charge</th>
+                <th className={thNum}>Quantity</th>
+                <th className={thNum}>Rate</th>
+                <th className={thNum}>Amount</th>
+                <th className={th}>Client authorisation</th>
+                <th className={th}>Status</th>
+                <th className={th}>Recorded by</th>
+                <th className={th}>Approved by</th>
+              </>
+            ) : null}
             {kind === 'storage-day' ? (
               <>
                 <th className={th}>Day (IST)</th>
@@ -367,6 +393,26 @@ function RecordsTable({
                     <td className={td}>{record.carrierName ?? '—'}</td>
                     <td className={`${td} font-mono`}>{record.trackingNumber ?? '—'}</td>
                     <td className={td}>{actorLabel(record)}</td>
+                  </tr>
+                );
+              case 'adhoc-charge':
+                return (
+                  <tr key={record.id} className="border-b border-(--border)">
+                    <td className={td}>{record.chargeDate}</td>
+                    <td className={td}>{record.warehouseCode}</td>
+                    <td className={td}>
+                      <span className="font-medium">{CHARGE_CATEGORY_LABEL[record.category] ?? record.category}</span> — {record.description}
+                      {record.reference === null ? null : <span className="text-(--muted-foreground)"> · Ref {record.reference}</span>}
+                    </td>
+                    <td className={tdNum}>{chargeQuantityText(record.quantity, record.unit)}</td>
+                    <td className={tdNum}>
+                      {formatRupees(record.unitRatePaise)} {perUnitLabel(record.unit)}
+                    </td>
+                    <td className={tdNum}>{formatRupees(record.amountPaise)}</td>
+                    <td className={td}>{record.clientAuthorizationRef ?? '—'}</td>
+                    <td className={td}>{CHARGE_STATUS_LABEL[record.status] ?? record.status}</td>
+                    <td className={td}>{record.recordedByEmail ?? `Unknown user (${record.recordedBy.slice(0, 8)}…)`}</td>
+                    <td className={td}>{record.decidedBy === null ? '—' : (record.decidedByEmail ?? `Unknown user (${record.decidedBy.slice(0, 8)}…)`)}</td>
                   </tr>
                 );
               case 'storage-day':

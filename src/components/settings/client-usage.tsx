@@ -5,6 +5,7 @@ import { useState } from 'react';
 import type { ClientDto, RateCardDto, UsageLineDto, UsageSegmentDto } from '@/lib/api/generated';
 import {
   ESTIMATE_NOTICE,
+  METERED_ONLY_NOTICE,
   billedTotalLabel,
   defaultUsageMonth,
   parseCustomRange,
@@ -95,6 +96,7 @@ export function ClientUsage({ client, cards, asOf }: { client: ClientDto; cards:
       <div className="flex flex-col gap-0.5">
         <h3 className="font-medium">Usage</h3>
         <div className="text-(--muted-foreground)">{ESTIMATE_NOTICE}</div>
+        <div className="text-xs text-(--muted-foreground)">{METERED_ONLY_NOTICE}</div>
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex min-w-56 flex-col gap-1">

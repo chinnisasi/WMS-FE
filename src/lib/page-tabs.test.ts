@@ -109,6 +109,8 @@ describe('page-tabs — the pages', () => {
       ['client-invoices', 'Client invoices'],
       // Story 5-6a — the credit and debit notes register.
       ['notes', 'Credit and debit notes'],
+      // Story 5-5a — the ad-hoc charges (recorded, approved, billed as their own invoice lines).
+      ['client-charges', 'Ad-hoc charges'],
       ['eway', 'E-way bills'],
       ['hsn', 'HSN summary'],
       ['cold-chain', 'Cold-chain trace'],
