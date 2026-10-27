@@ -8,7 +8,7 @@ import { render, type Rendered } from '../../lib/test/render';
 import { PortalInvoiceNotes } from '../portal/portal-invoice-notes';
 import { NotePolicyCard } from '../settings/note-policy-card';
 import { ClientInvoices } from './client-invoices';
-import { PrintableClientInvoiceNote } from './client-invoice-notes';
+import { NotesRegister, PrintableClientInvoiceNote } from './client-invoice-notes';
 
 /**
  * Story 5-6a — the credit / debit note surface, the claims a `src/lib` test
@@ -156,6 +156,27 @@ function note(status: 'draft' | 'issued' | 'void', over: Record<string, unknown>
   };
 }
 
+const REGISTER_ROW = (noteId: string, noteNo: string) => ({
+  noteId,
+  noteNo,
+  noteDate: '2026-10-12',
+  kind: 'credit',
+  status: 'issued',
+  voided: false,
+  recipientGstin: '29AAACA1111A1Z1',
+  recipientName: 'Acme Foods Private Limited',
+  placeOfSupply: '29',
+  supplyType: 'intra',
+  invoiceNo: '29/S2627/000001',
+  invoiceDate: '2026-10-05',
+  gstBps: 1800,
+  taxablePaise: 20_000,
+  igstPaise: 0,
+  cgstPaise: 1800,
+  sgstPaise: 1800,
+  noteValuePaise: 23_600,
+});
+
 const entryOf = (full: Record<string, unknown>): Record<string, unknown> => {
   const entry = { ...full };
   for (const key of ['invoiceNo', 'invoiceIssuedAt', 'creditDeadline', 'party', 'lines']) delete entry[key];
@@ -167,6 +188,7 @@ interface Recorded {
   readonly pathname: string;
   readonly body: unknown;
   readonly key: string | null;
+  readonly search: URLSearchParams;
 }
 let requests: Recorded[] = [];
 let invoiceStatus = 'issued';
@@ -188,7 +210,7 @@ function stubRouter(): void {
     } catch {
       body = null;
     }
-    requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key') });
+    requests.push({ method, pathname, body, key: request.headers.get('Idempotency-Key'), search: new URL(request.url).searchParams });
     if (method === 'GET' && pathname.endsWith('/clients')) return json(200, { items: [ACME] });
     if (method === 'GET' && pathname.endsWith('/client-invoices')) {
       const entry: Record<string, unknown> = { ...invoice(invoiceStatus), gapCount: 0 };
@@ -212,6 +234,14 @@ function stubRouter(): void {
     if (method === 'POST' && pathname.endsWith('/client-invoice-notes/n-1/void')) {
       notes = [note('void')];
       return json(200, { note: notes[0] });
+    }
+    if (method === 'DELETE' && pathname.endsWith('/client-invoice-notes/n-1')) {
+      notes = [];
+      return new Response(null, { status: 204 });
+    }
+    if (method === 'GET' && pathname.endsWith('/client-invoice-notes')) {
+      const cursor = new URL(request.url).searchParams.get('cursor');
+      return json(200, cursor === null ? { rows: [REGISTER_ROW('n-a', '29/C2627/000001')], nextCursor: 'c-2' } : { rows: [REGISTER_ROW('n-b', '29/C2627/000002')], nextCursor: null });
     }
     if (method === 'GET' && pathname.endsWith('/billing/note-policy')) return json(200, { requireSecondApprover: policy });
     if (method === 'PUT' && pathname.endsWith('/billing/note-policy')) {
@@ -424,14 +454,15 @@ describe('credit and debit notes', () => {
 
   test('Issue mints a NEW key per click', async () => {
     writeSession(session('accountant'));
-    notes = [note('draft')];
+    // Drafted by someone else (u-2): this accountant may issue it under the default policy.
+    notes = [note('draft', { createdBy: 'u-2' })];
     // The first issue is refused (another credit since): the second click must not reuse its key.
     let calls = 0;
     const real = globalThis.fetch;
     stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input.toString(), init);
       if (request.method === 'POST' && request.url.endsWith('/issue') && calls++ === 0) {
-        requests.push({ method: 'POST', pathname: new URL(request.url).pathname, body: null, key: request.headers.get('Idempotency-Key') });
+        requests.push({ method: 'POST', pathname: new URL(request.url).pathname, body: null, key: request.headers.get('Idempotency-Key'), search: new URL(request.url).searchParams });
         return json(409, { code: 'note-figures-changed', title: 'x', status: 409 });
       }
       return real(request);
@@ -446,6 +477,111 @@ describe('credit and debit notes', () => {
     const keys = requests.filter((r) => r.pathname.endsWith('/issue')).map((r) => r.key);
     expect(keys).toHaveLength(2);
     expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  test('A7: the drafter of a credit sees Issue disabled with the reason (policy on); with the policy off it is enabled', async () => {
+    writeSession(session('accountant'));
+    notes = [note('draft')]; // created by u-1, the session user
+    view = render(<ClientInvoices />);
+    await settle();
+    await openInvoice(view.container);
+    await press(buttons(view.container, 'Open')[0]);
+    const issue = buttons(view.container, 'Issue')[0]!;
+    expect(issue.disabled).toBe(true);
+    expect(view.container.textContent).toContain('You drafted this credit note');
+    view.unmount();
+    policy = false;
+    view = render(<ClientInvoices />);
+    await settle();
+    await openInvoice(view.container);
+    await press(buttons(view.container, 'Open')[0]);
+    expect(buttons(view.container, 'Issue')[0]!.disabled).toBe(false);
+  });
+
+  test('void from the note view: a blank reason sends nothing; the trimmed reason is sent with a key, reused on a retry', async () => {
+    writeSession(session('accountant'));
+    notes = [note('issued')];
+    let refuseOnce = true;
+    const real = globalThis.fetch;
+    stubGlobal('fetch', (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init);
+      if (request.method === 'POST' && request.url.endsWith('/void') && refuseOnce) {
+        refuseOnce = false;
+        requests.push({ method: 'POST', pathname: new URL(request.url).pathname, body: await request.clone().json(), key: request.headers.get('Idempotency-Key'), search: new URL(request.url).searchParams });
+        return json(503, { code: 'unavailable', title: 'Down', status: 503, detail: 'Try again.' });
+      }
+      return real(request);
+    }) as unknown as typeof fetch);
+    view = render(<ClientInvoices />);
+    await settle();
+    await openInvoice(view.container);
+    await press(buttons(view.container, 'Open')[0]);
+    await press(buttons(view.container, 'Void')[0]);
+    const form = view.container.querySelector('form[aria-label="Void note"]') as HTMLFormElement;
+    await press(buttons(form, 'Void note')[0]);
+    expect(requests.filter((r) => r.pathname.endsWith('/void'))).toHaveLength(0);
+    expect(form.textContent).toContain('a note is required to void');
+    setValue(form.querySelector('input[aria-label="Void note"]') as HTMLInputElement, '  Raised against the wrong line  ');
+    await press(buttons(form, 'Void note')[0]);
+    await press(buttons(view.container.querySelector('form[aria-label="Void note"]') as HTMLElement, 'Void note')[0]);
+    const voids = requests.filter((r) => r.pathname.endsWith('/void'));
+    expect(voids).toHaveLength(2);
+    expect(voids.map((r) => r.body)).toEqual([{ voidNote: 'Raised against the wrong line' }, { voidNote: 'Raised against the wrong line' }]);
+    expect(voids[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(voids[1]!.key).toBe(voids[0]!.key);
+    expect(view.container.textContent).toContain('29/C2627/000001 voided');
+  });
+
+  test('discard from the note view: a keyed DELETE, then back to the invoice', async () => {
+    writeSession(session('accountant'));
+    notes = [note('draft')];
+    view = render(<ClientInvoices />);
+    await settle();
+    await openInvoice(view.container);
+    await press(buttons(view.container, 'Open')[0]);
+    await press(buttons(view.container, 'Discard')[0]);
+    await press(buttons(view.container, 'Discard draft')[0]);
+    const deletes = requests.filter((r) => r.method === 'DELETE');
+    expect(deletes.map((r) => r.pathname.endsWith('/client-invoice-notes/n-1'))).toEqual([true]);
+    expect(deletes[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(view.container.querySelector('article[aria-label="Printable client invoice"]')).not.toBeNull();
+    expect(view.container.textContent).toContain('Draft note discarded');
+  });
+
+  test('the register: Export CSV walks every page with the filters and the month’s inclusive bounds, and writes both pages', async () => {
+    writeSession(session('ops_manager'));
+    let blob: Blob | null = null;
+    const realCreate = URL.createObjectURL;
+    const realRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = (b: Blob) => {
+      blob = b;
+      return 'blob:test';
+    };
+    URL.revokeObjectURL = () => undefined;
+    try {
+      view = render(<NotesRegister />);
+      await settle();
+      setValue(view.container.querySelector('input[aria-label="Month"]') as HTMLInputElement, '2027-02');
+      setValue(view.container.querySelector('select[aria-label="Type"]') as HTMLSelectElement, 'credit');
+      setValue(view.container.querySelector('select[aria-label="Status"]') as HTMLSelectElement, 'issued');
+      await settle();
+      requests = [];
+      await press(buttons(view.container, 'Export CSV')[0]);
+      const pages = requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/client-invoice-notes')).map((r) => Object.fromEntries(r.search));
+      expect(pages).toEqual([
+        { gstin: '29AAACT1234A1Z5', from: '2027-02-01', to: '2027-02-28', kind: 'credit', status: 'issued', limit: '500' },
+        { gstin: '29AAACT1234A1Z5', from: '2027-02-01', to: '2027-02-28', kind: 'credit', status: 'issued', cursor: 'c-2', limit: '500' },
+      ]);
+      expect(blob).not.toBeNull();
+      const text = await blob!.text();
+      expect(text).toContain('"29/C2627/000001"');
+      expect(text).toContain('"29/C2627/000002"');
+      expect(text).toContain('2027-02-01 to 2027-02-28');
+      expect(view.container.textContent).toContain('Exported 2 rows');
+    } finally {
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    }
   });
 
   test('the printed note carries every Rule 53(1A) item (a)–(i); a debit is titled Debit Note', () => {

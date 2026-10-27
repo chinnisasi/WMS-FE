@@ -81,9 +81,23 @@ export function notePlaceOfSupplyLabel(code: string): string {
   return name === undefined ? code : `${name} (${code})`;
 }
 
-/** The credit deadline (s.34(2)) as the draft shows it. */
-export function creditDeadlineLabel(lastDay: string): string {
+/** The credit deadline (s.34(2)) as the draft shows it — and, once `today` (IST) is past it, that it has run out. */
+export function creditDeadlineLabel(lastDay: string, today?: string): string {
+  if (today !== undefined && today > lastDay) {
+    return `The last day to issue this credit note was ${istDayLabel(lastDay)} (CGST Act s.34(2)) — it can no longer reduce GST. Discard it.`;
+  }
   return `Issue by ${istDayLabel(lastDay)} — after that the GST on this supply can no longer be reduced (CGST Act s.34(2)).`;
+}
+
+/** A7 — whether this user may issue this credit note under the tenant's policy (the server decides; this hides a doomed click). */
+export function issueBlockedForMaker(note: { kind: NoteKind; createdBy: string }, userId: string | undefined, requireSecondApprover: boolean | null): boolean {
+  return note.kind === 'credit' && requireSecondApprover !== false && userId !== undefined && note.createdBy === userId;
+}
+
+/** The policy PUT's refusal copy (owner-only — not the note commands' owner-or-accountant wording). */
+export function notePolicyRefusalReason(error: unknown): string {
+  if (error instanceof ApiProblem && error.code === 'role-denied') return 'Only the owner can change this setting.';
+  return noteRefusalReason(error);
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -156,7 +170,8 @@ export function parseNoteForm(form: NoteForm): { body: CreateNoteDto; problems: 
       problems.push({ field: `override:${line.invoiceLineId}`, problem: `At most ${NOTE_TEXT_MAX} characters.` });
       continue;
     }
-    lines.push({ invoiceLineId: line.invoiceLineId, amountPaise: parsed.paise, ...(form.kind === 'debit' && override !== '' ? { overrideReason: override } : {}) });
+    // An override is sent only while the debit is above its line — a reason typed for a larger amount is not stored once the amount drops.
+    lines.push({ invoiceLineId: line.invoiceLineId, amountPaise: parsed.paise, ...(needsOverride(form.kind, line) ? { overrideReason: override } : {}) });
   }
   if (lines.length === 0 && !problems.some((p) => p.field.startsWith('amount:') || p.field.startsWith('override:'))) {
     problems.push({ field: 'lines', problem: 'Enter an amount on at least one line.' });
@@ -271,7 +286,7 @@ export function noteRefusalReason(error: unknown, describeLine: (invoiceLineId: 
     case 'debit-needs-override':
       return 'A debit above its invoice line needs a reason on that line.';
     case 'note-figures-changed':
-      return 'Another credit note was issued against this invoice since this draft was made — discard this draft and create it again.';
+      return 'The credit notes on this invoice changed since this draft was made (one was issued or voided) — discard this draft and create it again.';
     case 'note-not-draft':
       return 'This note is no longer a draft — the list has been refreshed.';
     case 'note-not-issued':

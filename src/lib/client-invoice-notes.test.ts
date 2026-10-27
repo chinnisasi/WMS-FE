@@ -76,6 +76,9 @@ describe('client invoice notes — vocabulary and actions', () => {
     expect(notePlaceOfSupplyLabel('29')).toBe('Karnataka (29)');
     expect(creditDeadlineLabel('2027-11-30')).toContain('30 Nov 2027');
     expect(creditDeadlineLabel('2027-11-30')).toContain('s.34(2)');
+    // On the last day still "issue by"; the day after, it says the deadline has passed.
+    expect(creditDeadlineLabel('2027-11-30', '2027-11-30')).toContain('Issue by 30 Nov 2027');
+    expect(creditDeadlineLabel('2027-11-30', '2027-12-01')).toContain('can no longer reduce GST');
   });
 });
 
@@ -122,6 +125,8 @@ describe('client invoice notes — the draft form', () => {
     });
     const credit = parseNoteForm({ ...base, lines: [{ ...base.lines[0]!, overrideReason: 'ignored' }] });
     expect(credit.body!.lines).toEqual([{ invoiceLineId: 'l-1', amountPaise: 20_000 }]);
+    // A reason typed for a larger amount is not sent once the amount drops to the line (E5).
+    expect(parseNoteForm({ ...debit, lines: [{ ...debit.lines[0]!, amountText: '500', overrideReason: 'stale' }] }).body!.lines).toEqual([{ invoiceLineId: 'l-1', amountPaise: 50_000 }]);
     // A debit never settles a dispute.
     expect(parseNoteForm({ ...debit, settlesDispute: true, lines: [{ ...debit.lines[0]!, amountText: '10' }] }).body).not.toHaveProperty('settlesDispute');
   });

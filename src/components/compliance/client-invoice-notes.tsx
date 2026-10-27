@@ -19,6 +19,7 @@ import {
   NOTE_TEXT_MAX,
   REASON_NOTE_HINT,
   creditDeadlineLabel,
+  issueBlockedForMaker,
   needsOverride,
   noteActions,
   noteHeading,
@@ -47,9 +48,10 @@ import { downloadText } from '@/lib/csv';
 import { amountInWords, formatRoundOff, formatRupees, gstRateLabel, invoiceDateLabel, taxRateLabels } from '@/lib/invoices';
 import { istDateOf } from '@/lib/rate-cards';
 import { ulid } from '@/lib/ulid';
-import { useClientInvoiceNote, useInvoiceNotes, useNoteRegister, type NoteRegisterQuery } from '@/lib/use-client-invoice-notes';
+import { useClientInvoiceNote, useInvoiceNotes, useNotePolicy, useNoteRegister, type NoteRegisterQuery } from '@/lib/use-client-invoice-notes';
 
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { useTodayIst } from '@/components/shared/use-today-ist';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass, selectClass } from '@/components/outbound/shell';
 
@@ -396,6 +398,8 @@ export function NoteView({
   onOutcome: (outcome: ClientInvoiceOutcome) => void;
 }) {
   const detail = useClientInvoiceNote(noteId);
+  const policy = useNotePolicy();
+  const today = useTodayIst();
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<NoteConfirm>(null);
   const inFlight = useRef(false);
@@ -416,6 +420,7 @@ export function NoteView({
   if (detail.state === 'loading') return <div className="text-(--muted-foreground)">Loading the note…</div>;
   const note = detail.data;
   const actions = noteActions(note);
+  const makerBlocked = issueBlockedForMaker(note, readSession()?.user.id, policy.state === 'ready' ? policy.data.requireSecondApprover : null);
   const describe = (invoiceLineId: string): string => {
     const line = note.lines.find((candidate) => candidate.invoiceLineId === invoiceLineId);
     return line === undefined ? 'a line' : lineDescription(line);
@@ -455,7 +460,7 @@ export function NoteView({
           Print
         </button>
         {canInvoice && actions.issue ? (
-          <button type="button" className={primaryClass} disabled={busy} onClick={issue}>
+          <button type="button" className={primaryClass} disabled={busy || makerBlocked} aria-describedby={makerBlocked ? `maker-hint-${note.id}` : undefined} onClick={issue}>
             Issue
           </button>
         ) : null}
@@ -472,11 +477,15 @@ export function NoteView({
       </div>
       {note.status === 'draft' && note.kind === 'credit' && note.creditDeadline !== null ? (
         <div className="print:hidden">
-          <FeedbackBanner tone="warning" word="Credit note deadline" reason={creditDeadlineLabel(note.creditDeadline)} />
+          <FeedbackBanner tone="warning" word="Credit note deadline" reason={creditDeadlineLabel(note.creditDeadline, today)} />
         </div>
       ) : null}
       {note.status === 'draft' && note.kind === 'credit' ? (
-        <div className="text-xs text-(--muted-foreground) print:hidden">A credit note is issued by a second person — not the one who drafted it — unless the owner has turned that off in Settings.</div>
+        <div id={`maker-hint-${note.id}`} className="text-xs text-(--muted-foreground) print:hidden">
+          {makerBlocked
+            ? 'You drafted this credit note — another member with billing rights must issue it (Settings → Clients → Credit notes).'
+            : 'A credit note is issued by a second person — not the one who drafted it — unless the owner has turned that off in Settings.'}
+        </div>
       ) : null}
       {note.settlesDispute && note.status === 'draft' ? (
         <div className="text-xs print:hidden">Issuing this credit note settles the invoice’s dispute.</div>
@@ -825,7 +834,7 @@ export function NotesRegister() {
   return (
     <Section title="Credit and debit notes">
       <div className="text-(--muted-foreground)">
-        The notes issued under one GSTIN in a month — with the fields GSTR-1 asks for (CDNR). Void notes are listed and marked.
+        The notes issued under one GSTIN in a month, with the fields GSTR-1’s credit / debit note tables need (CDNR for registered recipients, CDNUR otherwise). Void notes are listed and marked. The CSV is a register for your accountant — not the GST offline-tool upload file.
       </div>
       <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => event.preventDefault()} aria-label="Notes register filters">
         <label className="flex flex-col gap-1">

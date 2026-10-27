@@ -4,7 +4,7 @@ import { useRef, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiPutNotePolicy } from '@/lib/api/client';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { noteRefusalReason } from '@/lib/client-invoice-notes';
+import { notePolicyRefusalReason } from '@/lib/client-invoice-notes';
 import { notifyClientInvoicesChanged } from '@/lib/client-invoices';
 import { ulid } from '@/lib/ulid';
 import { useNotePolicy } from '@/lib/use-client-invoice-notes';
@@ -47,7 +47,7 @@ export function NotePolicyCard() {
       notifyClientInvoicesChanged();
       policy.reload();
     } catch (error) {
-      setOutcome({ tone: 'rejected', word: 'Not changed', reason: noteRefusalReason(error) });
+      setOutcome({ tone: 'rejected', word: 'Not changed', reason: notePolicyRefusalReason(error) });
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -72,7 +72,7 @@ export function NotePolicyCard() {
             aria-describedby="note-policy-hint"
             onChange={(event) => toggle(event.target.checked)}
           />
-          <span>Require a second person to issue credit notes</span>
+          <span>Require a second person to issue credit notes (and another to void them)</span>
         </label>
       )}
       <div id="note-policy-hint" className="text-xs text-(--muted-foreground)">
