@@ -23,6 +23,9 @@ export const MAX_USAGE_DAYS = 366;
 /** Always shown above the figures: nothing here is an invoice. */
 export const ESTIMATE_NOTICE = 'Estimate until invoiced · GST-exclusive';
 
+/** Story 5-5a (A19) — the usage read prices the metered charges only. */
+export const METERED_ONLY_NOTICE = 'Metered charges only — ad-hoc charges and the minimum appear on the invoice.';
+
 /** Shown when storage has no measured day at all (no snapshot has run, or the tenant's own client). */
 export const STORAGE_NOT_MEASURED = 'Storage not measured yet';
 

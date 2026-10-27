@@ -10,7 +10,7 @@
  * nothing can pin).
  */
 import { ApiProblem } from '@/lib/api/client';
-import type { ClientDto, RateCardDto, RateCardLineDto } from '@/lib/api/generated';
+import type { ClientDto, ClientInvoiceLineDto, RateCardDto, RateCardLineDto } from '@/lib/api/generated';
 import { formatRupees } from '@/lib/invoices';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { parseRupees } from '@/lib/rupees';
@@ -22,28 +22,62 @@ export function notifyRateCardsChanged(): void {
   window.dispatchEvent(new Event(RATE_CARDS_CHANGED_EVENT));
 }
 
-export type ChargeCode = RateCardLineDto['chargeCode'];
-export type RateBasis = RateCardLineDto['basis'];
+/**
+ * Story 5-5a — the vocabularies split three ways:
+ * - `MeteredChargeCode` — the four metered charges (`CHARGE_CODES`,
+ *   `CHARGE_BASIS`, the editor's and the table's per-charge columns, usage);
+ * - `RateCardChargeCode` — a card line's code: the four plus
+ *   `minimum_monthly` (the minimum monthly charge, at most one per card);
+ * - `ChargeCode` — every code a label is asked for: a card line's, plus an
+ *   invoice line's `adhoc` and `minimum_adjustment`.
+ */
+export type RateCardChargeCode = RateCardLineDto['chargeCode'];
+export type MeteredChargeCode = Exclude<RateCardChargeCode, 'minimum_monthly'>;
+export type ChargeCode = RateCardChargeCode | ClientInvoiceLineDto['chargeCode'];
+export type RateBasis = RateCardLineDto['basis'] | ClientInvoiceLineDto['basis'];
+export type MinimumCounts = NonNullable<RateCardLineDto['minimumCounts']>;
 
-/** The four charges, in the backend's canonical order (`CHARGE_CODES`). */
-export const CHARGE_CODES: readonly ChargeCode[] = ['storage', 'inbound_handling', 'pick', 'outbound_handling'];
+/** The four metered charges, in the backend's canonical order (`CHARGE_CODES`). */
+export const CHARGE_CODES: readonly MeteredChargeCode[] = ['storage', 'inbound_handling', 'pick', 'outbound_handling'];
 
-/** The pair map — each charge has exactly one basis (the backend's `CHARGE_BASIS`). */
-export const CHARGE_BASIS: Readonly<Record<ChargeCode, RateBasis>> = {
+/** The pair map — each metered charge has exactly one basis (the backend's `CHARGE_BASIS`). */
+export const CHARGE_BASIS: Readonly<Record<MeteredChargeCode, RateCardLineDto['basis']>> = {
   storage: 'per_thousand_units_per_day',
   inbound_handling: 'per_receipt_line',
   pick: 'per_pick',
   outbound_handling: 'per_order',
 };
 
-/** The backend's `@Max` on a line amount: ₹1 lakh in paise. */
+/** The minimum monthly charge's code and its one basis (story 5-5a, decision 8). */
+export const MINIMUM_CODE = 'minimum_monthly' satisfies RateCardChargeCode;
+export const MINIMUM_BASIS = 'per_month' satisfies RateCardLineDto['basis'];
+
+/** The backend's per-code bound on a metered line amount: ₹1 lakh in paise. */
 export const MAX_RATE_AMOUNT_PAISE = 10_000_000;
+
+/** A12 — the minimum monthly charge's bound: ₹0.01 .. ₹1 crore in paise. */
+export const MAX_MINIMUM_AMOUNT_PAISE = 1_000_000_000;
+
+/** A19 — what counts toward the floor: every charge (the default), or the metered ones only. */
+export const MINIMUM_COUNTS: readonly MinimumCounts[] = ['all', 'metered'];
+
+export const MINIMUM_COUNTS_LABEL: Readonly<Record<MinimumCounts, string>> = {
+  all: 'Metered and ad-hoc charges',
+  metered: 'Metered charges only',
+};
+
+/** Decision 9 / A21 — where the minimum applies, in the operator's words. */
+export const MINIMUM_SCOPE_COPY =
+  'The minimum applies to each monthly invoice (one per GSTIN). When the month’s charges fall short, the invoice adds a minimum-charge adjustment line for the difference; a card change mid-month prorates it by days. A client billed under more than one GSTIN cannot carry a minimum.';
 
 const CHARGE_LABELS: Readonly<Record<ChargeCode, string>> = {
   storage: 'Storage',
   inbound_handling: 'Inbound handling',
   pick: 'Pick',
   outbound_handling: 'Outbound handling',
+  minimum_monthly: 'Minimum monthly charge',
+  adhoc: 'Ad-hoc charge',
+  minimum_adjustment: 'Minimum charge adjustment',
 };
 
 const BASIS_LABELS: Readonly<Record<RateBasis, string>> = {
@@ -51,6 +85,9 @@ const BASIS_LABELS: Readonly<Record<RateBasis, string>> = {
   per_receipt_line: 'per receipt line',
   per_pick: 'per pick',
   per_order: 'per order',
+  per_month: 'per month',
+  per_unit: 'per unit',
+  per_invoice: 'per invoice',
 };
 
 export function chargeLabel(code: ChargeCode): string {
@@ -64,10 +101,21 @@ export function basisLabel(basis: RateBasis): string {
 /** The copy for a charge a card does not price. ₹0 is different: billed at zero. */
 export const NOT_BILLED = 'Not billed';
 
-/** One charge's cell: `₹3.30` or "Not billed". */
-export function chargeCell(card: Pick<RateCardDto, 'lines'>, code: ChargeCode): string {
+/** One charge's cell: `₹3.30` or "Not billed" (the minimum's: "No minimum"). */
+export function chargeCell(card: Pick<RateCardDto, 'lines'>, code: RateCardChargeCode): string {
   const line = card.lines.find((entry) => entry.chargeCode === code);
-  return line === undefined ? NOT_BILLED : formatRupees(line.amountPaise);
+  if (line === undefined) return code === MINIMUM_CODE ? NO_MINIMUM : NOT_BILLED;
+  return formatRupees(line.amountPaise);
+}
+
+/** A card without a minimum monthly charge. */
+export const NO_MINIMUM = 'No minimum';
+
+/** The minimum column's cell: `₹50,000.00 · metered only`, or "No minimum". */
+export function minimumCell(card: Pick<RateCardDto, 'lines'>): string {
+  const line = card.lines.find((entry) => entry.chargeCode === MINIMUM_CODE);
+  if (line === undefined) return NO_MINIMUM;
+  return line.minimumCounts === 'metered' ? `${formatRupees(line.amountPaise)} · metered only` : formatRupees(line.amountPaise);
 }
 
 /** The clients a card can be drafted for: never the tenant's own `self` client. */
@@ -195,6 +243,10 @@ export function nextChangeSummary(
     const after = chargeCell(next, code);
     if (before !== after) changes.push(`${chargeLabel(code)} ${before} → ${after} from ${date}`);
   }
+  // Story 5-5a — the minimum (and its counts rule) is a term too.
+  const minimumBefore = inForce === null ? NO_MINIMUM : minimumCell(inForce);
+  const minimumAfter = minimumCell(next);
+  if (minimumBefore !== minimumAfter) changes.push(`${chargeLabel(MINIMUM_CODE)} ${minimumBefore} → ${minimumAfter} from ${date}`);
   if (changes.length === 0) changes.push(`A new card with the same prices takes over from ${date}`);
   return { date: next.effectiveFrom!, changes };
 }
@@ -208,14 +260,23 @@ export function showNotBilledBanner(client: Pick<ClientDto, 'status' | 'systemOw
 
 // ── the draft editor ────────────────────────────────────────────────────────
 
-/** The editor's four ₹ fields: blank = the charge is not billed. */
-export type RateDraftFields = Readonly<Record<ChargeCode, string>>;
+/**
+ * The editor's fields: the four metered ₹ fields (blank = the charge is not
+ * billed), and — story 5-5a — the minimum monthly ₹ field (blank = no
+ * minimum) with what counts toward it.
+ */
+export type RateDraftFields = Readonly<Record<MeteredChargeCode, string>> & {
+  readonly minimum_monthly: string;
+  readonly minimumCounts: MinimumCounts;
+};
 
 export const EMPTY_RATE_DRAFT: RateDraftFields = {
   storage: '',
   inbound_handling: '',
   pick: '',
   outbound_handling: '',
+  minimum_monthly: '',
+  minimumCounts: 'all',
 };
 
 /** Paise → the editor's rupee text (`330` → `3.30`), integer arithmetic only. */
@@ -225,16 +286,22 @@ export function paiseToRupeeText(paise: number): string {
 
 /** A card's lines as editor fields (to edit a draft). */
 export function draftFieldsOf(card: Pick<RateCardDto, 'lines'>): RateDraftFields {
-  const fields: Record<ChargeCode, string> = { ...EMPTY_RATE_DRAFT };
-  for (const line of card.lines) fields[line.chargeCode] = paiseToRupeeText(line.amountPaise);
+  const fields: { -readonly [K in keyof RateDraftFields]: RateDraftFields[K] } = { ...EMPTY_RATE_DRAFT };
+  for (const line of card.lines) {
+    fields[line.chargeCode] = paiseToRupeeText(line.amountPaise);
+    if (line.chargeCode === MINIMUM_CODE) fields.minimumCounts = line.minimumCounts ?? 'all';
+  }
   return fields;
 }
 
 /**
  * The editor's fields → the lines the backend takes, or a problem naming the
  * charge. Blank → no line (not billed); `0` → billed at ₹0. Rupees parse
- * through `parseRupees` (no float); the ₹1 lakh cap is checked here because
- * `parseRupees` does not know it. The basis is never typed — the pair map.
+ * through `parseRupees` (no float); the per-code bound (A12) is checked here
+ * because `parseRupees` does not know it: ₹0 .. ₹1 lakh for a metered rate,
+ * ₹0.01 .. ₹1 crore for the minimum. The basis is never typed — the pair map.
+ * The minimum line always carries its `minimumCounts` (the backend's default
+ * is `all`; sending it keeps the request explicit).
  */
 export function parseRateDraft(fields: RateDraftFields): { lines: RateCardLineDto[]; problem: null } | { lines: null; problem: string } {
   const lines: RateCardLineDto[] = [];
@@ -248,10 +315,29 @@ export function parseRateDraft(fields: RateDraftFields): { lines: RateCardLineDt
     }
     lines.push({ chargeCode: code, basis: CHARGE_BASIS[code], amountPaise: parsed.paise });
   }
+  const minimum = fields.minimum_monthly.trim();
+  if (minimum !== '') {
+    const label = chargeLabel(MINIMUM_CODE);
+    const parsed = parseRupees(minimum);
+    if ('problem' in parsed) return { lines: null, problem: `${label}: ${parsed.problem}` };
+    if (parsed.paise < 1) return { lines: null, problem: `${label}: at least ₹0.01 — leave it blank for no minimum.` };
+    if (parsed.paise > MAX_MINIMUM_AMOUNT_PAISE) {
+      return { lines: null, problem: `${label}: at most ${formatRupees(MAX_MINIMUM_AMOUNT_PAISE)} ${basisLabel(MINIMUM_BASIS)}.` };
+    }
+    lines.push({ chargeCode: MINIMUM_CODE, basis: MINIMUM_BASIS, amountPaise: parsed.paise, minimumCounts: fields.minimumCounts });
+  }
   return { lines, problem: null };
 }
 
 // ── outcomes and refusals ──────────────────────────────────────────────────
+
+/** The GSTINs a `minimum-needs-single-gstin` refusal names (structured, never parsed from prose; "none" stands for no GSTIN). */
+export function minimumGstins(error: unknown): readonly string[] {
+  if (!(error instanceof ApiProblem) || error.code !== 'minimum-needs-single-gstin') return [];
+  const raw = error.extensions['gstins'];
+  if (!Array.isArray(raw)) return [];
+  return (raw as unknown[]).map((gstin) => (typeof gstin === 'string' && gstin !== '' ? gstin : gstin === null ? 'no GSTIN' : null)).filter((gstin): gstin is string => gstin !== null);
+}
 
 export function activatedOutcome(card: Pick<RateCardDto, 'effectiveFrom'>): { word: string; reason: string } {
   return {
@@ -283,6 +369,13 @@ export function rateCardReason(error: unknown, action: RateCardAction): string {
         return error.detail ?? 'A new card must take effect after every existing card.';
       case 'rate-card-no-lines':
         return 'Price at least one charge before activating the card.';
+      case 'minimum-needs-single-gstin': {
+        // A21 — the server names the GSTINs in `extensions.gstins`.
+        const gstins = minimumGstins(error);
+        return `A minimum monthly charge applies to each monthly invoice (one per GSTIN), and this client is billed under ${
+          gstins.length > 1 ? `${gstins.length} GSTINs (${gstins.join(', ')})` : 'more than one GSTIN'
+        } — it would be charged once per GSTIN. Remove the minimum from the draft, or bill the client from one GSTIN.`;
+      }
       case 'rate-card-not-draft':
         return 'This card is no longer a draft — an activated card never changes. Refresh the list.';
       case 'rate-card-not-cancellable':

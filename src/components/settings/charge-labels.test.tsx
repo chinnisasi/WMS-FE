@@ -3,7 +3,7 @@ import { act } from 'react';
 
 import type { ClientInvoiceDto } from '../../lib/api/generated';
 import { clearSession, writeSession } from '../../lib/auth';
-import { CHARGE_CODES, chargeLabel, type ChargeCode } from '../../lib/rate-cards';
+import { CHARGE_CODES, chargeLabel, type MeteredChargeCode } from '../../lib/rate-cards';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import { PrintableClientInvoice } from '../compliance/client-invoices';
@@ -32,13 +32,16 @@ const SELF = {
 };
 const ACME = { ...SELF, id: 'c-acme', code: 'ACME', name: 'Acme Foods', systemOwned: false };
 
-const BASIS: Readonly<Record<ChargeCode, string>> = {
+// Story 5-5a — `ChargeCode` widened to every label-able code (the minimum, the
+// ad-hoc and adjustment lines); this test pins the four METERED charges' one
+// rate-text source, so it is keyed on `MeteredChargeCode` (CHARGE_CODES' type).
+const BASIS: Readonly<Record<MeteredChargeCode, string>> = {
   storage: 'per_thousand_units_per_day',
   inbound_handling: 'per_receipt_line',
   pick: 'per_pick',
   outbound_handling: 'per_order',
 };
-const PAISE: Readonly<Record<ChargeCode, number>> = { storage: 330, inbound_handling: 150, pick: 300, outbound_handling: 1200 };
+const PAISE: Readonly<Record<MeteredChargeCode, number>> = { storage: 330, inbound_handling: 150, pick: 300, outbound_handling: 1200 };
 
 const CARD = {
   id: 'card-a',

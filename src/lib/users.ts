@@ -182,6 +182,13 @@ export const CAPABILITIES = [
   // the business). Gates the Settings "Require a second person to issue
   // credit notes" toggle; every member reads the setting.
   'billing.configure',
+  // Story 5-5a — record an ad-hoc charge (extra labour, relabelling,
+  // repacking, …) against a client brand, and cancel one's own pending
+  // charge. OWNER + OPS MANAGER + ACCOUNTANT: the floor knows about the extra
+  // work, the office bills it. Approving, rejecting and cancelling an
+  // approved charge stay `billing.invoice`. Gates the /compliance Ad-hoc
+  // charges record form; every member reads the charges.
+  'billing.charge',
   // Story 21-6 — advance shipment notices: create, amend, close (short) and
   // cancel an ASN. Owner + Ops Manager, the `po.manage` holder set (an ASN is
   // the PO's mirror). Gates the Inbound surface's ASN card actions; every
@@ -338,8 +345,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
   ],
   // Story 8-2b: read-only except the e-way paperwork (finance work); story
   // 21-3: and the client rate cards (finance work); story 21-5: and the
-  // client invoices and tax details (finance work).
-  accountant: ['eway.manage', 'rates.manage', 'billing.invoice'],
+  // client invoices and tax details (finance work); story 5-5a: and recording
+  // ad-hoc charges.
+  accountant: ['eway.manage', 'rates.manage', 'billing.invoice', 'billing.charge'],
   // Story 21-7 — the client-portal persona; 21-7 left it empty, story 21-7b
   // grants exactly one write: announcing its own shipment from the portal;
   // story 4-1a adds placing its own order.

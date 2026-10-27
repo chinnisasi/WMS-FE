@@ -8669,7 +8669,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -8696,7 +8696,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -9268,12 +9268,16 @@ export type UpdatePartnerLinkDto = {
 };
 
 export type RateCardLineResponseDto = {
-    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
-    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling' | 'minimum_monthly';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order' | 'per_month';
     /**
-     * Integer paise per unit of the basis, GST-exclusive
+     * Integer paise per unit of the basis, GST-exclusive (the minimum: per month)
      */
     amountPaise: number;
+    /**
+     * Story 5-5a — present on the minimum_monthly line only
+     */
+    minimumCounts?: 'all' | 'metered';
 };
 
 export type RateCardDto = {
@@ -9337,22 +9341,26 @@ export type RateCardListResponse = {
 
 export type RateCardLineDto = {
     /**
-     * The charge this line prices — each at most once per card
+     * The charge this line prices — each at most once per card. Story 5-5a: `minimum_monthly` is the minimum monthly charge (per invoice — one per GSTIN)
      */
-    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling' | 'minimum_monthly';
     /**
-     * The basis — fixed per charge: storage ↔ per_thousand_units_per_day (₹ per 1,000 SKU base units per day), inbound_handling ↔ per_receipt_line, pick ↔ per_pick, outbound_handling ↔ per_order
+     * The basis — fixed per charge: storage ↔ per_thousand_units_per_day (₹ per 1,000 SKU base units per day), inbound_handling ↔ per_receipt_line, pick ↔ per_pick, outbound_handling ↔ per_order, minimum_monthly ↔ per_month
      */
-    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order' | 'per_month';
     /**
-     * Integer paise per unit of the basis, GST-exclusive (₹0 is billed at zero; ₹1 lakh cap)
+     * Integer paise per unit of the basis, GST-exclusive. A metered rate is ₹0 .. ₹1 lakh (₹0 is billed at zero); the minimum_monthly line ₹0.01 .. ₹1 crore (the per-code bound is the command’s — 400 validation-failed)
      */
     amountPaise: number;
+    /**
+     * Story 5-5a — on the minimum_monthly line only: what counts toward the floor — `all` (metered + ad-hoc charges, the default) or `metered`
+     */
+    minimumCounts?: 'all' | 'metered';
 };
 
 export type CreateRateCardDto = {
     /**
-     * The charges this card prices — any subset of the four. A charge with no line is not billed. A draft may have none; activation needs at least one
+     * The charges this card prices — any subset of the four metered charges, plus an optional minimum monthly charge. A charge with no line is not billed. A draft may have none; activation needs at least one
      */
     lines: Array<RateCardLineDto>;
 };
@@ -9363,7 +9371,7 @@ export type RateCardResponse = {
 
 export type RateCardLinesDto = {
     /**
-     * The charges this card prices — any subset of the four. A charge with no line is not billed. A draft may have none; activation needs at least one
+     * The charges this card prices — any subset of the four metered charges, plus an optional minimum monthly charge. A charge with no line is not billed. A draft may have none; activation needs at least one
      */
     lines: Array<RateCardLineDto>;
 };
@@ -9587,6 +9595,46 @@ export type StorageDayRecordDto = {
     onHand: string;
 };
 
+export type AdhocChargeRecordDto = {
+    kind: 'adhoc-charge';
+    /**
+     * The ad-hoc charge
+     */
+    id: string;
+    chargeId: string;
+    /**
+     * The IST date of the work
+     */
+    chargeDate: string;
+    warehouseId: string;
+    warehouseCode: string;
+    category: 'extra_labour' | 'special_handling' | 'returns_processing' | 'relabelling' | 'repacking' | 're_slotting' | 'extra_storage' | 'other';
+    description: string;
+    unit: string;
+    /**
+     * Units of `unit`, a decimal string (up to three places)
+     */
+    quantity: string;
+    unitRatePaise: number;
+    amountPaise: number;
+    reference: string | null;
+    /**
+     * The client's authorisation (PO, email, work order)
+     */
+    clientAuthorizationRef: string | null;
+    status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+    /**
+     * Who recorded the charge
+     */
+    recordedBy: string;
+    recordedByEmail: string | null;
+    /**
+     * Who approved (or rejected) it
+     */
+    decidedBy: string | null;
+    decidedByEmail: string | null;
+};
+
 export type PrepareClientInvoicesDto = {
     /**
      * One IST calendar month, YYYY-MM — it must have ended
@@ -9617,17 +9665,21 @@ export type ClientInvoiceTotalsDto = {
 };
 
 export type ClientInvoiceGapDto = {
-    code: 'supplier-gstin-missing' | 'supplier-address-missing' | 'client-legal-name-missing' | 'client-billing-address-missing' | 'storage-not-complete' | 'line-unpriced' | 'einvoice-required';
+    code: 'supplier-gstin-missing' | 'supplier-address-missing' | 'client-legal-name-missing' | 'client-billing-address-missing' | 'storage-not-complete' | 'line-unpriced' | 'adhoc-charge-pending' | 'minimum-charge-pending' | 'einvoice-required';
     detail: string;
     warehouseId?: string;
     /**
      * The IST date the line’s rate-card segment starts (line-scoped gaps)
      */
     segmentFrom?: string;
+    /**
+     * Story 5-5a — `adhoc-charge-pending` only: how many ad-hoc charges of this month await approval
+     */
+    count?: number;
 };
 
 export type ClientInvoiceWarningDto = {
-    code: 'supplier-state-differs';
+    code: 'supplier-state-differs' | 'minimum-not-applied-multi-gstin' | 'minimum-from-charges-only';
     detail: string;
 };
 
@@ -9700,14 +9752,17 @@ export type ClientInvoiceLineDto = {
      * Last IST date of the segment (inclusive)
      */
     segmentTo: string;
-    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
-    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
     /**
-     * The base UoM of a storage line; null for handling
+     * The four metered charges; story 5-5a adds `adhoc` (an approved ad-hoc charge) and `minimum_adjustment` (the top-up to the minimum monthly charge)
+     */
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling' | 'adhoc' | 'minimum_adjustment';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order' | 'per_unit' | 'per_invoice';
+    /**
+     * The base UoM of a storage line, the unit of an ad-hoc charge; null otherwise
      */
     uom: string | null;
     /**
-     * A decimal string: base-unit-days for storage (up to three decimals), a whole count otherwise
+     * A decimal string: base-unit-days for storage and units for an ad-hoc charge (up to three decimals), a whole count otherwise (1 on the minimum adjustment)
      */
     quantity: string;
     /**
@@ -9734,6 +9789,14 @@ export type ClientInvoiceLineDto = {
      */
     sgstPaise: number;
     igstPaise: number;
+    /**
+     * Story 5-5a — present only on an `adhoc` or `minimum_adjustment` line: the printed description
+     */
+    description?: string;
+    /**
+     * Story 5-5a — present only on an `adhoc` line: the ad-hoc charge it bills
+     */
+    adhocChargeId?: string;
 };
 
 export type ClientInvoiceDto = {
@@ -9852,7 +9915,7 @@ export type ClientInvoiceLineRecordsResponse = {
     /**
      * The kind of every record on this line
      */
-    kind: 'receipt-line' | 'pick' | 'order' | 'storage-day';
+    kind: 'receipt-line' | 'pick' | 'order' | 'storage-day' | 'adhoc-charge';
     /**
      * The invoice status the drill was read under
      */
@@ -9861,7 +9924,7 @@ export type ClientInvoiceLineRecordsResponse = {
      * The first page only (no cursor)
      */
     summary?: LineRecordsSummaryDto;
-    records: Array<ReceiptLineRecordDto | PickRecordDto | OrderRecordDto | StorageDayRecordDto>;
+    records: Array<ReceiptLineRecordDto | PickRecordDto | OrderRecordDto | StorageDayRecordDto | AdhocChargeRecordDto>;
     nextCursor: string | null;
 };
 
@@ -9948,8 +10011,8 @@ export type CreateNoteDto = {
 export type NoteLineDto = {
     id: string;
     invoiceLineId: string;
-    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
-    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling' | 'adhoc' | 'minimum_adjustment';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order' | 'per_unit' | 'per_invoice';
     uom: string | null;
     /**
      * IST date, inclusive (the invoice line’s segment)
@@ -9974,6 +10037,10 @@ export type NoteLineDto = {
     sgstPaise: number;
     igstPaise: number;
     overrideReason: string | null;
+    /**
+     * Story 5-5a — the amended invoice line’s description, present only for an ad-hoc charge or minimum-charge adjustment line
+     */
+    description?: string;
 };
 
 export type NoteDto = {
@@ -10122,6 +10189,173 @@ export type NotePolicyDto = {
      * Whether a credit note needs a second person to issue it (and another to void it). A tenant with no setting requires one
      */
     requireSecondApprover: boolean;
+};
+
+export type RecordClientChargeDto = {
+    /**
+     * The client brand billed (never the tenant’s own client — 409 client-not-billable)
+     */
+    clientId: string;
+    /**
+     * The warehouse the work was done in — it decides the supplying GSTIN (the invoice group)
+     */
+    warehouseId: string;
+    /**
+     * The IST date of the work: today or earlier, back to 1 April of the previous financial year (400 outside). More than 30 days back answers 201 with `charge-late`
+     */
+    chargeDate: string;
+    /**
+     * Each category fixes its SAC; `other` chooses one (sacCode)
+     */
+    category: 'extra_labour' | 'special_handling' | 'returns_processing' | 'relabelling' | 'repacking' | 're_slotting' | 'extra_storage' | 'other';
+    /**
+     * What was done — 1–200 characters, printed on the invoice line
+     */
+    description: string;
+    /**
+     * REQUIRED for `other` (one of the four services SACs); refused on any other category
+     */
+    sacCode?: '996729' | '996719' | '998540' | '998599';
+    unit: 'each' | 'hour' | 'day' | 'carton' | 'pallet' | 'order' | 'shipment' | 'container' | 'kg' | 'lot';
+    /**
+     * A decimal string, > 0, at most three decimal places, ≤ 10,000 ("2.5" and "2.50" are the same request)
+     */
+    quantity: string;
+    /**
+     * Integer paise per unit, GST-exclusive (₹0.01 .. ₹1 lakh). The amount is quantity × rate rounded half up once; ₹0.00 is refused, the cap is ₹1 crore
+     */
+    unitRatePaise: number;
+    /**
+     * An order ref, GRN or ASN code — free text, printed (" · Ref …")
+     */
+    reference?: string;
+    /**
+     * The client's authorisation for the work — a PO, email or work-order reference; printed (" · Client auth …") and shown in the drill
+     */
+    clientAuthorizationRef?: string;
+    /**
+     * Internal only — never printed, never shown in the portal
+     */
+    evidenceNote?: string;
+};
+
+export type ClientChargeBillingDto = {
+    invoiceId: string;
+    /**
+     * The invoice number; null while it is a draft
+     */
+    invoiceNo: string | null;
+    status: 'draft' | 'issued' | 'disputed' | 'settled';
+};
+
+export type ClientChargeDto = {
+    id: string;
+    clientId: string;
+    warehouseId: string;
+    /**
+     * The supplying GSTIN frozen at record — the invoice group key
+     */
+    supplierGstin: string | null;
+    /**
+     * The IST date of the work
+     */
+    chargeDate: string;
+    /**
+     * The first of the month whose invoice bills it — later than the service month when that month was already invoiced
+     */
+    billMonth: string;
+    category: 'extra_labour' | 'special_handling' | 'returns_processing' | 'relabelling' | 'repacking' | 're_slotting' | 'extra_storage' | 'other';
+    description: string;
+    sacCode: string;
+    unit: 'each' | 'hour' | 'day' | 'carton' | 'pallet' | 'order' | 'shipment' | 'container' | 'kg' | 'lot';
+    /**
+     * Units of `unit`, a decimal string (up to three places)
+     */
+    quantity: string;
+    unitRatePaise: number;
+    /**
+     * quantity × rate, rounded half up once — integer paise, GST-exclusive
+     */
+    amountPaise: number;
+    reference: string | null;
+    clientAuthorizationRef: string | null;
+    /**
+     * Internal only
+     */
+    evidenceNote: string | null;
+    status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+    recordedBy: string;
+    /**
+     * ISO-8601 UTC
+     */
+    recordedAt: string;
+    /**
+     * Who approved or rejected it (the recorder when approved at record)
+     */
+    decidedBy: string | null;
+    decidedAt: string | null;
+    /**
+     * A rejection’s reason
+     */
+    decisionNote: string | null;
+    cancelledBy: string | null;
+    cancelledAt: string | null;
+    cancelNote: string | null;
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    /**
+     * The latest non-void invoice with a line billing this charge, or null
+     */
+    billing: ClientChargeBillingDto | null;
+};
+
+export type ClientChargeWarningDto = {
+    code: 'charge-late' | 'charge-billed-later' | 'charge-may-bring-minimum' | 'charge-disables-minimum';
+    detail: string;
+};
+
+export type RecordClientChargeResponse = {
+    charge: ClientChargeDto;
+    /**
+     * Non-blocking: charge-late, charge-billed-later, charge-may-bring-minimum, charge-disables-minimum
+     */
+    warnings: Array<ClientChargeWarningDto>;
+};
+
+export type ClientChargeListResponse = {
+    items: Array<ClientChargeDto>;
+    nextCursor: string | null;
+};
+
+export type ClientChargeResponse = {
+    charge: ClientChargeDto;
+};
+
+export type ChargeNoteDto = {
+    /**
+     * Why — required, 1–500 characters
+     */
+    note: string;
+};
+
+export type ChargePolicyResponse = {
+    /**
+     * Integer paise
+     */
+    selfApproveLimitPaise: number;
+    /**
+     * No setting stored — the ₹10,000 default applies
+     */
+    isDefault: boolean;
+};
+
+export type ChargePolicyDto = {
+    /**
+     * A billing.invoice holder’s own charge up to this amount (integer paise, ₹0 .. ₹1 crore) is approved at record; above it, it pends for a second person
+     */
+    selfApproveLimitPaise: number;
 };
 
 export type PortalUserDto = {
@@ -10791,11 +11025,14 @@ export type PortalInvoiceLineDto = {
      * IST date, inclusive
      */
     segmentTo: string;
-    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
-    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling' | 'adhoc' | 'minimum_adjustment';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order' | 'per_unit' | 'per_invoice';
+    /**
+     * The base UoM of a storage line, the unit of an ad-hoc charge; null otherwise
+     */
     uom: string | null;
     /**
-     * A decimal string — base-unit-days for storage, a whole count otherwise
+     * A decimal string — base-unit-days for storage, units for an ad-hoc charge, a whole count otherwise
      */
     quantity: string;
     unitAmountPaise: number | null;
@@ -10805,6 +11042,10 @@ export type PortalInvoiceLineDto = {
     cgstPaise: number;
     sgstPaise: number;
     igstPaise: number;
+    /**
+     * Story 5-5a — present only on an ad-hoc charge or minimum-charge adjustment line: what the line is for, as printed
+     */
+    description?: string;
 };
 
 export type PortalInvoiceDetailResponse = {
@@ -10866,8 +11107,8 @@ export type PortalInvoiceNotesResponse = {
 };
 
 export type PortalNoteLineDto = {
-    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling';
-    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order';
+    chargeCode: 'storage' | 'inbound_handling' | 'pick' | 'outbound_handling' | 'adhoc' | 'minimum_adjustment';
+    basis: 'per_thousand_units_per_day' | 'per_receipt_line' | 'per_pick' | 'per_order' | 'per_unit' | 'per_invoice';
     uom: string | null;
     /**
      * IST date, inclusive
@@ -10883,6 +11124,10 @@ export type PortalNoteLineDto = {
     cgstPaise: number;
     sgstPaise: number;
     igstPaise: number;
+    /**
+     * Story 5-5a — the amended invoice line’s description, present only for an ad-hoc charge or minimum-charge adjustment line
+     */
+    description?: string;
 };
 
 export type PortalNoteDetailResponse = {
@@ -22961,7 +23206,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -23368,7 +23613,7 @@ export type ClientsControllerUpdateClientStatusErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * A departed client asked to be suspended — it can only be reactivated (client-not-active); a departure while work remains (client-not-wound-down — `blockers: [{kind, count, codes?}]` lists every blocker: stock, open-purchase-orders, open-asns, pending-over-receipts, open-orders, open-rmas, pending-adjustments, open-counts, open-review-items, unsettled-invoices); or a concurrent request with the same Idempotency-Key (conflict)
+     * A departed client asked to be suspended — it can only be reactivated (client-not-active); a departure while work remains (client-not-wound-down — `blockers: [{kind, count, codes?}]` lists every blocker: stock, open-purchase-orders, open-asns, pending-over-receipts, open-orders, open-rmas, pending-adjustments, open-counts, open-review-items, unsettled-invoices, unbilled-charges — story 5-5a, channel-mappings); or a concurrent request with the same Idempotency-Key (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -24854,7 +25099,7 @@ export type ClientInvoicesControllerLineRecordsErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The invoice's supplying GSTIN no longer maps to any warehouse (invoice-group-changed)
+     * The invoice's supplying GSTIN no longer maps to any warehouse (invoice-group-changed), or the line is a minimum-charge adjustment — computed from the other lines, it has no records (line-not-drillable)
      */
     409: ProblemDetailsDto;
 };
@@ -25627,6 +25872,392 @@ export type ClientInvoiceNotesControllerPutPolicyResponses = {
 };
 
 export type ClientInvoiceNotesControllerPutPolicyResponse = ClientInvoiceNotesControllerPutPolicyResponses[keyof ClientInvoiceNotesControllerPutPolicyResponses];
+
+export type ClientChargesControllerListData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        clientId?: string;
+        warehouseId?: string;
+        status?: 'pending' | 'approved' | 'rejected' | 'cancelled';
+        /**
+         * The billing month (YYYY-MM) — the invoice month that bills the charge
+         */
+        month?: string;
+        /**
+         * Opaque keyset cursor from a previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/client-charges';
+};
+
+export type ClientChargesControllerListErrors = {
+    /**
+     * A malformed clientId, warehouseId, status, month or limit (validation-failed), or a malformed cursor (invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ClientChargesControllerListError = ClientChargesControllerListErrors[keyof ClientChargesControllerListErrors];
+
+export type ClientChargesControllerListResponses = {
+    200: ClientChargeListResponse;
+};
+
+export type ClientChargesControllerListResponse = ClientChargesControllerListResponses[keyof ClientChargesControllerListResponses];
+
+export type ClientChargesControllerRecordData = {
+    body: RecordClientChargeDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-charges';
+};
+
+export type ClientChargesControllerRecordErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId or warehouseId, a category, unit or SAC outside its vocabulary (an `other` charge without one of the four services SACs, or a SAC on any other category), a blank or over-long description / reference / clientAuthorizationRef / evidenceNote, a malformed or out-of-range quantity, a rate outside ₹0.01 .. ₹1 lakh, an amount that rounds to ₹0.00 or passes ₹1 crore, or a chargeDate in the future or before 1 April of the previous financial year (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.charge — owner, ops manager and accountant (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such client, or no such warehouse, in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The tenant's own client (client-not-billable), a suspended or departed client (client-not-active), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientChargesControllerRecordError = ClientChargesControllerRecordErrors[keyof ClientChargesControllerRecordErrors];
+
+export type ClientChargesControllerRecordResponses = {
+    /**
+     * The charge and any non-blocking warnings
+     */
+    201: RecordClientChargeResponse;
+};
+
+export type ClientChargesControllerRecordResponse = ClientChargesControllerRecordResponses[keyof ClientChargesControllerRecordResponses];
+
+export type ClientChargesControllerGetData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        chargeId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-charges/{chargeId}';
+};
+
+export type ClientChargesControllerGetErrors = {
+    /**
+     * A malformed chargeId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No ad-hoc charge with this id exists in this tenant (charge-not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientChargesControllerGetError = ClientChargesControllerGetErrors[keyof ClientChargesControllerGetErrors];
+
+export type ClientChargesControllerGetResponses = {
+    200: ClientChargeResponse;
+};
+
+export type ClientChargesControllerGetResponse = ClientChargesControllerGetResponses[keyof ClientChargesControllerGetResponses];
+
+export type ClientChargesControllerApproveData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        chargeId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-charges/{chargeId}/approve';
+};
+
+export type ClientChargesControllerApproveErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed chargeId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No ad-hoc charge with this id exists in this tenant (charge-not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * You recorded it (charge-needs-second-approver); The charge is not pending (charge-not-pending), its billing month is already invoiced under its GSTIN (charge-period-invoiced), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientChargesControllerApproveError = ClientChargesControllerApproveErrors[keyof ClientChargesControllerApproveErrors];
+
+export type ClientChargesControllerApproveResponses = {
+    200: ClientChargeResponse;
+};
+
+export type ClientChargesControllerApproveResponse = ClientChargesControllerApproveResponses[keyof ClientChargesControllerApproveResponses];
+
+export type ClientChargesControllerRejectData = {
+    body: ChargeNoteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        chargeId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-charges/{chargeId}/reject';
+};
+
+export type ClientChargesControllerRejectErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed chargeId, or a missing or over-long note (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No ad-hoc charge with this id exists in this tenant (charge-not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The charge is not pending (charge-not-pending), its billing month is already invoiced under its GSTIN (charge-period-invoiced), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientChargesControllerRejectError = ClientChargesControllerRejectErrors[keyof ClientChargesControllerRejectErrors];
+
+export type ClientChargesControllerRejectResponses = {
+    200: ClientChargeResponse;
+};
+
+export type ClientChargesControllerRejectResponse = ClientChargesControllerRejectResponses[keyof ClientChargesControllerRejectResponses];
+
+export type ClientChargesControllerCancelData = {
+    body: ChargeNoteDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        chargeId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-charges/{chargeId}/cancel';
+};
+
+export type ClientChargesControllerCancelErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed chargeId, or a missing or over-long note (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant, or another member’s pending charge / an approved charge without billing.invoice (permission-denied), or the caller lacks billing.charge (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No ad-hoc charge with this id exists in this tenant (charge-not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The charge is rejected or already cancelled (charge-not-cancellable), it is billed on an issued, disputed or settled invoice or its billing month is invoiced (charge-period-invoiced), or a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientChargesControllerCancelError = ClientChargesControllerCancelErrors[keyof ClientChargesControllerCancelErrors];
+
+export type ClientChargesControllerCancelResponses = {
+    200: ClientChargeResponse;
+};
+
+export type ClientChargesControllerCancelResponse = ClientChargesControllerCancelResponses[keyof ClientChargesControllerCancelResponses];
+
+export type ClientChargesControllerGetPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-charge-policy';
+};
+
+export type ClientChargesControllerGetPolicyErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session — a user with a client (role-denied): this is an operator surface
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ClientChargesControllerGetPolicyError = ClientChargesControllerGetPolicyErrors[keyof ClientChargesControllerGetPolicyErrors];
+
+export type ClientChargesControllerGetPolicyResponses = {
+    200: ChargePolicyResponse;
+};
+
+export type ClientChargesControllerGetPolicyResponse = ClientChargesControllerGetPolicyResponses[keyof ClientChargesControllerGetPolicyResponses];
+
+export type ClientChargesControllerPutPolicyData = {
+    body: ChargePolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/client-charge-policy';
+};
+
+export type ClientChargesControllerPutPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a limit outside ₹0 .. ₹1 crore (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks billing.invoice — owner and accountant only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * A concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientChargesControllerPutPolicyError = ClientChargesControllerPutPolicyErrors[keyof ClientChargesControllerPutPolicyErrors];
+
+export type ClientChargesControllerPutPolicyResponses = {
+    200: ChargePolicyResponse;
+};
+
+export type ClientChargesControllerPutPolicyResponse = ClientChargesControllerPutPolicyResponses[keyof ClientChargesControllerPutPolicyResponses];
 
 export type PortalControllerMeData = {
     body?: never;
