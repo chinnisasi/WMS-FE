@@ -2,14 +2,15 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 import { refreshSessionUser } from '@/lib/api/client';
 import { readSession, subscribeSession, signedOutLoginHref } from '@/lib/auth';
-import { visibleNavItems } from '@/lib/navigation';
+import { shellTitle, visibleNavItems } from '@/lib/navigation';
 import { operatorShellRoute } from '@/lib/portal';
 
 import { SignOutButton } from '@/components/auth/sign-out';
+import { Logo } from '@/components/shared/logo';
 import { CommandPalette } from './command-palette';
 import { NotificationBell } from './notification-bell';
 import { Sidebar, ThemeToggle } from './sidebar';
@@ -50,6 +51,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function OperatorShell({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Story UI-1 — "where am I" in the header (small, muted, from md up).
+  const title = shellTitle(usePathname());
   const menuRef = useRef<HTMLDetailsElement>(null);
 
   // Bootstrap the signed-in user (story 1.5): the stored role is as of the
@@ -133,10 +136,18 @@ function OperatorShell({ children }: { children: React.ReactNode }) {
                   Security
                 </Link>
                 <SignOutButton className="mb-2 block px-2 py-1 text-left text-sm hover:bg-(--muted)" />
-                <ThemeToggle />
+                <ThemeToggle labelled />
               </div>
             </nav>
           </details>
+          <span className="md:hidden">
+            <Logo compact />
+          </span>
+          {title !== null && (
+            <span className="hidden truncate text-sm text-(--muted-foreground) md:inline" data-testid="shell-title">
+              {title}
+            </span>
+          )}
           {/* Story 9-2 — the notification bell: a sibling layer of the menu,
               beside Search (it carries the ml-auto that pushes both right). */}
           <NotificationBell paletteOpen={paletteOpen} />

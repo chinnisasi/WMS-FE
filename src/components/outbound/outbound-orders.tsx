@@ -90,6 +90,8 @@ import {
   Section,
   selectClass,
 } from '@/components/outbound/shell';
+import { StatusChip } from '@/components/shared/status-chip';
+import { orderStatusTone } from '@/lib/status-tone';
 
 /**
  * The Outbound orders surface (story 4.2b) — the first web consumer of the
@@ -750,9 +752,7 @@ function OrdersTable({
       key: 'status',
       header: 'Status',
       render: (order) => (
-        <span className="rounded-full border border-(--border) bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">
-          {orderStatusLabel(order.status)}
-        </span>
+        <StatusChip tone={orderStatusTone(order.status)}>{orderStatusLabel(order.status)}</StatusChip>
       ),
     },
     ...(showClients(clients)
@@ -903,14 +903,13 @@ function OrdersTable({
               <OrderDetailPanel orderId={order.id} warehouseId={warehouseId} canManageReturns={canManageReturns} />
             ) : null
           }
+          loading={orders.state === 'loading' ? 'Loading orders…' : undefined}
           emptyMessage={
-            orders.state === 'loading'
-              ? 'Loading orders…'
-              : loaded.length === 0
-                ? searching !== null
-                  ? orderSearchEmptyMessage(searching, warehouseLabel, active ?? { state: 'all' }, tenantName)
-                  : 'No orders in this warehouse yet.'
-                : 'No orders on this page match that status.'
+            loaded.length === 0
+              ? searching !== null
+                ? orderSearchEmptyMessage(searching, warehouseLabel, active ?? { state: 'all' }, tenantName)
+                : 'No orders in this warehouse yet.'
+              : 'No orders on this page match that status.'
           }
         />
       )}
@@ -1065,15 +1064,9 @@ export function OrderDetailPanel({
               {/* The line's own SKU names the unit and its precision — a
                   column mixing units has no single one. */}
               <span className="data">{lineQuantityLabel(line, skuMap?.[line.skuId])}</span>
-              <span
-                className={
-                  line.status === 'backordered'
-                    ? 'rounded-full border border-(--destructive) px-2 py-0.5 text-(--destructive)'
-                    : 'rounded-full border border-(--border) px-2 py-0.5 text-(--muted-foreground)'
-                }
-              >
+              <StatusChip tone={line.status === 'backordered' ? 'danger' : 'neutral'}>
                 {line.status === 'backordered' ? 'Backordered' : 'Open'}
-              </span>
+              </StatusChip>
               {/* A kit parent's reservationId is always null — the holds it
                   earns belong to its children — so the ordinary hold label
                   would read "No hold" and imply it got nothing. The label
@@ -1100,15 +1093,9 @@ export function OrderDetailPanel({
                     <span className="font-mono">{skuMap?.[child.skuId]?.code ?? child.skuId}</span>
                     <span className="text-(--muted-foreground)">{skuMap?.[child.skuId]?.name ?? ''}</span>
                     <span className="data">{lineQuantityLabel(child, skuMap?.[child.skuId])}</span>
-                    <span
-                      className={
-                        child.status === 'backordered'
-                          ? 'rounded-full border border-(--destructive) px-2 py-0.5 text-(--destructive)'
-                          : 'rounded-full border border-(--border) px-2 py-0.5 text-(--muted-foreground)'
-                      }
-                    >
+                    <StatusChip tone={child.status === 'backordered' ? 'danger' : 'neutral'}>
                       {child.status === 'backordered' ? 'Backordered' : 'Open'}
-                    </span>
+                    </StatusChip>
                     <span className="text-(--muted-foreground)">Hold: {holdStateLabel(child)}</span>
                     <HandlingBadges sku={skuMap?.[child.skuId]} />
                   </li>

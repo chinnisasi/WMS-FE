@@ -196,10 +196,10 @@ describe('LoginForm: where a sign-in lands (story 21-7)', () => {
     expect(stored.user.clientId).toBeNull();
   });
 
-  test('a client-portal user goes to /portal/stock with its client in the session', async () => {
+  test('a client-portal user goes to /portal (Home, UI-1) with its client in the session', async () => {
     signInClient = { id: 'c-1', code: 'BRAND-A', name: 'Brand A' };
     await signIn();
-    expect(pushes).toEqual(['/portal/stock']);
+    expect(pushes).toEqual(['/portal']);
     const stored = JSON.parse(localStorage.getItem('wms-session')!) as { client: unknown; user: { clientId: unknown } };
     expect(stored.client).toEqual(signInClient);
     expect(stored.user.clientId).toBe('c-1');

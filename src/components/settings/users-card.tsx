@@ -36,6 +36,7 @@ import { useUsers } from '@/lib/use-users';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ConfirmRow } from '@/components/settings/confirm-row';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { StatusChip } from '@/components/shared/status-chip';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -387,8 +388,6 @@ function InviteForm({
   );
 }
 
-const chipClass = 'rounded-full border px-2 py-0.5 text-xs';
-
 /** Story 6-1a — `lockedUntil` in the future reads "Locked" (words, not colour alone). */
 export function isSignInLocked(user: Pick<UserRow, 'lockedUntil'>, now = Date.now()): boolean {
   return typeof user.lockedUntil === 'string' && Date.parse(user.lockedUntil) > now;
@@ -401,21 +400,21 @@ function UserStatusBadges({ user, showSecondFactor }: { user: UserRow; showSecon
   return (
     <span className="flex flex-wrap gap-1">
       {user.status === 'invited' ? (
-        <span className={`${chipClass} border-(--border) bg-(--muted) text-(--muted-foreground)`}>Invited</span>
+        <StatusChip tone="neutral">Invited</StatusChip>
       ) : user.status === 'deactivated' ? (
-        <span className={`${chipClass} border-(--destructive) text-(--destructive)`}>Deactivated</span>
+        <StatusChip tone="danger">Deactivated</StatusChip>
       ) : (
-        <span className={`${chipClass} border-(--accent) text-(--accent-foreground)`}>Active</span>
+        <StatusChip tone="success">Active</StatusChip>
       )}
       {isSignInLocked(user) && (
-        <span className={`${chipClass} border-(--warning,#b45309) text-(--warning,#b45309)`} title={`Locked until ${user.lockedUntil}`}>
+        <StatusChip tone="warning" title={`Locked until ${user.lockedUntil}`}>
           Sign-in locked
-        </span>
+        </StatusChip>
       )}
       {chip !== null && (
-        <span data-testid="second-factor-chip" className={`${chipClass} border-(--border) text-(--muted-foreground)`}>
+        <StatusChip tone="neutral" data-testid="second-factor-chip">
           {chip}
-        </span>
+        </StatusChip>
       )}
       {emailWords !== null && (
         <span data-testid="invite-email-status" className="text-xs text-(--muted-foreground)">

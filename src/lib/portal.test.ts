@@ -32,10 +32,11 @@ import {
   portalOrderReason,
   type PortalOrderDraft,
 } from './portal';
+import { asnExpected, atLeastCount, orderTimeline, portalDateTime, portalNavCurrent, PORTAL_HOME } from './portal';
 
 describe('portal routing (story 21-7)', () => {
   test('sign-in sends a client user to the portal and staff to Settings', () => {
-    expect(signInDestination({ clientId: 'c-1' })).toBe('/portal/stock');
+    expect(signInDestination({ clientId: 'c-1' })).toBe('/portal'); // UI-1: the portal's Home
     expect(signInDestination({ clientId: null })).toBe('/settings');
     expect(signInDestination({})).toBe('/settings');
   });
@@ -46,8 +47,9 @@ describe('portal routing (story 21-7)', () => {
     expect(loginNotice('other')).toBeNull();
   });
 
-  test('the five portal surfaces, in order (21-8 adds Service)', () => {
+  test('Home, then the five portal surfaces, in order (21-8 adds Service; UI-1 adds Home)', () => {
     expect(PORTAL_NAV.map((item) => [item.label, item.href])).toEqual([
+      ['Home', '/portal'],
       ['Stock', '/portal/stock'],
       ['Orders', '/portal/orders'],
       ['Inbound', '/portal/inbound'],
@@ -373,5 +375,52 @@ describe('portalOrderReason (story 4-1a)', () => {
 
   test('the transport arm is the house unreachable copy', () => {
     expect(portalOrderReason(new TypeError('fetch failed'))).toBe('The API is unreachable — is wms-be running?');
+  });
+});
+
+describe('story UI-1 — Home counts, nav, and the order timeline', () => {
+  test('atLeastCount: the number shown, "+" only when the list has another page — never the page size', () => {
+    expect(atLeastCount(3, null)).toBe('3');
+    expect(atLeastCount(3, 'CURSOR-2')).toBe('3+'); // a filtered page: at least 3
+    expect(atLeastCount(0, 'CURSOR-2')).toBe('0+');
+    expect(atLeastCount(0, null)).toBe('0');
+  });
+
+  test('asnExpected: announced or part-received only', () => {
+    expect(asnExpected({ status: 'announced' })).toBe(true);
+    expect(asnExpected({ status: 'partially_received' })).toBe(true);
+    for (const status of ['received', 'closed', 'cancelled'] as const) expect(asnExpected({ status })).toBe(false);
+  });
+
+  test('portalNavCurrent: Home only on exact /portal; a surface on itself and its children', () => {
+    expect(PORTAL_HOME).toBe('/portal');
+    const home = { href: '/portal' };
+    expect(portalNavCurrent(home, '/portal')).toBe(true);
+    expect(portalNavCurrent(home, '/portal/stock')).toBe(false);
+    expect(portalNavCurrent({ href: '/portal/orders' }, '/portal/orders')).toBe(true);
+    expect(portalNavCurrent({ href: '/portal/orders' }, '/portal/orders/x')).toBe(true);
+    expect(portalNavCurrent({ href: '/portal/orders' }, '/portal/ordersx')).toBe(false);
+    expect(portalNavCurrent(home, null)).toBe(false);
+  });
+
+  const placed = '2026-10-26T08:35:00.000Z'; // 14:05 IST
+  test('portalDateTime: IST date and 24-hour time', () => {
+    expect(portalDateTime(placed)).toBe('26 Oct 2026, 14:05 IST');
+  });
+
+  test('orderTimeline: Placed with its IST time, then the steps of the status — no invented times', () => {
+    const shape = (status: Parameters<typeof orderTimeline>[0]['status']) =>
+      orderTimeline({ status, createdAt: placed }).map((s) => `${s.label}:${s.state}${s.time === undefined ? '' : '@'}`);
+    expect(shape('accepted')).toEqual(['Placed:done@', 'Accepted:current', 'Packed:upcoming', 'Dispatched:upcoming']);
+    expect(shape('ready_to_dispatch')).toEqual(['Placed:done@', 'Accepted:done', 'Packed:current', 'Dispatched:upcoming']);
+    expect(shape('dispatched')).toEqual(['Placed:done@', 'Accepted:done', 'Packed:done', 'Dispatched:done']);
+    // Cancelled: how far it got is not in the read, so the timeline does not guess.
+    expect(shape('cancelled')).toEqual(['Placed:done@', 'Cancelled:stopped']);
+    expect(orderTimeline({ status: 'accepted', createdAt: placed })[0]!.time).toBe('26 Oct 2026, 14:05 IST');
+  });
+
+  test('orderTimeline: a status this build does not know reads Placed alone', () => {
+    const steps = orderTimeline({ status: 'on_hold' as never, createdAt: placed });
+    expect(steps.map((s) => s.label)).toEqual(['Placed']);
   });
 });

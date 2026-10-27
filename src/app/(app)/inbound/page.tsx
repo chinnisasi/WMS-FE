@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { InboundCards } from '@/components/inbound/inbound-cards';
 import { UnsupportedDrillNotice } from '@/components/shared/drill-banner';
 import { drillKey, parseDrill } from '@/lib/drill';
@@ -21,9 +22,10 @@ export default async function InboundPage({
   const tab = parseInboundTab(params);
   const qcGrnId = parseInboundQcGrn(params);
   return (
-    <>
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Inbound" description="Purchase orders, shipment notices, gate-ins and receipts — from the dock to a putaway bin." />
       {drill === 'unsupported' && <UnsupportedDrillNotice />}
       <InboundCards key={`${drillKey(drill)}|${tab ?? 'default'}|${qcGrnId ?? ''}`} drill={drill} initialTab={tab} qcGrnId={qcGrnId} />
-    </>
+    </div>
   );
 }

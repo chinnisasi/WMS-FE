@@ -43,7 +43,7 @@ import { ReadFailure, Section, buttonClass, inputClass, primaryClass, rowButtonC
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
 
-const thClass = 'h-10 border-b border-(--border) px-3 text-left font-medium text-(--muted-foreground)';
+const thClass = 'h-10 border-b border-(--border) px-3 text-left font-medium text-(--foreground)';
 
 /**
  * Story 3-5a — the count tasks of one warehouse: newest first, status and

@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { AuditTrail } from '@/components/reports/audit-trail';
 import { ClientService } from '@/components/reports/client-service';
 import { LedgerIntegrity } from '@/components/reports/ledger-integrity';
@@ -18,13 +19,11 @@ export const metadata = { title: 'Reports' };
  */
 export default function ReportsPage() {
   return (
-    <div className="flex flex-col gap-4">
-      <section>
-        <h1 className="text-lg font-semibold">Reports</h1>
-        <p className="mt-1 max-w-prose text-sm text-(--muted-foreground)">
-          Registers to download, how the operation performed for each client and, for the owner, who changed what and when.
-        </p>
-      </section>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Reports"
+        description="Registers to download, how the operation performed for each client and, for the owner, who changed what and when."
+      />
       <OperationalReports />
       <ClientService />
       <AuditTrail />

@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { Outbound } from '@/components/outbound/outbound';
 import { UnsupportedDrillNotice } from '@/components/shared/drill-banner';
 import { drillKey, parseDrill } from '@/lib/drill';
@@ -21,9 +22,10 @@ export default async function OutboundPage({
   const drill = parseDrill('outbound', params);
   const tab = OUTBOUND_PAGE_TABS.parse(params);
   return (
-    <>
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Outbound" description="Orders, waves, picking, packing and dispatch." />
       {drill === 'unsupported' && <UnsupportedDrillNotice />}
       <Outbound key={`${drillKey(drill)}|${tab ?? 'default'}`} drill={drill} initialTab={tab} />
-    </>
+    </div>
   );
 }

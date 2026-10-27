@@ -32,6 +32,7 @@ let PortalOrders: ComponentType;
 let PortalInbound: ComponentType;
 let PortalInvoices: ComponentType;
 let PortalService: ComponentType;
+let PortalHome: ComponentType;
 
 beforeAll(async () => {
   const real = await import('next/navigation');
@@ -51,6 +52,7 @@ beforeAll(async () => {
   ({ PortalInbound } = await import('./portal-inbound'));
   ({ PortalInvoices } = await import('./portal-invoices'));
   ({ PortalService } = await import('./portal-service'));
+  ({ PortalHome } = await import('./portal-home'));
 });
 
 const TENANT_ID = '0198f7a2-1b3c-7d4e-8f90-112233445566';
@@ -166,7 +168,7 @@ describe('AppShell — the operator fence on the web', () => {
     );
     await settle();
     expect(requests).toEqual([]);
-    expect(replaces).toEqual(['/portal/stock']);
+    expect(replaces).toEqual(['/portal']); // UI-1: the portal's Home
     expect(view.container.querySelector('[data-testid="operator-page"]')).toBeNull();
   });
 
@@ -221,7 +223,10 @@ describe('PortalShell', () => {
     await settle();
     expect(view.container.querySelector('[data-testid="portal-company"]')!.textContent).toBe('Brand A Apparel');
     const nav = [...view.container.querySelectorAll('nav[aria-label="Portal"] a')].map((a) => a.textContent);
-    expect(nav).toEqual(['Stock', 'Orders', 'Inbound', 'Invoices', 'Service']);
+    expect(nav).toEqual(['Home', 'Stock', 'Orders', 'Inbound', 'Invoices', 'Service']); // UI-1 adds Home
+    // On /portal/stock, Stock is current and Home is not (Home matches exact /portal only).
+    const current = [...view.container.querySelectorAll('nav[aria-label="Portal"] a[aria-current="page"]')].map((a) => a.textContent);
+    expect(current).toEqual(['Stock']);
     expect(view.container.querySelector('[data-testid="portal-page"]')).not.toBeNull();
     expect(requests).toEqual([`GET /api/v1/tenants/${TENANT_ID}/portal/me`]);
     expect(replaces).toEqual([]);
@@ -1360,5 +1365,100 @@ describe('PortalService (21-8)', () => {
     window.removeEventListener('wms-portal-suspended', onSuspended);
     expect(announced).toBeGreaterThanOrEqual(1);
     expect(container.textContent).toContain("Your company's portal access is suspended.");
+  });
+});
+
+describe('story UI-1 — the portal Home', () => {
+  beforeEach(() => {
+    writeSession(PORTAL_SESSION);
+  });
+
+  const order = (id: string, status: string, ref: string) => ({
+    id,
+    status,
+    source: 'manual',
+    externalRef: null,
+    clientOrderRef: ref,
+    orderType: 'b2c',
+    priority: 'normal',
+    shipByDate: null,
+    codAmountPaise: null,
+    warehouseName: 'Whitefield',
+    destinationName: 'Asha',
+    destinationCity: 'Bengaluru',
+    destinationPincode: '560001',
+    lineCount: 1,
+    createdAt: '2026-10-08T10:00:00.000Z',
+  });
+
+  test('a client without the write capabilities sees no action buttons on Home', async () => {
+    writeSession({ ...PORTAL_SESSION, user: { ...PORTAL_SESSION.user, role: 'viewer' as never } });
+    routes = { '/portal/service': [503, { code: 'report-unavailable', status: 503, title: 'Report unavailable', detail: 'slow' }] };
+    view = render(<PortalHome />);
+    await settle();
+    const names = [...view.container.querySelectorAll('a')].map((a) => a.textContent);
+    expect(names).not.toContain('Place an order');
+    expect(names).not.toContain('Announce a shipment');
+  });
+
+  test('welcome header with the two writes; counts say "+" when the list has another page; a failed read fails only its tile', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [order('o-1', 'accepted', 'SO-1'), order('o-2', 'dispatched', 'SO-2')], nextCursor: 'CURSOR-2' }],
+      '/portal/inbound/asns': [503, { code: 'unavailable', status: 503, title: 'Down', detail: 'The ASN read failed.' }],
+      '/portal/service': [503, { code: 'report-unavailable', status: 503, title: 'Report unavailable', detail: 'slow' }],
+    };
+    view = render(<PortalHome />);
+    await settle();
+    const c = view.container;
+    expect(c.querySelector('h1')!.textContent).toBe('Welcome, Brand A Apparel');
+    const links = [...c.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')]);
+    expect(links).toContainEqual(['Place an order', '/portal/orders']);
+    expect(links).toContainEqual(['Announce a shipment', '/portal/inbound']);
+    // One page of two rows with a next cursor: at least 2, never the page size.
+    expect(c.querySelector('[aria-label="Being prepared: 2+"]')).not.toBeNull();
+    expect(c.querySelector('[aria-label="Packed, awaiting dispatch: 2+"]')).not.toBeNull();
+    // The ASN read failed: that tile alone shows the reason and Retry.
+    expect(c.textContent).toContain('Shipments expected not loaded');
+    expect(c.textContent).toContain('The ASN read failed.');
+    expect(c.querySelector('[aria-label^="Shipments expected:"]')).toBeNull();
+    // Recent orders: newest first as served, each with its status chip.
+    const recent = [...c.querySelectorAll('[data-testid="recent-orders"] li')].map((li) => li.textContent ?? '');
+    expect(recent).toHaveLength(2);
+    expect(recent[0]).toContain('SO-1');
+    expect(recent[0]).toContain('Accepted');
+    expect(c.querySelector('[data-testid="recent-orders"] [data-tone="success"]')!.textContent).toBe('Dispatched');
+    // Every request is a portal route, and each count tile reads its own status.
+    expect(requests.every((r) => r.includes('/portal/'))).toBe(true);
+    const orderReads = urls.filter((u) => u.includes('/portal/orders'));
+    expect(orderReads.some((u) => u.includes('status=accepted'))).toBe(true);
+    expect(orderReads.some((u) => u.includes('status=ready_to_dispatch'))).toBe(true);
+    expect(orderReads.some((u) => !u.includes('status='))).toBe(true); // the recent list is unfiltered
+  });
+
+  test('a filtered count: only the expected ASNs on the page, with "+" for a further page', async () => {
+    const asn = (id: string, status: string) => ({ id, code: id, status, expectedAt: null, warehouseName: 'Whitefield', lineCount: 1, announcedTotal: 1, receivedTotal: 0, createdAt: '2026-10-08T10:00:00.000Z' });
+    routes = {
+      '/portal/inbound/asns': [200, { items: [asn('A1', 'announced'), asn('A2', 'closed'), asn('A3', 'partially_received')], nextCursor: 'C2' }],
+      '/portal/service': [503, { code: 'report-unavailable', status: 503, title: 'Report unavailable', detail: 'slow' }],
+    };
+    view = render(<PortalHome />);
+    await settle();
+    expect(view.container.querySelector('[aria-label="Shipments expected: 2+"]')).not.toBeNull();
+    expect(view.container.textContent).toContain('No orders yet');
+  });
+
+  test('an expanded portal order shows its timeline: Placed with the IST time, then where it is now', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [order(ORDER_ID, 'ready_to_dispatch', 'SO-9')], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...order(ORDER_ID, 'ready_to_dispatch', 'SO-9'), lines: [] }],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Lines'));
+    await settle();
+    const steps = [...view.container.querySelectorAll('[data-testid="status-timeline"] li')];
+    expect(steps.map((li) => li.getAttribute('data-state'))).toEqual(['done', 'done', 'current', 'upcoming']);
+    expect(steps[0]!.textContent).toContain('8 Oct 2026, 15:30 IST');
+    expect(steps[2]!.getAttribute('aria-current')).toBe('step');
   });
 });

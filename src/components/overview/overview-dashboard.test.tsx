@@ -490,3 +490,43 @@ describe('the warehouse', () => {
     expect(overviewReads()).toHaveLength(0);
   });
 });
+
+describe('story UI-1 — exceptions first, the page header and the health indicator', () => {
+  test('the strip leads with the server counts as amber chips; links only where the viewer can open them', async () => {
+    view = await mount();
+    const c = view.container;
+    expect(c.querySelector('h1')!.textContent).toBe('Overview');
+    const strip = c.querySelector('[data-testid="exception-strip"]')!;
+    // Strip before the first tile group.
+    expect(strip.compareDocumentPosition(c.querySelector('[aria-labelledby="overview-group-0"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(c.querySelector('[data-testid="exception-short-picks"]')!.textContent).toBe('⚠3 short-picked lines today');
+    expect(c.querySelector('[data-testid="exception-short-picks"] a')).toBeNull(); // no web screen for this drill
+    expect(c.querySelector('[data-testid="exception-pending-over-receipts"] a')!.getAttribute('href')!.startsWith('/conflicts?')).toBe(true);
+    expect(c.querySelector('[data-testid="exception-sync"]')!.textContent).toBe('⚠1 channel not syncing cleanly') // singular agrees with its count;
+    expect(c.querySelector('[data-testid="exceptions-cleared"]')).toBeNull();
+    // The three tile groups, every tile still present.
+    expect([...c.querySelectorAll('h2')].map((h) => h.textContent?.trim())).toEqual(
+      expect.arrayContaining(['Needs attention', 'Today’s flow', 'Exceptions and accuracy', 'Stock and channels']),
+    );
+    expect(c.querySelectorAll('[role="group"]')).toHaveLength(10);
+  });
+
+  test('without review.decide the over-receipt exception is a plain chip, not a link', async () => {
+    view = await mount('accountant');
+    expect(view.container.querySelector('[data-testid="exception-pending-over-receipts"] a')).toBeNull();
+    expect(view.container.querySelector('[data-testid="exception-pending-over-receipts"]')!.textContent).toContain('1 over-receipt awaiting a decision');
+  });
+
+  test('the health indicator sits in the header; unreachable reads as an amber chip with the words', async () => {
+    view = await mount();
+    const header = view.container.querySelector('[data-testid="page-header"]')!;
+    expect(header.querySelector('[data-testid="api-health"]')!.textContent).toContain('API health: ok · wms-be');
+    view.unmount();
+    writeSession(SESSION);
+    view = render(<OverviewDashboard health="unreachable" />);
+    await settle();
+    const chip = view.container.querySelector('[data-testid="api-health"]')!;
+    expect(chip.getAttribute('data-tone')).toBe('warning');
+    expect(chip.textContent).toContain('API health: unreachable');
+  });
+});

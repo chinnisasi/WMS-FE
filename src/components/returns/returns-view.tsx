@@ -50,6 +50,7 @@ import {
   selectClass,
 } from '@/components/outbound/shell';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
+import { StatusChip } from '@/components/shared/status-chip';
 
 const STATUS_OPTIONS: readonly ReturnStatus[] = ['open', 'partially_received', 'received', 'cancelled'];
 
@@ -259,9 +260,7 @@ export function ReturnsList({
       key: 'status',
       header: 'Status',
       render: (rma) => (
-        <span className="rounded-full border border-(--border) bg-(--muted) px-2 py-0.5 text-xs text-(--muted-foreground)">
-          {RETURN_STATUS_LABEL[rma.status]}
-        </span>
+        <StatusChip tone="neutral">{RETURN_STATUS_LABEL[rma.status]}</StatusChip>
       ),
     },
     { key: 'lines', header: 'Lines', numeric: true, render: (rma) => returnLinesSummary(rma) },
@@ -365,7 +364,8 @@ export function ReturnsList({
           nextCursor={returns.state === 'ready' ? returns.data.nextCursor : null}
           onCursor={returns.onCursor}
           renderExpanded={(rma) => (expandedId === rma.id ? <ReturnDetail tenantId={tenantId} rma={rma} skus={skuMap} /> : null)}
-          emptyMessage={returns.state === 'loading' ? 'Loading returns…' : 'No returns yet'}
+          loading={returns.state === 'loading' ? 'Loading returns…' : undefined}
+          emptyMessage='No returns yet'
         />
       )}
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
@@ -427,9 +427,7 @@ function ReturnDetail({
                   {receivedOfAuthorized(line, sku === undefined ? null : { uom: sku.uom, uomPrecision: sku.uomPrecision })}
                 </span>
                 {lineAwaitsDisposition(line) && (
-                  <span className="rounded-full border border-(--warning) bg-(--warning)/10 px-2 py-0.5 text-(--foreground)">
-                    {AWAITING_DISPOSITION_BADGE}
-                  </span>
+                  <StatusChip tone="warning">{AWAITING_DISPOSITION_BADGE}</StatusChip>
                 )}
               </div>
               {line.serials.length > 0 && (

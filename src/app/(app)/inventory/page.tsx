@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { InventoryScreen } from '@/components/inventory/inventory-screen';
 import { INVENTORY_PAGE_TABS } from '@/lib/page-tabs';
 
@@ -16,5 +17,10 @@ export default async function InventoryPage({
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const tab = INVENTORY_PAGE_TABS.parse(await searchParams);
-  return <InventoryScreen key={`none|${tab ?? 'default'}`} initialTab={tab} />;
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Inventory" description="What is on hand, in which bin, for which client — and the batches behind it." />
+      <InventoryScreen key={`none|${tab ?? 'default'}`} initialTab={tab} />
+    </div>
+  );
 }

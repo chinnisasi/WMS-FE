@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { ReturnsView } from '@/components/returns/returns-view';
 
 export const metadata = { title: 'Returns' };
@@ -10,13 +11,11 @@ export const metadata = { title: 'Returns' };
  */
 export default function ReturnsPage() {
   return (
-    <div className="flex flex-col gap-4">
-      <section>
-        <h1 className="text-lg font-semibold">Returns</h1>
-        <p className="mt-1 max-w-prose text-sm text-(--muted-foreground)">
-          Units authorized to come back from dispatched orders. Create a return from the order on the Outbound page.
-        </p>
-      </section>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Returns"
+        description="Units authorized to come back from dispatched orders. Create a return from the order on the Outbound page."
+      />
       <ReturnsView />
     </div>
   );

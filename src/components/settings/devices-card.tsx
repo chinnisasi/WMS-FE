@@ -12,6 +12,7 @@ import { useDevices } from '@/lib/use-devices';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ConfirmRow } from '@/components/settings/confirm-row';
 import { DataTable, type DataTableColumn } from '@/components/data-table/data-table';
+import { StatusChip } from '@/components/shared/status-chip';
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } | null;
 
@@ -89,18 +90,12 @@ function DevicesCardSessioned() {
       header: 'Status',
       render: (d) =>
         d.status === 'revoked' ? (
-          <span className="rounded-full border border-(--destructive) px-2 py-0.5 text-xs text-(--destructive)">
-            Revoked · wipe flagged
-          </span>
+          <StatusChip tone="danger">Revoked · wipe flagged</StatusChip>
         ) : (
           <span className="flex flex-wrap gap-1">
-            <span className="rounded-full border border-(--accent) px-2 py-0.5 text-xs text-(--accent-foreground)">
-              Active
-            </span>
+            <StatusChip tone="success">Active</StatusChip>
             {badgeLocked(d) && (
-              <span className="rounded-full border border-(--warning,#b45309) px-2 py-0.5 text-xs text-(--warning,#b45309)">
-                Badge-in locked
-              </span>
+              <StatusChip tone="warning">Badge-in locked</StatusChip>
             )}
           </span>
         ),

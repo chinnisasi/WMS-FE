@@ -1,8 +1,8 @@
-import { redirect } from 'next/navigation';
+import { PortalHome } from '@/components/portal/portal-home';
 
-import { PORTAL_HOME } from '@/lib/portal';
+export const metadata = { title: 'Home' };
 
-/** `/portal` has no surface of its own — Stock is the portal's home. */
+/** Story UI-1 — `/portal` is the portal's Home (until UI-1 it redirected to Stock). */
 export default function PortalIndexPage() {
-  redirect(PORTAL_HOME);
+  return <PortalHome />;
 }

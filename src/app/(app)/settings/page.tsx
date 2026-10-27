@@ -22,14 +22,14 @@ export default async function SettingsPage({
 }) {
   const tab = SETTINGS_PAGE_TABS.parse(await searchParams);
   return (
-    <section className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <SurfacePlaceholder
         title="Settings"
-        description="Includes device enrollment, the team's users and roles, the warehouse floor setup, the clients whose goods you hold and their rate cards, the business partners (vendors, consignees and transporters) and the clients each trades with, the catalog import, and the setup checklist (which aggregates completion state across onboarding stories)."
+        description="Your team and their roles, devices, the warehouse floor, clients and their rate cards, business partners and the catalog — with the setup checklist to see what is left."
       />
       <SetupChecklistCard />
       {/* Settings takes no drill, so the key is the tab alone. */}
       <SettingsTabs key={tab ?? 'default'} initialTab={tab} />
-    </section>
+    </div>
   );
 }

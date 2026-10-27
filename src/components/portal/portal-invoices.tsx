@@ -13,7 +13,7 @@ import {
 } from '@/lib/portal';
 import { usePortalInvoice, usePortalInvoices } from '@/lib/use-portal';
 
-import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { DataTable, TableSkeleton, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { ReadFailure, Section, rowButtonClass } from '@/components/shared/surface';
 
 /**
@@ -50,7 +50,7 @@ export function PortalInvoices() {
   ];
   return (
     <Section title="Invoices">
-      {invoices.state === 'loading' && <div className="text-(--muted-foreground)">Loading your invoices…</div>}
+      {invoices.state === 'loading' && <TableSkeleton columns={columns} label="Loading your invoices…" />}
       {invoices.state === 'failed' && <ReadFailure word="Invoices not loaded" reason={invoices.reason} onRetry={invoices.reload} />}
       {invoices.state === 'ready' && (
         <DataTable<PortalInvoiceRowDto>

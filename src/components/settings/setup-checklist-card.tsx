@@ -4,6 +4,7 @@ import Link from 'next/link';
 
 import { setupStepHref } from '@/lib/page-tabs';
 import { useSetupChecklist } from '@/lib/use-setup-checklist';
+import { StatusChip } from '@/components/shared/status-chip';
 
 /**
  * The setup checklist card (mockup `key-web-overview.html` setup-checklist
@@ -32,9 +33,9 @@ export function SetupChecklistCard() {
     <section className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm">
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-medium">Setup checklist</h2>
-        <span className="rounded-full border border-(--border) bg-(--muted) px-2 py-0.5 text-xs tabular-nums text-(--muted-foreground)">
+        <StatusChip tone="neutral" className="tabular-nums">
           {doneCount} of {total} done
-        </span>
+        </StatusChip>
       </div>
       <div className="flex items-center gap-2">
         <span

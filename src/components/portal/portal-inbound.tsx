@@ -31,7 +31,7 @@ import {
 } from '@/lib/use-portal';
 import { roleHasCapability } from '@/lib/users';
 
-import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { DataTable, TableSkeleton, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { LineRows } from '@/components/shared/line-rows';
 import { ReadFailure, Section, buttonClass, inputClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
@@ -133,7 +133,7 @@ function AsnsSection() {
           reason={`${lineCountLabel(announced.lineCount)} sent to ${announced.warehouseName} — the warehouse receives against it when it arrives.`}
         />
       )}
-      {asns.state === 'loading' && <div className="text-(--muted-foreground)">Loading your shipment notices…</div>}
+      {asns.state === 'loading' && <TableSkeleton columns={columns} label="Loading your shipment notices…" />}
       {asns.state === 'failed' && <ReadFailure word="Notices not loaded" reason={asns.reason} onRetry={asns.reload} />}
       {asns.state === 'ready' && (
         <DataTable<PortalAsnRowDto>
@@ -336,7 +336,7 @@ function PurchaseOrdersSection() {
   ];
   return (
     <Section title="Purchase orders">
-      {pos.state === 'loading' && <div className="text-(--muted-foreground)">Loading your purchase orders…</div>}
+      {pos.state === 'loading' && <TableSkeleton columns={columns} label="Loading your purchase orders…" />}
       {pos.state === 'failed' && <ReadFailure word="Purchase orders not loaded" reason={pos.reason} onRetry={pos.reload} />}
       {pos.state === 'ready' && (
         <DataTable<PortalPurchaseOrderRowDto>

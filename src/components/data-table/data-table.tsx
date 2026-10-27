@@ -2,6 +2,8 @@
 
 import { Fragment, useState } from 'react';
 
+import { LoadingStatus, SkeletonRows } from '@/components/shared/skeleton';
+
 /**
  * Data-table primitive — the spine every list surface drops into (stubbed in
  * Story 1.1): dense ~40px rows, sticky header, tabular numerals on numeric
@@ -42,6 +44,53 @@ export interface DataTableProps<T extends { id: string }> {
    * table only supplies the slot.
    */
   readonly renderExpanded?: (row: T) => React.ReactNode;
+  /**
+   * Story UI-1 — a cold load (no data yet): the header renders, the body is
+   * five skeleton rows, the table is `aria-busy`, and these words are
+   * announced (visually hidden). Pass it only while the read has no data;
+   * absent, the table renders exactly as before. Prev/Next are untouched.
+   */
+  readonly loading?: string;
+}
+
+function HeaderRow<T>({ columns }: { columns: readonly DataTableColumn<T>[] }) {
+  return (
+    <thead className="sticky top-0 bg-(--muted)">
+      <tr>
+        {columns.map((c) => (
+          <th
+            key={c.key}
+            scope="col"
+            className={`h-10 border-b border-(--border) px-3 text-left font-medium text-(--foreground) ${
+              c.numeric ? 'data text-right' : ''
+            }`}
+          >
+            {c.header}
+          </th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
+/**
+ * Story UI-1 — the skeleton of a table for a surface that renders NO table
+ * while its read loads (the portal lists): the same header and five skeleton
+ * rows, no pager. A separate element, so the real `DataTable` still mounts
+ * fresh on ready exactly as before.
+ */
+export function TableSkeleton<T>({ columns, label }: { readonly columns: readonly DataTableColumn<T>[]; readonly label: string }) {
+  return (
+    <div className="overflow-x-auto rounded-md border border-(--border)" data-testid="table-skeleton">
+      <LoadingStatus label={label} />
+      <table aria-busy="true" className="w-full border-collapse text-sm">
+        <HeaderRow columns={columns} />
+        <tbody>
+          <SkeletonRows columns={columns.length} />
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export function DataTable<T extends { id: string }>({
@@ -51,6 +100,7 @@ export function DataTable<T extends { id: string }>({
   onCursor,
   emptyMessage = 'No rows yet.',
   renderExpanded,
+  loading,
 }: DataTableProps<T>) {
   // Tracks the cursor that produced the current page; null = first page, so
   // Prev is disabled until a Next has actually happened.
@@ -61,24 +111,13 @@ export function DataTable<T extends { id: string }>({
   };
   return (
     <div className="overflow-x-auto rounded-md border border-(--border)">
-      <table className="w-full border-collapse text-sm">
-        <thead className="sticky top-0 bg-(--muted)">
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                scope="col"
-                className={`h-10 border-b border-(--border) px-3 text-left font-medium text-(--muted-foreground) ${
-                  c.numeric ? 'data text-right' : ''
-                }`}
-              >
-                {c.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
+      {loading !== undefined && <LoadingStatus label={loading} />}
+      <table aria-busy={loading !== undefined ? 'true' : undefined} className="w-full border-collapse text-sm">
+        <HeaderRow columns={columns} />
         <tbody>
-          {rows.length === 0 ? (
+          {loading !== undefined ? (
+            <SkeletonRows columns={columns.length} />
+          ) : rows.length === 0 ? (
             <tr>
               <td colSpan={columns.length} className="h-24 px-3 text-center text-(--muted-foreground)">
                 {emptyMessage}

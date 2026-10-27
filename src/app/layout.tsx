@@ -2,14 +2,15 @@ import type { Metadata } from 'next';
 import { GeistSans } from 'geist/font/sans';
 
 import { RUNTIME_CONFIG_PATH } from '@/lib/api/base-url';
+import { PRODUCT_NAME } from '@/lib/navigation';
 import { THEME_STORAGE_KEY } from '@/lib/theme';
 
 import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'WMS',
-    template: '%s · WMS',
+    default: PRODUCT_NAME,
+    template: `%s · ${PRODUCT_NAME}`,
   },
   description: 'Multi-tenant warehouse management',
 };

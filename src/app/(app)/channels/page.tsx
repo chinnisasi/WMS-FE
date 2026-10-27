@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { ChannelsView } from '@/components/channels/channels-view';
 
 export const metadata = { title: 'Channels' };
@@ -10,5 +11,10 @@ export const metadata = { title: 'Channels' };
  * consult `channel.manage`.
  */
 export default function ChannelsPage() {
-  return <ChannelsView />;
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Channels" description="Sales channels connected to the warehouse, and how their sync is doing." />
+      <ChannelsView />
+    </div>
+  );
 }

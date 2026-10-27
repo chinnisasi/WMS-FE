@@ -27,7 +27,10 @@
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
   --border: #e4e4e7;
-  --input: #e4e4e7;
+  /* Story UI-1 (WCAG 1.4.11) — an input's boundary needs 3:1. zinc-200
+     (#e4e4e7) was 1.27:1 on white; zinc-500 is 4.83:1. An alias onto an
+     existing zinc, not a new hue. */
+  --input: #71717a;
   /* Focus indicator: Primary Blue per DESIGN.md (zinc-400 default fails
      WCAG 2.2 AA 1.4.11 non-text contrast on white at ≈2.5:1; blue is ≈8:1). */
   --ring: #1e4e8c;
@@ -61,7 +64,8 @@
   --destructive: #ef4444;
   --destructive-foreground: #fafafa;
   --border: #27272a;
-  --input: #27272a;
+  /* UI-1 — zinc-800 was ≈1.4:1 on the dark background; zinc-500 is ≈4.1:1. */
+  --input: #71717a;
   --ring: #d4d4d8;
 
   /* brand delta (dark pairs from DESIGN.md — never white on dark fills) */

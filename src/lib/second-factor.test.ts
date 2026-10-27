@@ -157,7 +157,7 @@ describe('notices and routing', () => {
     expect(existsSync(join(root, '(app)', 'account', 'security', 'page.tsx'))).toBe(true);
     expect(existsSync(join(root, '(portal)', 'account'))).toBe(false);
     const portal = { user: { clientId: 'c-1' } } as unknown as Session;
-    expect(operatorShellRoute(portal)).toEqual({ kind: 'redirect', href: '/portal/stock' });
+    expect(operatorShellRoute(portal)).toEqual({ kind: 'redirect', href: '/portal' }); // UI-1: the portal's Home
   });
 });
 

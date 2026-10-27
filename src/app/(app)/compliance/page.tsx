@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { ComplianceTabs } from '@/components/compliance/compliance-tabs';
 import { UnsupportedDrillNotice } from '@/components/shared/drill-banner';
 import { drillKey, parseDrill } from '@/lib/drill';
@@ -21,7 +22,8 @@ export default async function CompliancePage({
   const drill = parseDrill('compliance', params);
   const tab = COMPLIANCE_PAGE_TABS.parse(params);
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Compliance" description="Invoices, e-way bills, HSN summaries, licences and cold-chain records." />
       {drill === 'unsupported' && <UnsupportedDrillNotice />}
       <ComplianceTabs key={`${drillKey(drill)}|${tab ?? 'default'}`} drill={drill} initialTab={tab} />
     </div>

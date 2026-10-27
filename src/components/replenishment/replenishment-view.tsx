@@ -90,6 +90,7 @@ import {
   rowButtonClass,
   selectClass,
 } from '@/components/outbound/shell';
+import { StatusChip } from '@/components/shared/status-chip';
 
 /**
  * The Replenishment surface (story 6-1, the expiry/aging queue is story
@@ -795,9 +796,7 @@ function BatchAlertCard({
           <span className="font-mono text-xs text-(--muted-foreground)">{warehouseLabel}</span>
         )}
         {isOpen && (
-          <span className="rounded-full border border-(--warning) bg-(--warning)/10 px-2 py-0.5 text-xs font-medium text-(--foreground)">
-            {BATCH_ALERT_KIND_LABEL[entry.kind]}
-          </span>
+          <StatusChip tone="warning">{BATCH_ALERT_KIND_LABEL[entry.kind]}</StatusChip>
         )}
       </div>
       <div className="data flex flex-wrap gap-x-4 gap-y-0.5 text-xs">

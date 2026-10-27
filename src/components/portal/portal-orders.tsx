@@ -18,6 +18,7 @@ import {
   orderDestination,
   orderReference,
   orderStatusLabel,
+  orderTimeline,
   parsePortalOrderCreate,
   placedOrderBanner,
   PORTAL_ORDER_NO_SKUS_MESSAGE,
@@ -35,13 +36,16 @@ import { ulid } from '@/lib/ulid';
 import { usePortalOrder, usePortalOrders, usePortalSkuOptions, usePortalStockRows, usePortalWarehouses } from '@/lib/use-portal';
 import { roleHasCapability } from '@/lib/users';
 
-import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { DataTable, TableSkeleton, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { LineRows } from '@/components/shared/line-rows';
 import { OrderSearch } from '@/components/shared/order-search';
 import { ShipToFieldset } from '@/components/shared/ship-to-fieldset';
 import { ReadFailure, Section, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
 import { WarehousesFailure } from '@/components/shared/warehouses-failure';
+import { StatusChip } from '@/components/shared/status-chip';
+import { StatusTimeline } from '@/components/shared/status-timeline';
+import { orderStatusTone } from '@/lib/status-tone';
 
 /**
  * Story 21-7 — the portal's Orders surface: this company's orders, newest
@@ -87,7 +91,7 @@ export function PortalOrders() {
       ),
     },
     { key: 'ref', header: 'Reference', render: (row) => orderReference(row) },
-    { key: 'status', header: 'Status', render: (row) => orderStatusLabel(row.status) },
+    { key: 'status', header: 'Status', render: (row) => <StatusChip tone={orderStatusTone(row.status)}>{orderStatusLabel(row.status)}</StatusChip> },
     // Story 4-2a — priority, ship-by and the payment line; the type beside them.
     { key: 'fields', header: 'Priority · ship-by · payment', render: (row) => <OrderFieldChips order={row} todayIst={todayIst} /> },
     { key: 'orderType', header: 'Type', render: (row) => orderTypeLabel(row.orderType) },
@@ -147,7 +151,7 @@ export function PortalOrders() {
         label="Find an order"
         placeholder="Your order number or channel ref"
       />
-      {orders.state === 'loading' && <div className="text-(--muted-foreground)">Loading your orders…</div>}
+      {orders.state === 'loading' && <TableSkeleton columns={columns} label="Loading your orders…" />}
       {orders.state === 'failed' && <ReadFailure word="Orders not loaded" reason={orders.reason} onRetry={orders.reload} />}
       {orders.state === 'ready' && (
         <DataTable<PortalOrderRowDto>
@@ -373,21 +377,25 @@ function OrderLines({ orderId }: { orderId: string }) {
   if (order.state === 'loading') return <div className="text-(--muted-foreground)">Loading lines…</div>;
   if (order.state === 'failed') return <ReadFailure word="Lines not loaded" reason={order.reason} onRetry={order.reload} />;
   return (
-    <ul className="flex flex-col gap-1" data-testid="order-lines">
-      {order.data.lines.map((line, index) => (
-        <li key={index}>
-          <span>{skuLabel(line)}</span> <span className="data">× {portalQuantity(line.qty)}</span>
-          {line.components.length > 0 && (
-            <ul className="ml-6 flex flex-col gap-0.5 text-(--muted-foreground)" data-testid="kit-components">
-              {line.components.map((component, inner) => (
-                <li key={inner}>
-                  {skuLabel(component)} <span className="data">× {portalQuantity(component.qty)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-col gap-3 sm:flex-row sm:gap-8">
+      {/* Story UI-1 — where the order is, from its status and its placed time only. */}
+      <StatusTimeline label={`Order ${orderReference(order.data)} progress`} steps={orderTimeline(order.data)} />
+      <ul className="flex flex-col gap-1" data-testid="order-lines">
+        {order.data.lines.map((line, index) => (
+          <li key={index}>
+            <span>{skuLabel(line)}</span> <span className="data">× {portalQuantity(line.qty)}</span>
+            {line.components.length > 0 && (
+              <ul className="ml-6 flex flex-col gap-0.5 text-(--muted-foreground)" data-testid="kit-components">
+                {line.components.map((component, inner) => (
+                  <li key={inner}>
+                    {skuLabel(component)} <span className="data">× {portalQuantity(component.qty)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

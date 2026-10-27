@@ -86,4 +86,11 @@ describe('design-token layer vs DESIGN.md', () => {
     expect(KPI_STYLE).toEqual({ fontSize: 28, fontWeight: 600, fontVariantNumeric: 'tabular-nums' });
     expect(CSS).toContain('font-variant-numeric: tabular-nums');
   });
+
+  test('UI-1 — an input boundary reaches 3:1 in both themes (WCAG 1.4.11): --input is zinc-500', () => {
+    const rootBlock = CSS.slice(CSS.indexOf(':root'), CSS.indexOf('.dark {'));
+    const darkBlock = CSS.slice(CSS.indexOf('.dark {'), CSS.indexOf('@theme'));
+    expect(rootBlock).toContain('--input: #71717a');
+    expect(darkBlock).toContain('--input: #71717a');
+  });
 });

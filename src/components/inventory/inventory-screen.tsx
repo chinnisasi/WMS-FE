@@ -52,6 +52,7 @@ import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-fil
 import { Ledger } from '@/components/inventory/ledger';
 import { WriteOffBanner, WriteOffPanel, type WriteOffResult } from '@/components/inventory/write-off';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
+import { LoadingStatus, SkeletonRows } from '@/components/shared/skeleton';
 import { buttonClass, inputClass, ReadFailure, rowButtonClass, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
@@ -293,24 +294,28 @@ function ListTable<T extends { id: string }>({
   rowAttrs,
   footer,
   expanded,
+  loading,
 }: {
   columns: readonly Column<T>[];
   rows: readonly T[];
   emptyMessage: string;
+  /** Story UI-1 — a cold load: skeleton rows under the header, these words announced. */
+  loading?: string;
   rowAttrs?: (row: T) => { className?: string; 'data-zero'?: string };
   footer?: ReactNode;
   expanded?: (row: T) => ReactNode;
 }) {
   return (
     <div className="overflow-x-auto rounded-md border border-(--border)">
-      <table className="w-full border-collapse text-sm">
+      {loading !== undefined && <LoadingStatus label={loading} />}
+      <table aria-busy={loading !== undefined ? 'true' : undefined} className="w-full border-collapse text-sm">
         <thead className="sticky top-0 bg-(--muted)">
           <tr>
             {columns.map((c) => (
               <th
                 key={c.key}
                 scope="col"
-                className={`h-10 border-b border-(--border) px-3 text-left font-medium text-(--muted-foreground) ${c.numeric ? 'data text-right' : ''}`}
+                className={`h-10 border-b border-(--border) px-3 text-left font-medium text-(--foreground) ${c.numeric ? 'data text-right' : ''}`}
               >
                 {c.header}
               </th>
@@ -318,7 +323,9 @@ function ListTable<T extends { id: string }>({
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 ? (
+          {loading !== undefined ? (
+            <SkeletonRows columns={columns.length} />
+          ) : rows.length === 0 ? (
             <tr>
               <td colSpan={columns.length} className="h-24 px-3 text-center text-(--muted-foreground)">
                 {emptyMessage}
@@ -649,7 +656,7 @@ function StockRowsView({
   expanded?: (row: StockEntryDto) => ReactNode;
 }) {
   if (stock.state === 'loading') {
-    return <ListTable columns={columns} rows={[]} emptyMessage="Loading stock…" />;
+    return <ListTable columns={columns} rows={[]} emptyMessage="" loading="Loading stock…" />;
   }
   const { rows, nextCursor, loadingMore, moreFailed } = stock.data;
   // A SKU search walks every page before it totals (never a partial sum).
@@ -953,7 +960,8 @@ function BatchList({
       <ListTable
         columns={columns}
         rows={batches.state === 'ready' ? batches.data : []}
-        emptyMessage={batches.state === 'loading' ? 'Loading batches…' : `No batches of ${sku.code} yet.`}
+        emptyMessage={`No batches of ${sku.code} yet.`}
+        loading={batches.state === 'loading' ? 'Loading batches…' : undefined}
         rowAttrs={(b) => (b.quantity === 0 ? { className: 'text-(--muted-foreground)', 'data-zero': 'true' } : {})}
         expanded={(b) =>
           openBatch === b.id ? (

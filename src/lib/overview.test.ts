@@ -119,3 +119,83 @@ describe('labels', () => {
     expect(failuresLabel(0)).toBe('0 ingest failures in 24 h');
   });
 });
+
+// ── story UI-1 ───────────────────────────────────────────────────────────────
+
+import type { ReportingOverviewResponse } from './api/generated';
+import { exceptionsClearedText, healthIndicator, overviewExceptions } from './overview';
+
+describe('overviewExceptions (story UI-1 — exceptions first, never a false all-clear)', () => {
+  const drill = (apiPath: string) => ({ apiPath, query: {}, reconciles: true });
+  const live = (value: number | null, apiPath = '/tenants/t/receiving/over-receipts') => ({ value, drill: drill(apiPath) });
+  const windowed = (value: number | null, apiPath: string) => ({ today: live(value, apiPath), d7: live(value, apiPath) });
+  function tiles(over: Record<string, unknown> = {}) {
+    return {
+      tiles: {
+        grnVariances: { state: 'ok', pendingOverReceipts: live(1, '/tenants/t/receiving/over-receipts') },
+        shortPicks: { state: 'ok', shortLines: windowed(3, '/tenants/t/warehouses/w/outbound/picklist-lines') },
+        oversell: { state: 'ok', backorderedOrders: windowed(0, '/tenants/t/warehouses/w/outbound/orders') },
+        expiryAlerts: {
+          state: 'ok',
+          openExpiryUpcoming: live(2, '/tenants/t/replenishment/batch-alerts'),
+          openAged: live(0, '/tenants/t/replenishment/batch-alerts'),
+        },
+        syncHealth: {
+          state: 'ok',
+          connections: [{ health: 'ok' }, { health: 'degraded' }, { health: 'error' }],
+          drill: drill('/tenants/t/channels/connections'),
+        },
+        ...over,
+      },
+    } as unknown as Pick<ReportingOverviewResponse, 'tiles'>;
+  }
+  const canAll = () => true;
+
+  test('the six sources, counted from the server figures; sync counts the connections not ok', () => {
+    const result = overviewExceptions(tiles(), canAll);
+    expect(result.omitted).toBe(0);
+    expect(result.sources).toBe(6);
+    expect(result.items.map((i) => [i.key, i.count])).toEqual([
+      ['pending-over-receipts', 1],
+      ['short-picks', 3],
+      ['backordered', 0],
+      ['expiry', 2],
+      ['aged', 0],
+      ['sync', 2],
+    ]);
+    expect(exceptionsClearedText(result)).toBe('No exceptions in these figures'); // scoped: never an outright all-clear
+    expect(result.items.find((i) => i.key === 'pending-over-receipts')!.label).toBe('over-receipt awaiting a decision');
+    expect(result.items.find((i) => i.key === 'short-picks')!.label).toBe('short-picked lines today');
+  });
+
+  test('an unavailable tile or a null figure is omitted, never read as zero — and the all-clear says so', () => {
+    const result = overviewExceptions(
+      tiles({
+        shortPicks: { state: 'unavailable', shortLines: windowed(null, '/x') },
+        grnVariances: { state: 'ok', pendingOverReceipts: live(null) },
+        syncHealth: { state: 'ok', connections: null, drill: drill('/tenants/t/channels/connections') },
+      }),
+      canAll,
+    );
+    expect(result.omitted).toBe(3);
+    expect(result.items.map((i) => i.key)).toEqual(['backordered', 'expiry', 'aged']);
+    expect(exceptionsClearedText(result)).toBe('No exceptions in the figures available');
+    expect(exceptionsClearedText({ omitted: 6, sources: 6 })).toBeNull();
+  });
+
+  test('a drill the viewer cannot open, or with no screen, has a null href', () => {
+    const noReview = overviewExceptions(tiles(), (capability) => capability !== 'review.decide');
+    const over = noReview.items.find((i) => i.key === 'pending-over-receipts')!;
+    expect(over.href).toBeNull();
+    const all = overviewExceptions(tiles(), canAll);
+    expect(all.items.find((i) => i.key === 'pending-over-receipts')!.href).not.toBeNull();
+  });
+});
+
+describe('healthIndicator (story UI-1)', () => {
+  test('ok only when the probe said ok; the words "API health" always', () => {
+    expect(healthIndicator('ok · wms-be')).toEqual({ ok: true, text: 'API health: ok · wms-be' });
+    expect(healthIndicator('unreachable')).toEqual({ ok: false, text: 'API health: unreachable' });
+    expect(healthIndicator('okish · x').ok).toBe(false);
+  });
+});

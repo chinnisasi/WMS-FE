@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/shared/page-header';
 import { ConflictsQueues } from '@/components/conflicts/queues';
 import { UnsupportedDrillNotice } from '@/components/shared/drill-banner';
 import { parseQueueParam } from '@/lib/conflicts-queues';
@@ -19,9 +20,10 @@ export default async function ConflictsPage({
   const drill = parseDrill('conflicts', params);
   const queue = parseQueueParam(params);
   return (
-    <>
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Conflicts & Reviews" description="Decisions waiting on a person: over-receipts, count variances, adjustments and refused scans." />
       {drill === 'unsupported' && <UnsupportedDrillNotice />}
       <ConflictsQueues key={`${drillKey(drill)}|${queue ?? 'default'}`} drill={drill} initialQueue={queue} />
-    </>
+    </div>
   );
 }
