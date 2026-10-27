@@ -16,6 +16,15 @@ import {
   orderDestination,
   orderReference,
   PORTAL_NAV,
+  PORTAL_DISPOSITION_OUTCOME_LABEL,
+  PORTAL_DISPOSITION_REASON_LABEL,
+  PORTAL_RETURN_REASON_LABEL,
+  PORTAL_RETURN_STATUS_LABEL,
+  portalDispositionSummary,
+  portalDispositionText,
+  portalReturnDecisionState,
+  portalReturnFilterQuery,
+  portalReturnOrder,
   PORTAL_SUSPENDED_MESSAGE,
   portalCompanyLabel,
   portalQuantity,
@@ -47,12 +56,13 @@ describe('portal routing (story 21-7)', () => {
     expect(loginNotice('other')).toBeNull();
   });
 
-  test('Home, then the five portal surfaces, in order (21-8 adds Service; UI-1 adds Home)', () => {
+  test('Home, then the six portal surfaces, in order (21-8 adds Service; UI-1 adds Home; 4-7a Returns)', () => {
     expect(PORTAL_NAV.map((item) => [item.label, item.href])).toEqual([
       ['Home', '/portal'],
       ['Stock', '/portal/stock'],
       ['Orders', '/portal/orders'],
       ['Inbound', '/portal/inbound'],
+      ['Returns', '/portal/returns'],
       ['Invoices', '/portal/invoices'],
       ['Service', '/portal/service'],
     ]);
@@ -422,5 +432,40 @@ describe('story UI-1 — Home counts, nav, and the order timeline', () => {
   test('orderTimeline: a status this build does not know reads Placed alone', () => {
     const steps = orderTimeline({ status: 'on_hold' as never, createdAt: placed });
     expect(steps.map((s) => s.label)).toEqual(['Placed']);
+describe('story 4-7a — the portal returns', () => {
+  const totals = { receivedTotal: 0, restockedTotal: 0, onHoldTotal: 0, failedInspectionTotal: 0, scrappedTotal: 0, openTotal: 0 };
+
+  test('the split in words: only the non-zero parts, in the order of the work', () => {
+    expect(portalDispositionSummary(totals)).toBe('Nothing received yet');
+    expect(
+      portalDispositionSummary({ receivedTotal: 8, restockedTotal: 3, onHoldTotal: 1, failedInspectionTotal: 1, scrappedTotal: 1, openTotal: 2 }),
+    ).toBe('3 restocked · 1 held for inspection · 1 failed inspection · 1 scrapped · 2 awaiting a decision');
+    expect(portalDispositionSummary({ ...totals, receivedTotal: 1500, restockedTotal: 1500 })).toBe('1,500 restocked');
+  });
+
+  test('the decision state: none before anything is back; awaiting while open or held; all decided after', () => {
+    expect(portalReturnDecisionState(totals)).toBeNull();
+    expect(portalReturnDecisionState({ receivedTotal: 2, openTotal: 1, onHoldTotal: 0 })).toEqual({ tone: 'warning', word: '↩ Awaiting a decision' });
+    expect(portalReturnDecisionState({ receivedTotal: 2, openTotal: 0, onHoldTotal: 1 })?.tone).toBe('warning');
+    expect(portalReturnDecisionState({ receivedTotal: 2, openTotal: 0, onHoldTotal: 0 })).toEqual({ tone: 'success', word: '✓ All decided' });
+  });
+
+  test('labels are Records over the generated unions, in the client’s words', () => {
+    expect(PORTAL_RETURN_STATUS_LABEL.open).toBe('Expected back');
+    expect(PORTAL_DISPOSITION_OUTCOME_LABEL).toEqual({ restock: 'Restocked', quarantine: 'Held for inspection', scrap: 'Scrapped' });
+    expect(Object.keys(PORTAL_DISPOSITION_REASON_LABEL).sort()).toEqual(
+      ['client-instruction', 'contaminated', 'damaged', 'defective', 'expired', 'missing-parts', 'needs-inspection', 'other'],
+    );
+    expect(PORTAL_RETURN_REASON_LABEL['changed-mind']).toBe('Changed mind');
+  });
+
+  test('a decision in words; the filter sends nothing for "all"; the order never falls back to an id', () => {
+    expect(portalDispositionText({ outcome: 'scrap', qty: 2, reasonCode: 'damaged' })).toBe('Scrapped 2 · Damaged');
+    expect(portalDispositionText({ outcome: 'restock', qty: 3, reasonCode: null })).toBe('Restocked 3');
+    expect(portalReturnFilterQuery('all')).toBeNull();
+    expect(portalReturnFilterQuery('awaiting')).toBe('awaiting');
+    expect(portalReturnFilterQuery('dispositioned')).toBe('dispositioned');
+    expect(portalReturnOrder({ orderReference: null })).toBe('—');
+    expect(portalReturnOrder({ orderReference: 'SHOP-#1' })).toBe('SHOP-#1');
   });
 });

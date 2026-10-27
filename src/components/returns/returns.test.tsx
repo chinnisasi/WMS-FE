@@ -601,6 +601,9 @@ describe('the Returns list (story 13-1)', () => {
   });
 });
 
+/** Story 4-7a — a received receipt line nothing was decided on yet. */
+const SPLIT_OPEN = { openQty: 1, restockedQty: 0, scrappedQty: 0, onHoldQty: 0, failedInspectionQty: 0 };
+
 describe('the Returns list — receipts (story 13-2)', () => {
   async function mountList(role: UserRole, canManage: boolean): Promise<Rendered> {
     writeSession(session(role));
@@ -626,7 +629,7 @@ describe('the Returns list — receipts (story 13-2)', () => {
           occurredAt: '2026-10-16T05:00:00.000Z',
           operatorEmail: 'ravi@example.com',
           lines: [
-            { rmaLineId: 'rl-1', skuId: 'sku-a', qty: 1, condition: 'missing-parts', note: 'no charger', batchCode: null, serialNumber: null, weightGrams: null },
+            { id: 'rrl-1', rmaLineId: 'rl-1', skuId: 'sku-a', qty: 1, condition: 'missing-parts', note: 'no charger', batchCode: null, serialNumber: null, weightGrams: null, ...SPLIT_OPEN },
           ],
         },
       ],
@@ -678,7 +681,7 @@ describe('the Returns list — receipts (story 13-2)', () => {
           code: 'RRN-0004',
           occurredAt: '2026-10-16T05:00:00.000Z',
           operatorEmail: 'ravi@example.com',
-          lines: [{ rmaLineId: 'rl-1', skuId: 'sku-a', qty: 1, condition: 'opened', note: null, batchCode: null, serialNumber: null, weightGrams: null }],
+          lines: [{ id: 'rrl-1', rmaLineId: 'rl-1', skuId: 'sku-a', qty: 1, condition: 'opened', note: null, batchCode: null, serialNumber: null, weightGrams: null, ...SPLIT_OPEN }],
         },
       ],
     };
@@ -725,5 +728,62 @@ describe('the Returns list: the client filter (story 1-5a)', () => {
     await settle();
     expect(listGets().every((r) => !new URLSearchParams(r.search).has('clientId'))).toBe(true);
     expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
+  });
+});
+
+describe('the Returns list — the disposition badge (story 4-7a, A7)', () => {
+  function received(): Record<string, unknown> {
+    const base = rma({ status: 'partially_received' });
+    const lines = (base.lines as Record<string, unknown>[]).map((entry) => (entry.id === 'rl-1' ? { ...entry, receivedQty: 1 } : entry));
+    return { ...base, lines };
+  }
+  function detail(split: Record<string, number>): Record<string, unknown> {
+    return {
+      ...received(),
+      receipts: [
+        {
+          id: 'rr-1',
+          code: 'RRN-0003',
+          occurredAt: '2026-10-16T05:00:00.000Z',
+          operatorEmail: 'ravi@example.com',
+          lines: [{ id: 'rrl-1', rmaLineId: 'rl-1', skuId: 'sku-a', qty: 1, condition: 'opened', note: null, batchCode: null, serialNumber: null, weightGrams: null, ...split }],
+        },
+      ],
+    };
+  }
+
+  test('the badge reads the receipts: "Dispositioned" with the split once everything received is decided; a new epoch refetches', async () => {
+    listItems = [received()];
+    detailAnswer = detail(SPLIT_OPEN);
+    writeSession(session('ops_manager'));
+    view = render(<ReturnsList tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH-1 Peenya" canManage dispositionEpoch={0} />);
+    await settle();
+    await press([...view.container.querySelectorAll('button')].find((b) => b.textContent?.includes('RMA-0007')));
+    await settle();
+    expect(view.container.textContent).toContain('↩ Awaiting disposition');
+    expect(view.container.textContent).not.toContain('✓ Dispositioned');
+    const detailReads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/returns/rma-1')).length;
+    const before = detailReads();
+    // A disposition landed: neither the status nor the received figure moved — only the epoch does.
+    detailAnswer = detail({ openQty: 0, restockedQty: 1, scrappedQty: 0, onHoldQty: 0, failedInspectionQty: 0 });
+    view.rerender(<ReturnsList tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH-1 Peenya" canManage dispositionEpoch={1} />);
+    await settle();
+    expect(detailReads()).toBe(before + 1);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('✓ Dispositioned');
+    expect(text).toContain('1 restocked');
+    expect(text).not.toContain('↩ Awaiting disposition');
+  });
+
+  test('a unit still on an open return hold keeps the line awaiting', async () => {
+    listItems = [received()];
+    detailAnswer = detail({ openQty: 0, restockedQty: 0, scrappedQty: 0, onHoldQty: 1, failedInspectionQty: 0 });
+    writeSession(session('ops_manager'));
+    view = render(<ReturnsList tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH-1 Peenya" canManage />);
+    await settle();
+    await press([...view.container.querySelectorAll('button')].find((b) => b.textContent?.includes('RMA-0007')));
+    await settle();
+    expect(view.container.textContent).toContain('↩ Awaiting disposition');
+    expect(view.container.textContent).toContain('1 on hold');
   });
 });

@@ -512,7 +512,13 @@ const GRN_LINES_GUIDANCE: readonly (readonly [RejectedGrnLineDto['code'], string
  * order; the Accept-anyway remedy for a `grn.shelf-life-refused` row; none
  * otherwise.
  */
-export function rejectedOpGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
+export function rejectedOpGuidance(
+  entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>,
+  /** Story 4-7a — the payload bin's code, when the caller resolved it (a `return.restock` row names it). */
+  binCode: string | null = null,
+): readonly string[] {
+  // Story 4-7a — a refused handheld restock: Discard only; the web records it to match the floor.
+  if (entry.opType === 'return.restock') return [returnRestockGuidance(binCode)];
   // Story 2-3a — a refused device unload: Discard only; the web re-records it.
   if (entry.opType === 'gate-in.unload') return [gateInUnloadGuidance(entry.problemCode)];
   // Story 3-1 — a refused handheld move: Apply re-runs it, or Discard.
@@ -752,6 +758,7 @@ export function rejectedOpSummary(
   if (entry.opType === 'stock.move') return stockMoveSummary(entry, skuCode);
   if (entry.opType === 'stock.adjust') return stockAdjustSummary(entry, skuCode);
   if (entry.opType === 'receipt-photo.stage') return receiptPhotoSummary(entry);
+  if (entry.opType === 'return.restock') return returnRestockSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
   const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;
@@ -1224,4 +1231,72 @@ function receiptPhotoSummary(entry: Pick<RejectedOpResponse, 'payload' | 'proble
   if (capturedAt !== null) parts.push(`taken ${istDateTimeLabel(capturedAt)} IST`);
   const problem = RECEIPT_PHOTO_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
   return { heading: 'Damage photo not uploaded', lines: [`${parts.join(' · ')} — ${problem}`] };
+}
+
+// ── story 4-7a: a refused handheld restock (a return.restock row) ───────────
+
+/**
+ * The remedy a `return.restock` row's reviewer reads (Discard only, A4): the
+ * operator physically placed the units, but the server refused the restock,
+ * so the system still has them in the Returns bin. The web either records
+ * the restock to that bin, or a move or count makes the system match the
+ * floor. Modelled on `STOCK_MOVE_GUIDANCE`.
+ */
+export function returnRestockGuidance(binCode: string | null): string {
+  return `Units were physically placed in ${binCode ?? 'the scanned bin'} — restock them on the web to that bin, or record a move or count to match the floor.`;
+}
+
+/** Why the restock was refused, in words (the row's whole-op `problemCode`); an unknown code reads as itself. */
+export const RETURN_RESTOCK_PROBLEM_WORDS: Readonly<Record<string, string>> = {
+  'exceeds-awaiting': 'fewer units awaited a decision than the restock named',
+  'serial-not-awaiting': 'a serial was not awaiting a decision (or was graded non-sellable)',
+  'batch-required': 'the batch was missing',
+  'batch-expired': 'the batch had expired',
+  'batch-blocked': 'the batch is blocked',
+  'disposition-not-supported': 'this unit cannot be restocked from the handheld',
+  'disposition-scope-quarantined': 'the stock is under a reconcile quarantine',
+  'document-warehouse-mismatch': 'the units are in another warehouse',
+  'bin-retired': 'the target bin is retired',
+  'bin-blocked': 'the target bin is blocked',
+  'bin-full': 'the target bin is full',
+  'bin-overweight': 'the target bin would be overweight',
+  'bin-volume-exceeded': 'the target bin would be over its volume',
+  'bin-item-oversize': 'the item does not fit the target bin',
+  'bin-storage-mismatch': "the target bin's storage class does not suit the SKU",
+  'bin-client-mismatch': 'the target bin is dedicated to another client',
+  'bin-segregation-conflict': 'the target bin holds goods that must be kept apart',
+  'bin-occupancy-conflict': 'the target bulk asset holds another SKU',
+  'kit-cannot-hold-stock': 'a kit holds no stock',
+  'not-found': 'the bin or SKU no longer exists',
+  'role-denied': 'the operator may not restock into this bin',
+  'validation-failed': 'the restock was malformed',
+  'operator-mismatch': 'captured by another operator',
+  'device-revoked': 'the device was revoked',
+};
+
+/**
+ * A `return.restock` row's summary: the quantity and SKU, Returns → the
+ * target bin (a short id — the payload carries no code), the batch or
+ * serials and the device time, then the refusal in words. Read defensively
+ * (a stored row is data).
+ */
+function returnRestockSummary(
+  entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>,
+  skuCode: (skuId: string) => string | null,
+): { heading: string; lines: readonly string[] } {
+  const payload = entry.payload;
+  const skuId = typeof payload['skuId'] === 'string' ? payload['skuId'] : '';
+  const sku = skuCode(skuId) ?? (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
+  const qty = typeof payload['qty'] === 'number' ? String(payload['qty']) : '?';
+  const toBinId = payload['toBinId'];
+  const parts = [`Returns → ${typeof toBinId === 'string' && toBinId !== '' ? `bin …${shortIdTail(toBinId)}` : 'unknown bin'}`];
+  if (typeof payload['batchCode'] === 'string' && payload['batchCode'] !== '') parts.push(`batch ${payload['batchCode']}`);
+  if (Array.isArray(payload['serialNumbers'])) {
+    const serials = (payload['serialNumbers'] as unknown[]).filter((serial): serial is string => typeof serial === 'string');
+    if (serials.length > 0) parts.push(`serials ${serials.join(', ')}`);
+  }
+  const occurredAt = payload['occurredAt'];
+  if (typeof occurredAt === 'string' && !Number.isNaN(Date.parse(occurredAt))) parts.push(`at ${istDateTimeLabel(occurredAt)} IST`);
+  const problem = RETURN_RESTOCK_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return { heading: `${sku} × ${qty} — not restocked`, lines: [`${parts.join(' · ')} — ${problem}`] };
 }

@@ -5,6 +5,8 @@ import {
   describeDrill,
   drillBannerWord,
   drillKey,
+  LEDGER_EVENT_TYPES,
+  ledgerTypeLabel,
   ledgerDocHref,
   parseDrill,
   warehouseDisplayLabel,
@@ -471,5 +473,14 @@ describe('document drills — "View ledger" links land on the ledger filtered to
     expect(drillKey(a)).toBe(drillKey(parseHref(ledgerDocHref('grn', GRN, W, 'GRN-1'))));
     expect(drillKey(a)).not.toBe(drillKey(null));
     expect(drillKey(a)).not.toBe(drillKey(parseHref(ledgerDocHref('grn', GRN, W, 'GRN-2'))));
+  });
+});
+
+describe('story 4-7a — the return disposition ledger types', () => {
+  test('return.restocked and return.scrapped are filterable and labelled', () => {
+    expect(LEDGER_EVENT_TYPES).toContain('return.restocked');
+    expect(LEDGER_EVENT_TYPES).toContain('return.scrapped');
+    expect(ledgerTypeLabel('return.restocked')).toBe('Return restocked');
+    expect(ledgerTypeLabel('return.scrapped')).toBe('Return scrapped');
   });
 });

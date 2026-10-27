@@ -1,4 +1,5 @@
 import { ApiProblem } from '@/lib/api/client';
+import type { QcHoldDto } from '@/lib/api/generated';
 import { quantityLabel, type QuantityUom } from '@/lib/format-quantity';
 
 /**
@@ -155,13 +156,27 @@ export function qcReason(error: unknown): string {
 }
 // ── story 1-2b: receipt holds (QC on receipt) ───────────────────────────────
 
+/** The QC hold kinds (story 4-7a widens them with `return`). */
+export type QcHoldKind = NonNullable<QcHoldDto['kind']>;
+
 /**
- * A hold's kind, in words: a receipt hold was placed by the receipt itself
- * (its client's QC on receipt), a manual one by an Ops Manager. A row from
- * a backend without the field reads as manual.
+ * A hold's kind, in words — a `Record` over the generated union (an
+ * allowlist: a new kind fails the compile until named, never falls into
+ * "Manual"). A receipt hold was placed by the receipt itself (its client's
+ * QC on receipt), a manual one by an Ops Manager, a return hold (story
+ * 4-7a) by a returned unit's quarantine from the Returns bin. A row from a
+ * backend without the field reads as manual; a kind a newer backend sends
+ * reads as itself.
  */
-export function qcHoldKindLabel(kind: 'manual' | 'receipt' | undefined): string {
-  return kind === 'receipt' ? 'Auto · QC on receipt' : 'Manual';
+export const QC_HOLD_KIND_LABEL: Readonly<Record<QcHoldKind, string>> = {
+  manual: 'Manual',
+  receipt: 'Auto · QC on receipt',
+  return: 'Return',
+};
+
+export function qcHoldKindLabel(kind: string | undefined): string {
+  if (kind === undefined) return QC_HOLD_KIND_LABEL.manual;
+  return Object.hasOwn(QC_HOLD_KIND_LABEL, kind) ? QC_HOLD_KIND_LABEL[kind as QcHoldKind] : kind;
 }
 
 /** The GRN filter's banner: the receipt's code, else the id's random tail (guide §1.10). */

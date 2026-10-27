@@ -10,7 +10,9 @@ import { readSession, subscribeSession } from '@/lib/auth';
 import { quantityLabel } from '@/lib/format-quantity';
 import {
   AWAITING_DISPOSITION_BADGE,
+  DISPOSITIONED_BADGE,
   MAX_RETURN_NOTE_LENGTH,
+  RETURNS_DISPOSED_EVENT,
   RETURN_STATUS_LABEL,
   RETURNS_CHANGED_EVENT,
   canCancelReturn,
@@ -22,7 +24,8 @@ import {
   returnOrderLabel,
   returnReason,
   returnReasonText,
-  lineAwaitsDisposition,
+  lineDispositionSplit,
+  lineDispositionText,
   receiptHeading,
   receiptLineText,
   receivedOfAuthorized,
@@ -31,7 +34,8 @@ import {
 import { useOutboundSkus } from '@/lib/use-outbound-orders';
 import { clientFilterKey } from '@/lib/active-client';
 import { useActiveClient } from '@/lib/use-active-client';
-import { useReturns } from '@/lib/use-returns';
+import { RETURNS_PAGE_TABS, type ReturnsTab } from '@/lib/page-tabs';
+import { useAwaitingReturns, useReturns } from '@/lib/use-returns';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -52,6 +56,8 @@ import {
 } from '@/components/outbound/shell';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 import { StatusChip } from '@/components/shared/status-chip';
+import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
+import { AwaitingDispositions } from '@/components/returns/awaiting-dispositions';
 
 const STATUS_OPTIONS: readonly ReturnStatus[] = ['open', 'partially_received', 'received', 'cancelled'];
 
@@ -62,9 +68,14 @@ const STATUS_OPTIONS: readonly ReturnStatus[] = ['open', 'partially_received', '
  * numbers. Every role reads it; Cancel — an inline confirmation with a
  * reason, never a modal — renders only for `returns.manage`, and only on an
  * open authorization. Refreshes on `RETURNS_CHANGED_EVENT`; no polling.
- * 13-4 adds the returns queue and the disposition cards.
+ *
+ * Story 4-7a — two tabs on the shared page tabs: Authorizations (the bare
+ * route) and Awaiting disposition (`?tab=awaiting`, the queue of received
+ * units still in the Returns bin, with a count of the work waiting). A
+ * disposition bumps the page's disposition epoch, which joins an expanded
+ * RMA detail's refetch deps (A7).
  */
-export function ReturnsView() {
+export function ReturnsView({ initialTab = null }: { initialTab?: ReturnsTab | null } = {}) {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
   const sessioned = useSyncExternalStore(
     subscribeSession,
@@ -85,10 +96,19 @@ export function ReturnsView() {
       </Section>
     );
   }
-  return <ReturnsSessioned />;
+  return <ReturnsSessioned initialTab={initialTab} />;
 }
 
-function ReturnsSessioned() {
+function ReturnsSessioned({ initialTab }: { initialTab: ReturnsTab | null }) {
+  const [tab, selectTab] = usePageTab(RETURNS_PAGE_TABS, RETURNS_PAGE_TABS.initial(null, initialTab), false);
+  // A7 — every successful disposition (from this page or any other mounted
+  // reader) bumps it; an expanded RMA detail refetches on it.
+  const [dispositionEpoch, setDispositionEpoch] = useState(0);
+  useEffect(() => {
+    const onDisposed = () => setDispositionEpoch((epoch) => epoch + 1);
+    window.addEventListener(RETURNS_DISPOSED_EVENT, onDisposed);
+    return () => window.removeEventListener(RETURNS_DISPOSED_EVENT, onDisposed);
+  }, []);
   const warehouses = useTenantWarehouses();
   const tenantId = warehouses.state === 'ready' ? warehouses.data.tenantId : null;
   const items = warehouses.state === 'ready' ? warehouses.data.items : [];
@@ -151,18 +171,59 @@ function ReturnsSessioned() {
           </label>
         </div>
       )}
-      <ReturnsList
-        key={warehouseId}
-        tenantId={tenantId}
-        warehouseId={warehouseId}
-        warehouseLabel={warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`}
-        canManage={roleHasCapability(role, 'returns.manage')}
+      <PageTabStrip
+        def={RETURNS_PAGE_TABS}
+        active={tab}
+        drilled={false}
+        onSelect={selectTab}
+        badge={(id) => (id === 'awaiting' ? <AwaitingCountPill key={warehouseId} warehouseId={warehouseId} /> : null)}
       />
+      <PageTabPanel def={RETURNS_PAGE_TABS} active={tab}>
+        {tab === 'awaiting' ? (
+          <AwaitingDispositions
+            key={warehouseId}
+            tenantId={tenantId}
+            warehouseId={warehouseId}
+            warehouseLabel={warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`}
+            canManage={roleHasCapability(role, 'returns.manage')}
+          />
+        ) : (
+          <ReturnsList
+            key={warehouseId}
+            tenantId={tenantId}
+            warehouseId={warehouseId}
+            warehouseLabel={warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`}
+            canManage={roleHasCapability(role, 'returns.manage')}
+            dispositionEpoch={dispositionEpoch}
+          />
+        )}
+      </PageTabPanel>
     </div>
   );
 }
 
 type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string };
+
+/**
+ * Story 4-7a — the Awaiting disposition tab's count: the lines still waiting
+ * (work, never a total), from one page at the route's ceiling — "100+" when
+ * more lie beyond it. A failed or loading read shows no pill (never a wrong 0);
+ * none when nothing waits.
+ */
+function AwaitingCountPill({ warehouseId }: { warehouseId: string }) {
+  const active = useActiveClient();
+  const queue = useAwaitingReturns(warehouseId, active.filter);
+  if (queue.state !== 'ready' || queue.data.items.length === 0) return null;
+  const count = `${queue.data.items.length}${queue.data.nextCursor === null ? '' : '+'}`;
+  return (
+    <span
+      aria-label={`${count} awaiting`}
+      className="ml-1.5 rounded-full border border-(--warning) bg-(--warning)/10 px-1.5 text-[10px] font-medium text-(--foreground)"
+    >
+      {count}
+    </span>
+  );
+}
 
 /** Exported for the component test, which drives it without the warehouse read. */
 export function ReturnsList({
@@ -170,11 +231,14 @@ export function ReturnsList({
   warehouseId,
   warehouseLabel,
   canManage,
+  dispositionEpoch = 0,
 }: {
   tenantId: string;
   warehouseId: string;
   warehouseLabel: string | null;
   canManage: boolean;
+  /** Story 4-7a (A7) — bumped on every successful disposition; an expanded detail refetches on it. */
+  dispositionEpoch?: number;
 }) {
   const [status, setStatus] = useState<ReturnStatus | null>(null);
   // Story 1-5a — the screen's one active-client read filters the list.
@@ -364,7 +428,7 @@ export function ReturnsList({
           rows={rows}
           nextCursor={returns.state === 'ready' ? returns.data.nextCursor : null}
           onCursor={returns.onCursor}
-          renderExpanded={(rma) => (expandedId === rma.id ? <ReturnDetail tenantId={tenantId} rma={rma} skus={skuMap} /> : null)}
+          renderExpanded={(rma) => (expandedId === rma.id ? <ReturnDetail tenantId={tenantId} rma={rma} skus={skuMap} dispositionEpoch={dispositionEpoch} /> : null)}
           loading={returns.state === 'loading' ? 'Loading returns…' : undefined}
           emptyMessage={<EmptyState kind="first-use">No returns yet</EmptyState>}
         />
@@ -380,19 +444,24 @@ type ReceiptsRead =
   | { state: 'failed'; reason: string };
 
 /**
- * Story 13-2 — the expanded row: each line's received figure and the amber
- * "↩ Awaiting disposition" badge on a line with received units, then the
- * receipts. Receipts ride ONLY on the detail read (never the list), so they
- * are fetched here, when the row expands.
+ * Story 13-2 — the expanded row: each line's received figure and its
+ * disposition badge, then the receipts. Receipts ride ONLY on the detail
+ * read (never the list), so they are fetched here, when the row expands.
+ * Story 4-7a (A7) — the badge is computed from the receipts' lines (open and
+ * on hold, grouped by RMA line): amber "↩ Awaiting disposition" while any
+ * received unit is undecided, "✓ Dispositioned" once all are, with the split
+ * in words; no badge until the receipts have loaded (never a guess).
  */
 function ReturnDetail({
   tenantId,
   rma,
   skus,
+  dispositionEpoch,
 }: {
   tenantId: string;
   rma: ReturnAuthorizationDto;
   skus: Readonly<Record<string, SkuResponse>> | null;
+  dispositionEpoch: number;
 }) {
   const [receipts, setReceipts] = useState<ReceiptsRead>({ state: 'loading' });
   // Refetch when the row moves on (a receipt landed: the status or the summed
@@ -407,7 +476,8 @@ function ReturnDetail({
         setReceipts({ state: 'failed', reason: returnReason(error) });
       });
     return () => controller.abort();
-  }, [tenantId, rma.id, rma.status, receivedTotal]);
+    // A7 — a disposition moves neither the status nor the received total.
+  }, [tenantId, rma.id, rma.status, receivedTotal, dispositionEpoch]);
   return (
     <div className="flex flex-col gap-1 text-xs">
       {rma.status === 'cancelled' && rma.cancelReason !== null && (
@@ -416,6 +486,9 @@ function ReturnDetail({
       <ul className="flex flex-col gap-1">
         {rma.lines.map((line) => {
           const sku = skus?.[line.skuId];
+          const uom = sku === undefined ? null : { uom: sku.uom, uomPrecision: sku.uomPrecision };
+          const split = receipts.state === 'ready' ? lineDispositionSplit(line.id, receipts.receipts) : null;
+          const splitText = split === null ? null : lineDispositionText(split, uom);
           return (
             <li key={line.id} className="flex flex-col gap-0.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -427,9 +500,13 @@ function ReturnDetail({
                 <span className="data text-(--muted-foreground)">
                   {receivedOfAuthorized(line, sku === undefined ? null : { uom: sku.uom, uomPrecision: sku.uomPrecision })}
                 </span>
-                {lineAwaitsDisposition(line) && (
-                  <StatusChip tone="warning">{AWAITING_DISPOSITION_BADGE}</StatusChip>
-                )}
+                {split !== null &&
+                  (split.undecided ? (
+                    <StatusChip tone="warning">{AWAITING_DISPOSITION_BADGE}</StatusChip>
+                  ) : (
+                    <StatusChip tone="success">{DISPOSITIONED_BADGE}</StatusChip>
+                  ))}
+                {splitText !== null && <span className="data text-(--muted-foreground)">{splitText}</span>}
               </div>
               {line.serials.length > 0 && (
                 <div className="font-mono text-(--muted-foreground)">{line.serials.map((serial) => serial.serialNumber).join(', ')}</div>

@@ -17,6 +17,9 @@ import type {
   PortalOrderRowDto,
   PortalAsnRowDto,
   PortalPurchaseOrderRowDto,
+  PortalReturnDispositionDto,
+  PortalReturnLineDto,
+  PortalReturnRowDto,
   PortalSkuDto,
   PortalWarehouseDto,
 } from '@/lib/api/generated';
@@ -122,7 +125,7 @@ export const SESSION_ENDED_NOTICE: Readonly<Record<string, string>> = {
 };
 
 export interface PortalNavItem {
-  readonly id: 'home' | 'stock' | 'orders' | 'inbound' | 'invoices' | 'service';
+  readonly id: 'home' | 'stock' | 'orders' | 'inbound' | 'returns' | 'invoices' | 'service';
   readonly label: string;
   readonly href: string;
 }
@@ -133,6 +136,8 @@ export const PORTAL_NAV: readonly PortalNavItem[] = [
   { id: 'stock', label: 'Stock', href: '/portal/stock' },
   { id: 'orders', label: 'Orders', href: '/portal/orders' },
   { id: 'inbound', label: 'Inbound', href: '/portal/inbound' },
+  // Story 4-7a — the client's returns and what became of each unit.
+  { id: 'returns', label: 'Returns', href: '/portal/returns' },
   { id: 'invoices', label: 'Invoices', href: '/portal/invoices' },
   // Story 21-8 — how the operation performed for this client.
   { id: 'service', label: 'Service', href: '/portal/service' },
@@ -652,4 +657,100 @@ export function orderTimeline(order: Pick<PortalOrderRowDto, 'status' | 'created
   // A status a newer backend added and this build does not know: Placed alone, never a guess.
   const rest = Object.hasOwn(ORDER_TIMELINE, order.status) ? ORDER_TIMELINE[order.status] : [];
   return [{ label: 'Placed', state: 'done', time: portalDateTime(order.createdAt) }, ...rest];
+// ── returns (story 4-7a) ─────────────────────────────────────────────────────
+
+/** A return's status in the client's words — a `Record` over the generated union. */
+export const PORTAL_RETURN_STATUS_LABEL: Readonly<Record<PortalReturnRowDto['status'], string>> = {
+  open: 'Expected back',
+  partially_received: 'Partly received',
+  received: 'Received',
+  cancelled: 'Cancelled',
+};
+
+/** Why the customer sent it back, in words — a `Record` over the generated union. */
+export const PORTAL_RETURN_REASON_LABEL: Readonly<Record<PortalReturnLineDto['returnReasonCode'], string>> = {
+  damaged: 'Damaged',
+  defective: 'Defective',
+  'wrong-item': 'Wrong item',
+  'not-as-described': 'Not as described',
+  'changed-mind': 'Changed mind',
+  other: 'Other',
+};
+
+/** What the warehouse decided, in the client's words — a `Record` over the generated union. */
+export const PORTAL_DISPOSITION_OUTCOME_LABEL: Readonly<Record<PortalReturnDispositionDto['outcome'], string>> = {
+  restock: 'Restocked',
+  quarantine: 'Held for inspection',
+  scrap: 'Scrapped',
+};
+
+/** Why units were held or scrapped, in words — a `Record` over the generated union (null on a restock). */
+export const PORTAL_DISPOSITION_REASON_LABEL: Readonly<Record<NonNullable<PortalReturnDispositionDto['reasonCode']>, string>> = {
+  damaged: 'Damaged',
+  defective: 'Defective',
+  expired: 'Expired',
+  'missing-parts': 'Missing parts',
+  contaminated: 'Contaminated',
+  'needs-inspection': 'Needs inspection',
+  'client-instruction': 'Your instruction',
+  other: 'Other',
+};
+
+/** The list filter: every return, or only those with units still undecided, or only fully decided ones. */
+export type PortalReturnFilter = 'all' | 'awaiting' | 'dispositioned';
+
+export const PORTAL_RETURN_FILTER_LABEL: Readonly<Record<PortalReturnFilter, string>> = {
+  all: 'All returns',
+  awaiting: 'Awaiting a decision',
+  dispositioned: 'Fully decided',
+};
+
+/** The server filter the choice sends — `all` sends none. */
+export function portalReturnFilterQuery(filter: PortalReturnFilter): 'awaiting' | 'dispositioned' | null {
+  return filter === 'all' ? null : filter;
+}
+
+/** The return's order, in the client's words: its order reference, else "—" (never an internal id). */
+export function portalReturnOrder(row: Pick<PortalReturnRowDto, 'orderReference'>): string {
+  return row.orderReference === null || row.orderReference === '' ? '—' : row.orderReference;
+}
+
+type DispositionTotals = Pick<
+  PortalReturnRowDto,
+  'receivedTotal' | 'restockedTotal' | 'onHoldTotal' | 'failedInspectionTotal' | 'scrappedTotal' | 'openTotal'
+>;
+
+/**
+ * What became of the received units, only the non-zero parts, in the order of
+ * the work: "3 restocked · 1 held for inspection · 1 failed inspection · 1
+ * scrapped · 2 awaiting a decision". "Nothing received yet" before any unit
+ * is back. Totals sum across units of measure, so they are a progress hint.
+ */
+export function portalDispositionSummary(totals: DispositionTotals): string {
+  if (totals.receivedTotal === 0) return 'Nothing received yet';
+  const parts: string[] = [];
+  if (totals.restockedTotal > 0) parts.push(`${portalQuantity(totals.restockedTotal)} restocked`);
+  if (totals.onHoldTotal > 0) parts.push(`${portalQuantity(totals.onHoldTotal)} held for inspection`);
+  if (totals.failedInspectionTotal > 0) parts.push(`${portalQuantity(totals.failedInspectionTotal)} failed inspection`);
+  if (totals.scrappedTotal > 0) parts.push(`${portalQuantity(totals.scrappedTotal)} scrapped`);
+  if (totals.openTotal > 0) parts.push(`${portalQuantity(totals.openTotal)} awaiting a decision`);
+  return parts.length === 0 ? 'Received' : parts.join(' · ');
+}
+
+/**
+ * The return's decision state, word-first: "Awaiting a decision" while any
+ * received unit is open or held (amber), "All decided" once every received
+ * unit is (green), null when nothing is back yet (the status says so).
+ */
+export function portalReturnDecisionState(
+  totals: Pick<DispositionTotals, 'receivedTotal' | 'openTotal' | 'onHoldTotal'>,
+): { tone: 'warning' | 'success'; word: string } | null {
+  if (totals.receivedTotal === 0) return null;
+  return totals.openTotal > 0 || totals.onHoldTotal > 0 ? { tone: 'warning', word: '↩ Awaiting a decision' } : { tone: 'success', word: '✓ All decided' };
+}
+
+/** One decision in words: "Scrapped 2 · Damaged" / "Restocked 3". */
+export function portalDispositionText(entry: Pick<PortalReturnDispositionDto, 'outcome' | 'qty' | 'reasonCode'>): string {
+  const head = `${PORTAL_DISPOSITION_OUTCOME_LABEL[entry.outcome]} ${portalQuantity(entry.qty)}`;
+  return entry.reasonCode === null ? head : `${head} · ${PORTAL_DISPOSITION_REASON_LABEL[entry.reasonCode] ?? entry.reasonCode}`;
 }

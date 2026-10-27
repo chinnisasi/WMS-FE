@@ -74,6 +74,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   // Story 13-1 — a return authorization (RMA).
   return_authorization: 'Return',
   return_receipt: 'Return receipt',
+  // Story 4-7a — a return line's disposition (restock, quarantine or scrap).
+  return_disposition: 'Return disposition',
   sku: 'SKU',
   stock_adjustment_pending: 'Pending adjustment',
   stock_adjustment_policy: 'Adjustment policy',

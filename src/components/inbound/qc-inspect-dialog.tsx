@@ -147,7 +147,7 @@ export function QcInspectDialog({
           {hold.grnCode !== null && <> · {hold.grnCode}</>}
         </span>
         <span className="text-xs text-(--muted-foreground)">
-          Passed units go back to the origin bin{hold.kind === 'receipt' ? ' (Receiving — putaway work again)' : ''}; failed units move to the DAMAGED
+          Passed units go back to the origin bin{hold.kind === 'receipt' ? ' (Receiving — putaway work again)' : hold.kind === 'return' ? ' (Returns — they await a disposition again)' : ''}; failed units move to the DAMAGED
           bin (not sellable, write-off only). The hold closes as inspected.
         </span>
       </div>

@@ -1453,7 +1453,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock';
     /**
      * The replay fate the server refused with
      */
@@ -1529,7 +1529,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -5332,9 +5332,9 @@ export type QcHoldDto = {
      */
     createdAt: string;
     /**
-     * Story 1-2b — `receipt`: placed by the receipt itself (the client's QC on receipt), one per GRN line; `manual`: an Ops Manager's (sku, bin) scope hold. Always present on the list; on a command's answer present only for a receipt hold
+     * Story 1-2b — `receipt`: placed by the receipt itself (the client's QC on receipt), one per GRN line; `manual`: an Ops Manager's (sku, bin) scope hold; `return` (story 4-7a): a returned unit quarantined from the RETURNS bin. Always present on the list; on a command's answer present only for a receipt hold
      */
-    kind?: 'manual' | 'receipt';
+    kind?: 'manual' | 'receipt' | 'return';
     /**
      * Story 1-2b — the GRN line a receipt hold holds (receipt holds only)
      */
@@ -5480,9 +5480,9 @@ export type QcHoldEntryDto = {
      */
     createdAt: string;
     /**
-     * Story 1-2b — `receipt`: placed by the receipt itself (the client's QC on receipt), one per GRN line; `manual`: an Ops Manager's (sku, bin) scope hold
+     * Story 1-2b — `receipt`: placed by the receipt itself (the client's QC on receipt), one per GRN line; `manual`: an Ops Manager's (sku, bin) scope hold; `return` (story 4-7a): a returned unit quarantined from the RETURNS bin
      */
-    kind: 'manual' | 'receipt';
+    kind: 'manual' | 'receipt' | 'return';
     /**
      * Story 1-2b — the GRN line a receipt hold holds (receipt holds only)
      */
@@ -5503,6 +5503,10 @@ export type QcHoldEntryDto = {
      * Story 1-2b — the held SKU's client
      */
     clientId: string;
+    /**
+     * Story 4-7a — a return hold's return authorization code (RMA-0001); absent on every other hold
+     */
+    rmaCode?: string;
     /**
      * Story 1-2b — the batch held (null on an untracked SKU, or when a manual hold moved several batches)
      */
@@ -8665,7 +8669,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -8692,7 +8696,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -10399,6 +10403,98 @@ export type PortalWarehouseListResponse = {
     items: Array<PortalWarehouseDto>;
 };
 
+export type PortalReturnRowDto = {
+    id: string;
+    /**
+     * RMA-0001
+     */
+    code: string;
+    status: 'open' | 'partially_received' | 'received' | 'cancelled';
+    orderId: string;
+    orderReference: string | null;
+    externalReference: string | null;
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    lineCount: number;
+    /**
+     * Base units (summed across lines)
+     */
+    receivedTotal: number;
+    restockedTotal: number;
+    onHoldTotal: number;
+    failedInspectionTotal: number;
+    scrappedTotal: number;
+    openTotal: number;
+};
+
+export type PortalReturnPageResponse = {
+    items: Array<PortalReturnRowDto>;
+    nextCursor: string | null;
+};
+
+export type PortalReturnLineDto = {
+    skuCode: string;
+    skuName: string;
+    authorizedQty: number;
+    receivedQty: number;
+    /**
+     * Why the customer returned it
+     */
+    returnReasonCode: 'damaged' | 'defective' | 'wrong-item' | 'not-as-described' | 'changed-mind' | 'other';
+    restockedQty: number;
+    onHoldQty: number;
+    failedInspectionQty: number;
+    scrappedQty: number;
+    openQty: number;
+};
+
+export type PortalReturnDispositionDto = {
+    skuCode: string;
+    outcome: 'restock' | 'quarantine' | 'scrap';
+    qty: number;
+    /**
+     * Quarantine and scrap reasons; null on a restock
+     */
+    reasonCode: 'damaged' | 'defective' | 'expired' | 'missing-parts' | 'contaminated' | 'needs-inspection' | 'client-instruction' | 'other' | null;
+    /**
+     * ISO-8601 UTC
+     */
+    occurredAt: string;
+};
+
+export type PortalReturnDetailResponse = {
+    id: string;
+    /**
+     * RMA-0001
+     */
+    code: string;
+    status: 'open' | 'partially_received' | 'received' | 'cancelled';
+    orderId: string;
+    orderReference: string | null;
+    externalReference: string | null;
+    /**
+     * ISO-8601 UTC
+     */
+    createdAt: string;
+    lineCount: number;
+    /**
+     * Base units (summed across lines)
+     */
+    receivedTotal: number;
+    restockedTotal: number;
+    onHoldTotal: number;
+    failedInspectionTotal: number;
+    scrappedTotal: number;
+    openTotal: number;
+    lines: Array<PortalReturnLineDto>;
+    /**
+     * Oldest first
+     */
+    dispositions: Array<PortalReturnDispositionDto>;
+};
+
 export type PortalInvoiceTotalsDto = {
     subtotal: number;
     cgst: number;
@@ -11021,6 +11117,10 @@ export type ReturnAuthorizationLineDto = {
 };
 
 export type ReturnReceiptLineViewDto = {
+    /**
+     * Story 4-7a — the receipt line's id (a disposition's address)
+     */
+    id: string;
     rmaLineId: string;
     skuId: string;
     /**
@@ -11035,6 +11135,26 @@ export type ReturnReceiptLineViewDto = {
      * A returned case's captured weight, grams
      */
     weightGrams: number | null;
+    /**
+     * Story 4-7a — units still awaiting a disposition, base UoM
+     */
+    openQty: number;
+    /**
+     * Story 4-7a — units restocked to a storage bin, base UoM
+     */
+    restockedQty: number;
+    /**
+     * Story 4-7a — units scrapped, base UoM
+     */
+    scrappedQty: number;
+    /**
+     * Story 4-7a — units on an open return QC hold, base UoM
+     */
+    onHoldQty: number;
+    /**
+     * Story 4-7a — units that failed a return hold's inspection (now in DAMAGED), base UoM
+     */
+    failedInspectionQty: number;
 };
 
 export type ReturnReceiptViewDto = {
@@ -11208,6 +11328,158 @@ export type ReturnReceiptResultDto = {
      * The review row's op id when entries were refused (derived from the key, never equal to it); null otherwise
      */
     reviewOpId: string | null;
+};
+
+export type DisposeReturnDto = {
+    /**
+     * The warehouse — must be the receipt's (409 document-warehouse-mismatch otherwise)
+     */
+    warehouseId: string;
+    /**
+     * The return-receipt line dispositioned (the detail read's receipts[].lines[].id)
+     */
+    receiptLineId: string;
+    /**
+     * restock (to a storage bin), quarantine (a QC hold) or scrap
+     */
+    outcome: 'restock' | 'quarantine' | 'scrap';
+    /**
+     * Units dispositioned, base UoM — at most what the line still awaits. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded. A serial unit or a returned case is exactly 1.
+     */
+    qty: number;
+    /**
+     * Restock only — the storage bin the units go to
+     */
+    toBinId?: string | null;
+    /**
+     * Quarantine and scrap only (required there)
+     */
+    reasonCode?: 'damaged' | 'defective' | 'expired' | 'missing-parts' | 'contaminated' | 'needs-inspection' | 'client-instruction' | 'other' | null;
+    /**
+     * Quarantine and scrap only — trimmed, blank means absent, at most 200 characters; required with the reason "other"
+     */
+    note?: string | null;
+};
+
+export type ReturnDispositionEntryDto = {
+    id: string;
+    receiptLineId: string;
+    rmaId: string;
+    outcome: 'restock' | 'quarantine' | 'scrap';
+    /**
+     * Units, base UoM
+     */
+    qty: number;
+    /**
+     * Restock: the storage bin
+     */
+    toBinId: string | null;
+    /**
+     * Quarantine: the QC hold (kind return)
+     */
+    qcHoldId: string | null;
+    /**
+     * Restock / scrap: the ledger event
+     */
+    ledgerEventId: string | null;
+};
+
+export type ReturnDispositionResultDto = {
+    dispositions: Array<ReturnDispositionEntryDto>;
+};
+
+export type RestockReturnDto = {
+    warehouseId: string;
+    /**
+     * The SKU restocked — the server allocates it to the oldest sellable awaiting lines
+     */
+    skuId: string;
+    /**
+     * Units restocked, base UoM. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    qty: number;
+    /**
+     * Batch-tracked (non-serial) SKUs: the batch restocked (required — 400 batch-required)
+     */
+    batchCode?: string | null;
+    /**
+     * Serial-tracked SKUs: one serial number per unit (qty = count), at most 500
+     */
+    serialNumbers?: Array<string> | null;
+    /**
+     * The storage bin scanned
+     */
+    toBinId: string;
+    /**
+     * Device time (ISO-8601 UTC, Z-suffixed) — the ledger event's business time
+     */
+    occurredAt: string;
+};
+
+export type AwaitingDispositionDto = {
+    receiptLineId: string;
+    /**
+     * RRN-0001
+     */
+    receiptCode: string;
+    /**
+     * When the unit was received (device time, ISO-8601 UTC)
+     */
+    receivedAt: string;
+    rmaId: string;
+    /**
+     * RMA-0001
+     */
+    rmaCode: string;
+    orderReference: string | null;
+    clientId: string;
+    warehouseId: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * The base unit of measure
+     */
+    uom: string;
+    /**
+     * The grade the unit was received with
+     */
+    condition: 'resaleable' | 'opened' | 'damaged' | 'missing-parts';
+    /**
+     * The inspection note at receipt
+     */
+    note: string | null;
+    batchCode: string | null;
+    serialNumber: string | null;
+    /**
+     * A returned case's weight, grams
+     */
+    weightGrams: number | null;
+    /**
+     * Units received on the line, base UoM
+     */
+    receivedQty: number;
+    /**
+     * Units still awaiting a disposition, base UoM
+     */
+    openQty: number;
+    /**
+     * Units on an open return QC hold, base UoM
+     */
+    onHoldQty: number;
+    /**
+     * How many times the line was quarantined before
+     */
+    priorQuarantines: number;
+    /**
+     * The latest quarantine or scrap reason on the line
+     */
+    lastReasonCode: string | null;
+};
+
+export type AwaitingDispositionListResponse = {
+    items: Array<AwaitingDispositionDto>;
+    nextCursor: string | null;
 };
 
 export type ReturnableLineDto = {
@@ -14553,7 +14825,7 @@ export type InventoryControllerListEventsData = {
         /**
          * Story 9-1 — only events of these types (repeatable: `?type=a&type=b`; one value is a one-element list). An unknown type is refused (400 validation-failed naming the known set)
          */
-        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged' | 'qc.failed' | 'stock.moved'>;
+        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged' | 'qc.failed' | 'stock.moved' | 'return.restocked' | 'return.scrapped'>;
         /**
          * Story 9-1 — only events RECORDED at or after this instant (`recorded_at` — the server stamp, never the device `occurred_at`). ISO-8601 with a zone designator
          */
@@ -22392,7 +22664,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_invoice' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'warehouse' | 'wave' | 'wave_policy' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -25269,6 +25541,91 @@ export type PortalControllerServiceResponses = {
 
 export type PortalControllerServiceResponse = PortalControllerServiceResponses[keyof PortalControllerServiceResponses];
 
+export type PortalControllerPortalReturnsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+        /**
+         * `awaiting` — units still open or on an unsettled hold; `dispositioned` — every received unit decided
+         */
+        dispositionState?: 'awaiting' | 'dispositioned';
+    };
+    url: '/tenants/{tenantId}/portal/returns';
+};
+
+export type PortalControllerPortalReturnsErrors = {
+    /**
+     * A malformed cursor (invalid-cursor), a limit outside 1–100 or a status outside its vocabulary (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerPortalReturnsError = PortalControllerPortalReturnsErrors[keyof PortalControllerPortalReturnsErrors];
+
+export type PortalControllerPortalReturnsResponses = {
+    200: PortalReturnPageResponse;
+};
+
+export type PortalControllerPortalReturnsResponse = PortalControllerPortalReturnsResponses[keyof PortalControllerPortalReturnsResponses];
+
+export type PortalControllerPortalReturnData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rmaId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/returns/{rmaId}';
+};
+
+export type PortalControllerPortalReturnErrors = {
+    /**
+     * Malformed rmaId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such return of this client — unknown, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerPortalReturnError = PortalControllerPortalReturnErrors[keyof PortalControllerPortalReturnErrors];
+
+export type PortalControllerPortalReturnResponses = {
+    200: PortalReturnDetailResponse;
+};
+
+export type PortalControllerPortalReturnResponse = PortalControllerPortalReturnResponses[keyof PortalControllerPortalReturnResponses];
+
 export type PortalControllerInvoicesData = {
     body?: never;
     path: {
@@ -25623,6 +25980,167 @@ export type ReturnsControllerReceiveResponses = {
 };
 
 export type ReturnsControllerReceiveResponse = ReturnsControllerReceiveResponses[keyof ReturnsControllerReceiveResponses];
+
+export type ReturnsControllerDisposeData = {
+    body: DisposeReturnDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/returns/dispositions';
+};
+
+export type ReturnsControllerDisposeErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — an unknown outcome, a non-positive qty, a restock without toBinId or with a reason/note, a quarantine or scrap without a reason or with a bin, "other" without a note, a note over 200 characters, a quantity finer than its unit, a serial unit or returned case not disposed whole, or a system bin as the target (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks returns.manage (role-denied), or a client-portal session (role-denied — operators only); or a secure target bin without secure.move (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse, the receipt line or the target bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The line is another warehouse's (document-warehouse-mismatch); quarantine of a serial-tracked or catch-weight unit (disposition-not-supported); an expired or blocked batch on a restock (batch-expired / batch-blocked); more than the line awaits — member awaitingQty (exceeds-awaiting); a scrap above the tenant's write-off threshold — members awaitingQty, threshold (scrap-above-threshold); a reconcile quarantine on RETURNS or the target (disposition-scope-quarantined); a placement-gate refusal with the gate's own code (bin-retired, bin-blocked, bin-storage-mismatch, bin-client-mismatch, bin-occupancy-conflict, bin-segregation-conflict, bin-full, bin-overweight, bin-volume-exceeded, bin-item-oversize); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReturnsControllerDisposeError = ReturnsControllerDisposeErrors[keyof ReturnsControllerDisposeErrors];
+
+export type ReturnsControllerDisposeResponses = {
+    /**
+     * The disposition (the idempotency snapshot)
+     */
+    201: ReturnDispositionResultDto;
+};
+
+export type ReturnsControllerDisposeResponse = ReturnsControllerDisposeResponses[keyof ReturnsControllerDisposeResponses];
+
+export type ReturnsControllerRestockData = {
+    body: RestockReturnDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/returns/restocks';
+};
+
+export type ReturnsControllerRestockErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — a malformed id, a non-positive qty, a non-UTC occurredAt, repeated or uncounted serials, serials with a batchCode, serials on a SKU that is not serial-tracked (or none on one that is), a batch on an unbatched SKU, a catch-weight SKU (restocked on the web), a quantity finer than its unit, or a system bin as the target (validation-failed); a batch-tracked SKU without its batch (batch-required)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked), the operator is not a floor role, or a secure target bin without secure.move (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse, the SKU or the target bin does not exist (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Less is awaiting than the restock names — member awaitingQty (exceeds-awaiting); a named serial is not awaiting (or was graded non-sellable) — member serialNumber (serial-not-awaiting); an expired or blocked batch (batch-expired / batch-blocked); a reconcile quarantine (disposition-scope-quarantined); a placement-gate refusal with the gate's own code; or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReturnsControllerRestockError = ReturnsControllerRestockErrors[keyof ReturnsControllerRestockErrors];
+
+export type ReturnsControllerRestockResponses = {
+    /**
+     * The dispositions, one per receipt line drawn (the idempotency snapshot)
+     */
+    201: ReturnDispositionResultDto;
+};
+
+export type ReturnsControllerRestockResponse = ReturnsControllerRestockResponses[keyof ReturnsControllerRestockResponses];
+
+export type ReturnsControllerAwaitingData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        /**
+         * Only one warehouse's lines (tenant-wide when absent)
+         */
+        warehouseId?: string;
+        /**
+         * Only one client's lines. An unknown id is an empty page
+         */
+        clientId?: string;
+        /**
+         * Opaque keyset cursor from the previous page
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/returns/awaiting';
+};
+
+export type ReturnsControllerAwaitingErrors = {
+    /**
+     * A malformed warehouseId or clientId, a limit outside 1–100 (validation-failed), or a malformed cursor (invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type ReturnsControllerAwaitingError = ReturnsControllerAwaitingErrors[keyof ReturnsControllerAwaitingErrors];
+
+export type ReturnsControllerAwaitingResponses = {
+    200: AwaitingDispositionListResponse;
+};
+
+export type ReturnsControllerAwaitingResponse = ReturnsControllerAwaitingResponses[keyof ReturnsControllerAwaitingResponses];
 
 export type ReturnsControllerReturnableData = {
     body?: never;

@@ -179,6 +179,9 @@ describe('portal boundary — no operator hook or component reaches the portal',
   test('the entries are the portal pages, the portal route group and the two portal lib modules — tests excluded', () => {
     const entries = portalEntries();
     expect(entries).toContain('components/portal/portal-inbound.tsx');
+    // Story 4-7a — the returns page and its route.
+    expect(entries).toContain('components/portal/portal-returns.tsx');
+    expect(entries).toContain('app/(portal)/portal/returns/page.tsx');
     expect(entries).toContain('app/(portal)/layout.tsx');
     expect(entries).toContain('lib/portal.ts');
     expect(entries).toContain('lib/use-portal.ts');
