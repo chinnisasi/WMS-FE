@@ -62,6 +62,7 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   // Story 1-6c — a drug or FSSAI licence (added, edited, withdrawn; the expiry sweep's raises).
   licence: 'Licence',
   licence_policy: 'Licence enforcement',
+  lpn: 'LPN',
   manifest: 'Manifest',
   order: 'Order',
   order_import: 'Order import',

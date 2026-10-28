@@ -5190,6 +5190,17 @@ export type SuggestedBinDto = {
     binCode: string;
 };
 
+export type PutawayTaskLpnDto = {
+    /**
+     * The LPN code — what the pallet or carton label's barcode encodes, byte for byte
+     */
+    code: string;
+    /**
+     * The declared quantity on the label, base units
+     */
+    qty: number;
+};
+
 export type PutawayTaskDto = {
     grnId: string;
     /**
@@ -5217,6 +5228,10 @@ export type PutawayTaskDto = {
      * Story 2-6a — present only on a SERIAL-TRACKED task: the GRN line's booked serial numbers still in the Receiving bin, in capture order (qty is their count). The handheld verifies each scan against this list offline; a serial task without it (an older server, a legacy anonymous line) cannot be placed from the handheld
      */
     serialNumbers?: Array<string>;
+    /**
+     * Story 2-10b — the GRN line's ACTIVE LPNs (licence plates) in code order; empty when none. A handheld scan of one chooses this task, verified, with the quantity prefilled (min of the LPN's and the task's). Placed and voided LPNs never appear
+     */
+    lpns: Array<PutawayTaskLpnDto>;
 };
 
 export type PickTaskDto = {
@@ -5898,6 +5913,111 @@ export type GoodsReceiptLinesResponse = {
      * The GRN's lines, in receipt order
      */
     items: Array<GoodsReceiptLineEntryDto>;
+};
+
+export type LpnDto = {
+    id: string;
+    /**
+     * The licence plate code — `LPN-` and the tenant number, zero-padded to 6 digits; the barcode payload byte for byte
+     */
+    code: string;
+    grnId: string;
+    grnLineId: string;
+    skuId: string;
+    skuCode: string;
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * The SKU's client when the LPN was minted
+     */
+    clientId: string;
+    /**
+     * The declared quantity, base units
+     */
+    qty: number;
+    /**
+     * `active` (labelled, rides its putaway task), `placed` (a placement consumed it), `voided` (terminal; frees its quantity)
+     */
+    status: 'active' | 'placed' | 'voided';
+    createdAt: string;
+    /**
+     * When a placement consumed it (server clock)
+     */
+    placedAt: string | null;
+    voidedAt: string | null;
+    voidReasonCode: 'misprint' | 'wrong-quantity' | 'label-damaged' | 'other' | null;
+    voidNote: string | null;
+};
+
+export type LpnListResponse = {
+    /**
+     * Every LPN of the goods receipt (any status), in code order
+     */
+    items: Array<LpnDto>;
+};
+
+export type MintLpnsLineDto = {
+    /**
+     * A line of this goods receipt
+     */
+    grnLineId: string;
+    /**
+     * One declared quantity per label, in request order (base units, each > 0). A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
+     */
+    quantities: Array<number>;
+};
+
+export type MintLpnsRequestDto = {
+    /**
+     * The lines to label (distinct), at most 1000 labels in total
+     */
+    lines: Array<MintLpnsLineDto>;
+};
+
+export type MintLpnsResponse = {
+    grnId: string;
+    /**
+     * The minted LPNs, in request order (code order)
+     */
+    lpns: Array<LpnDto>;
+};
+
+export type LpnLabelsRequestDto = {
+    /**
+     * The LPNs to print (distinct ids of this goods receipt). Send this, or `grnLineId`, or neither.
+     */
+    lpnIds?: Array<string>;
+    /**
+     * Print the non-voided LPNs of one line of this receipt. Send this, or `lpnIds`, or neither.
+     */
+    grnLineId?: string;
+    /**
+     * `zpl` (Zebra thermal, 203 dpi) or `pdf`
+     */
+    format: 'zpl' | 'pdf';
+    /**
+     * `label` — one label per page or per ^XA…^XZ (default); `a4` — a 3 × 8 sheet of 70 × 36 mm cells (PDF only)
+     */
+    layout?: 'label' | 'a4';
+    /**
+     * The label size in inches (`label` layout only; sending it with `a4` is a 400)
+     */
+    size?: '4x2' | '2x1';
+};
+
+export type VoidLpnRequestDto = {
+    /**
+     * Why the label is voided (`other` needs the note)
+     */
+    reasonCode: 'misprint' | 'wrong-quantity' | 'label-damaged' | 'other';
+    /**
+     * A note (trimmed, 1–200 characters; required with `other`)
+     */
+    note?: string | null;
+};
+
+export type LpnResponse = {
+    lpn: LpnDto;
 };
 
 export type OverReceiptDto = {
@@ -6870,6 +6990,10 @@ export type PlacePutawayDto = {
      * The serial numbers of a serial-tracked placement (one per unit, no duplicates)
      */
     serials?: Array<string>;
+    /**
+     * Story 2-10b — the LPN (licence plate) the operator scanned for this placement: it must be an ACTIVE LPN of this GRN line holding at least `qty`, and the placement consumes it (`placed`). Absent, null or blank = no LPN (the payload hashes exactly as before)
+     */
+    lpnCode?: string | null;
 };
 
 export type PutawayPlacementDto = {
@@ -9618,7 +9742,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -9645,7 +9769,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -21001,6 +21125,217 @@ export type ReceivingControllerListGoodsReceiptLinesResponses = {
 
 export type ReceivingControllerListGoodsReceiptLinesResponse = ReceivingControllerListGoodsReceiptLinesResponses[keyof ReceivingControllerListGoodsReceiptLinesResponses];
 
+export type ReceivingControllerListLpnsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The goods receipt
+         */
+        grnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/lpns';
+};
+
+export type ReceivingControllerListLpnsErrors = {
+    /**
+     * Malformed grnId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such goods receipt in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReceivingControllerListLpnsError = ReceivingControllerListLpnsErrors[keyof ReceivingControllerListLpnsErrors];
+
+export type ReceivingControllerListLpnsResponses = {
+    200: LpnListResponse;
+};
+
+export type ReceivingControllerListLpnsResponse = ReceivingControllerListLpnsResponses[keyof ReceivingControllerListLpnsResponses];
+
+export type ReceivingControllerMintLpnsData = {
+    body: MintLpnsRequestDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The goods receipt
+         */
+        grnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/lpns';
+};
+
+export type ReceivingControllerMintLpnsErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed grnId or body, a line named twice, more than 1000 labels, or a quantity finer than the SKU's unit allows (validation-failed naming `quantities`)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks labels.execute (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such goods receipt, or a line that is not of this receipt (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse), more than the line can carry on labels (lpn-quantity-exceeds-line, with `remaining`, `putawayQty` and `labelled` in base units), or more than 5000 labels on a line (too-many-labels, with `count`)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerMintLpnsError = ReceivingControllerMintLpnsErrors[keyof ReceivingControllerMintLpnsErrors];
+
+export type ReceivingControllerMintLpnsResponses = {
+    201: MintLpnsResponse;
+};
+
+export type ReceivingControllerMintLpnsResponse = ReceivingControllerMintLpnsResponses[keyof ReceivingControllerMintLpnsResponses];
+
+export type ReceivingControllerPrintLpnLabelsData = {
+    body: LpnLabelsRequestDto;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The goods receipt
+         */
+        grnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/lpns/labels';
+};
+
+export type ReceivingControllerPrintLpnLabelsErrors = {
+    /**
+     * Invalid body (validation-failed): both lpnIds and grnLineId, more than 1000 or duplicate ids, size with the a4 layout, the a4 layout with zpl, or a malformed grnId
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks labels.execute (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The goods receipt, the line or a listed LPN is not in this tenant and receipt (not-found), or nothing to print (no-lpns-to-print)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A listed LPN is voided (lpn-voided), or a code too long for the size or A4 cell at a 2-dot bar (lpn-code-too-long-for-label) — each with `lpnCodes`; or more than 1000 labels (too-many-labels, with `count`)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerPrintLpnLabelsError = ReceivingControllerPrintLpnLabelsErrors[keyof ReceivingControllerPrintLpnLabelsErrors];
+
+export type ReceivingControllerPrintLpnLabelsResponses = {
+    /**
+     * The labels: ZPL as `text/plain; charset=us-ascii`, or a PDF
+     */
+    200: Blob | File;
+};
+
+export type ReceivingControllerPrintLpnLabelsResponse = ReceivingControllerPrintLpnLabelsResponses[keyof ReceivingControllerPrintLpnLabelsResponses];
+
+export type ReceivingControllerVoidLpnData = {
+    body: VoidLpnRequestDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The goods receipt
+         */
+        grnId: string;
+        /**
+         * The LPN
+         */
+        lpnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/lpns/{lpnId}/void';
+};
+
+export type ReceivingControllerVoidLpnErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed grnId or lpnId, an unknown reasonCode, a note over 200 characters, or `other` without a note (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks labels.execute (role-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such LPN on this goods receipt (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The LPN is already voided or was put away (lpn-not-active, with `lpnCode` and `lpnStatus`), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReceivingControllerVoidLpnError = ReceivingControllerVoidLpnErrors[keyof ReceivingControllerVoidLpnErrors];
+
+export type ReceivingControllerVoidLpnResponses = {
+    200: LpnResponse;
+};
+
+export type ReceivingControllerVoidLpnResponse = ReceivingControllerVoidLpnResponses[keyof ReceivingControllerVoidLpnResponses];
+
 export type ReceivingControllerListOverReceiptsData = {
     body?: never;
     path: {
@@ -26507,7 +26842,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
