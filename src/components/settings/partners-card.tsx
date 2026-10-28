@@ -24,10 +24,6 @@ import {
   linkShelfLifeCopy,
   linkShelfLifeGstinWarning,
   linkShelfLifeSummary,
-  MAX_SHELF_LIFE_DAYS,
-  MAX_SHELF_LIFE_PERCENT,
-  MIN_SHELF_LIFE_DAYS,
-  MIN_SHELF_LIFE_PERCENT,
   linkedClientsLabel,
   notifyPartnersChanged,
   panAfterGstinEdit,
@@ -435,6 +431,9 @@ function PartnerForm({
     </label>
   );
 
+  // Story 4-3b (A8) — computed once per render.
+  const gstinWarning = gstinChangeShelfLifeWarning(partner, fields.gstin);
+
   return (
     <form onSubmit={submit} aria-label={partner === null ? 'New partner' : `Edit ${partner.code}`} className="flex flex-col gap-3 rounded-md border border-(--border) p-3">
       <div className="font-medium">{partner === null ? 'New partner' : `Edit ${partner.code}`}</div>
@@ -461,9 +460,9 @@ function PartnerForm({
             onChange={(e) => edit({ ...fields, gstin: e.target.value, pan: panAfterGstinEdit(fields.gstin, e.target.value, fields.pan) })}
           />
           <span className="text-xs text-(--muted-foreground)">Blank for an unregistered supplier. One partner is one GST registration.</span>
-          {gstinChangeShelfLifeWarning(partner, fields.gstin) !== null ? (
+          {gstinWarning !== null ? (
             <span role="note" className="text-xs font-medium text-(--warning)">
-              {gstinChangeShelfLifeWarning(partner, fields.gstin)}
+              {gstinWarning}
             </span>
           ) : null}
         </label>
@@ -641,7 +640,7 @@ function PartnerLinksPanel({
       const updated = await fetchApiUpdatePartnerLinkShelfLife(session.tenant.id, partner.id, link.id, parsed.body, shelfKeyRef.current);
       shelfKeyRef.current = null;
       setShelfEdit(null);
-      onDirtyChange(false);
+      setDirty('shelf', false);
       onChanged(updated, 'Shelf-life rule saved', `${linkClientLabel(link.clientId, clients)} · applies to waves generated from now on.`);
     } catch (error) {
       onRejected('Shelf-life rule not saved', partnerReason(error, 'saved'));
@@ -651,9 +650,16 @@ function PartnerLinksPanel({
     }
   }
 
+  // Two drafts in this panel (the add-link form and the shelf-life editor),
+  // each with its own dirty flag; the panel is dirty when either is.
+  const dirtyRef = useRef({ add: false, shelf: false });
+  const setDirty = (which: 'add' | 'shelf', dirty: boolean) => {
+    dirtyRef.current = { ...dirtyRef.current, [which]: dirty };
+    onDirtyChange(dirtyRef.current.add || dirtyRef.current.shelf);
+  };
   const editAdd = (apply: () => void) => {
     keyRef.current = null;
-    onDirtyChange(true);
+    setDirty('add', true);
     apply();
   };
 
@@ -689,7 +695,7 @@ function PartnerLinksPanel({
         keyRef.current,
       );
       keyRef.current = null;
-      onDirtyChange(false);
+      setDirty('add', false);
       const label = linkClientLabel(clientId, clients);
       setClientId('');
       setClientCode('');
@@ -794,7 +800,8 @@ function PartnerLinksPanel({
                 {link.role === 'consignee' && (shelfEdit === null || shelfEdit.linkId !== link.id) ? (
                   <button
                     type="button"
-                    disabled={busyRow || shelfBusy}
+                    // One editor at a time: another row's open draft is never dropped silently.
+                    disabled={busyRow || shelfBusy || shelfEdit !== null}
                     className={rowButtonClass}
                     onClick={() => {
                       setProblem(null);
@@ -838,12 +845,10 @@ function PartnerLinksPanel({
                           aria-label="Minimum days left"
                           className={`${inputClass} w-32`}
                           inputMode="numeric"
-                          min={MIN_SHELF_LIFE_DAYS}
-                          max={MAX_SHELF_LIFE_DAYS}
                           value={shelfEdit.days}
                           onChange={(e) => {
                             shelfKeyRef.current = null;
-                            onDirtyChange(true);
+                            setDirty('shelf', true);
                             setProblem(null);
                             setShelfEdit({ ...shelfEdit, days: e.target.value });
                           }}
@@ -855,12 +860,10 @@ function PartnerLinksPanel({
                           aria-label="Minimum percent of total shelf life"
                           className={`${inputClass} w-32`}
                           inputMode="numeric"
-                          min={MIN_SHELF_LIFE_PERCENT}
-                          max={MAX_SHELF_LIFE_PERCENT}
                           value={shelfEdit.percent}
                           onChange={(e) => {
                             shelfKeyRef.current = null;
-                            onDirtyChange(true);
+                            setDirty('shelf', true);
                             setProblem(null);
                             setShelfEdit({ ...shelfEdit, percent: e.target.value });
                           }}
@@ -876,7 +879,7 @@ function PartnerLinksPanel({
                         onClick={() => {
                           setProblem(null);
                           shelfKeyRef.current = null;
-                          onDirtyChange(false);
+                          setDirty('shelf', false);
                           setShelfEdit(null);
                         }}
                       >

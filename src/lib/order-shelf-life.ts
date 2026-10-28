@@ -8,13 +8,32 @@ import { formatIstDate } from '@/lib/rate-cards';
 
 export type OrderShelfLifeLine = OrderShelfLifeDto['lines'][number];
 
-/** The section renders only when a consignee rule or a client minimum applies. */
+/**
+ * The section renders when a consignee rule or a client minimum applies, and
+ * also when the order names a GSTIN but no consignee rule applied (its
+ * resolution line says why). Never for `no-gstin` alone.
+ */
 export function orderShelfLifeApplies(read: OrderShelfLifeDto): boolean {
-  return read.consignee !== null || read.clientMinShelfLifeDays !== null;
+  return read.consignee !== null || read.clientMinShelfLifeDays !== null || read.consigneeResolution !== 'no-gstin';
 }
 
-/** The rule sentence: the consignee's rule (if any) and the client minimum (if any), and the date judged on. */
-export function orderShelfLifeRuleText(read: OrderShelfLifeDto): string {
+/** A8 — why the consignee rule did not apply, for an order that names a GSTIN; null otherwise. */
+export function orderShelfLifeResolutionText(read: OrderShelfLifeDto): string | null {
+  const partner = read.resolvedPartner?.name ?? 'The partner';
+  switch (read.consigneeResolution) {
+    case 'no-partner':
+      return `No partner has GSTIN ${read.consigneeGstin ?? ''} — no consignee shelf-life rule applies.`;
+    case 'no-consignee-link':
+      return `${partner} has no consignee link for this client — no consignee shelf-life rule applies.`;
+    case 'no-rule':
+      return `${partner}'s consignee link has no shelf-life rule.`;
+    default:
+      return null;
+  }
+}
+
+/** The rule sentence: the consignee's rule (if any) and the client minimum (if any), and the date judged on; null when neither applies. */
+export function orderShelfLifeRuleText(read: OrderShelfLifeDto): string | null {
   const parts: string[] = [];
   if (read.consignee !== null) {
     const terms: string[] = [];
@@ -23,6 +42,7 @@ export function orderShelfLifeRuleText(read: OrderShelfLifeDto): string {
     parts.push(`${read.consignee.name} (${read.consignee.code}) needs ${terms.join(' and ')} left`);
   }
   if (read.clientMinShelfLifeDays !== null) parts.push(`the client's minimum is ${read.clientMinShelfLifeDays} days`);
+  if (parts.length === 0) return null;
   const rule = parts.join('; ');
   return `${rule.charAt(0).toUpperCase()}${rule.slice(1)}. If waved today (${formatIstDate(read.judgedOn)}).`;
 }
@@ -41,14 +61,28 @@ export function orderShelfLifeLineText(line: OrderShelfLifeLine): string {
 export const SHELF_LIFE_RECOVERY =
   'Receive fresher stock and regenerate the wave (cancel this wave first), or cancel the order line. The reserved units stay held until then.';
 
-/** A line's warning, or null when it is covered. Unjudgeable names the SKU and the fix. */
+/** The fix for a line no dated batch can meet (a percent rule over a SKU with no total shelf life). */
+export function unjudgeableFix(skuCode: string): string {
+  return `Set ${skuCode}'s total shelf life in the catalog (then cancel and regenerate the wave if it is already waved), or cancel the order line.`;
+}
+
+/**
+ * A line's warning, or null. Only when a shelf-life minimum applies to the
+ * line (or it cannot be judged) — a plain stock shortfall is not a
+ * shelf-life warning. A planned-short line is worded by the planner's frozen
+ * cause, not by today's `judgeable`.
+ */
 export function orderShelfLifeLineWarning(line: OrderShelfLifeLine): string | null {
-  if (!line.judgeable) {
-    return `${line.skuCode} has no total shelf life, so the consignee's percent rule cannot be met — set the SKU's total shelf life in the catalog. ${SHELF_LIFE_RECOVERY}`;
+  if (line.shortfallQty !== null && line.shortfallQty > 0 && line.shortfallCause === 'consignee-unjudgeable') {
+    return `${line.shortfallQty} reserved unit(s) planned short while ${line.skuCode} had no total shelf life. ${unjudgeableFix(line.skuCode)}`;
   }
-  if (line.shortfallQty !== null && line.shortfallQty > 0 && line.shortfallCause !== null) {
+  if (line.shortfallQty !== null && line.shortfallQty > 0 && line.shortfallCause === 'consignee-shelf-life') {
     return `${line.shortfallQty} reserved unit(s) planned short — not enough stock meets the shelf-life rule. ${SHELF_LIFE_RECOVERY}`;
   }
+  if (!line.judgeable) {
+    return `${line.skuCode} has no total shelf life, so the consignee's percent rule cannot be met. ${unjudgeableFix(line.skuCode)}`;
+  }
+  if (line.effectiveMinDays === null) return null;
   if (line.plannedQty === null && line.qualifyingUnclaimed < line.reservedQty) {
     return `Only ${line.qualifyingUnclaimed} of the ${line.reservedQty} reserved unit(s) have qualifying stock not already claimed — a wave now would plan the rest short. ${SHELF_LIFE_RECOVERY}`;
   }

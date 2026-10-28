@@ -2873,7 +2873,7 @@ describe('business partner wrappers (story 1-3)', () => {
     expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/p-1/links/l-1/shelf-life`);
     expect(lastRequest!.headers.get('Idempotency-Key')).toBe(PKEY);
     expect(await lastRequest!.json()).toEqual({ minShelfLifeDays: null, minShelfLifePercent: 70 });
-    const read = { orderId: 'o-1', judgedOn: '2026-10-28', clientMinShelfLifeDays: null, consigneeResolution: 'no-gstin' as const, consignee: null, lines: [] };
+    const read = { orderId: 'o-1', judgedOn: '2026-10-28', clientMinShelfLifeDays: null, consigneeResolution: 'no-gstin' as const, consigneeGstin: null, resolvedPartner: null, consignee: null, lines: [] };
     stubFetch(200, { orderShelfLife: read });
     expect(await fetchApiGetOrderShelfLife(SESSION.tenant.id, 'o-1')).toEqual(read);
     expect(lastRequest!.method).toBe('GET');

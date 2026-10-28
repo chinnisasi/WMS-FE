@@ -8,6 +8,7 @@ import {
   orderShelfLifeApplies,
   orderShelfLifeLineText,
   orderShelfLifeLineWarning,
+  orderShelfLifeResolutionText,
   orderShelfLifeRuleText,
 } from '@/lib/order-shelf-life';
 import { useOrderShelfLife } from '@/lib/use-outbound-orders';
@@ -17,8 +18,9 @@ import { useOrderShelfLife } from '@/lib/use-outbound-orders';
  * the rule that applies (the consignee's, resolved from the order's GSTIN,
  * and the client minimum) and, per line, qualifying vs reserved stock if it
  * were waved today, a shortfall warning with what to do next (A7), and an
- * unjudgeable line's fix. Renders nothing when no rule applies (or the
- * backend predates the read — a 404).
+ * unjudgeable line's fix; for an order naming a GSTIN that matched no rule,
+ * one muted line saying why. Renders nothing for an order with no GSTIN and
+ * no client minimum (or a backend that predates the read — a 404).
  */
 export function CustomerShelfLifeSection({ orderId }: { orderId: string }) {
   const read = useOrderShelfLife(orderId);
@@ -27,6 +29,8 @@ export function CustomerShelfLifeSection({ orderId }: { orderId: string }) {
     return <ReadFailure word="Customer shelf life unavailable" reason={read.reason} onRetry={read.reload} />;
   }
   if (read.data === null || !orderShelfLifeApplies(read.data)) return null;
+  const rule = orderShelfLifeRuleText(read.data);
+  const resolution = orderShelfLifeResolutionText(read.data);
   return (
     <section
       aria-label="Customer shelf life"
@@ -34,9 +38,17 @@ export function CustomerShelfLifeSection({ orderId }: { orderId: string }) {
       data-testid="customer-shelf-life"
     >
       <h3 className="text-xs font-medium">Customer shelf life</h3>
-      <p className="text-xs" data-testid="customer-shelf-life-rule">
-        {orderShelfLifeRuleText(read.data)}
-      </p>
+      {rule !== null && (
+        <p className="text-xs" data-testid="customer-shelf-life-rule">
+          {rule}
+        </p>
+      )}
+      {resolution !== null && (
+        <p className="text-xs text-(--muted-foreground)" data-testid="customer-shelf-life-resolution">
+          {resolution}
+        </p>
+      )}
+      {rule !== null && (
       <ul className="flex flex-col gap-1">
         {read.data.lines.map((line) => {
           const warning = orderShelfLifeLineWarning(line);
@@ -48,7 +60,8 @@ export function CustomerShelfLifeSection({ orderId }: { orderId: string }) {
           );
         })}
       </ul>
-      <p className="text-xs text-(--muted-foreground)">{ORDER_SHELF_LIFE_NOTE}</p>
+      )}
+      {rule !== null && <p className="text-xs text-(--muted-foreground)">{ORDER_SHELF_LIFE_NOTE}</p>}
     </section>
   );
 }

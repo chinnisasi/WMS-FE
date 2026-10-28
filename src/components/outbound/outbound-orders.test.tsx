@@ -56,6 +56,8 @@ let ordersById: Record<string, Record<string, unknown>> = {};
 /** Story 4-2c — every "Allocate now" POST (its path and key), and the answer. */
 let allocates: { pathname: string; key: string | null }[] = [];
 let allocateAnswer: { status: number; body: unknown } = { status: 200, body: null };
+/** Story 4-3b — the customer shelf-life read's answer (null → the read 404s: an older backend). */
+let shelfLifeBody: Record<string, unknown> | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -176,6 +178,9 @@ function stubRouter(): void {
       listUrls.push(url);
       return json(200, ordersResponder === null ? { items: [], nextCursor: null } : ordersResponder(url));
     }
+    if (method === 'GET' && /\/outbound\/orders\/[^/]+\/shelf-life$/.test(pathname) && shelfLifeBody !== null) {
+      return json(200, { orderShelfLife: shelfLifeBody });
+    }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+\/restock-plan$/.test(pathname)) {
       const orderId = pathname.split('/')[pathname.split('/').length - 2]!;
       return json(200, { orderId, orderStatus: order?.status ?? 'accepted', shipment: null, lines: [], restocked: restockedBody });
@@ -230,6 +235,7 @@ beforeEach(() => {
   ordersById = {};
   allocates = [];
   allocateAnswer = { status: 200, body: null };
+  shelfLifeBody = null;
   stubRouter();
   writeSession(SESSION);
 });
@@ -1822,5 +1828,51 @@ describe('OrderDetailPanel: backorders (story 4-2c)', () => {
     await act(async () => allocateButton()!.click());
     await settle();
     expect(view.container.querySelector('[role="alert"]')!.textContent).toContain('Cancel the wave to re-plan it');
+  });
+});
+
+describe('OrderDetailPanel: customer shelf life (story 4-3b)', () => {
+  const ORDER_ID = '0198f7a2-1b3c-7d4e-8f90-00000000f001';
+  const shelfOrder = (status: string) => ({
+    id: ORDER_ID,
+    tenantId: TENANT_ID,
+    warehouseId: 'wh-1',
+    status,
+    source: 'manual',
+    integrationId: null,
+    externalEventId: null,
+    destination: null,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    lines: [line({ id: 'line-1', skuId: 'pad-sku', qty: 1, reservedQty: 1, parentLineId: null })],
+  });
+  const read = {
+    orderId: ORDER_ID,
+    judgedOn: '2026-10-28',
+    clientMinShelfLifeDays: null,
+    consigneeResolution: 'applied',
+    consigneeGstin: '27AAACD1111A1Z5',
+    resolvedPartner: { partnerId: 'p', code: 'DMART', name: 'DMart' },
+    consignee: { partnerId: 'p', code: 'DMART', name: 'DMart', minShelfLifeDays: 120, minShelfLifePercent: null },
+    lines: [],
+  };
+  const shelfReads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith(`/outbound/orders/${ORDER_ID}/shelf-life`)).length;
+
+  test('an accepted order reads it and shows the section', async () => {
+    order = shelfOrder('accepted');
+    shelfLifeBody = read;
+    view = await mount(ORDER_ID);
+    await settle();
+    expect(shelfReads()).toBe(1);
+    expect(view.container.querySelector('[data-testid="customer-shelf-life"]')!.textContent).toContain('DMart (DMART) needs ≥ 120 days left');
+  });
+
+  test('a dispatched order never requests it', async () => {
+    order = shelfOrder('dispatched');
+    shelfLifeBody = read;
+    view = await mount(ORDER_ID);
+    await settle();
+    expect(shelfReads()).toBe(0);
+    expect(view.container.querySelector('[data-testid="customer-shelf-life"]')).toBeNull();
   });
 });

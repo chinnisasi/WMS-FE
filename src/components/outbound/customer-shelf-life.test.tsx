@@ -4,6 +4,7 @@ import { act } from 'react';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
+import { OUTBOUND_CHANGED_EVENT } from '../../lib/outbound';
 import { CustomerShelfLifeSection } from './customer-shelf-life';
 
 /**
@@ -39,12 +40,30 @@ const LINE = {
 };
 
 let paths: string[] = [];
+let answer: { status: number; body: unknown } = { status: 200, body: {} };
 function stub(status: number, body: unknown): void {
+  answer = { status, body };
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
     paths.push(new URL(request.url).pathname);
-    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch);
+}
+
+function readOf(over: Record<string, unknown>): unknown {
+  return {
+    orderShelfLife: {
+      orderId: ORDER_ID,
+      judgedOn: '2026-10-28',
+      clientMinShelfLifeDays: null,
+      consigneeResolution: 'applied',
+      consigneeGstin: '27AAACD1111A1Z5',
+      resolvedPartner: { partnerId: 'p', code: 'DMART', name: 'DMart' },
+      consignee: { partnerId: 'p', code: 'DMART', name: 'DMart', minShelfLifeDays: 120, minShelfLifePercent: null },
+      lines: [],
+      ...over,
+    },
+  };
 }
 
 let view: Rendered | undefined;
@@ -84,7 +103,9 @@ describe('CustomerShelfLifeSection', () => {
     expect(section).not.toBeNull();
     expect(section!.textContent).toContain('Percent Mart (PCT) needs ≥ 70 % of total shelf life left.');
     expect(section!.textContent).toContain("SKU-UJ has no total shelf life, so the consignee's percent rule cannot be met");
-    expect(section!.textContent).toContain('Receive fresher stock and regenerate the wave (cancel this wave first), or cancel the order line.');
+    // The unjudgeable fix is the catalog, never "receive fresher stock".
+    expect(section!.textContent).toContain("Set SKU-UJ's total shelf life in the catalog (then cancel and regenerate the wave if it is already waved), or cancel the order line.");
+    expect(section!.textContent).not.toContain('fresher stock');
   });
 
   test('no rule applies: nothing renders', async () => {
@@ -111,5 +132,38 @@ describe('CustomerShelfLifeSection', () => {
     view = render(<CustomerShelfLifeSection orderId={ORDER_ID} />);
     await settle();
     expect(view.container.textContent).toContain('Customer shelf life unavailable');
+  });
+
+  test('a GSTIN that matched no rule: one muted line naming why, and no figures', async () => {
+    writeSession(session);
+    for (const [resolution, partner, expected] of [
+      ['no-partner', null, 'No partner has GSTIN 27AAACD1111A1Z5 — no consignee shelf-life rule applies.'],
+      ['no-consignee-link', { partnerId: 'p', code: 'DMART', name: 'DMart' }, 'DMart has no consignee link for this client — no consignee shelf-life rule applies.'],
+      ['no-rule', { partnerId: 'p', code: 'DMART', name: 'DMart' }, "DMart's consignee link has no shelf-life rule."],
+    ] as const) {
+      stub(200, readOf({ consigneeResolution: resolution, resolvedPartner: partner, consignee: null, lines: [LINE] }));
+      view = render(<CustomerShelfLifeSection orderId={ORDER_ID} />);
+      await settle();
+      expect(view.container.querySelector('[data-testid="customer-shelf-life-resolution"]')?.textContent).toBe(expected);
+      expect(view.container.querySelector('[data-testid="customer-shelf-life-line"]')).toBeNull();
+      view.unmount();
+      view = undefined;
+    }
+  });
+
+  test('OUTBOUND_CHANGED_EVENT refetches and the warning follows the new answer', async () => {
+    writeSession(session);
+    const covered = { ...LINE, skuCode: 'SKU-A', judgeable: true, effectiveMinDays: 120, reservedQty: 2, qualifyingOnHand: 5, qualifyingUnclaimed: 5 };
+    stub(200, readOf({ lines: [covered] }));
+    view = render(<CustomerShelfLifeSection orderId={ORDER_ID} />);
+    await settle();
+    expect(view.container.textContent).not.toContain('Short on shelf life');
+    answer = { status: 200, body: readOf({ lines: [{ ...covered, qualifyingUnclaimed: 1 }] }) };
+    await act(async () => {
+      window.dispatchEvent(new Event(OUTBOUND_CHANGED_EVENT));
+    });
+    await settle();
+    expect(paths).toHaveLength(2);
+    expect(view.container.textContent).toContain('Only 1 of the 2 reserved unit(s) have qualifying stock not already claimed');
   });
 });

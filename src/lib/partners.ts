@@ -436,7 +436,7 @@ export function parseLinkShelfLife(
   return { body: { minShelfLifeDays: days.value, minShelfLifePercent: percent.value }, problem: null };
 }
 
-/** A consignee link's rule as row text ("needs ≥ 120 days · ≥ 70 % of total life"); null when none (or an older server). */
+/** A consignee link's rule as row text ("Shelf life ≥ 120 days and ≥ 70 % of total life"); null when none (or an older server). */
 export function linkShelfLifeSummary(link: Pick<PartnerLink, 'minShelfLifeDays' | 'minShelfLifePercent'>): string | null {
   const parts: string[] = [];
   if (link.minShelfLifeDays != null) parts.push(`≥ ${link.minShelfLifeDays} days`);
@@ -468,6 +468,9 @@ export function gstinChangeShelfLifeWarning(partner: Pick<PartnerDto, 'gstin' | 
   const hasRule = partner.links.some((link) => link.role === 'consignee' && linkShelfLifeSummary(link) !== null);
   if (!hasRule) return null;
   const next = nextGstinText.trim().toUpperCase();
-  if (next === (partner.gstin ?? '')) return null;
+  const current = partner.gstin ?? '';
+  if (next === current) return null;
+  if (current === '') return 'Orders carrying this GSTIN will start matching this partner’s shelf-life rules.';
+  if (next === '') return 'No order will match this partner’s shelf-life rules without a GSTIN.';
   return 'Orders are matched by GSTIN — orders carrying the old GSTIN lose this partner’s shelf-life rules.';
 }

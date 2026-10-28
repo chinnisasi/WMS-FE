@@ -21,6 +21,7 @@ import { fetchOrdersDrill } from '@/lib/drill-fetch';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { detailReason, readReason } from '@/lib/outbound-orders';
 import { OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
+import { PARTNERS_CHANGED_EVENT } from '@/lib/partners';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
 import { useTenantWarehouses, type TenantWarehouses } from '@/lib/use-tenant-warehouses';
 
@@ -245,7 +246,7 @@ export function useOrderDetail(orderId: string | null): ResourceState<OrderDto> 
  * Story 4-3b — one order's customer shelf life (`GET …/orders/{id}/shelf-life`):
  * the rules that apply and, per line, how much on-hand stock qualifies if it
  * were waved today. The `useOrderDetail` shape; refetched on
- * OUTBOUND_CHANGED_EVENT.
+ * OUTBOUND_CHANGED_EVENT, PARTNERS_CHANGED_EVENT and CATALOG_CHANGED_EVENT.
  */
 export function useOrderShelfLife(orderId: string | null): ResourceState<OrderShelfLifeDto | null> & Reloadable {
   const tenantId = useSyncExternalStore(
@@ -262,8 +263,12 @@ export function useOrderShelfLife(orderId: string | null): ResourceState<OrderSh
 
   useEffect(() => {
     const onChange = () => setRevision((r) => r + 1);
-    window.addEventListener(OUTBOUND_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(OUTBOUND_CHANGED_EVENT, onChange);
+    // A rule edit (partners) or a SKU's total shelf life (catalog) changes the answer too.
+    const events = [OUTBOUND_CHANGED_EVENT, PARTNERS_CHANGED_EVENT, CATALOG_CHANGED_EVENT];
+    for (const event of events) window.addEventListener(event, onChange);
+    return () => {
+      for (const event of events) window.removeEventListener(event, onChange);
+    };
   }, []);
 
   useEffect(() => {

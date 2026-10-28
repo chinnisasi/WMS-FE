@@ -7,6 +7,7 @@ import {
   orderShelfLifeApplies,
   orderShelfLifeLineText,
   orderShelfLifeLineWarning,
+  orderShelfLifeResolutionText,
   orderShelfLifeRuleText,
   SHELF_LIFE_RECOVERY,
   type OrderShelfLifeLine,
@@ -63,6 +64,10 @@ describe('link rule text', () => {
     } as Pick<PartnerDto, 'gstin' | 'links'>;
     expect(gstinChangeShelfLifeWarning(withRule, '27aaacd1111a1z5')).toBeNull();
     expect(gstinChangeShelfLifeWarning(withRule, '27AAACD1111A1Z6')).toContain('orders carrying the old GSTIN lose this partner’s shelf-life rules');
+    expect(gstinChangeShelfLifeWarning(withRule, '  ')).toBe('No order will match this partner’s shelf-life rules without a GSTIN.');
+    expect(gstinChangeShelfLifeWarning({ ...withRule, gstin: null }, '27AAACD1111A1Z5')).toBe(
+      'Orders carrying this GSTIN will start matching this partner’s shelf-life rules.',
+    );
     expect(gstinChangeShelfLifeWarning({ ...withRule, links: [{ ...withRule.links[0]!, minShelfLifeDays: null }] }, '')).toBeNull();
     expect(gstinChangeShelfLifeWarning(null, '27AAACD1111A1Z6')).toBeNull();
   });
@@ -75,9 +80,9 @@ describe('the wave row (A2, A6, A13)', () => {
       consigneeRuleText({ consigneeName: 'DMart', consigneeMinShelfLifeDays: 126, consigneeMinShelfLifePercent: 70, consigneeShelfLifeBaseDays: 180 }),
     ).toBe('DMart needs ≥ 126 days (70 % of 180 d)');
     expect(consigneeRuleText({ consigneeName: 'DMart', consigneeMinShelfLifeDays: 126, consigneeMinShelfLifePercent: 70 })).toBe('DMart needs ≥ 126 days (70 %)');
-    expect(consigneeRuleText({ consigneeName: 'DMart', consigneeMinShelfLifeDays: null, consigneeMinShelfLifePercent: 70 })).toBe(
-      'DMart needs 70 % of total life (the SKU has none set)',
-    );
+    expect(consigneeRuleText({ consigneeName: 'DMart', consigneeMinShelfLifeDays: null, consigneeMinShelfLifePercent: 70 })).toBe('DMart needs ≥ 70 % of total life');
+    // No name (an older stored wave without the snapshot key): "the consignee".
+    expect(consigneeRuleText({ consigneeName: null, consigneeMinShelfLifeDays: 120 })).toBe('the consignee needs ≥ 120 days');
     expect(consigneeRuleText({})).toBeNull();
   });
 
@@ -88,8 +93,12 @@ describe('the wave row (A2, A6, A13)', () => {
     expect(
       allocationReason({ allocationRule: 'fefo', consigneeName: 'DMart', consigneeMinShelfLifeDays: 120, shortfallCause: 'consignee-shelf-life' }),
     ).toBe("earliest expiry first · DMart needs ≥ 120 days · short: below DMart's shelf-life rule");
-    expect(allocationReason({ allocationRule: 'fefo', consigneeName: 'P', consigneeMinShelfLifePercent: 70, shortfallCause: 'consignee-unjudgeable' })).toContain(
-      'short: SKU has no total shelf life',
+    // Unjudgeable: the rule once, the reason once.
+    expect(allocationReason({ allocationRule: 'fefo', consigneeName: 'P', consigneeMinShelfLifePercent: 70, shortfallCause: 'consignee-unjudgeable' })).toBe(
+      'earliest expiry first · P needs ≥ 70 % of total life · short: SKU has no total shelf life',
+    );
+    expect(allocationReason({ consigneeMinShelfLifeDays: 120, shortfallCause: 'consignee-shelf-life' })).toBe(
+      "the consignee needs ≥ 120 days · short: below the consignee's shelf-life rule",
     );
     // A pre-4-3b stored wave: no keys, exactly 4-3a's text.
     expect(allocationReason({ batchCode: 'L2', batchExpiryDate: '2027-03-31', allocationRule: 'fefo' })).toBe('batch L2 · exp 31 Mar 2027 · earliest expiry first');
@@ -118,15 +127,30 @@ describe('the order section', () => {
     judgedOn: '2026-10-28',
     clientMinShelfLifeDays: null,
     consigneeResolution: 'applied',
+    consigneeGstin: '27AAACD1111A1Z5',
+    resolvedPartner: { partnerId: 'p', code: 'DMART', name: 'DMart' },
     consignee: { partnerId: 'p', code: 'DMART', name: 'DMart', minShelfLifeDays: 120, minShelfLifePercent: 70 },
     lines: [line()],
     ...over,
   });
 
-  test('applies when a consignee rule or a client minimum applies', () => {
+  test('applies when a rule applies, or the order names a GSTIN that matched no rule; never for no-gstin alone', () => {
     expect(orderShelfLifeApplies(read())).toBe(true);
-    expect(orderShelfLifeApplies(read({ consignee: null, consigneeResolution: 'no-gstin' }))).toBe(false);
-    expect(orderShelfLifeApplies(read({ consignee: null, clientMinShelfLifeDays: 90 }))).toBe(true);
+    expect(orderShelfLifeApplies(read({ consignee: null, consigneeResolution: 'no-gstin', consigneeGstin: null }))).toBe(false);
+    expect(orderShelfLifeApplies(read({ consignee: null, consigneeResolution: 'no-gstin', clientMinShelfLifeDays: 90 }))).toBe(true);
+    expect(orderShelfLifeApplies(read({ consignee: null, consigneeResolution: 'no-rule' }))).toBe(true);
+  });
+
+  test('the resolution line names why no consignee rule applied', () => {
+    expect(orderShelfLifeResolutionText(read({ consignee: null, consigneeResolution: 'no-partner', resolvedPartner: null }))).toBe(
+      'No partner has GSTIN 27AAACD1111A1Z5 — no consignee shelf-life rule applies.',
+    );
+    expect(orderShelfLifeResolutionText(read({ consignee: null, consigneeResolution: 'no-consignee-link' }))).toBe(
+      'DMart has no consignee link for this client — no consignee shelf-life rule applies.',
+    );
+    expect(orderShelfLifeResolutionText(read({ consignee: null, consigneeResolution: 'no-rule' }))).toBe("DMart's consignee link has no shelf-life rule.");
+    expect(orderShelfLifeResolutionText(read())).toBeNull();
+    expect(orderShelfLifeRuleText(read({ consignee: null, consigneeResolution: 'no-rule' }))).toBeNull();
   });
 
   test('the rule sentence and the line figures', () => {
@@ -147,7 +171,16 @@ describe('the order section', () => {
     expect(orderShelfLifeLineWarning(line({ plannedQty: 4, shortfallQty: 2, shortfallCause: 'consignee-shelf-life' }))).toContain('2 reserved unit(s) planned short');
     expect(orderShelfLifeLineWarning(line({ plannedQty: 6, shortfallQty: 0, qualifyingUnclaimed: 0 }))).toBeNull();
     const uj = orderShelfLifeLineWarning(line({ judgeable: false, effectiveMinDays: null }))!;
-    expect(uj).toContain("SKU-A has no total shelf life, so the consignee's percent rule cannot be met — set the SKU's total shelf life in the catalog.");
+    expect(uj).toBe(
+      "SKU-A has no total shelf life, so the consignee's percent rule cannot be met. Set SKU-A's total shelf life in the catalog (then cancel and regenerate the wave if it is already waved), or cancel the order line.",
+    );
+    expect(uj).not.toContain('fresher stock');
+    // A planned-short line is worded by its frozen cause, not today's judgeable.
+    expect(orderShelfLifeLineWarning(line({ judgeable: true, plannedQty: 0, shortfallQty: 2, shortfallCause: 'consignee-unjudgeable' }))).toBe(
+      "2 reserved unit(s) planned short while SKU-A had no total shelf life. Set SKU-A's total shelf life in the catalog (then cancel and regenerate the wave if it is already waved), or cancel the order line.",
+    );
+    // No minimum applies: a plain stock shortfall is not a shelf-life warning.
+    expect(orderShelfLifeLineWarning(line({ effectiveMinDays: null, qualifyingUnclaimed: 0 }))).toBeNull();
     expect(SHELF_LIFE_RECOVERY).toBe('Receive fresher stock and regenerate the wave (cancel this wave first), or cancel the order line. The reserved units stay held until then.');
     expect(ORDER_SHELF_LIFE_NOTE).toContain('ignores other orders’ claims');
   });

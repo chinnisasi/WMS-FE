@@ -229,7 +229,8 @@ export function consigneeRuleText(line: {
   const percent = line.consigneeMinShelfLifePercent ?? null;
   if (days === null && percent === null) return null;
   const name = line.consigneeName ?? 'the consignee';
-  if (days === null) return `${name} needs ${percent} % of total life (the SKU has none set)`;
+  // Unjudgeable: the reason is the row's single "short: SKU has no total shelf life".
+  if (days === null) return `${name} needs ≥ ${percent} % of total life`;
   const base = line.consigneeShelfLifeBaseDays ?? null;
   const pct = percent === null ? '' : base === null ? ` (${percent} %)` : ` (${percent} % of ${base} d)`;
   return `${name} needs ≥ ${days} days${pct}`;

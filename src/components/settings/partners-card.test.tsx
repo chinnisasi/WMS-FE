@@ -401,4 +401,55 @@ describe('PartnersCard: the consignee shelf-life rule (story 4-3b)', () => {
     expect(requests.filter((r) => r.method === 'PUT')).toHaveLength(0);
     expect(view.container.textContent).toContain('Percent must be from 1 to 100');
   });
+
+  test('a refused save, then an edit: a NEW key and the new body; a second rule after a success: a fresh key; other rows\' Shelf life is disabled while one is open', async () => {
+    partnerRows = [
+      {
+        ...consignee(),
+        links: [
+          ...(consignee().links as unknown[]),
+          { id: 'l-c2', clientId: 'c-self', role: 'consignee', active: true, isDefault: false, clientCode: null, minShelfLifeDays: null, minShelfLifePercent: null },
+        ],
+      },
+    ];
+    writeSession(session('owner'));
+    view = render(<PartnersCard />);
+    await settle();
+    await click(buttons(view.container, 'Links')[0]!);
+    await click(buttons(view.container, 'Shelf life')[0]!);
+    // The other consignee row's button is disabled while this editor is open.
+    expect(buttons(view.container, 'Shelf life').every((b) => b.disabled)).toBe(true);
+    const editor = () => view!.container.querySelector('[aria-label="Shelf life for ACME"]') as HTMLElement;
+    setValue(editor().querySelector('input[aria-label="Minimum days left"]') as HTMLInputElement, '90');
+    refusal = { status: 500, code: 'internal', detail: 'boom' };
+    await click(buttons(editor(), 'Save rule')[0]!);
+    setValue(editor().querySelector('input[aria-label="Minimum days left"]') as HTMLInputElement, '100');
+    await click(buttons(editor(), 'Save rule')[0]!);
+    let puts = requests.filter((r) => r.method === 'PUT');
+    expect(puts).toHaveLength(2);
+    expect(puts[1]!.body).toEqual({ minShelfLifeDays: 100, minShelfLifePercent: null });
+    expect(puts[1]!.key).not.toBe(puts[0]!.key);
+    // A second rule after the success mints a fresh key.
+    await click(buttons(view.container, 'Shelf life')[0]!);
+    setValue(editor().querySelector('input[aria-label="Minimum days left"]') as HTMLInputElement, '110');
+    await click(buttons(editor(), 'Save rule')[0]!);
+    puts = requests.filter((r) => r.method === 'PUT');
+    expect(puts).toHaveLength(3);
+    expect(puts[2]!.key).not.toBe(puts[1]!.key);
+    expect(puts[2]!.body).toEqual({ minShelfLifeDays: 110, minShelfLifePercent: null });
+  });
+
+  test('the partner form warns when the GSTIN changes on a partner holding a consignee rule', async () => {
+    partnerRows = [consignee()];
+    writeSession(session('owner'));
+    view = render(<PartnersCard />);
+    await settle();
+    await click(buttons(view.container, 'Edit')[0]!);
+    const form = view.container.querySelector('form[aria-label="Edit V-1"]')!;
+    expect(form.textContent).not.toContain('Orders are matched by GSTIN');
+    setValue(inputLabelled(form, 'GSTIN'), '27PQRST5678K1Z2');
+    expect(view.container.querySelector('form[aria-label="Edit V-1"]')!.textContent).toContain(
+      'Orders are matched by GSTIN — orders carrying the old GSTIN lose this partner’s shelf-life rules.',
+    );
+  });
 });

@@ -3881,6 +3881,15 @@ export type OrderRatesResponse = {
     rates: OrderRatesDto;
 };
 
+export type OrderShelfLifeResolvedPartnerDto = {
+    partnerId: string;
+    code: string;
+    /**
+     * The partner display name
+     */
+    name: string;
+};
+
 export type OrderShelfLifeConsigneeDto = {
     partnerId: string;
     code: string;
@@ -3913,11 +3922,11 @@ export type OrderShelfLifeLineDto = {
      */
     judgeable: boolean;
     /**
-     * Base units on hand in the order's warehouse's pickable bins that meet every rule, if waved today (other orders' claims ignored)
+     * Base units on hand in the order's warehouse's pickable bins that meet every rule, if waved today (other orders' claims ignored) — per line, after the earlier lines of the same SKU (in line order) have taken their reserved units
      */
     qualifyingOnHand: number;
     /**
-     * qualifyingOnHand minus the units other open planned picklist lines already claim
+     * What still qualifies after other open lines' claims are spent in rank order (not qualifyingOnHand minus claims); this order's own lines are not claims. Per line, after the earlier lines of the same SKU
      */
     qualifyingUnclaimed: number;
     /**
@@ -3952,6 +3961,14 @@ export type OrderShelfLifeDto = {
      * Why the consignee rule did or did not apply: no-gstin (the order names no consignee GSTIN), no-partner (no partner holds that GSTIN), no-consignee-link (the partner has no consignee link to the order's client), no-rule (the link sets no minimum), applied
      */
     consigneeResolution: 'no-gstin' | 'no-partner' | 'no-consignee-link' | 'no-rule' | 'applied';
+    /**
+     * The order's consignee GSTIN as stored; null when none
+     */
+    consigneeGstin: string | null;
+    /**
+     * The partner holding that GSTIN (any status) — set for no-consignee-link, no-rule and applied; null otherwise
+     */
+    resolvedPartner: OrderShelfLifeResolvedPartnerDto | null;
     /**
      * The consignee whose rule applies; null unless consigneeResolution is applied
      */
@@ -4359,7 +4376,7 @@ export type PicklistLineDto = {
      */
     consigneeMinShelfLifePercent?: number | null;
     /**
-     * Story 4-3b — the SKU's total shelf life in days that the percent rule is of (the CURRENT catalog value — display only); null without a percent rule or a shelf life
+     * Story 4-3b — the SKU's total shelf life in days the percent rule was converted from at plan (frozen with it); null without a percent rule or a shelf life
      */
     consigneeShelfLifeBaseDays?: number | null;
     /**
