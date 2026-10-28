@@ -484,3 +484,10 @@ describe('story 4-7a — the return disposition ledger types', () => {
     expect(ledgerTypeLabel('return.scrapped')).toBe('Return scrapped');
   });
 });
+
+describe('story 4-2b — the cancel-with-restock ledger type', () => {
+  test('pick.restocked is filterable and labelled', () => {
+    expect(LEDGER_EVENT_TYPES).toContain('pick.restocked');
+    expect(ledgerTypeLabel('pick.restocked')).toBe('Restocked');
+  });
+});

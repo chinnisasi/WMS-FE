@@ -4,7 +4,7 @@ import { useTodayIst } from '@/components/shared/use-today-ist';
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiCancelOrder, fetchApiCreateOrder, fetchApiImportOrders } from '@/lib/api/client';
+import { fetchApiCreateOrder, fetchApiImportOrders } from '@/lib/api/client';
 import { orderSkuOptionLabel } from '@/lib/sku-status';
 import type { OrderEntryDto, ReturnAuthorizationDto, SkuResponse } from '@/lib/api/generated';
 import { quantityInputLabel, sharedQuantityUom } from '@/lib/format-quantity';
@@ -12,8 +12,6 @@ import { parseGstinField } from '@/lib/gstin';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import {
   canCancelOrder,
-  cancelOutcome,
-  cancelReason,
   channelRefLabel,
   createOutcome,
   createReason,
@@ -82,6 +80,7 @@ import { HandlingBadges } from '@/components/shared/handling-badges';
 import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { ReturnCreateForm } from '@/components/returns/return-create-form';
+import { CancelOrderDialog, PutBackSection, type CancelTarget } from '@/components/outbound/cancel-order-dialog';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
 import {
@@ -736,9 +735,10 @@ function OrdersTable({
   const orders = useOutboundOrders(warehouseId, clientFilter, drill, searching);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [confirmId, setConfirmId] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  // Story 4-2b — the order the Cancel dialog is open on: a snapshot, so the
+  // refetch after the cancel (which returns the list to page one, where the
+  // order may not be) never unmounts the dialog's put-back result.
+  const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
   // Bumped to remount DataTable, whose Prev/Next cursor is internal state —
   // without it the table would still offer Prev on what is now page one.
   const [pageEpoch, setPageEpoch] = useState(0);
@@ -768,25 +768,6 @@ function OrdersTable({
     () => readSession()?.tenant.name ?? null,
     () => null,
   );
-
-  async function confirmCancel(orderId: string) {
-    setBusyId(orderId);
-    setOutcome(null);
-    try {
-      const { order } = await fetchApiCancelOrder(tenantId, orderId, ulid());
-      setOutcome(cancelOutcome(order));
-      setConfirmId(null);
-      notifyOutboundChanged();
-    } catch (error) {
-      // The refusal stays on screen with the confirmation still open — its
-      // two real causes (a committed reservation, a drawn pick line) are
-      // invisible in every field this client holds, so the server's own
-      // words are what gets rendered.
-      setOutcome({ tone: 'rejected', word: 'Not cancelled', reason: cancelReason(error) });
-    } finally {
-      setBusyId(null);
-    }
-  }
 
   const columns: readonly DataTableColumn<OrderEntryDto>[] = [
     {
@@ -876,18 +857,18 @@ function OrdersTable({
             header: '',
             render: (order: OrderEntryDto) =>
               // No affordance at all for a state the backend would refuse:
-              // ready_to_dispatch, dispatched and cancelled are downstream or
-              // already done.
+              // dispatched and cancelled are terminal or already done. Story
+              // 4-2b — accepted (any pick state) and packed orders cancel with
+              // restock through the one shared dialog.
               canCancelOrder(order.status) ? (
                 <div className="flex justify-end">
                   <button
                     type="button"
-                    // Any cancel in flight disables every row: `busyId` and
-                    // the outcome banner are single, so two concurrent
-                    // cancels would leave one of them unreported.
-                    disabled={busyId !== null}
-                    onClick={() => setConfirmId(order.id)}
-                    className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
+                    // One dialog at a time: a second order's Cancel waits
+                    // until the open one is closed.
+                    disabled={cancelTarget !== null}
+                    onClick={() => setCancelTarget({ id: order.id, label: orderLabel(order), status: order.status })}
+                    className={rowButtonClass}
                   >
                     Cancel
                   </button>
@@ -898,7 +879,6 @@ function OrdersTable({
       : []),
   ];
 
-  const confirmTarget = confirmId === null ? null : (loaded.find((o) => o.id === confirmId) ?? null);
 
   return (
     <div className="flex flex-col gap-2">
@@ -939,27 +919,14 @@ function OrdersTable({
         </div>
       )}
 
-      {confirmTarget !== null && (
-        <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
-          <div className="text-xs text-(--muted-foreground)">
-            Cancelling order <span className="font-mono">{orderLabel(confirmTarget)}</span> releases every
-            reservation it still holds. A stock hold a picklist already claimed is refused by the
-            server, and the order stays as it is.
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={busyId !== null}
-              onClick={() => confirmCancel(confirmTarget.id)}
-              className={primaryClass}
-            >
-              {busyId === confirmTarget.id ? 'Cancelling…' : 'Cancel this order'}
-            </button>
-            <button type="button" onClick={() => setConfirmId(null)} className={buttonClass}>
-              Keep it
-            </button>
-          </div>
-        </div>
+      {cancelTarget !== null && (
+        <CancelOrderDialog
+          key={cancelTarget.id}
+          tenantId={tenantId}
+          warehouseId={warehouseId}
+          order={cancelTarget}
+          onClose={() => setCancelTarget(null)}
+        />
       )}
 
       {orders.state === 'failed' ? (
@@ -1002,9 +969,6 @@ function OrdersTable({
             )
           }
         />
-      )}
-      {outcome !== null && (
-        <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />
       )}
     </div>
   );
@@ -1092,6 +1056,8 @@ export function OrderDetailPanel({
           </Link>
         </div>
       )}
+      {/* Story 4-2b (A9) — what the cancel booked back into stock, per bin. */}
+      {detail.data.status === 'cancelled' && <PutBackSection orderId={orderId} />}
       {canManageReturns && canCreateReturn(detail.data.status) && skuClientDeparted(detail.data, detailClients) && (
         <div className="text-xs text-(--muted-foreground)" data-testid="return-client-departed">
           {RETURNS_CLIENT_DEPARTED}

@@ -4,13 +4,14 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import {
   fetchApiGetOrder,
+  fetchApiGetRestockPlan,
   fetchApiListOrders,
   fetchApiListSkus,
 } from '@/lib/api/client';
 import { CLIENT_PENDING, clientFilterForDrill, type ClientFilter } from '@/lib/active-client';
 import { useClientEpoch } from '@/lib/use-client-epoch';
 import { useKeyedDrill } from '@/lib/use-drill';
-import type { OrderDto, OrderEntryDto, SkuResponse } from '@/lib/api/generated';
+import type { OrderDto, OrderEntryDto, RestockPlanResponse, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CATALOG_CHANGED_EVENT } from '@/lib/catalog';
 import type { OrdersDrill } from '@/lib/drill';
@@ -235,6 +236,61 @@ export function useOrderDetail(orderId: string | null): ResourceState<OrderDto> 
     result.tenantId !== tenantId ||
     result.orderId !== orderId;
 
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+}
+
+/**
+ * Story 4-2b — one order's restock plan: the draws a cancel-with-restock
+ * would put back (`lines`), what a cancel already put back (`restocked`, the
+ * "Put back" list) and the order's shipment. The `useOrderDetail` shape: a
+ * refetch on OUTBOUND_CHANGED_EVENT keeps the last answer on screen until
+ * the new one lands; a changed order id reads as loading.
+ */
+export function useRestockPlan(orderId: string | null): ResourceState<RestockPlanResponse> & Reloadable {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{
+    tenantId: string;
+    orderId: string;
+    revision: number;
+    state: ResourceState<RestockPlanResponse>;
+  } | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    window.addEventListener(OUTBOUND_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(OUTBOUND_CHANGED_EVENT, onChange);
+  }, []);
+
+  useEffect(() => {
+    if (tenantId === null || orderId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const plan = await fetchApiGetRestockPlan(tenantId, orderId);
+        if (!cancelled) setResult({ tenantId, orderId, revision, state: { state: 'ready', data: plan } });
+      } catch (error) {
+        if (!cancelled) setResult({ tenantId, orderId, revision, state: { state: 'failed', reason: detailReason(error) } });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, orderId, revision]);
+
+  const reload = useCallback(() => setRevision((r) => r + 1), []);
+  const stale =
+    orderId === null ||
+    tenantId === null ||
+    result === null ||
+    result.tenantId !== tenantId ||
+    result.orderId !== orderId ||
+    // A Retry after a failure shows progress, never the old failure.
+    (result.state.state === 'failed' && result.revision !== revision);
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
 }
 

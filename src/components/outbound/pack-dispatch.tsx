@@ -49,6 +49,7 @@ import {
   parcelMeasurementLabel,
   parsePackDraft,
   shipmentRecordLabel,
+  shipmentVoidedLabel,
   type PackMeasurements,
   type PackScanDraftLine,
   type PipelineStatus,
@@ -73,11 +74,13 @@ import {
   labelClass,
   primaryClass,
   ReadFailure,
+  rowButtonClass,
   Section,
   selectClass,
 } from '@/components/outbound/shell';
 import { StatusChip } from '@/components/shared/status-chip';
 import { orderStatusTone } from '@/lib/status-tone';
+import { CancelOrderDialog, PutBackSection, type CancelTarget } from '@/components/outbound/cancel-order-dialog';
 
 /**
  * The Outbound pack & dispatch pipeline (story 4-2d) — the web consumer of
@@ -112,6 +115,8 @@ export function OutboundPackDispatch({
   // surface, gated on `labels.execute` (the same Owner + Ops Manager +
   // Operator grant as pack and dispatch).
   const canLabel = roleHasCapability(role, 'labels.execute');
+  // Story 4-2b — a packed order's Cancel (cancel with restock) is `orders.manage`.
+  const canCancel = roleHasCapability(role, 'orders.manage');
   // Story 1-5a — the screen's one active-client read. The pipeline and the
   // manifest builder act on every client (a carrier pickup is never split,
   // decision 10); only the manifests LIST is filtered.
@@ -129,6 +134,7 @@ export function OutboundPackDispatch({
         canPack={canPack}
         canDispatch={canDispatch}
         canLabel={canLabel}
+        canCancel={canCancel}
         active={active}
       />
     </Section>
@@ -145,6 +151,7 @@ function PackDispatchTable({
   canPack,
   canDispatch,
   canLabel,
+  canCancel = false,
   active,
 }: {
   tenantId: string;
@@ -152,6 +159,8 @@ function PackDispatchTable({
   canPack: boolean;
   canDispatch: boolean;
   canLabel: boolean;
+  /** Story 4-2b — `orders.manage`: the packed section's Cancel. */
+  canCancel?: boolean;
   active: ActiveClientState;
 }) {
   // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
@@ -159,6 +168,10 @@ function PackDispatchTable({
   const orders = usePipelineOrders(warehouseId);
   const [statusFilter, setStatusFilter] = useState<PipelineStatus | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Story 4-2b — the order the Cancel dialog is open on. It renders above the
+  // table, not in the row: a cancelled order leaves the pipeline on the
+  // refetch, and the dialog's put-back result must outlive its row.
+  const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
 
   // The pipeline page-scoped to its statuses: a cancelled order is not on it.
   // The list endpoint offers cursor + limit and nothing else — no status
@@ -244,6 +257,16 @@ function PackDispatchTable({
         </span>
       </div>
 
+      {cancelTarget !== null && (
+        <CancelOrderDialog
+          key={cancelTarget.id}
+          tenantId={tenantId}
+          warehouseId={warehouseId}
+          order={cancelTarget}
+          onClose={() => setCancelTarget(null)}
+        />
+      )}
+
       {orders.state === 'failed' ? (
         <ReadFailure word="Orders unavailable" reason={orders.reason} onRetry={orders.reload} />
       ) : (
@@ -260,6 +283,7 @@ function PackDispatchTable({
                 canPack={canPack}
                 canDispatch={canDispatch}
                 canLabel={canLabel}
+                onCancel={canCancel && cancelTarget === null ? setCancelTarget : undefined}
               />
             ) : null
           }
@@ -306,12 +330,15 @@ function PackDispatchPanel({
   canPack,
   canDispatch,
   canLabel,
+  onCancel,
 }: {
   tenantId: string;
   orderId: string;
   canPack: boolean;
   canDispatch: boolean;
   canLabel: boolean;
+  /** Story 4-2b — opens the Cancel dialog; absent without `orders.manage` (hidden, never disabled). */
+  onCancel?: (target: CancelTarget) => void;
 }) {
   const detail = useOrderDetail(orderId);
   // The SKU map only decorates: it names each line's SKU code and unit, and a
@@ -432,6 +459,21 @@ function PackDispatchPanel({
                   Packed and waiting for dispatch.
                 </div>
               )}
+              {onCancel !== undefined && (
+                // Story 4-2b — cancel the packed order: the parcel's units go
+                // back into stock (the dialog defaults to one bin) and an
+                // unmanifested label is voided.
+                <div className="flex flex-wrap items-center gap-2 border-t border-(--border) pt-2 text-xs">
+                  <span className="text-(--muted-foreground)">Not shipping after all?</span>
+                  <button
+                    type="button"
+                    className={rowButtonClass}
+                    onClick={() => onCancel({ id: order.id, label: orderLabel(order), status: order.status })}
+                  >
+                    Cancel order
+                  </button>
+                </div>
+              )}
             </>
           )}
           {status === 'dispatched' && (
@@ -440,9 +482,15 @@ function PackDispatchPanel({
             </div>
           )}
           {status === 'cancelled' && (
-            <div className="text-xs text-(--muted-foreground)">
-              Cancelled — the pipeline stops here; there is nothing to pack or dispatch.
-            </div>
+            <>
+              <div className="text-xs text-(--muted-foreground)">
+                Cancelled — the pipeline stops here. Any units it had picked were restocked: they are booked back
+                into stock, in the bins below.
+              </div>
+              {/* Story 4-2b (A9) — the put-back list, and a voided label. */}
+              <PutBackSection orderId={orderId} />
+              <LabelSection tenantId={tenantId} orderId={orderId} canLabel={false} />
+            </>
           )}
         </>
       )}
@@ -950,11 +998,19 @@ function LabelSection({
         <div className="text-(--muted-foreground)">
           {shipmentRecordLabel(shipment)} · labelled by {shipment.labelledBy}
         </div>
-        <div className="text-(--muted-foreground)">
-          {shipment.manifestId === null
-            ? 'Dispatch stamps this carrier and tracking onto the record unless free text is given.'
-            : 'Manifested — the shipment closed onto a manifest and is terminal.'}
-        </div>
+        {shipment.status === 'voided' ? (
+          // Story 4-2b — the label of an order cancelled before it was manifested.
+          <div className="flex flex-wrap items-center gap-2" data-testid="label-voided">
+            <StatusChip tone="neutral">Voided</StatusChip>
+            <span className="text-(--muted-foreground)">{shipmentVoidedLabel(shipment)}</span>
+          </div>
+        ) : (
+          <div className="text-(--muted-foreground)">
+            {shipment.manifestId === null
+              ? 'Dispatch stamps this carrier and tracking onto the record unless free text is given.'
+              : 'Manifested — the shipment closed onto a manifest and is terminal.'}
+          </div>
+        )}
       </div>
     );
   }

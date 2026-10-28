@@ -1527,3 +1527,42 @@ describe('Import orders from a file (story 4-1c)', () => {
     expect(listUrls.at(-1)!.searchParams.get('cursor')).toBeNull();
   });
 });
+
+describe('Orders list: Cancel with restock (story 4-2b)', () => {
+  function rows(): Record<string, unknown>[] {
+    return [
+      { ...entry('o-acc', 'c-self'), clientOrderRef: 'SO-ACC', status: 'accepted' },
+      { ...entry('o-rtd', 'c-self'), clientOrderRef: 'SO-RTD', status: 'ready_to_dispatch' },
+      { ...entry('o-dsp', 'c-self'), clientOrderRef: 'SO-DSP', status: 'dispatched' },
+      { ...entry('o-cnc', 'c-self'), clientOrderRef: 'SO-CNC', status: 'cancelled' },
+    ];
+  }
+  function cancelButtons(container: HTMLElement): HTMLButtonElement[] {
+    return [...container.querySelectorAll('button')].filter((b) => b.textContent === 'Cancel');
+  }
+
+  test('orders.manage sees Cancel on accepted and packed rows only, and it opens the shared dialog', async () => {
+    ordersResponder = () => ({ items: rows(), nextCursor: null });
+    view = render(<OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01" role="owner" />);
+    await settle();
+    const buttons = cancelButtons(view.container);
+    expect(buttons.length).toBe(2);
+    const rowText = buttons.map((b) => b.closest('tr')?.textContent ?? '');
+    expect(rowText[0]).toContain('SO-ACC');
+    expect(rowText[1]).toContain('SO-RTD');
+    await act(async () => buttons[1]!.click());
+    await settle();
+    const dialog = view.container.querySelector('[data-testid="cancel-order-dialog"]');
+    expect(dialog?.getAttribute('aria-label')).toBe('Cancel order SO-RTD');
+    // The old inline confirm is gone: nothing posts to /cancel.
+    expect(requests.some((r) => r.method === 'POST' && r.pathname.endsWith('/cancel'))).toBe(false);
+  });
+
+  test('a role without orders.manage is offered no Cancel at all (hidden, not disabled)', async () => {
+    ordersResponder = () => ({ items: rows(), nextCursor: null });
+    view = render(<OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01" role="operator" />);
+    await settle();
+    expect(view.container.textContent).toContain('SO-RTD');
+    expect(cancelButtons(view.container).length).toBe(0);
+  });
+});

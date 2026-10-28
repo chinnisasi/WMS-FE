@@ -128,9 +128,9 @@ describe('status and source labels', () => {
 });
 
 describe('canCancelOrder (no action the backend will refuse for a visible state)', () => {
-  test('cancel is offered for accepted alone', () => {
+  test('cancel is offered for accepted and packed orders (story 4-2b — cancel with restock)', () => {
     expect(canCancelOrder('accepted')).toBe(true);
-    expect(canCancelOrder('ready_to_dispatch')).toBe(false);
+    expect(canCancelOrder('ready_to_dispatch')).toBe(true);
     expect(canCancelOrder('dispatched')).toBe(false);
     expect(canCancelOrder('cancelled')).toBe(false);
   });

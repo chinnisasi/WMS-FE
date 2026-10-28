@@ -1,6 +1,15 @@
 import { ApiProblem } from '@/lib/api/client';
-import type { AddressDto, OrderDto, OrderEntryDto, OrderLineDto } from '@/lib/api/generated';
-import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
+import type {
+  AddressDto,
+  BinResponse,
+  CancelWithRestockResponse,
+  OrderDto,
+  OrderEntryDto,
+  OrderLineDto,
+  RestockPlanLineDto,
+  RestockPlanShipmentDto,
+} from '@/lib/api/generated';
+import { formatCount, parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 import { parseRupees } from '@/lib/rupees';
 import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 import { activeClientLabel, SHOW_ALL_CLIENTS, type ActiveClient } from '@/lib/active-client';
@@ -58,13 +67,15 @@ export function orderSourceLabel(source: OrderSource): string {
 }
 
 /**
- * Cancel is offered for exactly one state. The other three are terminal or
- * downstream (`ready_to_dispatch`, `dispatched`) or already done
- * (`cancelled`) — offering an action the backend will refuse for a state the
+ * Cancel is offered for the two undispatched states (story 4-2b): an
+ * `accepted` order in any pick state and a packed (`ready_to_dispatch`) one —
+ * both go through cancel-with-restock, which puts every drawn unit back.
+ * `dispatched` is terminal (it comes back as a return) and `cancelled` is
+ * already done — offering an action the backend will refuse for a state the
  * row already shows is the thing this rule exists to prevent.
  */
 export function canCancelOrder(status: OrderStatus): boolean {
-  return status === 'accepted';
+  return status === 'accepted' || status === 'ready_to_dispatch';
 }
 
 /** The channel refs a list row shows; `—` on a manual order. */
@@ -428,6 +439,159 @@ export function cancelReason(error: unknown): string {
     }
   }
   return UNREACHABLE_REASON;
+}
+
+/**
+ * Story 4-2b — cancel-with-restock failures. Every 409 is the server's own
+ * words (the order moved, the shipment is on a manifest, the chosen bin's
+ * gate — retired, blocked, class, client, full, segregation, a quarantined
+ * scope, a serial that moved, a pick that landed mid-cancel): each names
+ * state no DTO the dialog holds can show. A 400 (a system bin), 404 (an
+ * unknown bin or order) or 422 (the key reused with another destination)
+ * shows its `detail` as sent, and the rest are `cancelReason`'s arms.
+ */
+export function cancelWithRestockReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    if (error.status === 409) return verbatim(error);
+    if ((error.status === 400 || error.status === 404 || error.status === 422) && error.detail !== undefined && error.detail !== '') {
+      return error.detail;
+    }
+    if (error.status === 503 && error.code !== 'reservation-store-unavailable') {
+      return error.detail ?? 'The service is unavailable — nothing changed; retry in a moment.';
+    }
+  }
+  return cancelReason(error);
+}
+
+/**
+ * A restock quantity, in the SKU's base unit: at the unit's declared
+ * precision when the SKU resolves; otherwise the figure ungrouped-but-unrounded
+ * with the unit the line itself names (the plan always carries `uom`), never a
+ * guessed precision.
+ */
+export function restockQuantityLabel(line: { readonly qty: number; readonly uom: string }, sku?: QuantityUom | null): string {
+  return sku === undefined || sku === null ? `${formatCount(line.qty)} ${line.uom}` : quantityLabel(line.qty, sku);
+}
+
+/** Story 4-2b — one put-back line: "SKU × qty → bin (batch)", base units. */
+export function restockLineLabel(
+  line: {
+    readonly skuCode: string;
+    readonly qty: number;
+    readonly uom: string;
+    readonly toBinCode: string;
+    readonly batchCode: string | null;
+  },
+  sku?: QuantityUom | null,
+): string {
+  const batch = line.batchCode === null ? '' : ` (${line.batchCode})`;
+  return `${line.skuCode} × ${restockQuantityLabel(line, sku)} → ${line.toBinCode}${batch}`;
+}
+
+/** Story 4-2b — where a cancel-with-restock books the drawn units. */
+export type RestockDestination = 'origin' | 'bin';
+
+/** The destination choice, in the dialog's words. */
+export const RESTOCK_DESTINATION_LABEL: Readonly<Record<RestockDestination, string>> = {
+  origin: 'Back to the bins they were picked from',
+  bin: 'All into one bin',
+};
+
+/**
+ * Story 4-2b (decision 14, A8) — the destination the dialog opens on. A
+ * packed order's units are in a parcel at the bench, not near their bins, so
+ * it defaults to one bin; so does a plan carrying a recalled lot, whose units
+ * belong in a bin set aside for held stock. An accepted order's picks go
+ * back where they came from.
+ */
+export function defaultRestockDestination(
+  orderStatus: OrderStatus,
+  lines: readonly Pick<RestockPlanLineDto, 'recallCode'>[],
+): RestockDestination {
+  if (orderStatus === 'ready_to_dispatch') return 'bin';
+  return lines.some((line) => line.recallCode !== null) ? 'bin' : 'origin';
+}
+
+/** Story 4-2b (A8) — the window between the booking and the physical put-back. */
+export const RESTOCK_BOOKING_WINDOW = 'Stock is booked into these bins now — put the units back before the bins are counted.';
+
+/**
+ * Story 4-2b — one warning per recalled lot the plan carries: its units stay
+ * blocked wherever they land, and a pick from a bin holding a recalled lot is
+ * refused, so they belong in a bin set aside for held stock.
+ */
+export function restockRecallWarnings(lines: readonly Pick<RestockPlanLineDto, 'batchCode' | 'recallCode'>[]): readonly string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of lines) {
+    if (line.recallCode === null) continue;
+    const lot = line.batchCode ?? 'this lot';
+    const key = `${lot}|${line.recallCode}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(
+      `Lot ${lot} is under recall ${line.recallCode} — its units stay blocked wherever they are put back; choose a bin set aside for held stock, because a pick from a bin holding a recalled lot is refused.`,
+    );
+  }
+  return out;
+}
+
+/** Story 4-2b — the labelled shipment a confirm will void. */
+export function restockVoidNotice(shipment: Pick<RestockPlanShipmentDto, 'carrierName' | 'trackingNumber'>): string {
+  return `The label ${shipment.carrierName} ${shipment.trackingNumber} will be voided.`;
+}
+
+/** Story 4-2b — a manifested shipment is handed over: the cancel is refused, the goods come back as a return. */
+export function restockManifestedRefusal(shipment: Pick<RestockPlanShipmentDto, 'carrierName' | 'trackingNumber'>): string {
+  return `The shipment ${shipment.carrierName} ${shipment.trackingNumber} is on a carrier manifest — it has been handed over, so this order cannot be cancelled here. When the parcel comes back, receive it as a return.`;
+}
+
+/**
+ * Story 4-2b — the bins "All into one bin" offers: the warehouse's storage
+ * bins (never a system bin — a 400 — nor a retired one — a 409), by code.
+ * A blocked bin stays listed but is marked, so the picker never hides why a
+ * bin the operator expected is unusable; the server's gates decide the rest
+ * (class, client, room, segregation).
+ */
+export function restockBinOptions(bins: readonly BinResponse[]): readonly BinResponse[] {
+  return bins.filter((bin) => !bin.systemOwned && bin.retiredAt === null).sort((a, b) => a.code.localeCompare(b.code));
+}
+
+/** The option text of one restock bin. */
+export function restockBinOptionLabel(bin: Pick<BinResponse, 'code' | 'blocked'>): string {
+  return bin.blocked ? `${bin.code} — blocked` : bin.code;
+}
+
+export type ParsedRestockDestination =
+  | { readonly body: { restockBinId?: string }; readonly problem: null }
+  | { readonly body: null; readonly problem: string };
+
+/** The dialog's choice → the request body; "All into one bin" needs its bin. */
+export function parseRestockDestination(destination: RestockDestination, binId: string): ParsedRestockDestination {
+  if (destination === 'origin') return { body: {}, problem: null };
+  const id = binId.trim();
+  if (id === '') return { body: null, problem: 'Pick the bin every unit goes back to.' };
+  return { body: { restockBinId: id }, problem: null };
+}
+
+/** Story 4-2b — the success banner, built from the response. */
+export function restockOutcome(response: CancelWithRestockResponse, label: string): Outcome {
+  const restock = response.restock;
+  if (restock === null) {
+    return { tone: 'accepted', word: `Order ${label} cancelled`, reason: 'It was already cancelled — nothing changed.' };
+  }
+  const parts: string[] = [];
+  parts.push(
+    restock.lines.length === 0
+      ? 'Nothing had been picked, so nothing was restocked'
+      : `${restock.lines.length} ${restock.lines.length === 1 ? 'line' : 'lines'} booked back into stock`,
+  );
+  const holds = restock.releasedReservationIds.length + restock.retiredReservationIds.length;
+  if (holds > 0) parts.push(`${holds} ${holds === 1 ? 'hold' : 'holds'} released`);
+  if (restock.voidedShipment !== null) {
+    parts.push(`label ${restock.voidedShipment.carrierName} ${restock.voidedShipment.trackingNumber} voided`);
+  }
+  return { tone: 'accepted', word: `Order ${label} cancelled`, reason: `${parts.join('; ')}.` };
 }
 
 /** The detail (expanded-row) fetch failure — inline on that row only. */

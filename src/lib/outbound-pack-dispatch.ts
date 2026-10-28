@@ -13,6 +13,7 @@ import type {
 } from '@/lib/api/generated';
 import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON, verbatim, type OrderStatus, type Outcome } from '@/lib/outbound-orders';
+import { istDateTimeLabel } from '@/lib/audit-exports';
 
 /**
  * Pure copy and derivation for the Outbound pack & dispatch surface
@@ -570,6 +571,17 @@ export function labelOutcome(shipment: ShipmentDto): Outcome {
 export function shipmentRecordLabel(shipment: ShipmentDto): string {
   const parts = [`Carrier ${shipment.carrierName}`, `Tracking ${shipment.trackingNumber}`];
   return shipment.manifestId === null ? parts.join(' · ') : `${parts.join(' · ')} · manifested`;
+}
+
+/**
+ * Story 4-2b — a voided label, with when and who when the shipment carries
+ * them (a response stored before 4-2b reads both absent): "Voided 13 Oct
+ * 2026, 14:03 by ops@x — the order was cancelled before it was manifested".
+ */
+export function shipmentVoidedLabel(shipment: Pick<ShipmentDto, 'voidedAt' | 'voidedBy'>): string {
+  const when = shipment.voidedAt === undefined || shipment.voidedAt === null ? '' : ` ${istDateTimeLabel(shipment.voidedAt)}`;
+  const who = shipment.voidedBy === undefined || shipment.voidedBy === null ? '' : ` by ${shipment.voidedBy}`;
+  return `Voided${when}${who} — the order was cancelled before it was manifested; this label cannot be used.`;
 }
 
 /** The manifest confirm's terminal warning — a closed shipment never returns. */

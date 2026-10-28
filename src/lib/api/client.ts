@@ -103,6 +103,8 @@ import {
   movementsControllerResolveCountVariance,
   movementsControllerUpsertCountPolicies,
   outboundControllerCancelOrder,
+  outboundControllerCancelOrderWithRestock,
+  outboundControllerGetRestockPlan,
   outboundControllerCancelWave,
   outboundControllerCreateOrder,
   outboundControllerCreateWavePolicy,
@@ -461,6 +463,8 @@ import type {
   OrderListResponse,
   ShipmentResponse,
   OrderResponse,
+  CancelWithRestockResponse,
+  RestockPlanResponse,
   PackOrderDto,
   PackResponse,
   OverReceiptDecisionResponse,
@@ -3926,6 +3930,51 @@ export async function fetchApiCancelOrder(
     path: { tenantId, orderId },
     body: {},
     headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 4-2b — cancels an accepted or packed order and RESTOCKS it
+ * (capability `orders.manage`): every drawn unit goes back to stock in one
+ * transaction — to the bin it was drawn from, or, with `restockBinId`, all
+ * into that one storage bin — the order's holds are released, a labelled
+ * (unmanifested) shipment is voided. `restock` is null only for the
+ * already-cancelled no-op. The key is the caller's per-draft key.
+ */
+export async function fetchApiCancelOrderWithRestock(
+  tenantId: string,
+  orderId: string,
+  body: { restockBinId?: string | null },
+  idempotencyKey: string,
+): Promise<CancelWithRestockResponse> {
+  const { data, error } = await outboundControllerCancelOrderWithRestock({
+    path: { tenantId, orderId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 4-2b — what a cancel-with-restock would put back (`lines`, the
+ * order's draws not yet restocked) and what one already put back
+ * (`restocked`), plus the order's shipment. A READ: no capability, no key.
+ */
+export async function fetchApiGetRestockPlan(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<RestockPlanResponse> {
+  const { data, error } = await outboundControllerGetRestockPlan({
+    path: { tenantId, orderId },
+    signal: options?.signal,
   });
   if (error || !data) {
     throw unwrapError(error, 400);
