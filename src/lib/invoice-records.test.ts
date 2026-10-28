@@ -89,6 +89,17 @@ describe('labels and banners', () => {
     expect(orderRefOrderLabel({ source: 'manual', externalEventId: null, orderId: '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b' })).toBe('2e3f4a5b');
   });
 
+  test('story 4-2c — a backorder follow-on reads its root label plus -BO{seq}; an unnamed chain takes the root’s short id', () => {
+    const FOLLOW_ON = '0199a1b9-9999-7999-8999-9999deadbeef';
+    const ROOT = '0199a1b2-c3d4-7e5f-8a9b-0000a1b2c3d4';
+    expect(
+      orderRefOrderLabel({ source: 'manual', externalEventId: null, clientOrderRef: '1042', orderId: FOLLOW_ON, followOnRootOrderId: ROOT, followOnSeq: 1 }),
+    ).toBe('1042-BO1');
+    expect(
+      orderRefOrderLabel({ source: 'manual', externalEventId: null, clientOrderRef: null, orderId: FOLLOW_ON, followOnRootOrderId: ROOT, followOnSeq: 2 }),
+    ).toBe('a1b2c3d4-BO2');
+  });
+
   test('a reconciling summary raises no banner, on any status', () => {
     const summary = { lineQuantity: '412', recordsQuantity: '412', reconciles: true };
     for (const status of ['draft', 'issued', 'disputed', 'settled', 'void'] as const) expect(reconcileNotice(status, PICK_LINE, summary)).toBeNull();

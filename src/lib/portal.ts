@@ -250,16 +250,83 @@ export function orderDestination(order: Pick<PortalOrderRowDto, 'destinationName
   return parts.length === 0 ? '—' : parts.join(' · ');
 }
 
+/** The order fields the portal's reference reads (4-1b, 4-2c); absent reads as null. */
+export type PortalOrderReferenceFields = Pick<PortalOrderRowDto, 'source' | 'externalRef'> & {
+  readonly clientOrderRef?: string | null;
+  readonly followOnSeq?: number | null;
+};
+
 /**
- * The order's reference (story 4-1b's label rule, portal-shaped): the
- * client's OWN order number, else the channel's reference, else "Manual" /
- * "Channel" — never an internal id the client has never seen.
+ * The client's own name for the order chain (no suffix): its order number,
+ * else the channel's reference; null when it has neither — the portal never
+ * shows an internal id the client has never seen. A backorder follow-on
+ * carries its root's identity, so the whole chain shares it.
  */
-export function orderReference(order: Pick<PortalOrderRowDto, 'source' | 'externalRef'> & { readonly clientOrderRef?: string | null }): string {
+export function portalRootReference(order: PortalOrderReferenceFields): string | null {
   const own = order.clientOrderRef ?? null;
   if (own !== null && own !== '') return own;
   if (order.externalRef !== null && order.externalRef !== '') return order.externalRef;
-  return order.source === 'manual' ? 'Manual' : 'Channel';
+  return null;
+}
+
+/**
+ * The order's reference (story 4-1b's label rule, portal-shaped): the
+ * client's OWN order number, else the channel's reference, else "Manual" /
+ * "Channel" — never an internal id the client has never seen. Story 4-2c — a
+ * backorder follow-on adds `-BO{seq}` (`1042-BO1`); with no reference it reads
+ * "Manual · backorder 1".
+ */
+export function orderReference(order: PortalOrderReferenceFields): string {
+  const root = portalRootReference(order);
+  const seq = order.followOnSeq ?? null;
+  if (root !== null) return seq === null ? root : `${root}-BO${seq}`;
+  const word = order.source === 'manual' ? 'Manual' : 'Channel';
+  return seq === null ? word : `${word} · backorder ${seq}`;
+}
+
+/**
+ * Story 4-2c — on a follow-on's detail: "Backorder of 1042" (or "Backorder 2
+ * of your original order" when the chain has no reference). Null on an
+ * original order.
+ */
+export function portalFollowOnOfText(order: PortalOrderReferenceFields): string | null {
+  const seq = order.followOnSeq ?? null;
+  if (seq === null) return null;
+  const root = portalRootReference(order);
+  const rest = 'the items that did not ship with the first parcel; it ships when stock arrives';
+  return root === null ? `Backorder ${seq} of your original order — ${rest}` : `Backorder of ${root} — ${rest}`;
+}
+
+/**
+ * Story 4-2c (A14) — on a dispatched order that shipped short: "Shipped 7 of
+ * 10 — 3 follow in 1042-BO1; ask the warehouse to cancel the remainder".
+ * Computed from the TOP-LEVEL lines (a kit counts whole kits shipped). Null
+ * before dispatch, with no follow-on, or when a line has no shipped figure
+ * (a response from before 4-2c).
+ */
+export function portalShippedShortText(
+  order: PortalOrderReferenceFields & {
+    readonly status: PortalOrderRowDto['status'];
+    readonly followOnOrderId?: string | null;
+    readonly lines: readonly { readonly qty: number; readonly shippedQty?: number | null }[];
+  },
+): string | null {
+  if (order.status !== 'dispatched' || (order.followOnOrderId ?? null) === null) return null;
+  if (order.lines.some((line) => line.shippedQty === null || line.shippedQty === undefined)) return null;
+  const ordered = order.lines.reduce((sum, line) => sum + line.qty, 0);
+  const shipped = order.lines.reduce((sum, line) => sum + (line.shippedQty ?? 0), 0);
+  const rest = ordered - shipped;
+  if (rest <= 0) return null;
+  const root = portalRootReference(order);
+  const next = (order.followOnSeq ?? 0) + 1;
+  const followOn = root === null ? 'a backorder' : `${root}-BO${next}`;
+  return `Shipped ${portalQuantity(shipped)} of ${portalQuantity(ordered)} — ${portalQuantity(rest)} follow in ${followOn}; ask the warehouse to cancel the remainder`;
+}
+
+/** Story 4-2c — a line's shipped figure on a dispatched order ("7 of 10 shipped"), or null before dispatch. */
+export function portalLineShipped(line: { readonly qty: number; readonly shippedQty?: number | null }): string | null {
+  if (line.shippedQty === null || line.shippedQty === undefined) return null;
+  return `${portalQuantity(line.shippedQty)} of ${portalQuantity(line.qty)} shipped`;
 }
 
 export function lineCountLabel(count: number): string {

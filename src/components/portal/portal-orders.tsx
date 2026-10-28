@@ -2,7 +2,7 @@
 
 import { useTodayIst } from '@/components/shared/use-today-ist';
 import { OrderFieldsFieldset } from '@/components/shared/order-fields-fieldset';
-import { OrderFieldChips } from '@/components/shared/order-chips';
+import { BackorderChip, OrderFieldChips } from '@/components/shared/order-chips';
 import { emptyOrderFieldsDraft, type OrderFieldsDraft } from '@/lib/order-fields-form';
 import { orderTypeLabel } from '@/lib/order-fields';
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -19,6 +19,9 @@ import {
   orderReference,
   orderStatusLabel,
   orderTimeline,
+  portalFollowOnOfText,
+  portalLineShipped,
+  portalShippedShortText,
   parsePortalOrderCreate,
   placedOrderBanner,
   PORTAL_ORDER_NO_SKUS_MESSAGE,
@@ -96,7 +99,17 @@ export function PortalOrders() {
         </button>
       ),
     },
-    { key: 'ref', header: 'Reference', render: (row) => orderReference(row) },
+    {
+      key: 'ref',
+      header: 'Reference',
+      // Story 4-2c — a backorder (the rest of an order that shipped short) is chipped.
+      render: (row) => (
+        <span className="flex flex-wrap items-center gap-1">
+          <span data-testid="portal-order-ref">{orderReference(row)}</span>
+          <BackorderChip followOnSeq={row.followOnSeq} />
+        </span>
+      ),
+    },
     { key: 'status', header: 'Status', render: (row) => <StatusChip tone={orderStatusTone(row.status)}>{orderStatusLabel(row.status)}</StatusChip> },
     // Story 4-2a — priority, ship-by and the payment line; the type beside them.
     { key: 'fields', header: 'Priority · ship-by · payment', render: (row) => <OrderFieldChips order={row} todayIst={todayIst} /> },
@@ -465,26 +478,51 @@ function OrderLines({ orderId }: { orderId: string }) {
   const order = usePortalOrder(orderId);
   if (order.state === 'loading') return <div className="text-(--muted-foreground)">Loading lines…</div>;
   if (order.state === 'failed') return <ReadFailure word="Lines not loaded" reason={order.reason} onRetry={order.reload} />;
+  // Story 4-2c — where this order sits in a backorder chain, in the client's words.
+  const followOnOf = portalFollowOnOfText(order.data);
+  const shippedShort = portalShippedShortText(order.data);
+  // A line's shipped figure shows only where it differs from what was ordered.
+  const shortShipped = (line: { readonly qty: number; readonly shippedQty?: number | null }) =>
+    line.shippedQty !== null && line.shippedQty !== undefined && line.shippedQty !== line.qty ? portalLineShipped(line) : null;
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:gap-8">
-      {/* Story UI-1 — where the order is, from its status and its placed time only. */}
-      <StatusTimeline label={`Order ${orderReference(order.data)} progress`} steps={orderTimeline(order.data)} />
-      <ul className="flex flex-col gap-1" data-testid="order-lines">
-        {order.data.lines.map((line, index) => (
-          <li key={index}>
-            <span>{skuLabel(line)}</span> <span className="data">× {portalQuantity(line.qty)}</span>
-            {line.components.length > 0 && (
-              <ul className="ml-6 flex flex-col gap-0.5 text-(--muted-foreground)" data-testid="kit-components">
-                {line.components.map((component, inner) => (
-                  <li key={inner}>
-                    {skuLabel(component)} <span className="data">× {portalQuantity(component.qty)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        ))}
-      </ul>
+    <div className="flex flex-col gap-3">
+      {followOnOf !== null && (
+        <p className="text-xs" data-testid="portal-follow-on-of">
+          {followOnOf}
+        </p>
+      )}
+      {shippedShort !== null && (
+        <p className="text-xs font-medium" data-testid="portal-shipped-short">
+          {shippedShort}
+        </p>
+      )}
+      <div className="flex flex-col gap-3 sm:flex-row sm:gap-8">
+        {/* Story UI-1 — where the order is, from its status and its placed time only. */}
+        <StatusTimeline label={`Order ${orderReference(order.data)} progress`} steps={orderTimeline(order.data)} />
+        <ul className="flex flex-col gap-1" data-testid="order-lines">
+          {order.data.lines.map((line, index) => (
+            <li key={index}>
+              <span>{skuLabel(line)}</span> <span className="data">× {portalQuantity(line.qty)}</span>
+              {shortShipped(line) !== null && (
+                <span className="data text-(--muted-foreground)" data-testid="portal-line-shipped">
+                  {' '}
+                  · {shortShipped(line)}
+                </span>
+              )}
+              {line.components.length > 0 && (
+                <ul className="ml-6 flex flex-col gap-0.5 text-(--muted-foreground)" data-testid="kit-components">
+                  {line.components.map((component, inner) => (
+                    <li key={inner}>
+                      {skuLabel(component)} <span className="data">× {portalQuantity(component.qty)}</span>
+                      {shortShipped(component) !== null && <span className="data"> · {shortShipped(component)}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

@@ -67,3 +67,18 @@ export function OrderFieldChips({
     </span>
   );
 }
+
+/**
+ * Story 4-2c — the "Backorder" chip on a backorder follow-on (an order a short
+ * dispatch opened for the unshipped remainder): `followOnSeq` set. Nothing on
+ * a root order. Informational (outline), with its place in the chain in the
+ * title. Portal-allowed: no hook.
+ */
+export function BackorderChip({ followOnSeq }: { readonly followOnSeq?: number | null }) {
+  if (followOnSeq === null || followOnSeq === undefined) return null;
+  return (
+    <StatusChip tone="info" glyph="↳" title={`Backorder ${followOnSeq} — the rest of an order that shipped short`} data-testid="backorder-chip">
+      Backorder
+    </StatusChip>
+  );
+}

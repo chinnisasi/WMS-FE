@@ -197,6 +197,12 @@ export interface OrdersDrill extends DrillWindow {
   readonly status?: NonNullable<OrdersQuery['status']>;
   readonly source?: NonNullable<OrdersQuery['source']>;
   readonly backordered?: boolean;
+  /**
+   * Story 4-2c (A15) — `false`: root orders only (the SM-4 backordered tile's
+   * drill — a backorder follow-on is not a new client order); `true`: only
+   * follow-ons.
+   */
+  readonly followOn?: boolean;
 }
 
 export interface OverReceiptsDrill extends DrillWindow {
@@ -299,6 +305,7 @@ const SPECS: Readonly<Record<DrillList, ListSpec>> = {
       status: { oneOf: ORDER_STATUSES },
       source: { oneOf: ORDER_SOURCES },
       backordered: 'boolean',
+      followOn: 'boolean',
       ...WINDOW,
     },
     required: ['warehouseId'],
@@ -575,6 +582,9 @@ export function describeDrill(
   }
   if ('backordered' in drill && drill.backordered !== undefined) {
     parts.push(drill.backordered ? 'With a backordered line' : 'No backordered line');
+  }
+  if ('followOn' in drill && drill.followOn !== undefined) {
+    parts.push(drill.followOn ? 'Backorder follow-ons only' : 'Original orders only');
   }
   if ('blind' in drill && drill.blind !== undefined) {
     parts.push(drill.blind ? 'Blind receipts' : 'Document-backed receipts');

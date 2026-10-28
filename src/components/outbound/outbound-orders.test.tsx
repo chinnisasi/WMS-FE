@@ -51,6 +51,11 @@ let createdClientId: string | undefined;
 let orderImports: { form: Record<string, string>; key: string | null }[] = [];
 /** Story 4-2b — the restock plan's `restocked` list (empty by default). */
 let restockedBody: Record<string, unknown>[] = [];
+/** Story 4-2c — orders by id, read before `order` (a backorder chain's members). */
+let ordersById: Record<string, Record<string, unknown>> = {};
+/** Story 4-2c — every "Allocate now" POST (its path and key), and the answer. */
+let allocates: { pathname: string; key: string | null }[] = [];
+let allocateAnswer: { status: number; body: unknown } = { status: 200, body: null };
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -175,6 +180,13 @@ function stubRouter(): void {
       const orderId = pathname.split('/')[pathname.split('/').length - 2]!;
       return json(200, { orderId, orderStatus: order?.status ?? 'accepted', shipment: null, lines: [], restocked: restockedBody });
     }
+    if (method === 'POST' && /\/outbound\/orders\/[^/]+\/allocate$/.test(pathname)) {
+      allocates.push({ pathname, key: request.headers.get('Idempotency-Key') });
+      return json(allocateAnswer.status, allocateAnswer.body);
+    }
+    if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname) && ordersById[pathname.split('/').at(-1)!] !== undefined) {
+      return json(200, { order: ordersById[pathname.split('/').at(-1)!] });
+    }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname)) {
       if (order === null) {
         return json(404, { code: 'not-found', title: 'No such order', status: 404 });
@@ -215,6 +227,9 @@ beforeEach(() => {
   createdClientId = undefined;
   orderImports = [];
   restockedBody = [];
+  ordersById = {};
+  allocates = [];
+  allocateAnswer = { status: 200, body: null };
   stubRouter();
   writeSession(SESSION);
 });
@@ -1329,6 +1344,22 @@ describe('the client order number (story 4-1b)', () => {
     expect(view.container.textContent).toContain('000a0001');
   });
 
+  test('story 4-2c: a backorder follow-on reads its suffixed label with a "Backorder" chip; a root order has no chip', async () => {
+    const ROOT = '0198f7a2-1b3c-7d4e-8f90-0000a1b2c3d4';
+    ordersResponder = () => ({
+      items: [
+        { ...entry('0198f7a2-1b3c-7d4e-8f90-0000000b0001', 'c-self'), clientOrderRef: '1042', followOnOfOrderId: ROOT, followOnRootOrderId: ROOT, followOnSeq: 1 },
+        { ...entry('0198f7a2-1b3c-7d4e-8f90-0000000b0002', 'c-self'), followOnOfOrderId: ROOT, followOnRootOrderId: ROOT, followOnSeq: 2 },
+        { ...entry(ROOT, 'c-self'), clientOrderRef: '1043' },
+      ],
+      nextCursor: null,
+    });
+    view = await mountForm();
+    const labels = [...view.container.querySelectorAll('[data-testid="order-label"]')].map((node) => node.textContent);
+    expect(labels).toEqual(['1042-BO1', 'a1b2c3d4-BO2', '1043']);
+    expect(view.container.querySelectorAll('[data-testid="backorder-chip"]')).toHaveLength(2);
+  });
+
   test('the search sends reference (trimmed), restarts from page one, and Clear drops it; an empty result names the warehouse', async () => {
     ordersResponder = (url) => {
       if (url.searchParams.get('reference') === 'SO-1042') return { items: [{ ...entry('found-1', 'c-self'), clientOrderRef: 'SO-1042' }], nextCursor: null };
@@ -1642,5 +1673,154 @@ describe('OrderDetailPanel: Put back (story 4-2b)', () => {
     view = await mount('order-1');
     expect(view.container.querySelector('[data-testid="put-back-section"]')).toBeNull();
     expect(requests.some((r) => r.pathname.endsWith('/restock-plan'))).toBe(false);
+  });
+});
+
+describe('OrderDetailPanel: backorders (story 4-2c)', () => {
+  const ROOT = '0198f7a2-1b3c-7d4e-8f90-0000a1b2c3d4';
+  const FOLLOW_ON = '0198f7a9-1b3c-7d4e-8f90-00000000bo01';
+
+  function chainOrder(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: FOLLOW_ON,
+      tenantId: TENANT_ID,
+      warehouseId: 'wh-1',
+      status: 'accepted',
+      source: 'manual',
+      integrationId: null,
+      externalEventId: null,
+      clientOrderRef: '1042',
+      destination: null,
+      followOnOfOrderId: ROOT,
+      followOnRootOrderId: ROOT,
+      followOnSeq: 1,
+      followOnOrderId: null,
+      createdAt: '2026-10-27T00:00:00.000Z',
+      updatedAt: '2026-10-27T00:00:00.000Z',
+      lines: [
+        line({ id: 'bo-1', orderId: FOLLOW_ON, skuId: 'pad-sku', qty: 3, reservedQty: 0, shortfallQty: 3, status: 'backordered' }),
+        line({ id: 'bo-2', orderId: FOLLOW_ON, skuId: 'glove-sku', qty: 2, reservedQty: 2, reservationId: 'res-2', reservationState: 'held', status: 'backordered' }),
+      ],
+      ...over,
+    };
+  }
+
+  const text = (id: string) => view!.container.querySelector(`[data-testid="${id}"]`)?.textContent ?? null;
+  const allocateButton = () => [...view!.container.querySelectorAll('button')].find((b) => b.textContent === 'Allocate now');
+
+  test('a follow-on reads "Backorder 1 of 1042", its label suffixed and chipped; each line shows its live hold beside the acceptance history', async () => {
+    order = chainOrder();
+    view = render(<OrderDetailPanel orderId={FOLLOW_ON} />);
+    await settle();
+    expect(text('order-detail-header')).toContain('1042-BO1');
+    expect(text('order-detail-header')).toContain('Backorder');
+    expect(text('order-follow-on-of')).toContain('Backorder 1 of 1042');
+    const live = [...view.container.querySelectorAll('[data-testid="line-hold-live"]')].map((el) => el.textContent);
+    expect(live).toEqual(['◔Awaiting stock 3 each', '✓Reserved 2 each']);
+    const history = [...view.container.querySelectorAll('[data-testid="line-acceptance"]')].map((el) => el.textContent);
+    expect(history).toEqual(['Backordered at acceptance', 'Backordered at acceptance']);
+  });
+
+  test('"Backorder 1 of 1042" opens the parent in the panel, which reads "Shipped short — the rest is on 1042-BO1"; Back returns', async () => {
+    ordersById = {
+      [FOLLOW_ON]: chainOrder(),
+      [ROOT]: chainOrder({
+        id: ROOT,
+        status: 'dispatched',
+        followOnOfOrderId: null,
+        followOnRootOrderId: null,
+        followOnSeq: null,
+        followOnOrderId: FOLLOW_ON,
+        lines: [line({ id: 'root-1', orderId: ROOT, skuId: 'pad-sku', qty: 10, reservedQty: 10, reservationId: 'res-r', reservationState: 'committed' })],
+      }),
+    };
+    view = render(<OrderDetailPanel orderId={FOLLOW_ON} />);
+    await settle();
+    const toParent = view.container.querySelector('[data-testid="order-follow-on-of"] button') as HTMLButtonElement;
+    expect(toParent.textContent).toBe('1042');
+    await act(async () => toParent.click());
+    await settle();
+    expect(text('order-detail-header')).toContain('1042');
+    expect(text('order-detail-header')).not.toContain('1042-BO1');
+    expect(text('order-follow-on')).toBe('Shipped short — the rest is on 1042-BO1');
+    // A dispatched order shows no live hold — only the history.
+    expect(view.container.querySelector('[data-testid="line-hold-live"]')).toBeNull();
+    const back = [...view.container.querySelectorAll('button')].find((b) => b.textContent?.includes('Back') && !b.textContent.includes('1042'))!;
+    await act(async () => back.click());
+    await settle();
+    expect(text('order-detail-header')).toContain('1042-BO1');
+  });
+
+  test('"Allocate now" shows only for orders.manage, on an accepted order with a line holding nothing and still owed', async () => {
+    order = chainOrder();
+    view = render(<OrderDetailPanel orderId={FOLLOW_ON} />);
+    await settle();
+    expect(allocateButton()).toBeUndefined();
+    view.unmount();
+
+    view = render(<OrderDetailPanel orderId={FOLLOW_ON} canManageOrders />);
+    await settle();
+    expect(allocateButton()).toBeDefined();
+    view.unmount();
+
+    // Every line already held → nothing to allocate.
+    order = chainOrder({ lines: [line({ id: 'x', skuId: 'pad-sku', qty: 3, reservedQty: 3, reservationId: 'r', reservationState: 'held' })] });
+    view = render(<OrderDetailPanel orderId={FOLLOW_ON} canManageOrders />);
+    await settle();
+    expect(allocateButton()).toBeUndefined();
+    view.unmount();
+
+    // Packed → never.
+    order = chainOrder({ status: 'ready_to_dispatch' });
+    view = render(<OrderDetailPanel orderId={FOLLOW_ON} canManageOrders />);
+    await settle();
+    expect(allocateButton()).toBeUndefined();
+  });
+
+  test('"Allocate now" posts once with a key, reports "Reserved x of y units; z still awaiting stock" and its skipped lines, then refetches the order', async () => {
+    order = chainOrder();
+    allocateAnswer = {
+      status: 200,
+      body: {
+        allocation: {
+          orderId: FOLLOW_ON,
+          warehouseId: 'wh-1',
+          allocated: [{ orderLineId: 'bo-1', skuId: 'pad-sku', skuCode: 'PAD-01', qty: 3, reservedQty: 2 }],
+          stillShort: [{ orderLineId: 'bo-1', skuId: 'pad-sku', skuCode: 'PAD-01', shortQty: 1 }],
+          skipped: [{ orderLineId: 'bo-9', skuId: 'x', skuCode: 'DRUG-1', reason: 'licence-not-covered' }],
+        },
+      },
+    };
+    view = render(<OrderDetailPanel orderId={FOLLOW_ON} canManageOrders />);
+    await settle();
+    const reads = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith(`/outbound/orders/${FOLLOW_ON}`)).length;
+    const before = reads();
+    await act(async () => allocateButton()!.click());
+    await settle();
+    expect(allocates).toHaveLength(1);
+    expect(allocates[0]!.pathname).toContain(`/tenants/${TENANT_ID}/outbound/orders/${FOLLOW_ON}/allocate`);
+    expect(allocates[0]!.key).not.toBeNull();
+    expect(text('allocation-result')).toContain('Reserved 2 of 3 units; 1 still awaiting stock.');
+    expect(text('allocation-result')).toContain('DRUG-1: not reserved — no valid licence covers it at this warehouse today.');
+    expect(reads()).toBeGreaterThan(before);
+  });
+
+  test('an empty allocation is calm; a refusal names its cause', async () => {
+    order = chainOrder();
+    allocateAnswer = {
+      status: 200,
+      body: { allocation: { orderId: FOLLOW_ON, warehouseId: 'wh-1', allocated: [], stillShort: [{ orderLineId: 'bo-1', skuId: 'pad-sku', skuCode: 'PAD-01', shortQty: 3 }], skipped: [] } },
+    };
+    view = render(<OrderDetailPanel orderId={FOLLOW_ON} canManageOrders />);
+    await settle();
+    await act(async () => allocateButton()!.click());
+    await settle();
+    expect(text('allocation-result')).toContain('Nothing could be reserved yet — no stock is free for these lines');
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+
+    allocateAnswer = { status: 409, body: { code: 'order-on-open-wave', title: 'On an open wave', status: 409, waveId: '0198f7a2-1b3c-7d4e-8f90-0000deadbeef' } };
+    await act(async () => allocateButton()!.click());
+    await settle();
+    expect(view.container.querySelector('[role="alert"]')!.textContent).toContain('Cancel the wave to re-plan it');
   });
 });

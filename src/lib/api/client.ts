@@ -102,6 +102,7 @@ import {
   movementsControllerMoveStock,
   movementsControllerResolveCountVariance,
   movementsControllerUpsertCountPolicies,
+  outboundControllerAllocateOrder,
   outboundControllerCancelOrder,
   outboundControllerCancelOrderWithRestock,
   outboundControllerGetRestockPlan,
@@ -467,6 +468,7 @@ import type {
   ShipmentResponse,
   OrderResponse,
   CancelWithRestockResponse,
+  AllocateOrderResponse,
   RestockPlanResponse,
   PackOrderDto,
   PackResponse,
@@ -3877,6 +3879,8 @@ export async function fetchApiListOrders(
     status?: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
     source?: 'manual' | 'ingested';
     backordered?: boolean;
+    /** Story 4-2c — `true`: only backorder follow-ons; `false`: only root orders (the SM-4 drill). */
+    followOn?: boolean;
     from?: string;
     to?: string;
     /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
@@ -3893,6 +3897,7 @@ export async function fetchApiListOrders(
     status: options?.status,
     source: options?.source,
     backordered: options?.backordered,
+    followOn: options?.followOn,
     from: options?.from,
     to: options?.to,
     cursor: options?.cursor,
@@ -3968,6 +3973,29 @@ export async function fetchApiCancelOrder(
   const { data, error } = await outboundControllerCancelOrder({
     path: { tenantId, orderId },
     body: {},
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 4-2c — "Allocate now" (capability `orders.manage`): reserves what is
+ * free now for an accepted order's lines that hold nothing (backordered at
+ * acceptance, or a follow-on). A 200 may reserve nothing (`allocated: []`) —
+ * that is an outcome, not an error. Refusals: 409 `order-not-accepted`, 409
+ * `order-on-open-wave` (`extensions.waveId`), 503
+ * `reservation-store-unavailable`, 404. The key is the caller's per-click key.
+ */
+export async function fetchApiAllocateOrder(
+  tenantId: string,
+  orderId: string,
+  idempotencyKey: string,
+): Promise<AllocateOrderResponse> {
+  const { data, error } = await outboundControllerAllocateOrder({
+    path: { tenantId, orderId },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) {

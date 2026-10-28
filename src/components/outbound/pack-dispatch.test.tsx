@@ -103,10 +103,14 @@ function orderRow(id: string, status: string): Record<string, unknown> {
   };
 }
 
+/** Story 4-2c — per-order detail overrides (a COD amount, a short line). */
+let detailExtras: Record<string, Record<string, unknown>> = {};
+
 function orderDetail(id: string, status: string): unknown {
   return {
     ...orderRow(id, status),
     lines: orderLines(id),
+    ...(detailExtras[id] ?? {}),
   };
 }
 
@@ -456,6 +460,7 @@ let skuRowsOverride: unknown[] | null = null;
 
 beforeEach(() => {
   skuRowsOverride = null;
+  detailExtras = {};
   requests = [];
   orderStatuses = {
     'order-1': 'accepted',
@@ -1842,5 +1847,112 @@ describe('story 4-2b — Cancel on the packed section, the cancelled panel, a vo
     expect(voided?.textContent).toContain('Voided');
     expect(voided?.textContent).toContain('by priya@example.com');
     expect(buttonLabels(view)).not.toContain('Cancel order');
+  });
+});
+
+describe('short parcels and the backorder follow-on (story 4-2c)', () => {
+  const shortSlip = (codAmountPaise: number | null) => {
+    const pack = packedFixture('order-1') as { lines: Record<string, unknown>[] } & Record<string, unknown>;
+    return {
+      ...pack,
+      orderType: 'b2c',
+      codAmountPaise,
+      totalUnits: 5,
+      lines: [pack.lines[0], { ...pack.lines[1], packedQty: 1, shortfallQty: 2 }],
+    };
+  };
+
+  test('a short slip says the rest follows; on COD it names the full amount collected on this parcel', async () => {
+    packResponder = () => {
+      orderStatuses['order-1'] = 'ready_to_dispatch';
+      return { status: 201, body: { pack: shortSlip(149900) } };
+    };
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    await pressButton(view, 'Pack this order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="slip-short-note"]')!.textContent).toContain(
+      'Items short on this parcel follow in a separate shipment',
+    );
+    expect(view.container.querySelector('[data-testid="slip-cod-short"]')!.textContent).toBe(
+      'Cash on delivery — the courier collects the full ₹1,499.00 on this parcel; the rest follows prepaid',
+    );
+  });
+
+  test('a full slip carries neither note', async () => {
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    await pressButton(view, 'Pack this order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="slip-short-note"]')).toBeNull();
+    expect(view.container.querySelector('[data-testid="slip-cod-short"]')).toBeNull();
+  });
+
+  test('before packing, a COD order with a line awaiting stock warns at the bench; a prepaid one does not', async () => {
+    detailExtras['order-1'] = {
+      codAmountPaise: 50000,
+      orderType: 'b2c',
+      lines: (orderLines('order-1') as Record<string, unknown>[]).map((line, i) => (i === 1 ? { ...line, reservedQty: 1, shortfallQty: 2 } : line)),
+    };
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    expect(text(view)).toContain('Cash on delivery — the courier collects the full ₹500.00 on this parcel; the rest follows prepaid');
+    view.unmount();
+
+    detailExtras['order-1'] = { ...detailExtras['order-1'], codAmountPaise: null };
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    expect(text(view)).not.toContain('Cash on delivery — the courier collects');
+  });
+
+  test('the dispatch confirmation names the follow-on and links to it', async () => {
+    dispatchResponder = () => {
+      orderStatuses['order-2'] = 'dispatched';
+      const record = dispatchedFixture('order-2') as { lines: Record<string, unknown>[] } & Record<string, unknown>;
+      return {
+        status: 201,
+        body: {
+          dispatch: {
+            ...record,
+            clientOrderRef: '1042',
+            followOnOrderId: 'order-9',
+            followOnOfOrderId: null,
+            followOnRootOrderId: null,
+            followOnSeq: null,
+            lines: [record.lines[0], { ...record.lines[1], dispatchedQty: 0, shortfallQty: 3 }],
+          },
+        },
+      };
+    };
+    view = await mount('operator');
+    await expand(view, 'order-2');
+    await pressButton(view, 'Dispatch this order');
+    await pressButton(view, 'Dispatch this order');
+    await settle();
+    expect(text(view)).toContain('Shipped short — follow-on 1042-BO1 created for the rest; it ships when stock arrives.');
+    const link = view.container.querySelector('[data-testid="dispatch-follow-on-link"]')!;
+    expect(link.getAttribute('href')).toBe('/outbound?ref=1042-BO1');
+  });
+
+  test('a full dispatch names no follow-on', async () => {
+    view = await mount('operator');
+    await expand(view, 'order-2');
+    await pressButton(view, 'Dispatch this order');
+    await pressButton(view, 'Dispatch this order');
+    await settle();
+    expect(text(view)).not.toContain('follow-on');
+  });
+
+  test('409 pack-nothing-picked reads its own clear sentence', async () => {
+    packResponder = () => ({
+      status: 409,
+      body: { code: 'pack-nothing-picked', title: 'Nothing picked', status: 409, detail: 'Order has no picked units.' },
+    });
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    await pressButton(view, 'Pack this order');
+    await settle();
+    expect(text(view)).toContain('Nothing was picked for this order — cancel the wave to re-plan it, or cancel the order.');
+    expect(text(view)).not.toContain('Order has no picked units.');
   });
 });

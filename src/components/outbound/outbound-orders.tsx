@@ -4,13 +4,17 @@ import { useTodayIst } from '@/components/shared/use-today-ist';
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiCreateOrder, fetchApiImportOrders } from '@/lib/api/client';
+import { fetchApiAllocateOrder, fetchApiCreateOrder, fetchApiImportOrders } from '@/lib/api/client';
 import { orderSkuOptionLabel } from '@/lib/sku-status';
-import type { OrderEntryDto, ReturnAuthorizationDto, SkuResponse } from '@/lib/api/generated';
+import type { AllocationDto, OrderEntryDto, ReturnAuthorizationDto, SkuResponse } from '@/lib/api/generated';
 import { quantityInputLabel, sharedQuantityUom } from '@/lib/format-quantity';
 import { parseGstinField } from '@/lib/gstin';
 import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import {
+  acceptanceBadgeLabel,
+  allocateReason,
+  allocationResultText,
+  canAllocateOrder,
   canCancelOrder,
   channelRefLabel,
   createOutcome,
@@ -23,6 +27,7 @@ import {
   legalNameBody,
   legalNameProblem,
   kitParentHoldLabel,
+  lineHoldText,
   lineQuantityLabel,
   lineTotals,
   ORDER_STATUSES,
@@ -40,7 +45,8 @@ import {
   type OrderStatus,
 } from '@/lib/outbound-orders';
 import { ledgerDocHref, type OrdersDrill } from '@/lib/drill';
-import { clientOrderRefBody, orderLabel, parseClientOrderRef, shortOrderId } from '@/lib/orders';
+import { clientOrderRefBody, isFollowOn, nextFollowOnLabel, orderLabel, orderRootLabel, parseClientOrderRef, shortOrderId } from '@/lib/orders';
+import { useKeyedSubmit } from '@/lib/use-keyed-submit';
 import { useOrderDetail, useOutboundOrders, useOutboundSkus } from '@/lib/use-outbound-orders';
 import {
   clientCell,
@@ -71,7 +77,7 @@ import { OrderImport } from '@/components/shared/order-import';
 // Story 4-1a — the Ship-to fieldset is shared with the portal's order form.
 import { ShipToFieldset } from '@/components/shared/ship-to-fieldset';
 import { OrderFieldsFieldset } from '@/components/shared/order-fields-fieldset';
-import { OrderFieldChips } from '@/components/shared/order-chips';
+import { BackorderChip, OrderFieldChips } from '@/components/shared/order-chips';
 import { orderTypeLabel } from '@/lib/order-fields';
 import { emptyOrderFieldsDraft, parseOrderFieldsDraft, type OrderFieldsDraft } from '@/lib/order-fields-form';
 // Story 4-1b — the exact-match search box, shared with the portal's list.
@@ -787,8 +793,12 @@ function OrdersTable({
           {/* Story 4-1b — the order's label (its client number, else its
               channel reference, else its short id), the short id beneath. */}
           <span className="flex flex-col">
-            <span className="font-mono text-xs" data-testid="order-label">
-              {orderLabel(order)}
+            <span className="flex items-center gap-1">
+              <span className="font-mono text-xs" data-testid="order-label">
+                {orderLabel(order)}
+              </span>
+              {/* Story 4-2c — a backorder follow-on (the rest of a short shipment). */}
+              <BackorderChip followOnSeq={order.followOnSeq} />
             </span>
             <span className="font-mono text-[11px] text-(--muted-foreground)" title={order.id}>
               {shortOrderId(order.id)}
@@ -941,7 +951,7 @@ function OrdersTable({
           onCursor={orders.onCursor}
           renderExpanded={(order) =>
             expandedId === order.id ? (
-              <OrderDetailPanel orderId={order.id} warehouseId={warehouseId} canManageReturns={canManageReturns} />
+              <OrderDetailPanel orderId={order.id} warehouseId={warehouseId} canManageReturns={canManageReturns} canManageOrders={canManageOrders} />
             ) : null
           }
           loading={orders.state === 'loading' ? 'Loading orders…' : undefined}
@@ -982,11 +992,17 @@ function OrdersTable({
  * Exported for the story 11-6 component test, which pins the kit
  * parent/child grouping on this panel alone rather than driving the whole
  * surface (its list, filter and warehouse picker are out of scope there).
+ *
+ * Story 4-2c — a backorder chain is walked IN the panel (the app has no
+ * `[id]` route): "Backorder 1 of 1042" opens the parent here, "the rest is on
+ * 1042-BO1" opens the follow-on, and "Back" returns. Each order mounts its own
+ * body (`key`), so a draft or a result never leaks between orders.
  */
 export function OrderDetailPanel({
   orderId,
   warehouseId,
   canManageReturns = false,
+  canManageOrders = false,
 }: {
   orderId: string;
   /** Story 9-3a — the order's warehouse (threaded from `OrdersTable`): its "View ledger" link. */
@@ -997,6 +1013,41 @@ export function OrderDetailPanel({
    * returnable quantities only when opened — never on expand.
    */
   canManageReturns?: boolean;
+  /** Story 4-2c — `orders.manage`: an accepted order with lines awaiting stock offers "Allocate now". */
+  canManageOrders?: boolean;
+}) {
+  const [trail, setTrail] = useState<readonly string[]>([]);
+  const shownId = trail.at(-1) ?? orderId;
+  return (
+    <OrderDetailBody
+      key={shownId}
+      orderId={shownId}
+      warehouseId={warehouseId}
+      canManageReturns={canManageReturns}
+      canManageOrders={canManageOrders}
+      onOpenOrder={(id) => setTrail((current) => [...current, id])}
+      onBack={trail.length === 0 ? null : () => setTrail((current) => current.slice(0, -1))}
+    />
+  );
+}
+
+/** The link-styled button that opens another order of the chain in this panel. */
+const chainLinkClass = 'font-mono font-medium text-(--primary) underline underline-offset-2 hover:no-underline';
+
+function OrderDetailBody({
+  orderId,
+  warehouseId,
+  canManageReturns,
+  canManageOrders,
+  onOpenOrder,
+  onBack,
+}: {
+  orderId: string;
+  warehouseId?: string;
+  canManageReturns: boolean;
+  canManageOrders: boolean;
+  onOpenOrder: (orderId: string) => void;
+  onBack: (() => void) | null;
 }) {
   // Story 4-2a — today's IST date for the ship-by chips (re-read every minute).
   const todayIst = useTodayIst();
@@ -1007,6 +1058,11 @@ export function OrderDetailPanel({
   const detailClients = readyClients(useClients());
   const [creatingReturn, setCreatingReturn] = useState(false);
   const [createdReturn, setCreatedReturn] = useState<ReturnAuthorizationDto | null>(null);
+  // Story 4-2c — "Allocate now": one key per click (a retry of a failed click
+  // reuses it), the result kept on screen after the order refetches.
+  const allocate = useKeyedSubmit();
+  const [allocation, setAllocation] = useState<AllocationDto | null>(null);
+  const [allocateProblem, setAllocateProblem] = useState<string | null>(null);
   // The SKU map only decorates: a line falls back to its raw `skuId` rather
   // than blocking the quantities, which are what this panel exists for.
   const skuMap = skus.state === 'ready' ? skus.data : null;
@@ -1027,43 +1083,140 @@ export function OrderDetailPanel({
     );
   }
 
+  const order = detail.data;
   // The totals count the TOP-LEVEL lines only — a kit's children share their
   // parent's quantity, so summing the exploded flat list would double-count
   // every kit order's contents. The same groups feed the line list.
-  const groups = groupKitLines(detail.data.lines);
+  const groups = groupKitLines(order.lines);
+  const parentOrderId = order.followOnOfOrderId ?? null;
+  const followOnOrderId = order.followOnOrderId ?? null;
+  const showAllocate = canManageOrders && canAllocateOrder(order);
+  const result = allocation === null ? null : allocationResultText(allocation);
+
+  const runAllocate = async () => {
+    const tenantId = readSession()?.tenant.id;
+    if (tenantId === undefined) return;
+    setAllocateProblem(null);
+    try {
+      const sent = await allocate.run((key) => fetchApiAllocateOrder(tenantId, orderId, key));
+      if (!sent.sent) return;
+      setAllocation(sent.value.allocation);
+      // The lines' holds changed (or may have): read the order again.
+      detail.reload();
+    } catch (error) {
+      setAllocation(null);
+      setAllocateProblem(allocateReason(error));
+    }
+  };
+
+  // One line's chips: the live hold while accepted (story 4-2c), then the
+  // acceptance-time badge — history — when the line was backordered then.
+  const lineChips = (line: (typeof order.lines)[number]) => {
+    const live = lineHoldText(line, order.status, skuMap?.[line.skuId]);
+    return (
+      <>
+        {live !== null && (
+          <StatusChip tone={live.tone} glyph={live.tone === 'warning' ? '◔' : '✓'} data-testid="line-hold-live">
+            {live.word}
+          </StatusChip>
+        )}
+        {(line.status === 'backordered' || live === null) && (
+          <StatusChip tone="neutral" data-testid="line-acceptance">
+            {acceptanceBadgeLabel(line)}
+          </StatusChip>
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-2">
       {/* Story 4-1b — the order's header: its label, the full id beside it. */}
       <header className="flex flex-wrap items-baseline gap-2" data-testid="order-detail-header">
-        <span className="font-mono text-sm font-medium">{orderLabel(detail.data)}</span>
-        <span className="font-mono text-xs text-(--muted-foreground)">{detail.data.id}</span>
+        {onBack !== null && (
+          <button type="button" onClick={onBack} className={`${rowButtonClass} text-xs`}>
+            <span aria-hidden>← </span>Back
+          </button>
+        )}
+        <span className="font-mono text-sm font-medium">{orderLabel(order)}</span>
+        <BackorderChip followOnSeq={order.followOnSeq} />
+        <span className="font-mono text-xs text-(--muted-foreground)">{order.id}</span>
       </header>
+      {/* Story 4-2c — where this order sits in a backorder chain. */}
+      {isFollowOn(order) && (
+        <p className="text-xs" data-testid="order-follow-on-of">
+          Backorder {order.followOnSeq} of{' '}
+          {parentOrderId === null ? (
+            <span className="font-mono font-medium">{orderRootLabel(order)}</span>
+          ) : (
+            <button type="button" className={chainLinkClass} onClick={() => onOpenOrder(parentOrderId)}>
+              {orderRootLabel(order)}
+            </button>
+          )}
+          <span className="text-(--muted-foreground)"> — the rest of an order that shipped short; it ships when stock arrives.</span>
+        </p>
+      )}
+      {followOnOrderId !== null && (
+        <p className="text-xs" data-testid="order-follow-on">
+          Shipped short — the rest is on{' '}
+          <button type="button" className={chainLinkClass} onClick={() => onOpenOrder(followOnOrderId)}>
+            {nextFollowOnLabel(order)}
+          </button>
+        </p>
+      )}
       {/* Story 4-2a — the type, then priority, ship-by and the payment line. */}
       <p className="flex flex-wrap items-center gap-2 text-xs" data-testid="order-detail-fields">
-        <span data-testid="order-detail-type">{orderTypeLabel(detail.data.orderType)}</span>
-        <OrderFieldChips order={detail.data} todayIst={todayIst} />
+        <span data-testid="order-detail-type">{orderTypeLabel(order.orderType)}</span>
+        <OrderFieldChips order={order} todayIst={todayIst} />
       </p>
       {warehouseId !== undefined && (
         // Story 9-3a — the order's pick, pack and dispatch events. The label
         // is the order's real handle — story 4-1b: the order label rule.
         <div className="text-xs">
           <Link
-            href={ledgerDocHref('order', orderId, warehouseId, orderLabel(detail.data))}
+            href={ledgerDocHref('order', orderId, warehouseId, orderLabel(order))}
             className="text-(--primary) underline underline-offset-2"
           >
             View ledger
           </Link>
         </div>
       )}
+      {/* Story 4-2c — reserve what is free now for the lines awaiting stock. */}
+      {showAllocate && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="allocate-now">
+          <button
+            type="button"
+            onClick={() => void runAllocate()}
+            disabled={allocate.busy}
+            aria-busy={allocate.busy ? 'true' : undefined}
+            className={`${primaryClass} py-1 text-xs`}
+          >
+            {allocate.busy ? 'Allocating…' : 'Allocate now'}
+          </button>
+          <span className="text-xs text-(--muted-foreground)">
+            Reserves free stock for the lines awaiting it — the warehouse also retries on its own as stock arrives.
+          </span>
+        </div>
+      )}
+      {allocateProblem !== null && <FeedbackBanner tone="rejected" word="Not allocated" reason={allocateProblem} />}
+      {result !== null && (
+        <div className="flex flex-col gap-1" data-testid="allocation-result">
+          <FeedbackBanner tone={result.tone} word={result.word} reason={result.reason} />
+          {result.skipped.map((text) => (
+            <p key={text} className="text-xs text-(--muted-foreground)">
+              {text}
+            </p>
+          ))}
+        </div>
+      )}
       {/* Story 4-2b (A9) — what the cancel booked back into stock, per bin. */}
-      {detail.data.status === 'cancelled' && <PutBackSection orderId={orderId} />}
-      {canManageReturns && canCreateReturn(detail.data.status) && skuClientDeparted(detail.data, detailClients) && (
+      {order.status === 'cancelled' && <PutBackSection orderId={orderId} />}
+      {canManageReturns && canCreateReturn(order.status) && skuClientDeparted(order, detailClients) && (
         <div className="text-xs text-(--muted-foreground)" data-testid="return-client-departed">
           {RETURNS_CLIENT_DEPARTED}
         </div>
       )}
-      {canManageReturns && canCreateReturn(detail.data.status) && !skuClientDeparted(detail.data, detailClients) && !creatingReturn && (
+      {canManageReturns && canCreateReturn(order.status) && !skuClientDeparted(order, detailClients) && !creatingReturn && (
         <div>
           <button
             type="button"
@@ -1103,7 +1256,7 @@ export function OrderDetailPanel({
       <div className="text-xs text-(--muted-foreground)">
         {orderTotalsLabel(
           lineTotals(groups.map(({ line }) => line)),
-          sharedQuantityUom(detail.data.lines, (skuId) => skuMap?.[skuId]),
+          sharedQuantityUom(order.lines, (skuId) => skuMap?.[skuId]),
         )}
       </div>
       {/* Story 11-6 — an exploded kit renders as its parent line with the
@@ -1120,9 +1273,7 @@ export function OrderDetailPanel({
               {/* The line's own SKU names the unit and its precision — a
                   column mixing units has no single one. */}
               <span className="data">{lineQuantityLabel(line, skuMap?.[line.skuId])}</span>
-              <StatusChip tone={line.status === 'backordered' ? 'danger' : 'neutral'}>
-                {line.status === 'backordered' ? 'Backordered' : 'Open'}
-              </StatusChip>
+              {lineChips(line)}
               {/* A kit parent's reservationId is always null — the holds it
                   earns belong to its children — so the ordinary hold label
                   would read "No hold" and imply it got nothing. The label
@@ -1131,7 +1282,7 @@ export function OrderDetailPanel({
                   holds nothing. */}
               <span className="text-(--muted-foreground)">
                 {children.length > 0
-                  ? kitParentHoldLabel(line, detail.data.status)
+                  ? kitParentHoldLabel(line, order.status)
                   : `Hold: ${holdStateLabel(line)}`}
               </span>
               {/* Story 1-6a (decision 9) — the handling warnings of the SKU
@@ -1149,9 +1300,7 @@ export function OrderDetailPanel({
                     <span className="font-mono">{skuMap?.[child.skuId]?.code ?? child.skuId}</span>
                     <span className="text-(--muted-foreground)">{skuMap?.[child.skuId]?.name ?? ''}</span>
                     <span className="data">{lineQuantityLabel(child, skuMap?.[child.skuId])}</span>
-                    <StatusChip tone={child.status === 'backordered' ? 'danger' : 'neutral'}>
-                      {child.status === 'backordered' ? 'Backordered' : 'Open'}
-                    </StatusChip>
+                    {lineChips(child)}
                     <span className="text-(--muted-foreground)">Hold: {holdStateLabel(child)}</span>
                     <HandlingBadges sku={skuMap?.[child.skuId]} />
                   </li>
@@ -1164,4 +1313,3 @@ export function OrderDetailPanel({
     </div>
   );
 }
-
