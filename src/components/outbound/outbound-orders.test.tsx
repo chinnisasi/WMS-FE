@@ -47,6 +47,8 @@ let listUrls: URL[] = [];
 let ordersResponder: ((url: URL) => { items: Record<string, unknown>[]; nextCursor: string | null }) | null = null;
 /** Story 1-5a: the client the create answers with (absent by default). */
 let createdClientId: string | undefined;
+/** Story 4-1c — every order-import POST: its form fields and key. */
+let orderImports: { form: Record<string, string>; key: string | null }[] = [];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -140,6 +142,29 @@ function stubRouter(): void {
         },
       });
     }
+    if (method === 'POST' && pathname.endsWith(`/tenants/${TENANT_ID}/outbound/order-imports`)) {
+      const data = await request.formData();
+      const form = Object.fromEntries([...data.entries()].map(([name, value]) => [name, typeof value === "string" ? value : (value as File).name]));
+      orderImports.push({ form, key: request.headers.get('Idempotency-Key') });
+      const dryRun = form.dryRun === 'true';
+      return json(dryRun ? 200 : 201, {
+        importId: dryRun ? null : 'imp-1',
+        dryRun,
+        warehouseId: 'wh-1',
+        fileSha256: 'cd'.repeat(32),
+        rowCount: 3,
+        orderCount: 2,
+        acceptedCount: 2,
+        refusedCount: 0,
+        complete: true,
+        notAttemptedCount: 0,
+        orders: [
+          { orderId: dryRun ? null : 'o-1', clientOrderRef: 'SO-1', lineCount: 2, firstRow: 2, replayed: false, clientId: 'c-1', clientLabel: 'ACME', backorderedLineCount: dryRun ? null : 1 },
+          { orderId: dryRun ? null : 'o-2', clientOrderRef: 'SO-2', lineCount: 1, firstRow: 4, replayed: false, clientId: 'c-1', clientLabel: 'ACME', backorderedLineCount: dryRun ? null : 0 },
+        ],
+        errors: [],
+      });
+    }
     if (method === 'GET' && /\/warehouses\/[^/]+\/outbound\/orders$/.test(pathname)) {
       listUrls.push(url);
       return json(200, ordersResponder === null ? { items: [], nextCursor: null } : ordersResponder(url));
@@ -182,6 +207,7 @@ beforeEach(() => {
   listUrls = [];
   ordersResponder = null;
   createdClientId = undefined;
+  orderImports = [];
   stubRouter();
   writeSession(SESSION);
 });
@@ -1451,5 +1477,53 @@ describe('the order fields (story 4-2a)', () => {
     await submitCreate(view.container);
     expect(creates[2]!.key).not.toBe(creates[1]!.key);
     expect(creates[2]!.body.priority).toBe('high');
+  });
+});
+
+describe('Import orders from a file (story 4-1c)', () => {
+  function pick(container: HTMLElement, file: File): void {
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Order file"]')!;
+    act(() => {
+      Object.defineProperty(input, 'files', { value: [file], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+  async function press(container: HTMLElement, text: string): Promise<void> {
+    const found = [...container.querySelectorAll('button')].find((b) => b.textContent === text);
+    expect(found).toBeDefined();
+    await act(async () => {
+      found!.click();
+    });
+    await settle();
+  }
+
+  test('orders.manage gets "Import from file"; an operator does not', async () => {
+    view = render(<OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01" role="operator" />);
+    await settle();
+    expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Import from file')).toBe(false);
+    view.unmount();
+    view = await mountForm();
+    expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Import from file')).toBe(true);
+  });
+
+  test('Check posts dryRun with no key; Import posts the key, names the backorders and returns the list to page one', async () => {
+    view = await mountForm();
+    await press(view.container, 'Import from file');
+    const panel = view.container.querySelector<HTMLElement>('section[aria-label="Import orders from a file"]')!;
+    expect(panel.textContent).toContain('client (blank = the client the SKUs belong to');
+    pick(panel, new File(['order_ref,sku,quantity\n'], 'orders.csv', { type: 'text/csv', lastModified: 1 }));
+    await press(panel, 'Check file');
+    expect(orderImports).toEqual([{ form: { file: 'orders.csv', warehouseId: 'wh-1', dryRun: 'true' }, key: null }]);
+    expect(panel.textContent).toContain('2 orders, 3 lines ready');
+    expect(panel.textContent).toContain('a line short of stock is backordered then');
+    const listsBefore = listUrls.length;
+    await press(panel, 'Import');
+    expect(orderImports[1]!.form).toEqual({ file: 'orders.csv', warehouseId: 'wh-1' });
+    expect(orderImports[1]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(panel.textContent).toContain('2 orders created');
+    expect(panel.textContent).toContain('1 line on 1 order backordered');
+    expect(panel.textContent).toContain('1 backordered');
+    expect(listUrls.length).toBeGreaterThan(listsBefore);
+    expect(listUrls.at(-1)!.searchParams.get('cursor')).toBeNull();
   });
 });

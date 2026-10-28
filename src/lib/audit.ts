@@ -64,6 +64,7 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   licence_policy: 'Licence enforcement',
   manifest: 'Manifest',
   order: 'Order',
+  order_import: 'Order import',
   over_receipt: 'Over-receipt',
   // Story 1-3 — a business partner and one of its client links.
   partner: 'Partner',

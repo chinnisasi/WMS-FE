@@ -4,7 +4,7 @@ import { useTodayIst } from '@/components/shared/use-today-ist';
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiCancelOrder, fetchApiCreateOrder } from '@/lib/api/client';
+import { fetchApiCancelOrder, fetchApiCreateOrder, fetchApiImportOrders } from '@/lib/api/client';
 import { orderSkuOptionLabel } from '@/lib/sku-status';
 import type { OrderEntryDto, ReturnAuthorizationDto, SkuResponse } from '@/lib/api/generated';
 import { quantityInputLabel, sharedQuantityUom } from '@/lib/format-quantity';
@@ -68,6 +68,8 @@ import { canCreateReturn, RETURN_CREATED_REASON, returnCreatedWord } from '@/lib
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { EmptyState } from '@/components/shared/empty-state';
+// Story 4-1c — the order import panel, shared with the portal's Orders page.
+import { OrderImport } from '@/components/shared/order-import';
 // Story 4-1a — the Ship-to fieldset is shared with the portal's order form.
 import { ShipToFieldset } from '@/components/shared/ship-to-fieldset';
 import { OrderFieldsFieldset } from '@/components/shared/order-fields-fieldset';
@@ -146,6 +148,7 @@ export function OutboundOrders({
           ? 'Outbound orders'
           : `${warehouseLabel} — newest first. Acceptance reserves stock line by line.`}
       </div>
+      {canManageOrders && drill === null && <OrderImportToggle tenantId={tenantId} warehouseId={warehouseId} />}
       {canManageOrders && drill === null && (
         <OrderCreateForm tenantId={tenantId} warehouseId={warehouseId} active={active} focusOnReady={focusNewOrder} />
       )}
@@ -162,6 +165,39 @@ export function OutboundOrders({
         initialReference={drill === null ? initialReference : null}
       />
     </Section>
+  );
+}
+
+/**
+ * Story 4-1c — "Import from file" beside the create form (`orders.manage`,
+ * never while drilled): the shared two-step panel over the staff route,
+ * keyed by warehouse (a switch starts over). A created order returns the
+ * list to page one and refetches (the outbound-changed event).
+ */
+function OrderImportToggle({ tenantId, warehouseId }: { tenantId: string; warehouseId: string }) {
+  const todayIst = useTodayIst();
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  if (openFor !== warehouseId) {
+    return (
+      <div>
+        <button type="button" className={buttonClass} onClick={() => setOpenFor(warehouseId)}>
+          Import from file
+        </button>
+      </div>
+    );
+  }
+  return (
+    <OrderImport
+      key={warehouseId}
+      surface="staff"
+      warehouseId={warehouseId}
+      todayIst={todayIst}
+      run={(file, warehouse, step) => fetchApiImportOrders(tenantId, file, warehouse, step)}
+      onImported={(result) => {
+        if (result.acceptedCount > 0) notifyOutboundChanged();
+      }}
+      onClose={() => setOpenFor(null)}
+    />
   );
 }
 

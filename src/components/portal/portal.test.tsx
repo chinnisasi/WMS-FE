@@ -104,8 +104,15 @@ function stubRouter(): void {
     requests.push(`${request.method.toUpperCase()} ${pathname}`);
     urls.push(`${pathname}${search}`);
     if (request.method.toUpperCase() === 'POST') {
-      const text = await request.clone().text();
-      posts.push({ path: pathname, key: request.headers.get('Idempotency-Key'), body: text === '' ? {} : (JSON.parse(text) as Record<string, unknown>) });
+      // Story 4-1c — a multipart upload (the order import) is read as its form fields.
+      const multipart = (request.headers.get('content-type') ?? '').includes('multipart/form-data');
+      const text = multipart ? '' : await request.clone().text();
+      const body: Record<string, unknown> = multipart
+        ? Object.fromEntries([...(await request.clone().formData()).entries()].map(([name, value]) => [name, typeof value === "string" ? value : (value as File).name]))
+        : text === ''
+          ? {}
+          : (JSON.parse(text) as Record<string, unknown>);
+      posts.push({ path: pathname, key: request.headers.get('Idempotency-Key'), body });
       if (postHold !== null) await postHold;
       const reply = postReplies.shift() ?? [503, { code: 'unavailable', status: 503, title: 'Down' }];
       return json(reply[0], reply[1]);
@@ -1710,5 +1717,127 @@ describe('story 3-7a — the portal Recalls', () => {
     await settle();
     expect(view.container.textContent).toContain('Recalls not loaded');
     expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Retry')).toBe(true);
+  });
+});
+
+describe('Import orders from a file (4-1c)', () => {
+  const W1 = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const W2 = '0198f7a2-1b3c-7d4e-8f90-0000000000a2';
+  const result = (dryRun: boolean) => ({
+    importId: dryRun ? null : 'imp-1',
+    dryRun,
+    warehouseId: W1,
+    fileSha256: 'ab'.repeat(32),
+    rowCount: 3,
+    orderCount: 2,
+    acceptedCount: 1,
+    refusedCount: 1,
+    complete: true,
+    notAttemptedCount: 0,
+    orders: [{ orderId: dryRun ? null : ORDER_ID, clientOrderRef: 'SO-1', lineCount: 2, firstRow: 2, replayed: false }],
+    errors: [{ rowNumber: 4, orderRef: 'SO-2', sku: 'RICE', quantity: '10', code: 'order-backorder-rejected', detail: 'Not enough stock at this warehouse for "RICE" — nothing was placed.' }],
+  });
+
+  beforeEach(() => {
+    writeSession(PORTAL_SESSION);
+    routes = {
+      ...routes,
+      '/portal/warehouses': [
+        200,
+        {
+          items: [
+            { warehouseId: W2, warehouseName: 'Annex', city: 'Chennai' },
+            { warehouseId: W1, warehouseName: 'Main', city: 'Bengaluru' },
+          ],
+        },
+      ],
+    };
+  });
+
+  function setValue(element: HTMLSelectElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(element, value);
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  function pick(container: HTMLElement, file: File): void {
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Order file"]')!;
+    act(() => {
+      Object.defineProperty(input, 'files', { value: [file], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  test('orders.place is offered "Import from file"; Check posts to portal/order-imports with the warehouse and no key; Import posts the key, names the shortage and refreshes the list', async () => {
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Import from file'));
+    await settle();
+    const panel = view.container.querySelector<HTMLElement>('section[aria-label="Import orders from a file"]')!;
+    expect(panel).not.toBeNull();
+    // No client or rate column is offered to a client.
+    expect(panel.textContent).not.toContain('rate (rupees');
+    expect(buttonNamed(panel, 'Check file').disabled).toBe(true);
+    setValue(view.container.querySelector<HTMLSelectElement>('[aria-label="Warehouse"]')!, W1);
+    await settle();
+    const fresh = view.container.querySelector<HTMLElement>('section[aria-label="Import orders from a file"]')!;
+    pick(fresh, new File(['order_ref,sku,quantity\n'], 'orders.csv', { type: 'text/csv' }));
+    postReplies.push([200, result(true)]);
+    click(buttonNamed(fresh, 'Check file'));
+    await settle();
+    expect(posts.at(-1)).toMatchObject({ path: `/api/v1/tenants/${PORTAL_SESSION.tenant.id}/portal/order-imports`, key: null, body: { file: 'orders.csv', warehouseId: W1, dryRun: 'true' } });
+    expect(fresh.textContent).toContain('1 order, 2 lines ready');
+    expect(fresh.textContent).toContain('an order short of stock is refused then');
+    const listReads = requests.filter((entry) => entry.endsWith('/portal/orders')).length;
+    postReplies.push([201, result(false)]);
+    click(buttonNamed(fresh, 'Import'));
+    await settle();
+    expect(posts.at(-1)!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(posts.at(-1)!.body).toEqual({ file: 'orders.csv', warehouseId: W1 });
+    expect(fresh.textContent).toContain('1 order placed');
+    expect(fresh.textContent).toContain('Not enough stock');
+    expect(requests.filter((entry) => entry.endsWith('/portal/orders')).length).toBeGreaterThan(listReads);
+  });
+
+  test('C16: a file picked before the warehouse is kept; switching the warehouse drops the checked result and the next Import sends a new key', async () => {
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Import from file'));
+    await settle();
+    const panel = (): HTMLElement => view!.container.querySelector<HTMLElement>('section[aria-label="Import orders from a file"]')!;
+    const select = (): HTMLSelectElement => view!.container.querySelector<HTMLSelectElement>('[aria-label="Warehouse"]')!;
+    pick(panel(), new File(['order_ref,sku,quantity\n'], 'orders.csv', { type: 'text/csv', lastModified: 7 }));
+    setValue(select(), W1);
+    await settle();
+    expect(panel().textContent).toContain('Selected: orders.csv');
+    postReplies.push([200, result(true)]);
+    click(buttonNamed(panel(), 'Check file'));
+    await settle();
+    postReplies.push([200, { ...result(false), importId: null, complete: false, notAttemptedCount: 1 }]);
+    click(buttonNamed(panel(), 'Import'));
+    await settle();
+    const first = posts.at(-1)!.key;
+    expect(panel().textContent).toContain('Import again');
+    setValue(select(), W2);
+    await settle();
+    expect(panel().querySelector('[data-testid="order-import-result"]')).toBeNull();
+    expect(buttonNamed(panel(), 'Import').disabled).toBe(true);
+    postReplies.push([200, { ...result(true), warehouseId: W2 }]);
+    click(buttonNamed(panel(), 'Check file'));
+    await settle();
+    postReplies.push([201, { ...result(false), warehouseId: W2 }]);
+    click(buttonNamed(panel(), 'Import'));
+    await settle();
+    expect(posts.at(-1)!.body).toEqual({ file: 'orders.csv', warehouseId: W2 });
+    expect(posts.at(-1)!.key).not.toBe(first);
+  });
+
+  test('without orders.place there is no "Import from file"', async () => {
+    writeSession({ ...PORTAL_SESSION, user: { ...PORTAL_SESSION.user, role: 'accountant' } });
+    view = render(<PortalOrders />);
+    await settle();
+    expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Import from file')).toBe(false);
   });
 });
