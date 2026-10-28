@@ -14,8 +14,9 @@ import {
 } from './inbound-tabs';
 
 describe('inbound-tabs', () => {
-  test('the seven tabs, in page order — Gate-in first (story 2-3a), Returns to vendor after QC holds (story 2-8b), Purchase orders still the default', () => {
+  test('the eight tabs, in page order — Dock schedule first (story 2-3b), then Gate-in (story 2-3a), Returns to vendor after QC holds (story 2-8b), Purchase orders still the default', () => {
     expect(INBOUND_TABS.map((t) => t.label)).toEqual([
+      'Dock schedule',
       'Gate-in',
       'Purchase orders',
       'Advance shipment notices',
@@ -37,6 +38,12 @@ describe('inbound-tabs', () => {
     expect(inboundTabHref('qc-holds')).toBe('/inbound?tab=qc-holds');
     expect(parseInboundTab({ tab: 'gate-ins' })).toBe('gate-ins');
     expect(initialInboundTab(null, 'gate-ins')).toBe('gate-ins');
+  });
+
+  test('story 2-3b (decision 10) — Dock schedule is ?tab=dock; the bare /inbound stays Purchase orders', () => {
+    expect(inboundTabHref('dock')).toBe('/inbound?tab=dock');
+    expect(parseInboundTab({ tab: 'dock' })).toBe('dock');
+    expect(initialInboundTab(null, null)).toBe('pos');
   });
 
   test('?tab= parses a known id; anything else is ignored', () => {

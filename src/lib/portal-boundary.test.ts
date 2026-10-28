@@ -191,6 +191,10 @@ describe('portal boundary — no operator hook or component reaches the portal',
     expect(entries.some(isTestFile)).toBe(false);
   });
 
+  test('story 2-3b — DetailDrawer and StatusChip are portal-allowed (2-3c portal booking reuses them)', () => {
+    expect(report(walk(['components/shared/detail-drawer.tsx', 'components/shared/status-chip.tsx']))).toBe('');
+  });
+
   test('nothing reachable from a portal entry is an operator hook module or an operator component', () => {
     const violations = walk(portalEntries());
     // On failure, the message names each offender and the chain that reached it.

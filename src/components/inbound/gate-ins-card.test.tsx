@@ -87,6 +87,7 @@ function entry(id: string, code: string, patch: Record<string, unknown> = {}): R
     packagesFlag: null,
     packagesDifference: null,
     staleOpen: false,
+    appointment: null,
     ...patch,
   };
 }
@@ -102,6 +103,33 @@ let createAnswers: ({ kind: 'ok' } | { kind: 'drop' } | { kind: 'problem'; statu
 let actionAnswers: ({ kind: 'ok'; applied?: boolean } | { kind: 'drop' } | { kind: 'problem'; status: number; code: string; detail: string })[] = [];
 let grns: Record<string, unknown>[] = [];
 let requests: { method: string; url: URL; body: unknown; key: string | null }[] = [];
+// Story 2-3b — the warehouse's dock doors and the linkable appointments.
+let dockDoors: Record<string, unknown>[] = [];
+let dockAppointments: Record<string, unknown>[] = [];
+
+const APPT = '0198f7a2-1b3c-7d4e-8f90-0000000000e1';
+const APPT2 = '0198f7a2-1b3c-7d4e-8f90-0000000000e2';
+
+function door(id: string, code: string, active = true): Record<string, unknown> {
+  return { id, warehouseId: WH, code, name: null, active, createdBy: 'u-1', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z' };
+}
+
+function appointment(id: string, code: string, patch: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id, tenantId: T, warehouseId: WH, code, status: 'booked', dockDoorId: 'door-d3', doorCode: 'D3',
+    startsAt: new Date(Date.now() + 3_600_000).toISOString(), endsAt: new Date(Date.now() + 5_400_000).toISOString(),
+    graceMinutes: 15, clientId: null, vehicleNo: 'KA01AB1234', transporterName: null, note: null, documents: [],
+    gateInId: null, gateInCode: null, gatedInAt: null, linkedAt: null, linkedBy: null, bookedBy: 'u-1',
+    cancelledAt: null, cancelledBy: null, cancelReason: null, punctuality: null, punctualityMinutes: null, noShow: false,
+    createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z',
+    ...patch,
+  };
+}
+
+const SUMMARY = {
+  scheduled: 0, pending: 0, arrived: 0, early: 0, onTime: 0, late: 0, noShow: 0, cancelled: 0,
+  onTimeRate: null, bookedMinutes: 0, openMinutes: 0, utilisationRate: null, byDoor: [],
+};
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -206,6 +234,19 @@ function stubRouter(): void {
       return json(200, { items: [], nextCursor: null });
     }
     if (pathname.endsWith('/inbound/asns')) return json(200, { items: [], nextCursor: null });
+    if (pathname === `${base}/warehouses/${WH}/dock-doors`) return json(200, { items: dockDoors });
+    if (pathname === `${base}/receiving/dock-schedule`) {
+      return json(200, {
+        asOf: new Date().toISOString(),
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+        schedule: { warehouseId: WH, slotMinutes: 30, opensAt: '00:00', closesAt: '24:00', openDays: [1, 2, 3, 4, 5, 6, 7], graceMinutes: 15, configured: true, updatedAt: null },
+        doors: dockDoors,
+        appointments: dockAppointments,
+        summary: SUMMARY,
+        truncated: false,
+      });
+    }
     if (pathname === `${base}/receiving/goods-receipts`) return json(200, { items: grns, nextCursor: null });
     if (pathname.endsWith('/inventory/stock')) return json(200, { items: [], nextCursor: null });
     if (pathname === `${base}/receiving/qc-holds`) return json(200, { items: [], nextCursor: null });
@@ -246,6 +287,8 @@ beforeEach(() => {
   actionAnswers = [];
   grns = [];
   requests = [];
+  dockDoors = [];
+  dockAppointments = [];
   stubRouter();
 });
 
@@ -330,7 +373,8 @@ describe('the Gate-in tab — reads', () => {
   test('Gate-in is the first tab, but the bare page still opens on Purchase orders (decision 9)', async () => {
     await mount('owner', null);
     const tabs = [...view!.container.querySelectorAll('[role="tab"]')].map((t) => t.getAttribute('data-tab'));
-    expect(tabs[0]).toBe('gate-ins');
+    // Story 2-3b — the Dock schedule leads; Gate-in follows it.
+    expect(tabs.slice(0, 2)).toEqual(['dock', 'gate-ins']);
     expect(view!.container.querySelector('[role="tab"][aria-selected="true"]')!.getAttribute('data-tab')).toBe('pos');
     expect(view!.container.querySelector('[data-testid="gate-ins-card"]')).toBeNull();
   });
@@ -690,6 +734,105 @@ describe('Edit — a full replacement', () => {
     actionAnswers = [{ kind: 'problem', status: 409, code: 'gate-in-time-locked', detail: 'x' }];
     await press(button(form, 'Save'));
     expect(form.querySelector('[role="alert"]')!.textContent).toBe('The gated-in time is locked once the unload starts — leave it as recorded.');
+  });
+});
+
+describe('story 2-3b — the appointment at the gate', () => {
+  async function openRecord(): Promise<HTMLFormElement> {
+    await press(button(card(), 'Record a gate-in'));
+    return recordForm()!;
+  }
+
+  test('the list reads "DA-0001 · Late 20 min" for a linked visit and "Unscheduled" otherwise; the detail names the window and door', async () => {
+    rows = [
+      entry(G1, 'GI-0001', {
+        appointment: { id: APPT, code: 'DA-0001', startsAt: '2026-10-21T05:00:00.000Z', endsAt: '2026-10-21T06:00:00.000Z', doorCode: 'D3', punctuality: 'late', punctualityMinutes: 20 },
+      }),
+      entry(G2, 'GI-0002'),
+    ];
+    detailPatch = { appointment: (rows[0] as { appointment: unknown }).appointment };
+    await mount('accountant');
+    expect(card().querySelector('[data-testid="gate-in-appointment-GI-0001"]')!.textContent).toBe('DA-0001 · Late 20 min');
+    expect(card().querySelector('[data-testid="gate-in-appointment-GI-0002"]')!.textContent).toBe('Unscheduled');
+    await press(button(row('GI-0001')!, 'GI-0001'));
+    expect(card().querySelector('[data-testid="gate-in-detail-appointment"]')!.textContent).toBe('Appointment DA-0001 · 10:30–11:30 · D3 · Late 20 min');
+  });
+
+  test('Record: the vehicle pre-selects its appointment and prefills its door; the body carries appointmentId; "No appointment" sends none', async () => {
+    dockDoors = [door('door-d3', 'D3'), door('door-d4', 'D4')];
+    dockAppointments = [appointment(APPT, 'DA-0001'), appointment(APPT2, 'DA-0002', { vehicleNo: 'MH12XY9999', dockDoorId: 'door-d4', doorCode: 'D4' })];
+    await mount('operator');
+    const form = await openRecord();
+    // The linkable read is one three-day window (A14).
+    const windowRead = requests.find((r) => r.url.pathname.endsWith('/receiving/dock-schedule'))!;
+    expect(windowRead.url.searchParams.get('warehouseId')).toBe(WH);
+    expect(windowRead.url.searchParams.has('includeCancelled')).toBe(false);
+    const options = [...select(form, 'Appointment').options].map((o) => o.textContent);
+    expect(options[0]).toBe('No appointment — unscheduled');
+    expect(options.some((o) => o!.startsWith('DA-0001 · '))).toBe(true);
+    // The door is a select of the active doors with "Other — type it".
+    expect([...select(form, 'Dock door').options].map((o) => o.textContent)).toEqual(['No dock door', 'D3', 'D4', 'Other — type it']);
+    setInput(input(form, 'Vehicle number'), 'ka 01 ab 1234');
+    expect(select(form, 'Appointment').value).toBe(APPT);
+    expect(select(form, 'Dock door').value).toBe('D3');
+    expect(form.querySelector('[data-testid="appointment-vehicle-match"]')).not.toBeNull();
+    setSelect(select(form, 'Transporter'), TRANSPORTER);
+    setInput(input(form, 'Seal number'), 'S-1');
+    await press(button(form, 'Record gate-in'));
+    const linked = posts()[0]!.body as Record<string, unknown>;
+    expect(linked.appointmentId).toBe(APPT);
+    expect(linked.dockDoor).toBe('D3');
+  });
+
+  test('Record: the desk can unlink ("No appointment") — the create sends no appointmentId; "Other — type it" opens a text door', async () => {
+    dockDoors = [door('door-d3', 'D3')];
+    dockAppointments = [appointment(APPT, 'DA-0001')];
+    await mount('operator');
+    const form = await openRecord();
+    setInput(input(form, 'Vehicle number'), 'KA01AB1234');
+    setSelect(select(form, 'Appointment'), '');
+    expect(select(form, 'Appointment').value).toBe('');
+    setSelect(select(form, 'Dock door'), '__other__');
+    setInput(input(form, 'Dock door'), 'YARD-2');
+    setSelect(select(form, 'Transporter'), TRANSPORTER);
+    setInput(input(form, 'Seal number'), 'S-1');
+    await press(button(form, 'Record gate-in'));
+    const body = posts()[0]!.body as Record<string, unknown>;
+    expect('appointmentId' in body).toBe(false);
+    expect(body.dockDoor).toBe('YARD-2');
+  });
+
+  test('a link refusal reads the dock copy and re-reads the appointments', async () => {
+    dockAppointments = [appointment(APPT, 'DA-0001')];
+    await mount('operator');
+    const form = await openRecord();
+    setInput(input(form, 'Vehicle number'), 'KA01AB1234');
+    setSelect(select(form, 'Transporter'), TRANSPORTER);
+    setInput(input(form, 'Seal number'), 'S-1');
+    const before = requests.filter((r) => r.url.pathname.endsWith('/receiving/dock-schedule')).length;
+    createAnswers = [{ kind: 'problem', status: 409, code: 'appointment-closed', detail: 'x' }];
+    await press(button(form, 'Record gate-in'));
+    expect(form.querySelector('[role="alert"]')!.textContent).toBe('That appointment has arrived, is cancelled or is another gate-in’s — refresh the list.');
+    expect(requests.filter((r) => r.url.pathname.endsWith('/receiving/dock-schedule')).length).toBeGreaterThan(before);
+  });
+
+  test('Edit always states the link: the stored appointment is kept (sent) and clearing it sends null', async () => {
+    const linkedAppointment = { id: APPT, code: 'DA-0001', startsAt: '2026-10-21T05:00:00.000Z', endsAt: '2026-10-21T06:00:00.000Z', doorCode: 'D3', punctuality: 'on_time', punctualityMinutes: 5 };
+    rows = [entry(G1, 'GI-0001', { appointment: linkedAppointment })];
+    detailPatch = { appointment: linkedAppointment };
+    await mount('owner');
+    await press(button(row('GI-0001')!, 'Edit'));
+    let form = card().querySelector<HTMLFormElement>('form[aria-label="Edit GI-0001"]')!;
+    expect(select(form, 'Appointment').value).toBe(APPT);
+    await press(button(form, 'Save'));
+    expect((requests.filter((r) => r.method === 'PATCH')[0]!.body as Record<string, unknown>).appointmentId).toBe(APPT);
+    await press(button(row('GI-0001')!, 'Edit'));
+    form = card().querySelector<HTMLFormElement>('form[aria-label="Edit GI-0001"]')!;
+    setSelect(select(form, 'Appointment'), '');
+    await press(button(form, 'Save'));
+    const cleared = requests.filter((r) => r.method === 'PATCH')[1]!.body as Record<string, unknown>;
+    expect('appointmentId' in cleared).toBe(true);
+    expect(cleared.appointmentId).toBeNull();
   });
 });
 

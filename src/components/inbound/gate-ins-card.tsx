@@ -32,6 +32,7 @@ import type { ActiveClientState } from '@/lib/use-active-client';
 import { readyClients } from '@/lib/use-clients';
 import { useGateInDetail, useGateIns } from '@/lib/use-gate-ins';
 import { roleHasCapability } from '@/lib/users';
+import { gateInAppointmentLabel, gateInAppointmentLine } from '@/lib/dock-schedule';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -159,6 +160,16 @@ export function GateInsCard({
       render: (entry) => <time dateTime={entry.gatedInAt}>{istDateTimeLabel(entry.gatedInAt)}</time>,
     },
     { key: 'dock', header: 'Dock', render: (entry) => <span className="font-mono text-xs">{entry.dockDoor ?? '—'}</span> },
+    // Story 2-3b — the linked dock appointment and the visit's punctuality against it.
+    {
+      key: 'appointment',
+      header: 'Appointment',
+      render: (entry) => (
+        <span className="text-xs" data-testid={`gate-in-appointment-${entry.code}`}>
+          {gateInAppointmentLabel(entry.appointment)}
+        </span>
+      ),
+    },
     {
       key: 'packages',
       header: 'Packages',
@@ -514,6 +525,7 @@ function GateInDetailPanel({
         </span>
         <span>Unload {istTimeLabel(gateIn.unloadStartedAt)} → {istTimeLabel(gateIn.unloadEndedAt)}</span>
         <span>Gated out {istTimeLabel(gateIn.gatedOutAt)}</span>
+        <span data-testid="gate-in-detail-appointment">Appointment {gateInAppointmentLine(gateIn.appointment)}</span>
       </div>
       <div className="flex flex-col gap-0.5">
         <div className="font-medium">Documents</div>

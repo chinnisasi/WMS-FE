@@ -77,6 +77,8 @@ import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-fil
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AsnsCard } from '@/components/inbound/asn-card';
+import { DockScheduleCard } from '@/components/inbound/dock-schedule-card';
+import { DEFAULT_DOCK_URL_STATE, type DockUrlState } from '@/lib/dock-schedule';
 import { QcInspectDialog } from '@/components/inbound/qc-inspect-dialog';
 import { ReceiptPhotosDialog } from '@/components/inbound/receipt-photos';
 import { CameraGlyph } from '@/components/shared/photo-viewer';
@@ -112,7 +114,8 @@ export function InboundCards({
   drill = null,
   initialTab = null,
   qcGrnId = null,
-}: { drill?: ParsedDrill; initialTab?: InboundTab | null; qcGrnId?: string | null } = {}) {
+  dock = DEFAULT_DOCK_URL_STATE,
+}: { drill?: ParsedDrill; initialTab?: InboundTab | null; qcGrnId?: string | null; dock?: DockUrlState } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -128,17 +131,19 @@ export function InboundCards({
       </div>
     );
   }
-  return <InboundCardsSessioned drill={drill} initialTab={initialTab} qcGrnId={qcGrnId} />;
+  return <InboundCardsSessioned drill={drill} initialTab={initialTab} qcGrnId={qcGrnId} dock={dock} />;
 }
 
 function InboundCardsSessioned({
   drill,
   initialTab,
   qcGrnId,
+  dock,
 }: {
   drill: ParsedDrill;
   initialTab: InboundTab | null;
   qcGrnId: string | null;
+  dock: DockUrlState;
 }) {
   const grnsDrill = drillFor(drill, 'grns');
   const putawayDrill = drillFor(drill, 'putaway');
@@ -199,6 +204,10 @@ function InboundCardsSessioned({
         badge={(id) => <InboundTabCount tab={id} counts={tabCounts} />}
       />
       <PageTabPanel def={INBOUND_PAGE_TABS} active={tab}>
+        {/* Story 2-3b — the dock calendar, every client's (never client-filtered). */}
+        {tab === 'dock' && (
+          <DockScheduleCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.code ?? warehouse?.name ?? null} initial={dock} />
+        )}
         {/* Story 2-3a — every client's gate-ins (never client-filtered). */}
         {tab === 'gate-ins' && (
           <GateInsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
@@ -250,7 +259,7 @@ function InboundCardsSessioned({
  * client, so it shows even while the client filter is pending.
  */
 function InboundTabCount({ tab, counts }: { tab: InboundTab; counts: InboundTabCounts }) {
-  if (tab === 'grns') return null;
+  if (tab === 'grns' || tab === 'dock') return null;
   const count = counts[tab];
   if (count === undefined) return null;
   return (

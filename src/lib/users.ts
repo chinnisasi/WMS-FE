@@ -261,6 +261,17 @@ export const CAPABILITIES = [
   // stay) or cancel an awaited one. Owner + Ops Manager only — the photo is
   // evidence in a vendor or client claim, so the floor cannot take it back.
   'receipt.photo-remove',
+  // Story 2-3b — the dock-door master and the per-warehouse dock schedule:
+  // add, rename, deactivate and reactivate a door; set the slot length, the
+  // opening hours, the open days and the on-time grace (Settings →
+  // Warehouses → "Dock doors and schedule"). Owner + Ops Manager — the dock's
+  // shape is a planner's setting. The ops grant is derived below.
+  'dock.manage',
+  // Story 2-3b — book, reschedule and cancel a dock appointment (Inbound →
+  // Dock schedule). Owner + Ops Manager (derived below) + OPERATOR — the
+  // inbound planner and the gate desk book slots. Linking an appointment at
+  // the gate-in stays `gate.manage`. Every member reads the calendar.
+  'dock.schedule',
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -347,6 +358,9 @@ export const ROLE_CAPABILITIES: Readonly<Record<UserRole, readonly Capability[]>
     // Story 2-5a — the dock adds a damage photo from the web; never
     // `receipt.photo-remove` (evidence is removed by a manager).
     'receipt.attach',
+    // Story 2-3b — the gate desk books, reschedules and cancels dock
+    // appointments; never `dock.manage` (the doors and the schedule).
+    'dock.schedule',
   ],
   // Story 8-2b: read-only except the e-way paperwork (finance work); story
   // 21-3: and the client rate cards (finance work); story 21-5: and the
