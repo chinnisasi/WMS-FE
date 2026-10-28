@@ -203,6 +203,41 @@ describe('ResetPasswordForm (story 6-1c)', () => {
     expect(byLabel(container, 'Authenticator code')).toBeDefined();
   });
 
+  test('code review C4 — a check refused by a limit is not a dead link: "Couldn’t check the link" with Try again, which then opens the form', async () => {
+    checkAnswers = [{ status: 429, body: { code: 'rate-limited', status: 429, detail: 'x', retryAfterSeconds: 45 } }];
+    const container = await openLink();
+    expect(container.textContent).toContain('Try again in 1 minute.');
+    expect(container.textContent).not.toContain('Link not valid');
+    expect(container.textContent).not.toContain('Request a new link');
+    const retry = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Try again')!;
+    act(() => void retry.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await settle();
+    expect(calls.filter((c) => c.path.endsWith('/check')).map((c) => c.body)).toEqual([{ token: TOKEN }, { token: TOKEN }]);
+    expect(container.textContent).toContain('Setting a new password for priya@example.com');
+  });
+
+  test('code review C14 / C16 — a re-check that needs no code shows no code notice; the 5th wrong code (attemptsLeft 0) moves to Request a new link', async () => {
+    checkAnswers = [
+      { status: 200, body: { email: 'o@example.com', expiresAt: '2026-10-28T10:00:00.000Z', secondFactorRequired: true } },
+      { status: 200, body: { email: 'o@example.com', expiresAt: '2026-10-28T10:00:00.000Z', secondFactorRequired: false } },
+    ];
+    confirmAnswers = [
+      { status: 422, body: { code: 'second-factor-needed', status: 422, detail: 'x' } },
+      { status: 422, body: { code: 'second-factor-invalid', status: 422, detail: 'x', attemptsLeft: 0 } },
+    ];
+    const container = await openLink();
+    setInput(byLabel(container, 'New password'), 'a-new-password');
+    setInput(byLabel(container, 'Confirm new password'), 'a-new-password');
+    setInput(byLabel(container, 'Authenticator code'), '123456');
+    submit(container);
+    await settle();
+    expect(container.textContent).not.toContain('Code needed');
+    expect([...container.querySelectorAll('label')].some((l) => l.textContent === 'Authenticator code')).toBe(false);
+    submit(container);
+    await settle();
+    expect(container.textContent).toContain('Request a new link');
+  });
+
   test('the link expired while typing (confirm 400) → the invalid-link state; 423, 429 and 503 keep the form with their words', async () => {
     confirmAnswers = [
       { status: 423, body: { code: 'second-factor-locked', status: 423, detail: 'x', retryAfterSeconds: 600 } },
@@ -252,6 +287,22 @@ describe('ForgotPasswordForm (story 6-1c)', () => {
 });
 
 describe('LoginForm: the forgot link and the reset notice (story 6-1c)', () => {
+  test('code review C3 — a 429 from the hour buckets says its wait in minutes, naming the network or the account', async () => {
+    stubGlobal('fetch', (async () =>
+      json(429, { code: 'rate-limited', status: 429, detail: 'x', retryAfterSeconds: 1800 })) as unknown as typeof fetch);
+    view = render(<LoginForm />);
+    const { container } = view;
+    const input = (label: string) =>
+      [...container.querySelectorAll('label')].find((l) => l.querySelector('span')?.textContent === label)!.querySelector('input')!;
+    setInput(input('Email'), 'priya@example.com');
+    setInput(input('Password'), 'whatever-password');
+    submit(container);
+    await settle();
+    expect(container.querySelector('[role="alert"]')!.textContent).toContain(
+      'Too many sign-in attempts from this network or for this account. Try again in 30 minutes.',
+    );
+  });
+
   test('"Forgot password?" carries the typed email; reset=done shows an accepted banner, not "Signed out"', async () => {
     view = render(<LoginForm notice="Password changed — sign in with your new password." resetDone />);
     const { container } = view;

@@ -42,12 +42,11 @@ describe('password reset words and rules (story 6-1c)', () => {
   test('A12 — a 429 says its wait in minutes; "a minute" when the server gave none', () => {
     expect(minutesText(30)).toBe('1 minute');
     expect(minutesText(1801)).toBe('31 minutes');
-    expect(rateLimitedReason(problem('rate-limited', { retryAfterSeconds: 1800 }))).toBe(
-      'Too many attempts from this network or for this account. Try again in 30 minutes.',
+    expect(rateLimitedReason(problem('rate-limited', { retryAfterSeconds: 1800 }), 'sign-in attempts', true)).toBe(
+      'Too many sign-in attempts from this network or for this account. Try again in 30 minutes.',
     );
-    expect(rateLimitedReason(problem('rate-limited'), 'reset requests')).toBe(
-      'Too many reset requests from this network or for this account. Try again in a minute.',
-    );
+    // C31 — the reset buckets are per address only.
+    expect(rateLimitedReason(problem('rate-limited'), 'reset requests')).toBe('Too many reset requests from this network. Try again in a minute.');
     expect(secondFactorReason(problem('rate-limited', { retryAfterSeconds: 600 }))).toBe('Too many attempts. Try again in 10 minutes.');
   });
 
@@ -55,6 +54,8 @@ describe('password reset words and rules (story 6-1c)', () => {
     expect(resetRefusal(problem('reset-link-invalid'))).toEqual({ kind: 'invalid' });
     expect(resetRefusal(problem('second-factor-needed')).kind).toBe('code-needed');
     expect(resetRefusal(problem('second-factor-invalid', { attemptsLeft: 2 }))).toEqual({ kind: 'reason', reason: 'That code is not right — 2 attempts left.' });
+    // C16 — the 5th wrong code spent the link.
+    expect(resetRefusal(problem('second-factor-invalid', { attemptsLeft: 0 }))).toEqual({ kind: 'invalid' });
     expect(resetRefusal(problem('second-factor-locked', { retryAfterSeconds: 900 }))).toEqual({ kind: 'reason', reason: 'Too many wrong codes. Try again in 15 minutes.' });
     expect(resetRefusal(problem('second-factor-locked', { retryAfterSeconds: null }))).toEqual({
       kind: 'reason',
@@ -66,9 +67,7 @@ describe('password reset words and rules (story 6-1c)', () => {
 
   test('the request page: one answer for every email; only a limit or a bad address refuses', () => {
     expect(RESET_REQUESTED_COPY).toBe("If an account exists for that email, we've sent a link. It expires in 60 minutes.");
-    expect(forgotRefusal(problem('rate-limited', { retryAfterSeconds: 3000 }))).toBe(
-      'Too many reset requests from this network or for this account. Try again in 50 minutes.',
-    );
+    expect(forgotRefusal(problem('rate-limited', { retryAfterSeconds: 3000 }))).toBe('Too many reset requests from this network. Try again in 50 minutes.');
     expect(forgotRefusal(problem('validation-failed', {}, 'email must be an email'))).toBe('Enter the email address you sign in with.');
   });
 

@@ -534,6 +534,8 @@ export function ForgotPasswordForm({ initialEmail = '' }: { initialEmail?: strin
 type ResetState =
   | { readonly kind: 'checking' }
   | { readonly kind: 'invalid' }
+  /** The check itself failed (a limit, the API unreachable): the link may be fine — retry (code review C29). */
+  | { readonly kind: 'check-failed'; readonly reason: string }
   | { readonly kind: 'ready'; readonly email: string; readonly secondFactorRequired: boolean };
 
 /**
@@ -559,23 +561,37 @@ export function ResetPasswordForm() {
   const [notice, setNotice] = useState<string | null>(null);
   const [fieldProblem, setFieldProblem] = useState<string | null>(null);
   const inFlight = useRef(false);
+  const started = useRef(false);
 
-  async function runCheck(value: string): Promise<void> {
+  /**
+   * Validates the link. On the first load a failed check (not a dead link)
+   * shows Retry; on a re-check (after `second-factor-needed`) it keeps the
+   * form as it was and says why (code review C15). Answers the fresh state.
+   */
+  async function runCheck(value: string, recheck = false): Promise<ResetState | null> {
     try {
       const checked = await fetchApiCheckPasswordReset(value);
-      setState({ kind: 'ready', email: checked.email, secondFactorRequired: checked.secondFactorRequired });
+      const next: ResetState = { kind: 'ready', email: checked.email, secondFactorRequired: checked.secondFactorRequired };
+      setState(next);
+      return next;
     } catch (error) {
       const refusal = resetRefusal(error);
-      if (refusal.kind === 'reason') {
-        setState({ kind: 'ready', email: '', secondFactorRequired: false });
-        setRejection(refusal.reason);
-      } else {
+      if (refusal.kind === 'invalid') {
         setState({ kind: 'invalid' });
+        return { kind: 'invalid' };
       }
+      const reason = refusal.kind === 'reason' ? refusal.reason : 'Check the link and try again.';
+      if (recheck) setRejection(reason);
+      else setState({ kind: 'check-failed', reason });
+      return null;
     }
   }
 
   useEffect(() => {
+    // Code review C28 — once per page (StrictMode runs a mount effect twice in
+    // development; the first run already took the token off the address bar).
+    if (started.current) return;
+    started.current = true;
     const found = resetTokenFromHash(window.location.hash);
     // Drop the token from the address bar (and so from history and sync) at once.
     if (window.location.hash !== '') window.history.replaceState(null, '', window.location.pathname);
@@ -621,10 +637,11 @@ export function ResetPasswordForm() {
       if (refusal.kind === 'invalid') {
         setState({ kind: 'invalid' });
       } else if (refusal.kind === 'code-needed') {
-        // The factor may have changed since the check: ask again, then show the field.
+        // The factor may have changed since the check: ask again, then show
+        // the field — the notice only when a code is now asked for (C14).
         setCode('');
-        await runCheck(token);
-        setNotice(refusal.reason);
+        const fresh = await runCheck(token, true);
+        if (fresh?.kind === 'ready' && fresh.secondFactorRequired) setNotice(refusal.reason);
       } else {
         setCode('');
         setRejection(refusal.reason);
@@ -640,6 +657,25 @@ export function ResetPasswordForm() {
       <p role="status" className="text-sm text-(--muted-foreground)">
         Checking your link…
       </p>
+    );
+  }
+
+  if (state.kind === 'check-failed') {
+    return (
+      <div className="flex flex-col gap-4">
+        <FeedbackBanner tone="rejected" word="Couldn’t check the link" reason={state.reason} />
+        <button
+          type="button"
+          className="self-start rounded-md border border-(--border) px-3 py-2 text-sm font-medium hover:bg-(--muted)"
+          onClick={() => {
+            if (token === null) return;
+            setState({ kind: 'checking' });
+            void runCheck(token);
+          }}
+        >
+          Try again
+        </button>
+      </div>
     );
   }
 
@@ -777,7 +813,7 @@ function rejectionReason(error: unknown): string {
         return `Too many failed attempts. Try again in ${minutesFrom(error)}, or ask an owner to unlock your account.`;
       // Story 6-1c (A12) — the wait in minutes (the untrusted hour buckets).
       case 'rate-limited':
-        return rateLimitedReason(error, 'sign-in attempts');
+        return rateLimitedReason(error, 'sign-in attempts', true);
       case 'client-suspended':
         return PORTAL_SUSPENDED_MESSAGE;
       // Story 1-2a — a portal user whose client has departed.

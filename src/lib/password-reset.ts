@@ -25,12 +25,14 @@ export function minutesText(seconds: number): string {
 
 /**
  * Story 6-1c (A12) — the words for a 429 `rate-limited`: the wait the server
- * gave, in minutes (an hour bucket's wait is long); "a minute" when it gave none.
+ * gave, in minutes (an hour bucket's wait is long); "a minute" when it gave
+ * none. `perAccount`: the refusal may be the account's bucket (sign-in) —
+ * the reset routes' buckets are per address only (code review C31).
  */
-export function rateLimitedReason(error: ApiProblem, what = 'attempts'): string {
+export function rateLimitedReason(error: ApiProblem, what = 'attempts', perAccount = false): string {
   const retry = error.extensions?.retryAfterSeconds;
   const wait = typeof retry === 'number' && Number.isFinite(retry) && retry > 0 ? minutesText(retry) : 'a minute';
-  return `Too many ${what} from this network or for this account. Try again in ${wait}.`;
+  return `Too many ${what} from this network${perAccount ? ' or for this account' : ''}. Try again in ${wait}.`;
 }
 
 /**
@@ -90,6 +92,8 @@ export function resetRefusal(error: unknown): ResetRefusal {
       };
     }
     case 'second-factor-invalid':
+      // Code review C16 — the 5th wrong code spent the link: offer a new one.
+      if (error.extensions?.attemptsLeft === 0) return { kind: 'invalid' };
       return { kind: 'reason', reason: secondFactorReason(error) };
     case 'rate-limited':
       return { kind: 'reason', reason: rateLimitedReason(error) };
