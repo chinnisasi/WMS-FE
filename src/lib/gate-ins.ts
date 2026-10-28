@@ -331,6 +331,14 @@ export interface GateInDraft {
   readonly sealNumber: string;
   readonly packagesDeclared: string;
   readonly dockDoor: string;
+  /** Story 2-3b — "Other — type it": the door is typed, not picked from the warehouse's active doors. */
+  readonly dockDoorTyped: boolean;
+  /** Story 2-3b — the door was set by hand (an appointment pick no longer prefills it). */
+  readonly dockDoorEdited: boolean;
+  /** Story 2-3b — the linked dock appointment's id; '' = "No appointment — unscheduled". */
+  readonly appointmentId: string;
+  /** Story 2-3b — the appointment was picked by hand (the vehicle match no longer pre-selects one). */
+  readonly appointmentPicked: boolean;
   /** The `datetime-local` value, read as IST. */
   readonly gatedInAt: string;
   /** Whether the user changed the time — a Record sends it only then (absent = the server's now at save). */
@@ -354,6 +362,10 @@ export function emptyGateInDraft(nowMs: number = Date.now()): GateInDraft {
     sealNumber: '',
     packagesDeclared: '',
     dockDoor: '',
+    dockDoorTyped: false,
+    dockDoorEdited: false,
+    appointmentId: '',
+    appointmentPicked: false,
     gatedInAt: istLocalNow(nowMs),
     gatedInAtEdited: false,
     documents: [EMPTY_DRAFT_DOCUMENT],
@@ -376,6 +388,12 @@ export function draftOfGateIn(gateIn: GateInDetailDto): GateInDraft {
     sealNumber: gateIn.sealNumber ?? '',
     packagesDeclared: gateIn.packagesDeclared === null ? '' : String(gateIn.packagesDeclared),
     dockDoor: gateIn.dockDoor ?? '',
+    dockDoorTyped: false,
+    // A stored door is never overwritten by an appointment pick; a blank one is prefilled.
+    dockDoorEdited: gateIn.dockDoor !== null,
+    // The stored link is the edit's starting point — never re-guessed from the vehicle.
+    appointmentId: gateIn.appointment?.id ?? '',
+    appointmentPicked: true,
     gatedInAt: isoToIstLocal(gateIn.gatedInAt) ?? '',
     gatedInAtEdited: false,
     documents: [...gateIn.documents]
@@ -516,6 +534,8 @@ export function parseGateInDraft(
       dockDoor,
       gatedInAt,
       documents,
+      // Story 2-3b — '' is unscheduled (null); the create drops a null, the amend always sends it.
+      appointmentId: draft.appointmentId === '' ? null : draft.appointmentId,
     },
     problem: null,
   };
@@ -528,8 +548,11 @@ export function parseGateInDraft(
  * stamps its own now.
  */
 export function createGateInBody(header: GateInHeaderBody, warehouseId: string, timeEdited: boolean): CreateGateInDto {
-  const { gatedInAt, ...rest } = header;
-  return timeEdited ? { warehouseId, ...rest, gatedInAt } : { warehouseId, ...rest };
+  const { gatedInAt, appointmentId, ...rest } = header;
+  // Story 2-3b — an unscheduled visit sends no `appointmentId` (the pre-2-3b
+  // body, byte for byte); a linked one sends it.
+  const linked = appointmentId === null ? rest : { ...rest, appointmentId };
+  return timeEdited ? { warehouseId, ...linked, gatedInAt } : { warehouseId, ...linked };
 }
 
 /**
@@ -538,6 +561,11 @@ export function createGateInBody(header: GateInHeaderBody, warehouseId: string, 
  * unchanged time resends the STORED instant (never the minute-truncated
  * input, which would move the time and audit a change no one made); a
  * changed time past `gated_in` is the server's 409 `gate-in-time-locked`.
+ *
+ * Story 2-3b — `appointmentId` is ALWAYS sent (the header carries it: an id
+ * keeps or moves the link, null clears it). The server reads an ABSENT key
+ * as "unchanged" for an older client; this one always states the link it
+ * shows.
  */
 export function amendGateInBody(
   header: GateInHeaderBody,

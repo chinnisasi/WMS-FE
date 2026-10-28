@@ -49,6 +49,9 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   count_variance: 'Count variance',
   count_variance_policy: 'Variance policy',
   device: 'Device',
+  // Story 2-3b — a dock appointment (booked, rescheduled, cancelled, arrived, released) and a dock door.
+  dock_appointment: 'Dock appointment',
+  dock_door: 'Dock door',
   eway_bill: 'E-way bill',
   eway_gstin_setting: 'E-way GSTIN setting',
   eway_state_threshold: 'E-way threshold',

@@ -66,7 +66,14 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // Story 5-6a: + billing.configure (owner-only).
     // Story 5-5a: + billing.charge (owner + ops_manager + accountant — recording ad-hoc charges) — 52 became 53.
     // Story 2-8b: + rtv.manage (owner + ops_manager — returns to vendor) — 53 became 54.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(54);
+    // Story 2-3b: + dock.manage (owner + ops_manager) and dock.schedule (owner + ops_manager + operator) — 54 became 56.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(56);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'dock.manage')),
+    ).toEqual(['owner', 'ops_manager']);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'dock.schedule')),
+    ).toEqual(['owner', 'ops_manager', 'operator']);
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'rtv.manage')),
     ).toEqual(['owner', 'ops_manager']);
@@ -264,6 +271,9 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'receipt.photo-remove',
         // Story 5-5a — recording ad-hoc charges (derived; approving them stays billing.invoice).
         'billing.charge',
+        // Story 2-3b — the dock doors and schedule, and the appointments (derived).
+        'dock.manage',
+        'dock.schedule',
       ] as const satisfies readonly Capability[])
         .slice()
         .sort(),
@@ -297,6 +307,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
       'stock.adjust.request',
       // Story 2-5a — the dock adds a damage photo from the web (never removes one).
       'receipt.attach',
+      // Story 2-3b — the gate desk books dock appointments (never dock.manage).
+      'dock.schedule',
     ]);
     expect(roleHasCapability('operator', 'putaway.execute')).toBe(true);
     expect(roleHasCapability('operator', 'warehouse.create')).toBe(false);

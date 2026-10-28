@@ -47,6 +47,16 @@ import {
   fetchApiCreateAsn,
   fetchApiCreatePurchaseOrder,
   fetchApiAmendGateIn,
+  fetchApiBookDockAppointment,
+  fetchApiCancelDockAppointment,
+  fetchApiCreateDockDoor,
+  fetchApiDockWindow,
+  fetchApiGetDockAppointment,
+  fetchApiGetDockSchedule,
+  fetchApiListDockDoors,
+  fetchApiPutDockSchedule,
+  fetchApiRescheduleDockAppointment,
+  fetchApiUpdateDockDoor,
   fetchApiCreateGateIn,
   fetchApiGateOutGateIn,
   fetchApiGetGateIn,
@@ -3462,6 +3472,99 @@ describe('bin block wrappers (story 3-3b)', () => {
     writeSession(SESSION);
     stubFetch(409, { code: 'bin-already-blocked', status: 409, title: 'Bin already blocked', detail: 'A-01 is already blocked' });
     await expect(fetchApiBlockBin(T, W, B, { reason: 'damaged' }, 'K')).rejects.toMatchObject({ code: 'bin-already-blocked', status: 409 });
+    clearSession();
+  });
+});
+
+describe('dock wrappers (story 2-3b)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const T = SESSION.tenant.id;
+  const W = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const DOOR = '0198f7a2-1b3c-7d4e-8f90-0000000000d3';
+  const A = '0198f7a2-1b3c-7d4e-8f90-0000000000e1';
+  const base = `/api/v1/tenants/${T}`;
+
+  test('the doors: list GETs, create POSTs, update PATCHes — each write with its key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [] });
+    await fetchApiListDockDoors(T, W);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/warehouses/${W}/dock-doors`);
+    stubFetch(201, { dockDoor: { id: DOOR, code: 'D3' } });
+    await fetchApiCreateDockDoor(T, W, { code: 'D3' }, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/warehouses/${W}/dock-doors`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ code: 'D3' });
+    stubFetch(200, { dockDoor: { id: DOOR, code: 'D3' } });
+    await fetchApiUpdateDockDoor(T, W, DOOR, { code: 'D3', name: null, active: false }, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/warehouses/${W}/dock-doors/${DOOR}`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ code: 'D3', name: null, active: false });
+    clearSession();
+  });
+
+  test('the schedule: GET, and PUT with its key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { schedule: {} });
+    await fetchApiGetDockSchedule(T, W);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/warehouses/${W}/dock-schedule`);
+    const body = { slotMinutes: 60 as const, opensAt: '06:00', closesAt: '22:00', openDays: [1, 2, 3, 4, 5, 6, 7], graceMinutes: 15 };
+    await fetchApiPutDockSchedule(T, W, body, KEY);
+    expect(lastRequest!.method).toBe('PUT');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    clearSession();
+  });
+
+  test('the window: warehouse, from and to always; includeCancelled only when true', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { appointments: [] });
+    await fetchApiDockWindow(T, { warehouseId: W, from: '2026-10-27', to: '2026-10-27' });
+    let url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`${base}/receiving/dock-schedule`);
+    expect([...url.searchParams.keys()].sort()).toEqual(['from', 'to', 'warehouseId']);
+    await fetchApiDockWindow(T, { warehouseId: W, from: '2026-10-26', to: '2026-11-01', includeCancelled: true });
+    url = new URL(lastRequest!.url);
+    expect(url.searchParams.get('includeCancelled')).toBe('true');
+    clearSession();
+  });
+
+  test('the appointment: book POSTs, get GETs, reschedule PATCHes, cancel POSTs /cancel — the writes keyed', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { appointment: { id: A, code: 'DA-0001' } });
+    const book = { warehouseId: W, dockDoorId: DOOR, startsAt: '2026-10-28T05:00:00.000Z', endsAt: '2026-10-28T06:00:00.000Z', documents: [] };
+    const res = await fetchApiBookDockAppointment(T, book, KEY);
+    expect(res.appointment.code).toBe('DA-0001');
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/receiving/dock-appointments`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(book);
+    stubFetch(200, { appointment: { id: A } });
+    await fetchApiGetDockAppointment(T, A);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/receiving/dock-appointments/${A}`);
+    const { warehouseId: _w, ...reschedule } = book;
+    void _w;
+    await fetchApiRescheduleDockAppointment(T, A, reschedule, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/receiving/dock-appointments/${A}`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    await fetchApiCancelDockAppointment(T, A, { reason: 'Vendor postponed' }, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/receiving/dock-appointments/${A}/cancel`);
+    expect(await lastRequest!.json()).toEqual({ reason: 'Vendor postponed' });
+    clearSession();
+  });
+
+  test('a clash is an ApiProblem carrying its code and the clash extension', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { code: 'dock-slot-taken', status: 409, detail: 'taken', clash: { code: 'DA-0001' } });
+    const error = await fetchApiBookDockAppointment(T, { warehouseId: W, dockDoorId: DOOR, startsAt: 'a', endsAt: 'b' }, KEY).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiProblem);
+    expect((error as ApiProblem).code).toBe('dock-slot-taken');
+    expect((error as ApiProblem).extensions['clash']).toEqual({ code: 'DA-0001' });
     clearSession();
   });
 });

@@ -7,6 +7,7 @@ import { SETTINGS_PAGE_TABS, type SettingsTab } from '@/lib/page-tabs';
 
 import { ClientsCard } from '@/components/settings/clients-card';
 import { DevicesCard } from '@/components/settings/devices-card';
+import { DockSetupCard } from '@/components/settings/dock-setup-card';
 import { PartnersCard } from '@/components/settings/partners-card';
 import { ImportCatalogCard } from '@/components/settings/import-catalog';
 import { NotePolicyCard } from '@/components/settings/note-policy-card';
@@ -23,7 +24,8 @@ import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page
 /**
  * The Settings cards in grouped tabs (page-tabs, user decision
  * 2026-10-17), one group mounted at a time, `?tab=` linkable:
- *   - Warehouses (the default): create form, warehouse list, zones & bins;
+ *   - Warehouses (the default): create form, warehouse list, zones & bins,
+ *     dock doors and schedule (story 2-3b);
  *   - Catalog: import, new SKU (1-4), products, SKUs, segregation matrix;
  *   - Clients: clients, rate cards;
  *   - Partners (story 1-3): the business partner master and its client links;
@@ -57,6 +59,8 @@ function SettingsTabsKnown({ initialTab }: { initialTab: SettingsTab | null }) {
               <WarehouseCreateForm />
               <WarehouseList />
               <ZonesBinsSetup />
+              {/* Story 2-3b — the dock doors and the dock schedule (dock.manage writes). */}
+              <DockSetupCard />
             </>
           )}
           {tab === 'catalog' && (

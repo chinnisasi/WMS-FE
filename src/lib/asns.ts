@@ -222,6 +222,9 @@ export function withoutKits<T extends { id: string }>(
   return options.filter((option) => !kitIds.has(option.id) || keep.has(option.id));
 }
 
+/** The `asn-not-open` copy — `asnReason`'s, reused by the dock booking's `dockReason` (story 2-3b, A17). */
+export const ASN_NOT_OPEN_REASON = 'This ASN is no longer open (received, closed or cancelled) — refresh the list.';
+
 /** The ASN mutations' refusals, branching on the problem `code` — never on prose. */
 export function asnReason(error: unknown): string {
   if (error instanceof ApiProblem) {
@@ -240,7 +243,7 @@ export function asnReason(error: unknown): string {
       case 'sku-inactive':
         return skuInactiveSentence(error, 'a new ASN, nor take a raised quantity on one');
       case 'asn-not-open':
-        return 'This ASN is no longer open (received, closed or cancelled) — refresh the list.';
+        return ASN_NOT_OPEN_REASON;
       case 'asn-line-received':
         return error.detail ?? 'A line that has received stock cannot be removed, change SKU, or announce less than it received.';
       case 'asn-transition-invalid':

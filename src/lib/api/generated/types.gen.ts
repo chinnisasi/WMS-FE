@@ -5603,6 +5603,15 @@ export type CatalogOpenGateInDocumentDto = {
     number: string;
 };
 
+export type CatalogGateInAppointmentDto = {
+    code: string;
+    startsAt: string;
+    endsAt: string;
+    doorCode: string;
+    punctuality: 'early' | 'on_time' | 'late';
+    punctualityMinutes: number;
+};
+
 export type CatalogOpenGateInDto = {
     id: string;
     code: string;
@@ -5617,6 +5626,34 @@ export type CatalogOpenGateInDto = {
      */
     unloadStartedAt: string | null;
     documents: Array<CatalogOpenGateInDocumentDto>;
+    /**
+     * Story 2-3b (additive) — the linked dock appointment, read-only; null = unscheduled. An older server omits it
+     */
+    appointment: CatalogGateInAppointmentDto | null;
+};
+
+export type CatalogDockAppointmentDocumentDto = {
+    kind: 'po' | 'asn';
+    code: string | null;
+    /**
+     * A26 — the document's client (named in the snapshot's `clients`), so the device prefixes a colliding code with the client's code
+     */
+    clientId: string | null;
+};
+
+export type CatalogDockAppointmentDto = {
+    id: string;
+    code: string;
+    startsAt: string;
+    endsAt: string;
+    /**
+     * The frozen grace — the device reads "Not arrived" once its clock passes endsAt + grace
+     */
+    graceMinutes: number;
+    doorCode: string;
+    vehicleNo: string | null;
+    transporterName: string | null;
+    documents: Array<CatalogDockAppointmentDocumentDto>;
 };
 
 export type CatalogReceiptPhotosDto = {
@@ -5717,6 +5754,10 @@ export type CatalogSnapshotResponse = {
      * Story 2-3a (additive): the warehouse's open gate-ins — not gated out, gated in within the last 7 days, at most 200, newest first (decision 15). The dock records their unload and receives against them. An older server omits it
      */
     openGateIns: Array<CatalogOpenGateInDto>;
+    /**
+     * Story 2-3b (additive): the warehouse's BOOKED dock appointments starting today (IST, server clock), at most 100, by start — the Receive tab's read-only "Expected today". The device derives "Not arrived" from endsAt + graceMinutes against its own clock. An older server omits it
+     */
+    dockAppointments: Array<CatalogDockAppointmentDto>;
     /**
      * Story 2-4a (additive): the damage reason vocabulary — the handheld shows its Damaged control only when the snapshot carries it (an older server omits it), and refuses to confirm a draft holding damage against a snapshot without it
      */
@@ -6583,6 +6624,10 @@ export type CreateGateInDto = {
      */
     documents?: Array<GateInDocumentInputDto>;
     /**
+     * Story 2-3b — the dock appointment this visit keeps: a booked appointment of this warehouse starting the day before, the day of or the day after the visit's gated-in date (IST). Create: absent or null = unscheduled. Amend: ABSENT = the link unchanged (the one field where absent ≠ null), null = clear (the appointment returns to booked), an id = move. 404 unknown; 409 appointment-warehouse-mismatch, appointment-closed (cancelled, or another gate-in's), appointment-not-due
+     */
+    appointmentId?: string | null;
+    /**
      * The warehouse whose gate the vehicle came through
      */
     warehouseId: string;
@@ -6664,10 +6709,31 @@ export type GateInDto = {
     createdAt: string;
     updatedAt: string;
     documents: Array<GateInDocumentDto>;
+    /**
+     * Story 2-3b — the linked dock appointment (null: unscheduled). Absent on an answer stored before 2-3b and replayed
+     */
+    appointmentId?: string | null;
+    /**
+     * Story 2-3b — its code
+     */
+    appointmentCode?: string | null;
 };
 
 export type GateInResponse = {
     gateIn: GateInDto;
+};
+
+export type GateInAppointmentDto = {
+    id: string;
+    code: string;
+    startsAt: string;
+    endsAt: string;
+    doorCode: string;
+    punctuality: 'early' | 'on_time' | 'late';
+    /**
+     * The gate-in time − the slot start in whole minutes (negative = early)
+     */
+    punctualityMinutes: number;
 };
 
 export type GateInEntryDto = {
@@ -6742,6 +6808,10 @@ export type GateInEntryDto = {
      * Not gated out and gated in more than 7 days ago (the device no longer offers it)
      */
     staleOpen: boolean;
+    /**
+     * Story 2-3b — the linked dock appointment and the visit's punctuality against it (derived from the gated-in time); null = unscheduled
+     */
+    appointment: GateInAppointmentDto | null;
 };
 
 export type GateInListResponse = {
@@ -6867,6 +6937,10 @@ export type GateInDetailDto = {
      * Not gated out and gated in more than 7 days ago (the device no longer offers it)
      */
     staleOpen: boolean;
+    /**
+     * Story 2-3b — the linked dock appointment and the visit's punctuality against it (derived from the gated-in time); null = unscheduled
+     */
+    appointment: GateInAppointmentDto | null;
     documents: Array<GateInDetailDocumentDto>;
     /**
      * The goods receipts linked to this visit, oldest first
@@ -6932,6 +7006,10 @@ export type AmendGateInDto = {
      * The supplier documents (0–20) — the full set (amend replaces it)
      */
     documents?: Array<GateInDocumentInputDto>;
+    /**
+     * Story 2-3b — the dock appointment this visit keeps: a booked appointment of this warehouse starting the day before, the day of or the day after the visit's gated-in date (IST). Create: absent or null = unscheduled. Amend: ABSENT = the link unchanged (the one field where absent ≠ null), null = clear (the appointment returns to booked), an id = move. 404 unknown; 409 appointment-warehouse-mismatch, appointment-closed (cancelled, or another gate-in's), appointment-not-due
+     */
+    appointmentId?: string | null;
 };
 
 export type UnloadGateInDto = {
@@ -6962,6 +7040,310 @@ export type GateOutDto = {
      * When the vehicle left (ISO-8601 with a zone); absent = now. Not before the gated-in time, not more than 5 minutes ahead
      */
     gatedOutAt?: string;
+};
+
+export type DockDoorDto = {
+    id: string;
+    warehouseId: string;
+    code: string;
+    name: string | null;
+    active: boolean;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type DockDoorListResponse = {
+    /**
+     * Every door of the warehouse — active first, then by code
+     */
+    items: Array<DockDoorDto>;
+};
+
+export type CreateDockDoorDto = {
+    /**
+     * Uppercased and trimmed; 1–20 letters, digits or hyphens; unique per warehouse (active or inactive)
+     */
+    code: string;
+    /**
+     * Trimmed; blank = none
+     */
+    name?: string | null;
+};
+
+export type DockDoorResponse = {
+    dockDoor: DockDoorDto;
+};
+
+export type UpdateDockDoorDto = {
+    /**
+     * Uppercased and trimmed; 1–20 letters, digits or hyphens; unique per warehouse (active or inactive)
+     */
+    code: string;
+    /**
+     * Trimmed; blank = none
+     */
+    name?: string | null;
+    /**
+     * false deactivates (refused while the door has a booked appointment still to come — 409 dock-door-has-appointments); a door is never deleted
+     */
+    active: boolean;
+};
+
+export type DockScheduleDto = {
+    warehouseId: string;
+    slotMinutes: 15 | 30 | 60;
+    opensAt: string;
+    /**
+     * 24:00 = midnight
+     */
+    closesAt: string;
+    openDays: Array<number>;
+    graceMinutes: number;
+    /**
+     * false while the warehouse has no stored schedule — the defaults (30 min, 09:00–18:00, Mon–Sat, grace 15) are shown
+     */
+    configured: boolean;
+    updatedAt: string | null;
+};
+
+export type DockScheduleResponse = {
+    schedule: DockScheduleDto;
+};
+
+export type PutDockScheduleDto = {
+    /**
+     * The slot length in minutes
+     */
+    slotMinutes: 15 | 30 | 60;
+    /**
+     * IST wall clock HH:MM, on the slot grid
+     */
+    opensAt: string;
+    /**
+     * IST wall clock HH:MM, on the slot grid, after opensAt; 24:00 closes at midnight
+     */
+    closesAt: string;
+    /**
+     * ISO weekdays the dock is open (1 = Monday … 7 = Sunday), at least one, no repeats
+     */
+    openDays: Array<number>;
+    /**
+     * Minutes either side of the slot start an arrival still reads on time (frozen on each appointment at booking)
+     */
+    graceMinutes: number;
+};
+
+export type DockAppointmentDocumentDto = {
+    kind: 'po' | 'asn';
+    id: string;
+    code: string | null;
+    clientId: string | null;
+    /**
+     * The PO's frozen vendor name; null on an ASN
+     */
+    vendorName: string | null;
+};
+
+export type DockAppointmentDto = {
+    id: string;
+    tenantId: string;
+    warehouseId: string;
+    code: string;
+    /**
+     * Stored status; a no-show is derived (noShow), never stored
+     */
+    status: 'booked' | 'arrived' | 'cancelled';
+    dockDoorId: string;
+    doorCode: string;
+    startsAt: string;
+    endsAt: string;
+    /**
+     * The on-time grace frozen at booking (re-frozen when rescheduled to another door or window)
+     */
+    graceMinutes: number;
+    /**
+     * Set when every document names one client; null when mixed or none
+     */
+    clientId: string | null;
+    vehicleNo: string | null;
+    transporterName: string | null;
+    note: string | null;
+    documents: Array<DockAppointmentDocumentDto>;
+    gateInId: string | null;
+    gateInCode: string | null;
+    /**
+     * The linked gate-in's gated-in time — the arrival
+     */
+    gatedInAt: string | null;
+    linkedAt: string | null;
+    linkedBy: string | null;
+    bookedBy: string;
+    cancelledAt: string | null;
+    cancelledBy: string | null;
+    cancelReason: string | null;
+    /**
+     * Derived from the arrival: early below −grace, late above +grace, else on_time; null until arrived
+     */
+    punctuality: 'early' | 'on_time' | 'late' | null;
+    /**
+     * Arrival − start in whole minutes (the raw delta, truncated toward zero; negative = early)
+     */
+    punctualityMinutes: number | null;
+    /**
+     * Derived: still booked at or after endsAt + grace
+     */
+    noShow: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type DockDoorMinutesDto = {
+    doorId: string;
+    bookedMinutes: number;
+    openMinutes: number;
+};
+
+export type DockSummaryDto = {
+    /**
+     * Non-cancelled appointments starting in the window
+     */
+    scheduled: number;
+    /**
+     * Booked and not yet a no-show
+     */
+    pending: number;
+    arrived: number;
+    early: number;
+    onTime: number;
+    late: number;
+    noShow: number;
+    /**
+     * Counted even when includeCancelled is false
+     */
+    cancelled: number;
+    /**
+     * onTime ÷ (arrived + noShow) as a percentage (0–100, one decimal); null when the denominator is 0
+     */
+    onTimeRate: number | null;
+    /**
+     * Minutes of scheduled appointments, each clipped to its day's opening hours
+     */
+    bookedMinutes: number;
+    /**
+     * The door set (active now, plus any door with an appointment in the window) × the open minutes of each open day
+     */
+    openMinutes: number;
+    /**
+     * bookedMinutes ÷ openMinutes as a percentage (0–100, one decimal, clamped); null when openMinutes is 0
+     */
+    utilisationRate: number | null;
+    byDoor: Array<DockDoorMinutesDto>;
+};
+
+export type DockWindowResponse = {
+    /**
+     * The server instant the derived fields (noShow, pending) were read at
+     */
+    asOf: string;
+    from: string;
+    to: string;
+    schedule: DockScheduleDto;
+    /**
+     * Active doors, plus any inactive door with an appointment in the window
+     */
+    doors: Array<DockDoorDto>;
+    /**
+     * By (startsAt, id), at most 1000
+     */
+    appointments: Array<DockAppointmentDto>;
+    /**
+     * Over the whole window, independent of the 1000-row cap
+     */
+    summary: DockSummaryDto;
+    /**
+     * true when the window holds more than 1000 listed appointments
+     */
+    truncated: boolean;
+};
+
+export type DockAppointmentDocumentInputDto = {
+    /**
+     * An OPEN purchase order of this warehouse (any client) — exactly one of poId / asnId
+     */
+    poId?: string | null;
+    /**
+     * An announced or partially received ASN of this warehouse (any client)
+     */
+    asnId?: string | null;
+};
+
+export type BookDockAppointmentDto = {
+    /**
+     * An active dock door of the warehouse
+     */
+    dockDoorId: string;
+    /**
+     * On the warehouse's IST slot grid, not before the current slot, at most 90 IST days ahead, inside an open day's hours
+     */
+    startsAt: string;
+    /**
+     * 1 to 8 whole slots after startsAt, not past the closing time
+     */
+    endsAt: string;
+    /**
+     * The POs and ASNs the truck carries (0–10, no repeats); the full set (reschedule replaces it)
+     */
+    documents?: Array<DockAppointmentDocumentInputDto>;
+    /**
+     * The expected vehicle — normalised like the gate-in (4–15 letters and digits)
+     */
+    vehicleNo?: string | null;
+    transporterName?: string | null;
+    /**
+     * Free text — never copied into an event
+     */
+    note?: string | null;
+    warehouseId: string;
+};
+
+export type DockAppointmentResponse = {
+    appointment: DockAppointmentDto;
+};
+
+export type RescheduleDockAppointmentDto = {
+    /**
+     * An active dock door of the warehouse
+     */
+    dockDoorId: string;
+    /**
+     * On the warehouse's IST slot grid, not before the current slot, at most 90 IST days ahead, inside an open day's hours
+     */
+    startsAt: string;
+    /**
+     * 1 to 8 whole slots after startsAt, not past the closing time
+     */
+    endsAt: string;
+    /**
+     * The POs and ASNs the truck carries (0–10, no repeats); the full set (reschedule replaces it)
+     */
+    documents?: Array<DockAppointmentDocumentInputDto>;
+    /**
+     * The expected vehicle — normalised like the gate-in (4–15 letters and digits)
+     */
+    vehicleNo?: string | null;
+    transporterName?: string | null;
+    /**
+     * Free text — never copied into an event
+     */
+    note?: string | null;
+};
+
+export type CancelDockAppointmentDto = {
+    /**
+     * Why (1–200 characters, trimmed)
+     */
+    reason: string;
 };
 
 export type PlacePutawayDto = {
@@ -9754,7 +10136,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -9781,7 +10163,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -22179,11 +22561,11 @@ export type GateInControllerCreateErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * The warehouse, the transporter partner, or a document's purchase order or ASN does not exist in this tenant (not-found)
+     * The warehouse, the transporter partner, a document's purchase order or ASN, or the dock appointment does not exist in this tenant (not-found)
      */
     404: ProblemDetailsDto;
     /**
-     * The partner lacks the transporter role (partner-not-transporter) or is inactive (transporter-inactive); a document's PO or ASN is another warehouse's (document-warehouse-mismatch); or a concurrent idempotent request (conflict)
+     * The partner lacks the transporter role (partner-not-transporter) or is inactive (transporter-inactive); a document's PO or ASN is another warehouse's (document-warehouse-mismatch); the dock appointment is another warehouse's (appointment-warehouse-mismatch), cancelled or another gate-in's (appointment-closed), or does not start within a day of the visit's IST date (appointment-not-due); or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -22276,11 +22658,11 @@ export type GateInControllerAmendErrors = {
      */
     403: ProblemDetailsDto;
     /**
-     * The gate-in, the (new) transporter partner, or a document's PO or ASN does not exist in this tenant (not-found)
+     * The gate-in, the (new) transporter partner, a document's PO or ASN, or the new dock appointment does not exist in this tenant (not-found)
      */
     404: ProblemDetailsDto;
     /**
-     * The gate-in is gated out (gate-in-closed); a different gated-in time once the unload started (gate-in-time-locked); a changed seal status, seal number or packages declared once the unload ended (gate-in-field-locked); a new transporter partner without the role (partner-not-transporter) or inactive (transporter-inactive); a document of another warehouse (document-warehouse-mismatch); or a concurrent idempotent request (conflict)
+     * The gate-in is gated out (gate-in-closed); a different gated-in time once the unload started (gate-in-time-locked); a changed seal status, seal number or packages declared once the unload ended (gate-in-field-locked); a new transporter partner without the role (partner-not-transporter) or inactive (transporter-inactive); a document of another warehouse (document-warehouse-mismatch); a new dock appointment of another warehouse (appointment-warehouse-mismatch), cancelled or another gate-in's (appointment-closed), or not due (appointment-not-due); or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -22464,6 +22846,473 @@ export type GateInControllerGateOutResponses = {
 };
 
 export type GateInControllerGateOutResponse = GateInControllerGateOutResponses[keyof GateInControllerGateOutResponses];
+
+export type DockControllerListDoorsData = {
+    body?: never;
+    path: {
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/dock-doors';
+};
+
+export type DockControllerListDoorsErrors = {
+    /**
+     * Malformed warehouseId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type DockControllerListDoorsError = DockControllerListDoorsErrors[keyof DockControllerListDoorsErrors];
+
+export type DockControllerListDoorsResponses = {
+    200: DockDoorListResponse;
+};
+
+export type DockControllerListDoorsResponse = DockControllerListDoorsResponses[keyof DockControllerListDoorsResponses];
+
+export type DockControllerCreateDoorData = {
+    body: CreateDockDoorDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/dock-doors';
+};
+
+export type DockControllerCreateDoorErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, the code (1–20 letters, digits or hyphens) or the name (≤ 60) (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface), or the caller lacks dock.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The code exists in this warehouse (dock-door-code-taken); 100 doors already (dock-door-limit); a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DockControllerCreateDoorError = DockControllerCreateDoorErrors[keyof DockControllerCreateDoorErrors];
+
+export type DockControllerCreateDoorResponses = {
+    201: DockDoorResponse;
+};
+
+export type DockControllerCreateDoorResponse = DockControllerCreateDoorResponses[keyof DockControllerCreateDoorResponses];
+
+export type DockControllerUpdateDoorData = {
+    body: UpdateDockDoorDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        tenantId: string;
+        warehouseId: string;
+        doorId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/dock-doors/{doorId}';
+};
+
+export type DockControllerUpdateDoorErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed id, the code, the name or active (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface), or the caller lacks dock.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such door in this warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The code exists in this warehouse (dock-door-code-taken); booked appointments still to come — appointmentCount and firstAppointmentCode name them (dock-door-has-appointments); a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DockControllerUpdateDoorError = DockControllerUpdateDoorErrors[keyof DockControllerUpdateDoorErrors];
+
+export type DockControllerUpdateDoorResponses = {
+    200: DockDoorResponse;
+};
+
+export type DockControllerUpdateDoorResponse = DockControllerUpdateDoorResponses[keyof DockControllerUpdateDoorResponses];
+
+export type DockControllerGetScheduleData = {
+    body?: never;
+    path: {
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/dock-schedule';
+};
+
+export type DockControllerGetScheduleErrors = {
+    /**
+     * Malformed warehouseId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type DockControllerGetScheduleError = DockControllerGetScheduleErrors[keyof DockControllerGetScheduleErrors];
+
+export type DockControllerGetScheduleResponses = {
+    200: DockScheduleResponse;
+};
+
+export type DockControllerGetScheduleResponse = DockControllerGetScheduleResponses[keyof DockControllerGetScheduleResponses];
+
+export type DockControllerPutScheduleData = {
+    body: PutDockScheduleDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/dock-schedule';
+};
+
+export type DockControllerPutScheduleErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; a slot length not 15/30/60, a time not HH:MM or off the slot grid, closesAt not after opensAt, no open day or a repeated one, a grace outside 0–120 — the field named (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface), or the caller lacks dock.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DockControllerPutScheduleError = DockControllerPutScheduleErrors[keyof DockControllerPutScheduleErrors];
+
+export type DockControllerPutScheduleResponses = {
+    200: DockScheduleResponse;
+};
+
+export type DockControllerPutScheduleResponse = DockControllerPutScheduleResponses[keyof DockControllerPutScheduleResponses];
+
+export type DockControllerWindowData = {
+    body?: never;
+    path: {
+        tenantId: string;
+    };
+    query: {
+        warehouseId: string;
+        /**
+         * First IST date (inclusive)
+         */
+        from: string;
+        /**
+         * Last IST date (inclusive); at most 7 days from `from`
+         */
+        to: string;
+        /**
+         * List cancelled appointments too (the summary counts them either way)
+         */
+        includeCancelled?: boolean;
+    };
+    url: '/tenants/{tenantId}/receiving/dock-schedule';
+};
+
+export type DockControllerWindowErrors = {
+    /**
+     * Malformed warehouseId, from or to, to before from, or more than 7 days (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type DockControllerWindowError = DockControllerWindowErrors[keyof DockControllerWindowErrors];
+
+export type DockControllerWindowResponses = {
+    200: DockWindowResponse;
+};
+
+export type DockControllerWindowResponse = DockControllerWindowResponses[keyof DockControllerWindowResponses];
+
+export type DockControllerBookData = {
+    body: BookDockAppointmentDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/dock-appointments';
+};
+
+export type DockControllerBookErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; a malformed field — the instants, more than 8 slots, more than 10 documents or a repeated one, a document naming both or neither of poId / asnId, the vehicle, a length (validation-failed); a start off the slot grid or a duration that is not whole slots (slot-misaligned); before the current slot (slot-in-past); more than 90 IST days ahead (slot-too-far)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface), or the caller lacks dock.schedule (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse, the door, or a document does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A closed day or outside the opening hours (dock-closed); the door is another warehouse's (dock-door-warehouse-mismatch) or inactive (dock-door-inactive); the door is taken — `clash` names the appointment and its window (dock-slot-taken); a document of another warehouse (document-warehouse-mismatch), a PO not open (po-not-open), an ASN not announced or partially received (asn-not-open); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DockControllerBookError = DockControllerBookErrors[keyof DockControllerBookErrors];
+
+export type DockControllerBookResponses = {
+    201: DockAppointmentResponse;
+};
+
+export type DockControllerBookResponse = DockControllerBookResponses[keyof DockControllerBookResponses];
+
+export type DockControllerGetData = {
+    body?: never;
+    path: {
+        tenantId: string;
+        appointmentId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/dock-appointments/{appointmentId}';
+};
+
+export type DockControllerGetErrors = {
+    /**
+     * Malformed appointmentId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such appointment in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type DockControllerGetError = DockControllerGetErrors[keyof DockControllerGetErrors];
+
+export type DockControllerGetResponses = {
+    200: DockAppointmentResponse;
+};
+
+export type DockControllerGetResponse = DockControllerGetResponses[keyof DockControllerGetResponses];
+
+export type DockControllerRescheduleData = {
+    body: RescheduleDockAppointmentDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        tenantId: string;
+        appointmentId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/dock-appointments/{appointmentId}';
+};
+
+export type DockControllerRescheduleErrors = {
+    /**
+     * Missing or malformed Idempotency-Key; a malformed field — the instants, more than 8 slots, more than 10 documents or a repeated one, a document naming both or neither of poId / asnId, the vehicle, a length (validation-failed); a start off the slot grid or a duration that is not whole slots (slot-misaligned); before the current slot (slot-in-past); more than 90 IST days ahead (slot-too-far); a malformed appointmentId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface), or the caller lacks dock.schedule (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The appointment, the new door or a document does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Arrived or cancelled (appointment-closed); past its window and grace (appointment-no-show); moved concurrently — reload (conflict); A closed day or outside the opening hours (dock-closed); the door is another warehouse's (dock-door-warehouse-mismatch) or inactive (dock-door-inactive); the door is taken — `clash` names the appointment and its window (dock-slot-taken); a document of another warehouse (document-warehouse-mismatch), a PO not open (po-not-open), an ASN not announced or partially received (asn-not-open); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DockControllerRescheduleError = DockControllerRescheduleErrors[keyof DockControllerRescheduleErrors];
+
+export type DockControllerRescheduleResponses = {
+    200: DockAppointmentResponse;
+};
+
+export type DockControllerRescheduleResponse = DockControllerRescheduleResponses[keyof DockControllerRescheduleResponses];
+
+export type DockControllerCancelData = {
+    body: CancelDockAppointmentDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        tenantId: string;
+        appointmentId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/dock-appointments/{appointmentId}/cancel';
+};
+
+export type DockControllerCancelErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed appointmentId, a blank or over-200 reason (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied — an operator surface), or the caller lacks dock.schedule (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such appointment in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Arrived or cancelled (appointment-closed); past its window and grace (appointment-no-show); a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type DockControllerCancelError = DockControllerCancelErrors[keyof DockControllerCancelErrors];
+
+export type DockControllerCancelResponses = {
+    200: DockAppointmentResponse;
+};
+
+export type DockControllerCancelResponse = DockControllerCancelResponses[keyof DockControllerCancelResponses];
 
 export type PutawayControllerListPlacementsData = {
     body?: never;
@@ -26854,7 +27703,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */

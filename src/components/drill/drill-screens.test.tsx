@@ -285,9 +285,31 @@ function stubRouter(): void {
         nextCursor: null,
       });
     }
+    // Story 2-3b — the Dock schedule tab's window and one appointment.
+    if (p === `/api/v1/tenants/${T}/receiving/dock-schedule`) {
+      return json(200, {
+        asOf: '2030-01-14T04:00:00.000Z',
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+        schedule: { warehouseId: W1, slotMinutes: 30, opensAt: '09:00', closesAt: '18:00', openDays: [1, 2, 3, 4, 5, 6], graceMinutes: 15, configured: true, updatedAt: null },
+        doors: [DOCK_DOOR],
+        appointments: [DOCK_APPOINTMENT],
+        summary: { scheduled: 1, pending: 1, arrived: 0, early: 0, onTime: 0, late: 0, noShow: 0, cancelled: 0, onTimeRate: null, bookedMinutes: 60, openMinutes: 540, utilisationRate: 11.1, byDoor: [] },
+        truncated: false,
+      });
+    }
+    if (p === `/api/v1/tenants/${T}/receiving/dock-appointments/${DOCK_APPOINTMENT.id}`) return json(200, { appointment: DOCK_APPOINTMENT });
     return json(404, { code: 'not-found', title: 'Unrouted in this test', status: 404 });
   }) as unknown as typeof fetch);
 }
+
+const DOCK_DOOR = { id: '0198f7a2-1b3c-7d4e-8f90-00000000d003', warehouseId: W1, code: 'D3', name: null, active: true, createdBy: 'u-1', createdAt: '2029-12-01T00:00:00.000Z', updatedAt: '2029-12-01T00:00:00.000Z' };
+const DOCK_APPOINTMENT = {
+  id: '0198f7a2-1b3c-7d4e-8f90-0000000000a1', tenantId: T, warehouseId: W1, code: 'DA-0001', status: 'booked', dockDoorId: DOCK_DOOR.id, doorCode: 'D3',
+  startsAt: '2030-01-15T05:00:00.000Z', endsAt: '2030-01-15T06:00:00.000Z', graceMinutes: 15, clientId: null, vehicleNo: null, transporterName: null, note: null,
+  documents: [], gateInId: null, gateInCode: null, gatedInAt: null, linkedAt: null, linkedBy: null, bookedBy: 'u-1', cancelledAt: null, cancelledBy: null,
+  cancelReason: null, punctuality: null, punctualityMinutes: null, noShow: false, createdAt: '2029-12-01T00:00:00.000Z', updatedAt: '2029-12-01T00:00:00.000Z',
+};
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 12; i++) {
@@ -1367,6 +1389,20 @@ describe('the pages', () => {
     const defaults = reads(DEFAULT_READ[route]!);
     expect(defaults.length).toBeGreaterThan(0);
     for (const r of defaults) expect(r.params.has('from')).toBe(false);
+  });
+
+  test('story 2-3b — /inbound?tab=dock&view=week&open=<id>: the page parses the dock state, the Week view reads its week and the drawer opens', async () => {
+    pathname = '/inbound';
+    searchParamsNow = new URLSearchParams(`tab=dock&view=week&date=2030-01-15&open=${DOCK_APPOINTMENT.id}`);
+    writeSession(session('owner'));
+    writeActiveWarehouseId(T, W1);
+    view = render(await renderPage('/inbound', { tab: 'dock', view: 'week', date: '2030-01-15', open: DOCK_APPOINTMENT.id }));
+    await settle();
+    const windowRead = reads('/receiving/dock-schedule').at(-1)!;
+    expect([windowRead.params.get('from'), windowRead.params.get('to')]).toEqual(['2030-01-14', '2030-01-20']);
+    expect(view.container.querySelector('[data-testid="dock-week-grid"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-testid="dock-week-row-D3"]')!.textContent).toContain('10:30 DA-0001 · Booked');
+    expect(view.container.querySelector('[data-testid="dock-drawer"] h2')!.textContent).toBe('DA-0001');
   });
 
   test('an unrelated param with no `list` is a plain visit — no notice', async () => {

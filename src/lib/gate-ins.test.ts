@@ -201,12 +201,24 @@ describe('the draft parser — one problem naming the field or the row', () => {
         { kind: 'invoice', number: 'INV-77', documentDate: '2026-10-20', ewayBillNo: '123456789012', poId: PO, asnId: null },
         { kind: 'bill_of_entry', number: 'BE-1', documentDate: '2026-10-19', ewayBillNo: null, poId: null, asnId: null },
       ],
+      appointmentId: null,
     });
     expect(createGateInBody(parsed.header!, 'wh-1', true)).toMatchObject({ warehouseId: 'wh-1', gatedInAt: '2026-10-21T04:30:00.000Z' });
     // The prefilled time is the form's OPEN time: untouched, it is not sent (the server stamps its now at save).
     const untouched = createGateInBody(parsed.header!, 'wh-1', false);
     expect('gatedInAt' in untouched).toBe(false);
     expect(emptyGateInDraft(NOW).gatedInAtEdited).toBe(false);
+    // Story 2-3b — an unscheduled create sends no appointmentId at all (the pre-2-3b body).
+    expect('appointmentId' in untouched).toBe(false);
+  });
+
+  test('story 2-3b — a linked create carries appointmentId; blank is unscheduled', () => {
+    const APPT = '0198f7a2-1b3c-7d4e-8f90-0000000000d1';
+    const linked = parseGateInDraft(draft({ appointmentId: APPT }), NOW);
+    expect(linked.header?.appointmentId).toBe(APPT);
+    expect(createGateInBody(linked.header!, 'wh-1', false).appointmentId).toBe(APPT);
+    expect(parseGateInDraft(draft({ appointmentId: '' }), NOW).header?.appointmentId).toBeNull();
+    expect(emptyGateInDraft(NOW).appointmentPicked).toBe(false);
   });
 
   test('BH-series and temporary plates are accepted; a bad plate quotes the rule', () => {
@@ -308,6 +320,22 @@ describe('Edit — a full replacement; the time only while gated_in or when chan
     expect(body.lrNumber).toBeNull();
     expect('gatedInAt' in body).toBe(false);
     expect('warehouseId' in body).toBe(false);
+    // Story 2-3b — the amend ALWAYS states the link: null clears (no appointment stored here).
+    expect('appointmentId' in body).toBe(true);
+    expect(body.appointmentId).toBeNull();
+  });
+
+  test('story 2-3b — the edit draft keeps the stored link (never re-guessed) and sends it; a cleared pick sends null', () => {
+    const APPT = '0198f7a2-1b3c-7d4e-8f90-0000000000d1';
+    const linked = { ...detail, appointment: { id: APPT, code: 'DA-0001' }, dockDoor: 'D3' } as unknown as GateInDetailDto;
+    const d = draftOfGateIn(linked);
+    expect(d.appointmentId).toBe(APPT);
+    expect(d.appointmentPicked).toBe(true);
+    expect(d.dockDoorEdited).toBe(true);
+    expect(amendGateInBody(parseGateInDraft(d, NOW).header!, linked, d.gatedInAt).appointmentId).toBe(APPT);
+    expect(amendGateInBody(parseGateInDraft({ ...d, appointmentId: '' }, NOW).header!, linked, d.gatedInAt).appointmentId).toBeNull();
+    // A stored blank door may be prefilled by an appointment pick.
+    expect(draftOfGateIn(detail).dockDoorEdited).toBe(false);
   });
 
   test('while gated_in the stored instant rides unchanged (never the minute-truncated input); a changed time is sent', () => {

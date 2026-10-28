@@ -316,6 +316,16 @@ import {
   returnsControllerGet,
   returnsControllerList,
   returnsControllerReturnable,
+  dockControllerBook,
+  dockControllerCancel,
+  dockControllerCreateDoor,
+  dockControllerGet,
+  dockControllerGetSchedule,
+  dockControllerListDoors,
+  dockControllerPutSchedule,
+  dockControllerReschedule,
+  dockControllerUpdateDoor,
+  dockControllerWindow,
 } from './generated/sdk.gen';
 import {
   accessTokenExpired,
@@ -590,6 +600,17 @@ import type {
   AmendGateInDto,
   CreateGateInDto,
   GateInDetailResponse,
+  BookDockAppointmentDto,
+  CancelDockAppointmentDto,
+  CreateDockDoorDto,
+  DockAppointmentResponse,
+  DockDoorListResponse,
+  DockDoorResponse,
+  DockScheduleResponse,
+  DockWindowResponse,
+  PutDockScheduleDto,
+  RescheduleDockAppointmentDto,
+  UpdateDockDoorDto,
   GateInListResponse,
   GateInResponse,
   GateInUnloadResponse,
@@ -6649,6 +6670,131 @@ export async function fetchApiReturnableDamaged(
     path: { tenantId, warehouseId },
     query: { clientId, ...(options?.skuId === undefined ? {} : { skuId: options.skuId }) },
     signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+// ── Story 2-3b — dock doors, the dock schedule and dock appointments ────────
+
+/** Story 2-3b — every dock door of a warehouse, active first then by code (any staff session). */
+export async function fetchApiListDockDoors(tenantId: string, warehouseId: string, options?: { signal?: AbortSignal }): Promise<DockDoorListResponse> {
+  const { data, error } = await dockControllerListDoors({ path: { tenantId, warehouseId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-3b — adds a dock door (`dock.manage`). Per-draft key. */
+export async function fetchApiCreateDockDoor(tenantId: string, warehouseId: string, body: CreateDockDoorDto, idempotencyKey: string): Promise<DockDoorResponse> {
+  const { data, error } = await dockControllerCreateDoor({
+    path: { tenantId, warehouseId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-3b — replaces a door's code, name and active flag (`dock.manage`); a door is never deleted. */
+export async function fetchApiUpdateDockDoor(
+  tenantId: string,
+  warehouseId: string,
+  doorId: string,
+  body: UpdateDockDoorDto,
+  idempotencyKey: string,
+): Promise<DockDoorResponse> {
+  const { data, error } = await dockControllerUpdateDoor({
+    path: { tenantId, warehouseId, doorId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-3b — the warehouse's dock schedule (`configured: false` = the defaults). */
+export async function fetchApiGetDockSchedule(tenantId: string, warehouseId: string, options?: { signal?: AbortSignal }): Promise<DockScheduleResponse> {
+  const { data, error } = await dockControllerGetSchedule({ path: { tenantId, warehouseId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-3b — replaces the warehouse's dock schedule (`dock.manage`). */
+export async function fetchApiPutDockSchedule(tenantId: string, warehouseId: string, body: PutDockScheduleDto, idempotencyKey: string): Promise<DockScheduleResponse> {
+  const { data, error } = await dockControllerPutSchedule({
+    path: { tenantId, warehouseId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * Story 2-3b — the dock calendar of a window (`from`/`to` inclusive IST
+ * dates, at most 7 days): the schedule, the doors, the appointments (≤ 1000)
+ * and the exact summary. `includeCancelled` rides only when true.
+ */
+export async function fetchApiDockWindow(
+  tenantId: string,
+  query: { warehouseId: string; from: string; to: string; includeCancelled?: boolean },
+  options?: { signal?: AbortSignal },
+): Promise<DockWindowResponse> {
+  const { data, error } = await dockControllerWindow({
+    path: { tenantId },
+    query: {
+      warehouseId: query.warehouseId,
+      from: query.from,
+      to: query.to,
+      ...(query.includeCancelled === true ? { includeCancelled: true } : {}),
+    },
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-3b — books a dock appointment (`dock.schedule`). Per-draft key. */
+export async function fetchApiBookDockAppointment(tenantId: string, body: BookDockAppointmentDto, idempotencyKey: string): Promise<DockAppointmentResponse> {
+  const { data, error } = await dockControllerBook({ path: { tenantId }, body, headers: { 'Idempotency-Key': idempotencyKey } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-3b — one dock appointment (the drawer, `?open=`). */
+export async function fetchApiGetDockAppointment(tenantId: string, appointmentId: string, options?: { signal?: AbortSignal }): Promise<DockAppointmentResponse> {
+  const { data, error } = await dockControllerGet({ path: { tenantId, appointmentId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-3b — reschedules a booked appointment: a FULL replacement (`dock.schedule`). */
+export async function fetchApiRescheduleDockAppointment(
+  tenantId: string,
+  appointmentId: string,
+  body: RescheduleDockAppointmentDto,
+  idempotencyKey: string,
+): Promise<DockAppointmentResponse> {
+  const { data, error } = await dockControllerReschedule({
+    path: { tenantId, appointmentId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-3b — cancels a booked appointment with a reason (`dock.schedule`). */
+export async function fetchApiCancelDockAppointment(
+  tenantId: string,
+  appointmentId: string,
+  body: CancelDockAppointmentDto,
+  idempotencyKey: string,
+): Promise<DockAppointmentResponse> {
+  const { data, error } = await dockControllerCancel({
+    path: { tenantId, appointmentId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) throw unwrapError(error, 400);
   return data;

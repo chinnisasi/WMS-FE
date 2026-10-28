@@ -20,6 +20,7 @@ import {
   gateInClientName,
   gateInReason,
   isTransporterRefusal,
+  istLocalToIso,
   linkOptionLabel,
   parseGateInDraft,
   savedLinkOption,
@@ -27,6 +28,16 @@ import {
   type GateInDraftDocument,
   type GateInLinkOption,
 } from '@/lib/gate-ins';
+import {
+  APPOINTMENT_LINK_CODES,
+  appointmentWindowLabel,
+  dockReason,
+  linkOptionWords,
+  linkableAppointments,
+  linkableWindow,
+  withAppointmentDefaults,
+} from '@/lib/dock-schedule';
+import { useDockDoors, useDockWindow } from '@/lib/use-dock-schedule';
 import { useGateInLinkSources, useTransporterOptions } from '@/lib/use-gate-ins';
 import { ulid } from '@/lib/ulid';
 
@@ -50,7 +61,19 @@ import { lineButtonClass as buttonClass, lineInputClass as inputClass } from '@/
  * Edit is a full replacement: every field is sent (blank → null); the time
  * rides only while `gated_in` or when changed (`amendGateInBody`) — and the
  * input is locked once the unload started (decision 14).
+ *
+ * Story 2-3b — the Appointment select (the warehouse's booked appointments
+ * starting yesterday, today or tomorrow, IST — A14; "No appointment —
+ * unscheduled" first): until the desk picks one, the appointment whose
+ * expected vehicle equals the typed vehicle is pre-selected, and until the
+ * door is set by hand, the chosen appointment's door fills it (derived at
+ * render — `withAppointmentDefaults`). The door is a select of the
+ * warehouse's active doors with "Other — type it" (the server's door rule is
+ * unchanged: typed text). The key is bound to the BODY it was minted for, so
+ * a body that changed under a retry (an appointment list that re-read) mints
+ * a fresh one rather than reusing a key the server would answer 422.
  */
+const OTHER_DOOR = '__other__';
 
 const primaryClass =
   'rounded-sm bg-(--primary) px-3 py-1 text-xs font-medium text-(--primary-foreground) hover:opacity-90 disabled:opacity-60';
@@ -78,18 +101,41 @@ export function GateInForm({
   const [busy, setBusy] = useState(false);
   // Per DRAFT: a write that timed out after the server committed must replay
   // on a retry, never record a second gate-in.
-  const keyRef = useRef<string | null>(null);
+  const keyRef = useRef<{ key: string; body: string } | null>(null);
   const inFlight = useRef(false);
+  const [nowMs] = useState(() => Date.now());
 
   const transporters = useTransporterOptions();
   const links = useGateInLinkSources(warehouseId);
+  // Story 2-3b — the appointments the desk may link (one three-day read) and the active doors.
+  // WE7 — the server's link window is centred on the VISIT's IST date: the
+  // gated-in time as typed (the edited gate-in's stored one by default), else
+  // now. It is recomputed whenever that date changes.
+  const visitIso = istLocalToIso(draft.gatedInAt);
+  const linkWindow = linkableWindow(visitIso === null ? nowMs : Date.parse(visitIso));
+  const appointmentsRead = useDockWindow(warehouseId, linkWindow, false);
+  const doorsRead = useDockDoors(warehouseId);
+  const linkable = appointmentsRead.state === 'ready' ? linkableAppointments(appointmentsRead.data.appointments) : [];
+  const activeDoorCodes = doorsRead.state === 'ready' ? doorsRead.data.filter((door) => door.active).map((door) => door.code) : [];
+  // The linkable appointments, plus the edited gate-in's own link (arrived, so not among them).
+  const appointmentOptions = linkable.map((appointment) => ({ value: appointment.id, label: linkOptionWords(appointment) }));
+  if (editing?.appointment != null && !appointmentOptions.some((option) => option.value === editing.appointment!.id)) {
+    appointmentOptions.unshift({
+      value: editing.appointment.id,
+      label: `${editing.appointment.code} · ${appointmentWindowLabel(editing.appointment)} · ${editing.appointment.doorCode} (linked)`,
+    });
+  }
+  const defaulted = withAppointmentDefaults(draft, linkable, nowMs);
+  // WE8 — a picked appointment no longer listed (a re-read, another window)
+  // reads as unscheduled: a hidden id is never submitted.
+  const pickHidden = defaulted.appointmentId !== '' && !appointmentOptions.some((option) => option.value === defaulted.appointmentId);
+  const effective = pickHidden ? { ...defaulted, appointmentId: '' } : defaulted;
   // Decision 14 — the time is editable only while the truck waits at the gate.
   const timeLocked = editing !== null && editing.status !== 'gated_in';
   // Decision 16 — the seal and the declared count lock once the unload ended.
   const securityLocked = editing !== null && editing.unloadEndedAt !== null;
 
   function edit(patch: Partial<GateInDraft>) {
-    keyRef.current = null;
     setProblem(null);
     setDraft((current) => ({ ...current, ...patch }));
   }
@@ -101,26 +147,33 @@ export function GateInForm({
   async function submit() {
     const session = readSession();
     if (session === null || inFlight.current) return;
-    const parsed = parseGateInDraft(draft);
+    const parsed = parseGateInDraft(effective);
     if (parsed.header === null) {
       setProblem(parsed.problem);
       return;
     }
-    const key = keyRef.current ?? ulid();
-    keyRef.current = key;
+    const createBody = editing === null ? createGateInBody(parsed.header, warehouseId, effective.gatedInAtEdited) : null;
+    const amendBody = editing === null ? null : amendGateInBody(parsed.header, editing, effective.gatedInAt);
+    // Per DRAFT, bound to the body: a retry of the unchanged body replays; any change mints a fresh key.
+    const serialised = JSON.stringify(createBody ?? amendBody);
+    if (keyRef.current === null || keyRef.current.body !== serialised) keyRef.current = { key: ulid(), body: serialised };
+    const key = keyRef.current.key;
     inFlight.current = true;
     setBusy(true);
     setProblem(null);
     try {
       const { gateIn } =
-        editing === null
-          ? await fetchApiCreateGateIn(session.tenant.id, createGateInBody(parsed.header, warehouseId, draft.gatedInAtEdited), key)
-          : await fetchApiAmendGateIn(session.tenant.id, editing.id, amendGateInBody(parsed.header, editing, draft.gatedInAt), key);
+        createBody !== null
+          ? await fetchApiCreateGateIn(session.tenant.id, createBody, key)
+          : await fetchApiAmendGateIn(session.tenant.id, editing!.id, amendBody!, key);
       keyRef.current = null;
       onSaved(gateIn, mode);
     } catch (error) {
       // The draft is kept as typed; a stale option is re-read.
-      setProblem(gateInReason(error));
+      const linkRefusal = error instanceof ApiProblem && APPOINTMENT_LINK_CODES.has(error.code);
+      setProblem(linkRefusal ? dockReason(error) : gateInReason(error));
+      // Story 2-3b — the appointment moved under the desk: re-read the picker.
+      if (linkRefusal || (error instanceof ApiProblem && error.code === 'not-found')) appointmentsRead.reload();
       if (isTransporterRefusal(error)) transporters.reload();
       if (error instanceof ApiProblem && (error.code === 'document-warehouse-mismatch' || error.code === 'not-found')) links.reload();
     } finally {
@@ -151,7 +204,12 @@ export function GateInForm({
       ? { id: editing.transporterPartnerId, label: `${editing.transporterLabel} (no longer listed)` }
       : null;
   const typed = draft.transporterMode === 'typed';
-
+  // Story 2-3b — the door is typed when the desk chose "Other", or when it holds a code that is not an active door.
+  const doorTyped =
+    doorsRead.state !== 'ready' ||
+    activeDoorCodes.length === 0 ||
+    draft.dockDoorTyped ||
+    (effective.dockDoor !== '' && !activeDoorCodes.includes(effective.dockDoor));
   return (
     <form
       aria-label={mode === 'record' ? 'Record a gate-in' : `Edit ${editing?.code ?? 'gate-in'}`}
@@ -308,15 +366,43 @@ export function GateInForm({
             className={`${inputClass} w-36`}
           />
           {securityLocked && <span className="text-xs text-(--muted-foreground)">Seal and packages declared locked — the unload has ended.</span>}
-          <input
-            type="text"
-            aria-label="Dock door"
-            placeholder="Dock door"
-            maxLength={GATE_IN_LIMITS.dockDoor}
-            value={draft.dockDoor}
-            onChange={(event) => edit({ dockDoor: event.target.value })}
-            className={`${inputClass} w-24`}
-          />
+          {doorTyped ? (
+            <>
+              <input
+                type="text"
+                aria-label="Dock door"
+                placeholder="Dock door"
+                maxLength={GATE_IN_LIMITS.dockDoor}
+                value={effective.dockDoor}
+                onChange={(event) => edit({ dockDoor: event.target.value, dockDoorEdited: true })}
+                className={`${inputClass} w-24`}
+              />
+              {activeDoorCodes.length > 0 && (
+                <button type="button" onClick={() => edit({ dockDoor: '', dockDoorTyped: false, dockDoorEdited: true })} className={buttonClass}>
+                  Pick a door
+                </button>
+              )}
+            </>
+          ) : (
+            <select
+              aria-label="Dock door"
+              value={effective.dockDoor}
+              onChange={(event) =>
+                event.target.value === OTHER_DOOR
+                  ? edit({ dockDoor: '', dockDoorTyped: true, dockDoorEdited: true })
+                  : edit({ dockDoor: event.target.value, dockDoorTyped: false, dockDoorEdited: true })
+              }
+              className={inputClass}
+            >
+              <option value="">No dock door</option>
+              {activeDoorCodes.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+              <option value={OTHER_DOOR}>Other — type it</option>
+            </select>
+          )}
           <label className="flex items-center gap-1 text-xs text-(--muted-foreground)">
             Gated in (IST)
             <input
@@ -329,6 +415,44 @@ export function GateInForm({
             />
           </label>
           {timeLocked && <span className="text-xs text-(--muted-foreground)">Locked — the unload has started.</span>}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1 text-xs">
+            Appointment
+            <select
+              aria-label="Appointment"
+              value={effective.appointmentId}
+              onChange={(event) => edit({ appointmentId: event.target.value, appointmentPicked: true })}
+              className={inputClass}
+            >
+              <option value="">No appointment — unscheduled</option>
+              {appointmentOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {pickHidden && draft.appointmentPicked && appointmentsRead.state !== 'loading' && (
+            <span className="text-xs text-(--muted-foreground)" data-testid="appointment-pick-dropped">
+              The appointment picked is no longer listed — the visit reads unscheduled; pick again.
+            </span>
+          )}
+          {appointmentsRead.state === 'ready' && appointmentsRead.data.truncated && (
+            <span className="text-xs text-(--muted-foreground)" data-testid="appointment-truncated">
+              Some appointments are not listed — too many in the window.
+            </span>
+          )}
+          {appointmentsRead.state === 'loading' && <span className="text-xs text-(--muted-foreground)">Loading appointments…</span>}
+          {appointmentsRead.state === 'failed' && (
+            <ReadFailure word="Appointments unavailable" reason={appointmentsRead.reason} onRetry={appointmentsRead.reload} />
+          )}
+          {!draft.appointmentPicked && effective.appointmentId !== '' && (
+            <span className="text-xs text-(--muted-foreground)" data-testid="appointment-vehicle-match">
+              Matched by the vehicle number.
+            </span>
+          )}
         </div>
 
         <div className="flex flex-col gap-1">

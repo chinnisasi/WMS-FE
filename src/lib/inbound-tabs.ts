@@ -9,6 +9,10 @@ import { definePageTabs } from '@/lib/page-tabs';
  * Inbound's own.
  */
 export const INBOUND_TABS = [
+  // Story 2-3b (decision 10) — the dock calendar comes first (the truck is
+  // booked before it arrives); it has no count, and the page still opens on
+  // Purchase orders: Dock schedule is `?tab=dock`.
+  { id: 'dock', label: 'Dock schedule' },
   // Story 2-3a — the gate-in (the vehicle visit) comes first in the order of
   // the work, but the page still opens on Purchase orders (decision 9):
   // Gate-in is reached at `?tab=gate-ins`.
@@ -68,7 +72,7 @@ export function initialInboundTab(drill: ParsedDrill, tab: InboundTab | null): I
  * one page at the route's maximum size; a full page with more behind it
  * reads "N+" — never a misleadingly small number.
  */
-export type CountedInboundTab = Exclude<InboundTab, 'grns' | 'gate-ins'>;
+export type CountedInboundTab = Exclude<InboundTab, 'grns' | 'gate-ins' | 'dock'>;
 
 /**
  * Story 2-3a — every tab with a pill: the client-filtered counts above, plus
