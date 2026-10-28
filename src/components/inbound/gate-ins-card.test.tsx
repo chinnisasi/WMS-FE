@@ -106,6 +106,7 @@ let requests: { method: string; url: URL; body: unknown; key: string | null }[] 
 // Story 2-3b — the warehouse's dock doors and the linkable appointments.
 let dockDoors: Record<string, unknown>[] = [];
 let dockAppointments: Record<string, unknown>[] = [];
+let dockTruncated = false;
 
 const APPT = '0198f7a2-1b3c-7d4e-8f90-0000000000e1';
 const APPT2 = '0198f7a2-1b3c-7d4e-8f90-0000000000e2';
@@ -244,7 +245,7 @@ function stubRouter(): void {
         doors: dockDoors,
         appointments: dockAppointments,
         summary: SUMMARY,
-        truncated: false,
+        truncated: dockTruncated,
       });
     }
     if (pathname === `${base}/receiving/goods-receipts`) return json(200, { items: grns, nextCursor: null });
@@ -289,6 +290,7 @@ beforeEach(() => {
   requests = [];
   dockDoors = [];
   dockAppointments = [];
+  dockTruncated = false;
   stubRouter();
 });
 
@@ -800,6 +802,39 @@ describe('story 2-3b — the appointment at the gate', () => {
     const body = posts()[0]!.body as Record<string, unknown>;
     expect('appointmentId' in body).toBe(false);
     expect(body.dockDoor).toBe('YARD-2');
+  });
+
+  test('WE7 / WE8 — the picker reads the three days around the VISIT; a picked appointment that is no longer listed reads unscheduled and is never sent', async () => {
+    dockAppointments = [appointment(APPT, 'DA-0001')];
+    await mount('operator');
+    const form = await openRecord();
+    const reads = () => requests.filter((r) => r.url.pathname.endsWith('/receiving/dock-schedule'));
+    setSelect(select(form, 'Appointment'), APPT);
+    expect(select(form, 'Appointment').value).toBe(APPT);
+    // The visit typed for 21 Oct 2026: the window is 20–22 Oct.
+    dockAppointments = [];
+    setInput(input(form, 'Gated in at (IST)'), '2026-10-21T09:00');
+    await settle();
+    const last = reads().at(-1)!.url.searchParams;
+    expect([last.get('from'), last.get('to')]).toEqual(['2026-10-20', '2026-10-22']);
+    expect(select(form, 'Appointment').value).toBe('');
+    expect(form.querySelector('[data-testid="appointment-pick-dropped"]')).not.toBeNull();
+    setInput(input(form, 'Vehicle number'), 'KA01AB1234');
+    setSelect(select(form, 'Transporter'), TRANSPORTER);
+    setInput(input(form, 'Seal number'), 'S-1');
+    await press(button(form, 'Record gate-in'));
+    expect('appointmentId' in (posts()[0]!.body as Record<string, unknown>)).toBe(false);
+  });
+
+  test('WE7 — Edit centres the window on the stored gated-in date; W13 — a truncated read says some are not listed', async () => {
+    dockTruncated = true;
+    await mount('owner');
+    await press(button(row('GI-0001')!, 'Edit'));
+    const form = card().querySelector<HTMLFormElement>('form[aria-label="Edit GI-0001"]')!;
+    const read = requests.filter((r) => r.url.pathname.endsWith('/receiving/dock-schedule')).at(-1)!.url.searchParams;
+    // GI-0001 gated in 2026-10-21 10:00 IST.
+    expect([read.get('from'), read.get('to')]).toEqual(['2026-10-20', '2026-10-22']);
+    expect(form.querySelector('[data-testid="appointment-truncated"]')!.textContent).toBe('Some appointments are not listed — too many in the window.');
   });
 
   test('a link refusal reads the dock copy and re-reads the appointments', async () => {

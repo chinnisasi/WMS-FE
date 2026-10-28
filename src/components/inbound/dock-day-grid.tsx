@@ -6,13 +6,13 @@ import {
   DOOR_PAGE_SIZE,
   appointmentChip,
   appointmentWindowLabel,
+  cancelledByRow,
   dayRows,
   doorColumn,
   doorPageLabel,
   isBookableSlot,
   isOffSchedule,
   nowRow,
-  type DayCell,
   type DockAppointment,
   type DockDoor,
   type DockSchedule,
@@ -30,7 +30,10 @@ import { StatusChip } from '@/components/shared/status-chip';
  *
  * At scale: its own horizontal scroll with a sticky time column and header,
  * door columns paged twelve at a time, and ONE tab stop — a roving tabindex
- * (arrows move, Enter books or opens). "Skip to list view" sits before it.
+ * (arrows move through every booking of a merged block too, Enter books or
+ * opens) on `role="grid"` rows and cells. "Skip to list view" sits before
+ * it. A cancelled appointment (Show cancelled) is a struck-through line in
+ * the cell — it never takes the slot, so the Book button stays.
  */
 export function DockDayGrid({
   date,
@@ -62,34 +65,48 @@ export function DockDayGrid({
   const rows = dayRows(schedule, date, appointments);
   const slot = schedule.slotMinutes;
   const now = nowRow(rows, slot, date, nowMs);
-  const columns = shown.map((door) => doorColumn(rows, slot, appointments.filter((appointment) => appointment.dockDoorId === door.id)));
+  const doorAppointments = shown.map((door) => appointments.filter((appointment) => appointment.dockDoorId === door.id));
+  const columns = doorAppointments.map((list) => doorColumn(rows, slot, list));
+  const cancelled = doorAppointments.map((list) => cancelledByRow(rows, list));
 
-  // The cell holding row `r` in column `c` (a block covers several rows).
-  const cellAt = (r: number, c: number): DayCell | undefined =>
-    columns[c]?.find((cell) => (cell.kind === 'free' ? cell.row === r : r >= cell.row && r < cell.row + cell.span));
-  const [activeWanted, setActive] = useState<{ row: number; col: number }>({ row: 0, col: 0 });
-  const active = {
-    row: Math.min(activeWanted.row, Math.max(0, rows.length - 1)),
-    col: Math.min(activeWanted.col, Math.max(0, shown.length - 1)),
-  };
-  const activeCell = cellAt(active.row, active.col);
-  const activeKey = activeCell === undefined ? null : `${activeCell.row}-${active.col}`;
+  /**
+   * The roving model: each column is an ordered list of focus targets — every
+   * booking of a (merged) block, every cancelled line, and each free cell's
+   * Book button or blank cell. Up / Down walk a column's list; Left / Right
+   * land on the first target of the cell covering the same row next door.
+   */
+  type Target = { readonly row: number; readonly span: number };
+  const targets: Target[][] = columns.map((cells, c) =>
+    cells.flatMap((cell) => {
+      const span = cell.kind === 'block' ? cell.span : 1;
+      const lines = Array.from({ length: span }, (_, offset) => cancelled[c]!.get(cell.row + offset) ?? []).flat();
+      const count = cell.kind === 'block' ? cell.appointments.length + lines.length : lines.length + 1;
+      return Array.from({ length: count }, () => ({ row: cell.row, span }));
+    }),
+  );
+  const [activeWanted, setActive] = useState<{ col: number; index: number }>({ col: 0, index: 0 });
+  const activeCol = Math.min(activeWanted.col, Math.max(0, shown.length - 1));
+  const activeIndex = Math.min(activeWanted.index, Math.max(0, (targets[activeCol]?.length ?? 1) - 1));
+  const activeKey = `${activeCol}:${activeIndex}`;
   const table = useRef<HTMLDivElement | null>(null);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const moves: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
-    const move = moves[event.key];
-    if (move === undefined || rows.length === 0 || shown.length === 0) return;
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key) || shown.length === 0) return;
+    const column = targets[activeCol] ?? [];
+    if (column.length === 0) return;
     event.preventDefault();
-    const from = cellAt(active.row, active.col);
-    // Down leaves a block from its last row; up from its first.
-    const baseRow = from === undefined ? active.row : move[0] > 0 ? from.row + (from.kind === 'block' ? from.span - 1 : 0) : from.row;
-    const row = Math.min(rows.length - 1, Math.max(0, baseRow + move[0]));
-    const col = Math.min(shown.length - 1, Math.max(0, active.col + move[1]));
-    setActive({ row, col });
-    const target = cellAt(row, col);
-    if (target === undefined) return;
-    table.current?.querySelector<HTMLElement>(`[data-cell="${target.row}-${col}"]`)?.focus();
+    let col = activeCol;
+    let index = activeIndex;
+    if (event.key === 'ArrowUp') index = Math.max(0, index - 1);
+    else if (event.key === 'ArrowDown') index = Math.min(column.length - 1, index + 1);
+    else {
+      col = Math.min(shown.length - 1, Math.max(0, activeCol + (event.key === 'ArrowRight' ? 1 : -1)));
+      const row = column[activeIndex]!.row;
+      const found = (targets[col] ?? []).findIndex((target) => row >= target.row && row < target.row + target.span);
+      index = Math.max(0, found);
+    }
+    setActive({ col, index });
+    table.current?.querySelector<HTMLElement>(`[data-cell="${col}:${index}"]`)?.focus();
   }
 
   return (
@@ -116,14 +133,14 @@ export function DockDayGrid({
         )}
       </div>
       <div ref={table} className="max-h-[70vh] overflow-auto rounded-sm border border-(--border)" onKeyDown={onKeyDown}>
-        <table className="border-collapse text-xs" aria-label={`Dock doors on ${date}, by slot`}>
+        <table role="grid" className="border-collapse text-xs" aria-label={`Dock doors on ${date}, by slot`}>
           <thead>
-            <tr>
-              <th scope="col" className="sticky top-0 left-0 z-20 bg-(--muted) px-2 py-1 text-left font-medium text-(--foreground)">
+            <tr role="row">
+              <th scope="col" role="columnheader" className="sticky top-0 left-0 z-20 bg-(--muted) px-2 py-1 text-left font-medium text-(--foreground)">
                 Time (IST)
               </th>
               {shown.map((door) => (
-                <th key={door.id} scope="col" className="sticky top-0 z-10 min-w-36 bg-(--muted) px-2 py-1 text-left font-medium text-(--foreground)">
+                <th key={door.id} scope="col" role="columnheader" className="sticky top-0 z-10 min-w-36 bg-(--muted) px-2 py-1 text-left font-medium text-(--foreground)">
                   <span className="font-mono">{door.code}</span>
                   {door.name !== null && <span className="text-(--muted-foreground)"> · {door.name}</span>}
                   {!door.active && <span className="text-(--muted-foreground)"> · inactive</span>}
@@ -132,79 +149,100 @@ export function DockDayGrid({
             </tr>
           </thead>
           <tbody>
-            {rows.map((minute, r) => (
-              <tr key={minute} data-now={now === r ? 'true' : undefined} className={now === r ? 'border-t-2 border-t-(--primary)' : 'border-t border-t-(--border)'}>
-                <th scope="row" className="sticky left-0 z-10 h-10 bg-(--background) px-2 text-left font-normal whitespace-nowrap">
-                  <span className="data">{minuteLabel(minute)}</span>
-                  {now === r && <span className="ml-1 font-medium text-(--primary)">· now</span>}
-                </th>
-                {shown.map((door, c) => {
-                  const cell = columns[c]?.find((entry) => entry.row === r);
-                  if (cell === undefined) return null; // covered by a block above
-                  const key = `${cell.row}-${c}`;
-                  const tabIndex = key === activeKey ? 0 : -1;
-                  const focusActive = () => setActive({ row: cell.row, col: c });
-                  if (cell.kind === 'block') {
+            {(() => {
+              // Each column's next target index, advanced as its cells render top to bottom.
+              const cursor = shown.map(() => 0);
+              const props = (c: number) => {
+                const index = cursor[c]!;
+                cursor[c] = index + 1;
+                const key = `${c}:${index}`;
+                return { 'data-cell': key, tabIndex: key === activeKey ? 0 : -1, onFocus: () => setActive({ col: c, index }) };
+              };
+              const cancelledLine = (appointment: DockAppointment, c: number) => (
+                <button
+                  key={appointment.id}
+                  type="button"
+                  {...props(c)}
+                  data-testid={`dock-cancelled-${appointment.code}`}
+                  onClick={() => onOpen(appointment.id)}
+                  aria-label={`${appointment.code}, ${appointmentWindowLabel(appointment)}, Cancelled`}
+                  className="w-full truncate rounded-sm border border-dashed border-(--border) px-1 text-left text-(--muted-foreground) line-through"
+                >
+                  {appointment.code} · Cancelled
+                </button>
+              );
+              return rows.map((minute, r) => (
+                <tr
+                  key={minute}
+                  role="row"
+                  data-now={now === r ? 'true' : undefined}
+                  className={now === r ? 'border-t-2 border-t-(--primary)' : 'border-t border-t-(--border)'}
+                >
+                  <th scope="row" role="rowheader" className="sticky left-0 z-10 h-10 bg-(--background) px-2 text-left font-normal whitespace-nowrap">
+                    <span className="data">{minuteLabel(minute)}</span>
+                    {now === r && <span className="ml-1 font-medium text-(--primary)">· now</span>}
+                  </th>
+                  {shown.map((door, c) => {
+                    const cell = columns[c]?.find((entry) => entry.row === r);
+                    if (cell === undefined) return null; // covered by a block above
+                    const span = cell.kind === 'block' ? cell.span : 1;
+                    const lines = Array.from({ length: span }, (_, offset) => cancelled[c]!.get(cell.row + offset) ?? []).flat();
+                    if (cell.kind === 'block') {
+                      return (
+                        <td key={door.id} role="gridcell" rowSpan={cell.span} className="border-l border-(--border) p-0.5 align-top">
+                          <div className="flex h-full flex-col gap-0.5">
+                            {cell.appointments.map((appointment) => {
+                              const chip = appointmentChip(appointment);
+                              const off = isOffSchedule(schedule, appointment);
+                              return (
+                                <button
+                                  key={appointment.id}
+                                  type="button"
+                                  {...props(c)}
+                                  data-testid={`dock-block-${appointment.code}`}
+                                  onClick={() => onOpen(appointment.id)}
+                                  aria-label={`${appointment.code}, ${door.code} ${appointmentWindowLabel(appointment)}, ${chip.word}${off ? ', outside schedule' : ''}`}
+                                  className="flex flex-col items-start gap-0.5 rounded-sm border border-(--primary) bg-(--primary)/10 px-1.5 py-1 text-left hover:bg-(--primary)/20"
+                                >
+                                  <span className="font-mono font-medium">{appointment.code}</span>
+                                  <span className="data">{appointmentWindowLabel(appointment)}</span>
+                                  <StatusChip tone={chip.tone} glyph={chip.glyph}>
+                                    {chip.word}
+                                  </StatusChip>
+                                  {off && <span className="text-(--muted-foreground)">Outside schedule</span>}
+                                </button>
+                              );
+                            })}
+                            {lines.map((appointment) => cancelledLine(appointment, c))}
+                          </div>
+                        </td>
+                      );
+                    }
+                    const bookable = canSchedule && door.active && isBookableSlot(schedule, date, minute, nowMs);
                     return (
-                      <td key={door.id} rowSpan={cell.span} className="border-l border-(--border) p-0.5 align-top">
+                      <td key={door.id} role="gridcell" className="h-10 border-l border-(--border) p-0.5">
                         <div className="flex h-full flex-col gap-0.5">
-                          {cell.appointments.map((appointment, index) => {
-                            const chip = appointmentChip(appointment);
-                            const off = isOffSchedule(schedule, appointment);
-                            return (
-                              <button
-                                key={appointment.id}
-                                type="button"
-                                data-cell={index === 0 ? key : undefined}
-                                data-testid={`dock-block-${appointment.code}`}
-                                tabIndex={index === 0 ? tabIndex : -1}
-                                onFocus={focusActive}
-                                onClick={() => onOpen(appointment.id)}
-                                aria-label={`${appointment.code}, ${door.code} ${appointmentWindowLabel(appointment)}, ${chip.word}${off ? ', outside schedule' : ''}`}
-                                className="flex flex-col items-start gap-0.5 rounded-sm border border-(--primary) bg-(--primary)/10 px-1.5 py-1 text-left hover:bg-(--primary)/20"
-                              >
-                                <span className="font-mono font-medium">{appointment.code}</span>
-                                <span className="data">{appointmentWindowLabel(appointment)}</span>
-                                <StatusChip tone={chip.tone} glyph={chip.glyph}>
-                                  {chip.word}
-                                </StatusChip>
-                                {off && <span className="text-(--muted-foreground)">Outside schedule</span>}
-                              </button>
-                            );
-                          })}
+                          {lines.map((appointment) => cancelledLine(appointment, c))}
+                          {bookable ? (
+                            <button
+                              type="button"
+                              {...props(c)}
+                              onClick={() => onBook({ date, start: minute, doorId: door.id })}
+                              aria-label={`Book ${door.code} at ${minuteLabel(minute)}`}
+                              className="min-h-6 w-full flex-1 rounded-sm text-(--muted-foreground) opacity-60 hover:bg-(--muted) hover:opacity-100 focus-visible:opacity-100"
+                            >
+                              <span aria-hidden>+</span>
+                            </button>
+                          ) : (
+                            <div {...props(c)} aria-label={`${door.code} ${minuteLabel(minute)} — free`} className="min-h-6 w-full flex-1" />
+                          )}
                         </div>
                       </td>
                     );
-                  }
-                  const bookable = canSchedule && door.active && isBookableSlot(schedule, date, minute, nowMs);
-                  return (
-                    <td key={door.id} className="h-10 border-l border-(--border) p-0.5">
-                      {bookable ? (
-                        <button
-                          type="button"
-                          data-cell={key}
-                          tabIndex={tabIndex}
-                          onFocus={focusActive}
-                          onClick={() => onBook({ date, start: minute, doorId: door.id })}
-                          aria-label={`Book ${door.code} at ${minuteLabel(minute)}`}
-                          className="h-full w-full rounded-sm text-(--muted-foreground) opacity-60 hover:bg-(--muted) hover:opacity-100 focus-visible:opacity-100"
-                        >
-                          <span aria-hidden>+</span>
-                        </button>
-                      ) : (
-                        <div
-                          data-cell={key}
-                          tabIndex={tabIndex}
-                          onFocus={focusActive}
-                          aria-label={`${door.code} ${minuteLabel(minute)} — free`}
-                          className="h-full w-full"
-                        />
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+                  })}
+                </tr>
+              ));
+            })()}
           </tbody>
         </table>
       </div>

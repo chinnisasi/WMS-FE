@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 
 import {
   addIsoDays,
-  daysBetween,
   istClockLabel,
   istDateOf,
   istDayLabel,
@@ -68,7 +67,6 @@ describe('ist', () => {
   test('calendar steps and spans', () => {
     expect(addIsoDays('2026-10-31', 1)).toBe('2026-11-01');
     expect(addIsoDays('2026-03-01', -1)).toBe('2026-02-28');
-    expect(daysBetween('2026-10-26', '2026-11-01')).toBe(6);
   });
 
   test('HH:MM both ways; 24:00 is 1440 and nothing past it', () => {

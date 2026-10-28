@@ -7,6 +7,7 @@ import {
   appointmentChip,
   appointmentShortWord,
   bookBody,
+  cancelledByRow,
   canChangeAppointment,
   closedAppointmentSentence,
   closedDaySentence,
@@ -26,6 +27,8 @@ import {
   gateInAppointmentLine,
   isBookableSlot,
   isOffSchedule,
+  isStaleDockRefusal,
+  liveCount,
   linkableAppointments,
   linkableWindow,
   noDoorsSentence,
@@ -45,6 +48,7 @@ import {
   vehicleMatch,
   weekCell,
   weekEntryLabel,
+  weekIndex,
   windowLabel,
   windowOf,
   withAppointmentDefaults,
@@ -137,10 +141,11 @@ describe('URL state (decision 10)', () => {
     expect(dockParamsKey(state)).toBe(`week|${TUESDAY}|${A1}|1`);
   });
 
-  test('the window: a day, or the Mon–Sun week (List reads the week); Prev/Next step a day or a week', () => {
+  test('the window: a day (Day and List — W10), or the Mon–Sun week; Prev/Next step a day or a week', () => {
     expect(windowOf('day', TUESDAY)).toEqual({ from: TUESDAY, to: TUESDAY });
     expect(windowOf('week', SUNDAY)).toEqual({ from: '2026-10-26', to: SUNDAY });
-    expect(windowOf('list', TUESDAY)).toEqual({ from: '2026-10-26', to: SUNDAY });
+    expect(windowOf('list', TUESDAY)).toEqual({ from: TUESDAY, to: TUESDAY });
+    expect(stepDate('list', TUESDAY, 1)).toBe('2026-10-28');
     expect(stepDate('day', TUESDAY, 1)).toBe('2026-10-28');
     expect(stepDate('week', TUESDAY, -1)).toBe('2026-10-20');
     expect(windowLabel({ from: TUESDAY, to: TUESDAY })).toBe('Tue 27 Oct');
@@ -208,6 +213,16 @@ describe('the Day grid', () => {
     expect(blocks[0]!.kind === 'block' && blocks[0]!.appointments.map((x) => x.code)).toEqual(['DA-0001', 'DA-0002']);
   });
 
+  test('WE12 — a cancelled appointment never takes a cell: the slot stays free, the line rides the row; the closed-day count skips it', () => {
+    const gone = appointment({ id: 'gone', code: 'DA-0009', status: 'cancelled' });
+    const rows = dayRows(SCHEDULE, TUESDAY, [gone]);
+    expect(doorColumn(rows, 30, [gone]).every((cell) => cell.kind === 'free')).toBe(true);
+    const byRow = cancelledByRow(rows, [gone, appointment()]);
+    expect([...byRow.keys()].map((row) => rows[row])).toEqual([630]);
+    expect(byRow.get(rows.indexOf(630))!.map((a) => a.code)).toEqual(['DA-0009']);
+    expect(liveCount([gone, appointment()])).toBe(1);
+  });
+
   test('bookable: the current slot (now 10:40, 10:30) yes; the previous slot no; a closed day no; an extended row no', () => {
     const now = Date.parse(istInstantOf(TUESDAY, 640));
     expect(isBookableSlot(SCHEDULE, TUESDAY, 630, now)).toBe(true);
@@ -237,10 +252,10 @@ describe('the Week grid', () => {
     const six = Array.from({ length: 6 }, (_, i) =>
       appointment({ id: `a${i}`, code: `DA-000${i}`, startsAt: istInstantOf(TUESDAY, 540 + i * 30), endsAt: istInstantOf(TUESDAY, 570 + i * 30) }),
     );
-    const cell = weekCell(six, D3, TUESDAY);
+    const cell = weekCell(weekIndex(six), D3, TUESDAY);
     expect(cell.entries.length).toBe(4);
     expect(cell.more).toBe(2);
-    expect(weekCell(six, D4, TUESDAY)).toEqual({ entries: [], more: 0 });
+    expect(weekCell(weekIndex(six), D4, TUESDAY)).toEqual({ entries: [], more: 0 });
   });
 });
 
@@ -326,7 +341,9 @@ describe('words', () => {
 
 describe('the gate-in picker (decision 8, A14)', () => {
   test('the window is IST yesterday to tomorrow; only booked appointments link (a no-show still does)', () => {
+    // Centred on the VISIT's IST date (the server's A14 window), whatever the clock says.
     expect(linkableWindow(Date.parse(istInstantOf(TUESDAY, 1)))).toEqual({ from: '2026-10-26', to: '2026-10-28' });
+    expect(linkableWindow(Date.parse(istInstantOf(TUESDAY, 1439)))).toEqual({ from: '2026-10-26', to: '2026-10-28' });
     const list = linkableAppointments([
       appointment({ id: 'c', status: 'cancelled' }),
       appointment({ id: 'n', noShow: true }),
@@ -416,6 +433,14 @@ describe('the book / reschedule draft', () => {
     expect(hourly.find((o) => o.minute === 630)).toEqual({ minute: 630, label: '10:30 (as booked)', disabled: false });
   });
 
+  test('WE1 / WE3 — no slots for a cleared date or a closed day; a reschedule keeps its own start on a now-closed day', () => {
+    const now = Date.parse(istInstantOf(TUESDAY, 640));
+    expect(startOptions(SCHEDULE, '', now)).toEqual([]);
+    expect(startOptions(SCHEDULE, '2026-02-30', now)).toEqual([]);
+    expect(startOptions(SCHEDULE, SUNDAY, now)).toEqual([]);
+    expect(startOptions(SCHEDULE, SUNDAY, now, 630)).toEqual([{ minute: 630, label: '10:30 (as booked)', disabled: false }]);
+  });
+
   test('duration options: 1–8 slots, plus the booking’s own length', () => {
     expect(durationOptions(30).map((o) => o.label)).toEqual(['30 min', '1 h', '1 h 30 min', '2 h', '2 h 30 min', '3 h', '3 h 30 min', '4 h']);
     expect(durationOptions(60, 30)[0]).toEqual({ minutes: 30, label: '30 min (as booked)' });
@@ -496,6 +521,14 @@ describe('dockReason — every code', () => {
     expect(dockReason(problem('validation-failed', {}, 'startsAt must be an ISO instant'))).toBe('startsAt must be an ISO instant');
     expect(dockReason(problem('something-new'))).toBe('The dock schedule was not changed (something-new).');
     expect(dockReason(new TypeError('Failed to fetch'))).toBe(UNREACHABLE_REASON);
+  });
+
+  test('W11 — the refusals that say the calendar moved (the form re-reads on these)', () => {
+    for (const code of ['dock-slot-taken', 'appointment-closed', 'appointment-no-show', 'conflict', 'not-found', 'dock-door-inactive', 'po-not-open', 'asn-not-open']) {
+      expect(isStaleDockRefusal(problem(code))).toBe(true);
+    }
+    expect(isStaleDockRefusal(problem('slot-in-past'))).toBe(false);
+    expect(isStaleDockRefusal(new TypeError('Failed to fetch'))).toBe(false);
   });
 
   test('the gate-in maps exactly the appointment-link codes with dockReason', () => {

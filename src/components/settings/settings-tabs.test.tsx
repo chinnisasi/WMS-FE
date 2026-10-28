@@ -151,7 +151,8 @@ describe('Settings — tabs (page-tabs)', () => {
 
   /** The decided grouping (user, 2026-10-17): each tab's cards, panel-scoped. */
   test.each([
-    ['warehouses', ['Create a warehouse', 'MAIN Chennai DC', 'Zones and bins']],
+    // Story 2-3b — the dock doors and schedule follow Zones & bins.
+    ['warehouses', ['Create a warehouse', 'MAIN Chennai DC', 'Zones and bins', 'Dock doors and schedule']],
     ['catalog', ['Import catalog', 'New SKU', 'Products', 'SKUs', 'Segregation matrix']],
     ['clients', ['Clients', 'Rate cards']],
     ['partners', ['Partners']],

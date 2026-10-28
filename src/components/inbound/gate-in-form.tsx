@@ -20,6 +20,7 @@ import {
   gateInClientName,
   gateInReason,
   isTransporterRefusal,
+  istLocalToIso,
   linkOptionLabel,
   parseGateInDraft,
   savedLinkOption,
@@ -107,12 +108,28 @@ export function GateInForm({
   const transporters = useTransporterOptions();
   const links = useGateInLinkSources(warehouseId);
   // Story 2-3b — the appointments the desk may link (one three-day read) and the active doors.
-  const [linkWindow] = useState(() => linkableWindow(Date.now()));
+  // WE7 — the server's link window is centred on the VISIT's IST date: the
+  // gated-in time as typed (the edited gate-in's stored one by default), else
+  // now. It is recomputed whenever that date changes.
+  const visitIso = istLocalToIso(draft.gatedInAt);
+  const linkWindow = linkableWindow(visitIso === null ? nowMs : Date.parse(visitIso));
   const appointmentsRead = useDockWindow(warehouseId, linkWindow, false);
   const doorsRead = useDockDoors(warehouseId);
   const linkable = appointmentsRead.state === 'ready' ? linkableAppointments(appointmentsRead.data.appointments) : [];
   const activeDoorCodes = doorsRead.state === 'ready' ? doorsRead.data.filter((door) => door.active).map((door) => door.code) : [];
-  const effective = withAppointmentDefaults(draft, linkable, nowMs);
+  // The linkable appointments, plus the edited gate-in's own link (arrived, so not among them).
+  const appointmentOptions = linkable.map((appointment) => ({ value: appointment.id, label: linkOptionWords(appointment) }));
+  if (editing?.appointment != null && !appointmentOptions.some((option) => option.value === editing.appointment!.id)) {
+    appointmentOptions.unshift({
+      value: editing.appointment.id,
+      label: `${editing.appointment.code} · ${appointmentWindowLabel(editing.appointment)} · ${editing.appointment.doorCode} (linked)`,
+    });
+  }
+  const defaulted = withAppointmentDefaults(draft, linkable, nowMs);
+  // WE8 — a picked appointment no longer listed (a re-read, another window)
+  // reads as unscheduled: a hidden id is never submitted.
+  const pickHidden = defaulted.appointmentId !== '' && !appointmentOptions.some((option) => option.value === defaulted.appointmentId);
+  const effective = pickHidden ? { ...defaulted, appointmentId: '' } : defaulted;
   // Decision 14 — the time is editable only while the truck waits at the gate.
   const timeLocked = editing !== null && editing.status !== 'gated_in';
   // Decision 16 — the seal and the declared count lock once the unload ended.
@@ -193,15 +210,6 @@ export function GateInForm({
     activeDoorCodes.length === 0 ||
     draft.dockDoorTyped ||
     (effective.dockDoor !== '' && !activeDoorCodes.includes(effective.dockDoor));
-  // The linkable appointments, plus the edited gate-in's own link (arrived, so not among them).
-  const appointmentOptions = linkable.map((appointment) => ({ value: appointment.id, label: linkOptionWords(appointment) }));
-  if (editing?.appointment != null && !appointmentOptions.some((option) => option.value === editing.appointment!.id)) {
-    appointmentOptions.unshift({
-      value: editing.appointment.id,
-      label: `${editing.appointment.code} · ${appointmentWindowLabel(editing.appointment)} · ${editing.appointment.doorCode} (linked)`,
-    });
-  }
-
   return (
     <form
       aria-label={mode === 'record' ? 'Record a gate-in' : `Edit ${editing?.code ?? 'gate-in'}`}
@@ -426,6 +434,16 @@ export function GateInForm({
               ))}
             </select>
           </label>
+          {pickHidden && draft.appointmentPicked && appointmentsRead.state !== 'loading' && (
+            <span className="text-xs text-(--muted-foreground)" data-testid="appointment-pick-dropped">
+              The appointment picked is no longer listed — the visit reads unscheduled; pick again.
+            </span>
+          )}
+          {appointmentsRead.state === 'ready' && appointmentsRead.data.truncated && (
+            <span className="text-xs text-(--muted-foreground)" data-testid="appointment-truncated">
+              Some appointments are not listed — too many in the window.
+            </span>
+          )}
           {appointmentsRead.state === 'loading' && <span className="text-xs text-(--muted-foreground)">Loading appointments…</span>}
           {appointmentsRead.state === 'failed' && (
             <ReadFailure word="Appointments unavailable" reason={appointmentsRead.reason} onRetry={appointmentsRead.reload} />

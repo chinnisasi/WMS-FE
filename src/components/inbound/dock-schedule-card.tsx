@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import { readSession, subscribeSession } from '@/lib/auth';
 import { notifyInboundChanged } from '@/lib/asns';
@@ -14,6 +14,8 @@ import {
   appointmentWindowLabel,
   appointmentsOn,
   closedDaySentence,
+  liveCount,
+  parseDockParams,
   dayRows,
   dockHref,
   documentLabels,
@@ -76,8 +78,22 @@ export function DockScheduleCard({
   warehouseLabel: string | null;
   initial: DockUrlState;
 }) {
-  const [url, setUrl] = useState<DockUrlState>(initial);
-  const [today] = useState(() => istDateOf(Date.now()));
+  // W1 — seeded from the LIVE URL on mount (a return to the tab must not
+  // replay the server-parsed state of the first load, e.g. a closed `?open=`);
+  // the server parse stands in when the URL is not this tab's (tests, SSR).
+  const [url, setUrl] = useState<DockUrlState>(() => {
+    if (typeof window === 'undefined') return initial;
+    const live = new URLSearchParams(window.location.search);
+    return live.get('tab') === 'dock' ? parseDockParams(Object.fromEntries(live)) : initial;
+  });
+  // W7 — one ticking clock (60 s): the past cells, the now-line, the form's
+  // past slots and "today" follow it.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const today = istDateOf(nowMs);
   const date = url.date ?? today;
   const range = windowOf(url.view, date);
   const read = useDockWindow(warehouseId, range, url.cancelled);
@@ -108,20 +124,31 @@ export function DockScheduleCard({
     replaceUrl(dockHref(next));
   }
 
+  // WE5 — while the drawer's write is in flight, nothing opens another target
+  // (a remount would drop the write's key).
+  const [drawerBusy, setDrawerBusy] = useState(false);
+  // W12 — the last write's answer, shown in the drawer until its re-read catches up.
+  const [written, setWritten] = useState<DockAppointment | null>(null);
+
   function openAppointment(appointmentId: string) {
+    if (drawerBusy) return;
     setBookFor(null);
     navigate({ open: appointmentId });
   }
 
   function openBook(seed: { date: string; start: number | null; doorId: string | null }) {
-    if (warehouseId === null) return;
+    if (warehouseId === null || drawerBusy) return;
     setBanner(null);
     navigate({ open: null });
     setBookFor({ warehouseId, seed });
   }
 
   const data = read.state === 'ready' ? read.data : null;
-  const nowMs = data === null ? 0 : Date.parse(data.asOf);
+  // W6 — the drawer keeps the last good window of this warehouse, so a failed
+  // re-read or a cold load (another day or view) never unmounts it with its draft.
+  const [lastGood, setLastGood] = useState<{ warehouseId: string; data: NonNullable<typeof data> } | null>(null);
+  if (data !== null && warehouseId !== null && (lastGood === null || lastGood.data !== data)) setLastGood({ warehouseId, data });
+  const drawerData = data ?? (lastGood !== null && lastGood.warehouseId === warehouseId ? lastGood.data : null);
   const target: DockDrawerTarget | null =
     book !== null ? { kind: 'book', seed: book } : url.open !== null ? { kind: 'open', appointmentId: url.open } : null;
 
@@ -179,7 +206,7 @@ export function DockScheduleCard({
       columns={listColumns}
       rows={[...appointments]}
       rowNoun={{ one: 'appointment', many: 'appointments' }}
-      emptyMessage={`No appointments ${url.view === 'day' ? 'on' : 'in'} ${windowLabel(range)}.`}
+      emptyMessage={`No appointments ${url.view === 'week' ? 'in' : 'on'} ${windowLabel(range)}.`}
     />
   );
 
@@ -222,10 +249,10 @@ export function DockScheduleCard({
       <>
         {!open && (
           <div data-testid="dock-closed-day">
-            {dayAppointments.length === 0 ? (
+            {liveCount(dayAppointments) === 0 ? (
               <span className="text-(--muted-foreground)">{closedDaySentence(date, 0)}</span>
             ) : (
-              <FeedbackBanner tone="warning" word={closedDaySentence(date, dayAppointments.length)} reason="The bookings still stand — reschedule or cancel them if the dock will not open." />
+              <FeedbackBanner tone="warning" word={closedDaySentence(date, liveCount(dayAppointments))} reason="The bookings still stand — reschedule or cancel them if the dock will not open." />
             )}
           </div>
         )}
@@ -352,26 +379,31 @@ export function DockScheduleCard({
         )
       )}
 
-      {target !== null && warehouseId !== null && data !== null && (
+      {target !== null && warehouseId !== null && drawerData !== null && (
         <DockAppointmentDrawer
           key={target.kind === 'open' ? `open|${target.appointmentId}` : `book|${warehouseId}`}
           target={target}
           context={{
             warehouseId,
-            schedule: data.schedule,
-            doors: data.doors,
-            loaded: data.appointments,
+            schedule: drawerData.schedule,
+            doors: drawerData.doors,
+            loaded: drawerData.appointments,
             canSchedule,
             clients,
             tenantName,
+            nowMs,
           }}
+          written={written}
+          onBusy={setDrawerBusy}
           onClose={() => {
             setBookFor(null);
+            setWritten(null);
             navigate({ open: null });
           }}
           onStale={read.reload}
           onDone={(outcome, appointment) => {
             setBanner({ warehouseId, outcome });
+            setWritten(appointment);
             setBookFor(null);
             // The booked / changed appointment opens in the drawer.
             navigate({ open: appointment.id });

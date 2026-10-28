@@ -62,7 +62,6 @@ export const DOCK_LIMITS = {
   note: 500,
   cancelReason: 200,
   graceMax: 120,
-  windowDays: 7,
 } as const;
 
 /** `^[A-Z0-9-]{1,20}$` — the door code CHECK, after the server's trim + uppercase. */
@@ -139,16 +138,20 @@ export function dockHref(state: DockUrlState): string {
   return `/inbound?${query.toString()}`;
 }
 
-/** The read window of a view: Day reads its day; Week and List the Mon–Sun week of the date. */
+/**
+ * The read window of a view: Day and List read the date's day (List is the
+ * Day grid as a table — "Skip to list view" lands on the same appointments,
+ * W10); Week reads the Mon–Sun week of the date.
+ */
 export function windowOf(view: DockView, date: string): { from: string; to: string } {
-  if (view === 'day') return { from: date, to: date };
+  if (view !== 'week') return { from: date, to: date };
   const week = weekOf(date);
   return { from: week[0]!, to: week[6]! };
 }
 
-/** The date Prev / Next moves to: a day in Day, a week otherwise. */
+/** The date Prev / Next moves to: a week in Week, a day otherwise. */
 export function stepDate(view: DockView, date: string, direction: -1 | 1): string {
-  return addIsoDays(date, view === 'day' ? direction : 7 * direction);
+  return addIsoDays(date, view === 'week' ? 7 * direction : direction);
 }
 
 /** "Wed 28 Oct" for a day, "Mon 26 Oct – Sun 1 Nov" for a week. */
@@ -232,11 +235,11 @@ export type DayCell =
  */
 export function doorColumn(rows: readonly number[], slotMinutes: number, doorAppointments: readonly DockAppointment[]): DayCell[] {
   const blocks: { row: number; endRow: number; appointments: DockAppointment[] }[] = [];
-  const sorted = [...doorAppointments].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  // A cancelled appointment never occupies a cell — it frees its slot (see `cancelledByRow`).
+  const sorted = doorAppointments.filter((appointment) => appointment.status !== 'cancelled').sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   for (const appointment of sorted) {
     const { start, end } = appointmentMinutes(appointment);
-    let row = 0;
-    for (let index = 0; index < rows.length; index += 1) if (rows[index]! <= start) row = index;
+    const row = rowOf(rows, start);
     const endRow = Math.min(rows.length, Math.max(row + 1, row + Math.ceil((end - rows[row]!) / slotMinutes)));
     const current = blocks[blocks.length - 1];
     if (current !== undefined && row < current.endRow) {
@@ -255,6 +258,28 @@ export function doorColumn(rows: readonly number[], slotMinutes: number, doorApp
   }
   for (; next < rows.length; next += 1) cells.push({ kind: 'free', row: next });
   return cells;
+}
+
+/** The index of the row a minute falls in (the last row starting at or before it). */
+function rowOf(rows: readonly number[], minute: number): number {
+  let row = 0;
+  for (let index = 0; index < rows.length; index += 1) if (rows[index]! <= minute) row = index;
+  return row;
+}
+
+/**
+ * A door's CANCELLED appointments (listed with Show cancelled) by the row
+ * they start in: drawn as a line inside whatever cell covers that row, so a
+ * freed slot keeps its Book button.
+ */
+export function cancelledByRow(rows: readonly number[], doorAppointments: readonly DockAppointment[]): Map<number, DockAppointment[]> {
+  const byRow = new Map<number, DockAppointment[]>();
+  for (const appointment of doorAppointments) {
+    if (appointment.status !== 'cancelled' || rows.length === 0) continue;
+    const row = rowOf(rows, appointmentMinutes(appointment).start);
+    byRow.set(row, [...(byRow.get(row) ?? []), appointment]);
+  }
+  return byRow;
 }
 
 /**
@@ -282,11 +307,16 @@ export function nowRow(rows: readonly number[], slotMinutes: number, date: strin
   return index === -1 ? null : index;
 }
 
-/** "Closed on Sunday", or with bookings "Closed on Saturday — 2 appointments booked before the change" (A6). */
+/** "Closed on Sunday", or with bookings "Closed on Saturday — 2 appointments booked before the change" (A6). `booked` counts non-cancelled ones only (`liveCount`). */
 export function closedDaySentence(date: string, booked: number): string {
   const day = weekdayLong(istWeekdayOf(date));
   if (booked === 0) return `Closed on ${day}`;
   return `Closed on ${day} — ${booked} appointment${booked === 1 ? '' : 's'} booked before the change`;
+}
+
+/** The appointments that still hold their slot (not cancelled). */
+export function liveCount(appointments: readonly DockAppointment[]): number {
+  return appointments.filter((appointment) => appointment.status !== 'cancelled').length;
 }
 
 /** The first-use empty state (no door). */
@@ -303,9 +333,22 @@ export function doorPageLabel(page: number, total: number): string {
 
 // ── the week ─────────────────────────────────────────────────────────────────
 
+/** The Week's appointments grouped once per render: `doorId|date` → by start then code. */
+export function weekIndex(appointments: readonly DockAppointment[]): Map<string, DockAppointment[]> {
+  const index = new Map<string, DockAppointment[]>();
+  for (const appointment of appointments) {
+    const key = `${appointment.dockDoorId}|${istDateOf(appointment.startsAt)}`;
+    const list = index.get(key);
+    if (list === undefined) index.set(key, [appointment]);
+    else list.push(appointment);
+  }
+  for (const list of index.values()) list.sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.code.localeCompare(b.code));
+  return index;
+}
+
 /** One Week cell: up to four entries, then how many more. */
-export function weekCell(appointments: readonly DockAppointment[], doorId: string, date: string): { entries: DockAppointment[]; more: number } {
-  const mine = appointmentsOn(appointments, date).filter((appointment) => appointment.dockDoorId === doorId);
+export function weekCell(index: ReadonlyMap<string, readonly DockAppointment[]>, doorId: string, date: string): { entries: DockAppointment[]; more: number } {
+  const mine = index.get(`${doorId}|${date}`) ?? [];
   return { entries: mine.slice(0, WEEK_CELL_ENTRIES), more: Math.max(0, mine.length - WEEK_CELL_ENTRIES) };
 }
 
@@ -448,10 +491,14 @@ export function documentLabels(documents: DockAppointment['documents'], clientNa
 
 // ── the gate-in's appointment picker (decision 8, A14) ──────────────────────
 
-/** The picker's read: IST yesterday to tomorrow (A14's window — one three-day read). */
-export function linkableWindow(nowMs: number): { from: string; to: string } {
-  const today = istDateOf(nowMs);
-  return { from: addIsoDays(today, -1), to: addIsoDays(today, 1) };
+/**
+ * The picker's read (A14 — one three-day read): the IST day before, of and
+ * after the VISIT — the server centres its link window on the gate-in's own
+ * IST date (`istDateOf(gatedInAt)`), not on its clock.
+ */
+export function linkableWindow(visitMs: number): { from: string; to: string } {
+  const day = istDateOf(visitMs);
+  return { from: addIsoDays(day, -1), to: addIsoDays(day, 1) };
 }
 
 /** The appointments the gate desk may link: `booked` (a no-show still links — decision 8), by start. */
@@ -617,15 +664,19 @@ export interface SlotOption {
  * when it is off the grid (`keep`, so a note edit never moves it — A5).
  */
 export function startOptions(
-  schedule: Pick<DockSchedule, 'slotMinutes' | 'opensAt' | 'closesAt'>,
+  schedule: Pick<DockSchedule, 'slotMinutes' | 'opensAt' | 'closesAt' | 'openDays'>,
   date: string,
   nowMs: number,
   keep: number | null = null,
 ): SlotOption[] {
+  // A cleared or malformed date has no slots (never an invalid instant).
+  if (!isRealDate(date)) return [];
   const { opens, closes } = openingMinutes(schedule);
   const slot = schedule.slotMinutes;
   const options: SlotOption[] = [];
-  for (let minute = opens; minute + slot <= closes; minute += slot) {
+  // A closed day offers no slot (the server refuses `dock-closed`); only a reschedule's own start stays.
+  const open = isOpenDay(schedule, date);
+  for (let minute = opens; open && minute + slot <= closes; minute += slot) {
     const past = Date.parse(istInstantOf(date, minute + slot)) <= nowMs;
     options.push({ minute, label: minuteLabel(minute), disabled: past && minute !== keep });
   }

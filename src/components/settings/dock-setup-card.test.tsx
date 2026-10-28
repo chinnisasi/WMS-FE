@@ -35,6 +35,7 @@ let doors: Record<string, unknown>[] = [];
 let schedule: Record<string, unknown> = DEFAULTS;
 let nextProblem: { status: number; code: string; detail: string; extensions?: Record<string, unknown> } | null = null;
 let requests: { method: string; url: URL; body: unknown; key: string | null }[] = [];
+let warehousesMode: 'ok' | 'fail' = 'ok';
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -57,6 +58,7 @@ function stubRouter(): void {
     }
     requests.push({ method, url, body, key: request.headers.get('Idempotency-Key') });
     const base = `/api/v1/tenants/${T}`;
+    if (url.pathname === `${base}/warehouses` && warehousesMode === 'fail') return json(500, { code: 'internal', title: 'Boom', status: 500, detail: 'warehouses down' });
     if (url.pathname === `${base}/warehouses`) return json(200, { items: [{ id: WH, code: 'BLR-1', name: 'Bengaluru DC' }], nextCursor: null });
     if (method !== 'GET' && nextProblem !== null) {
       const problem = nextProblem;
@@ -93,6 +95,7 @@ beforeEach(() => {
   schedule = DEFAULTS;
   nextProblem = null;
   requests = [];
+  warehousesMode = 'ok';
   stubRouter();
 });
 
@@ -225,5 +228,48 @@ describe('AC3 — set up', () => {
     await press(buttonByText(card().querySelector<HTMLElement>('[role="group"][aria-label="Deactivate D3"]')!, 'Deactivate'));
     expect(card().querySelector('[data-testid="dock-door-status-D3"]')!.textContent).toBe('Inactive');
     expect(buttonByText(card(), 'Reactivate')).toBeDefined();
+  });
+});
+
+describe('code review fixes', () => {
+  test('W2 — /settings#dock-setup scrolls the card into view once its reads settle', async () => {
+    const scrolled: unknown[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, arg?: unknown) {
+      scrolled.push([this.id, arg]);
+    } as typeof HTMLElement.prototype.scrollIntoView;
+    window.history.replaceState(null, '', '/settings#dock-setup');
+    try {
+      await mount('owner');
+      expect(scrolled).toEqual([['dock-setup', { block: 'start' }]]);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
+  test('W3 — a failed warehouses read shows the failure with Retry, never an absent card', async () => {
+    warehousesMode = 'fail';
+    await mount('owner');
+    expect(card().textContent).toContain('Warehouses not loaded');
+    expect(buttonByText(card(), 'Retry')).toBeDefined();
+  });
+
+  test('W4 / W5 — at 100 doors the Add form says why it is gone; the Edit code input is bounded like Add; no duplicate-key warning', async () => {
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => void errors.push(args.map(String).join(' '));
+    try {
+      doors = Array.from({ length: 100 }, (_, i) => door(`D${i + 1}`));
+      await mount('owner');
+      expect(card().querySelector('form[aria-label="Add a dock door"]')).toBeNull();
+      expect(card().querySelector('[data-testid="dock-door-limit"]')!.textContent).toContain('100 doors — the most a warehouse can have');
+      await press(buttonByText(card(), 'Edit'));
+      const edit = card().querySelector<HTMLFormElement>('form[aria-label="Edit D1"]')!;
+      expect(edit.querySelector<HTMLInputElement>('input[aria-label="Door code"]')!.maxLength).toBe(22);
+      expect(errors.filter((e) => e.includes('same key'))).toEqual([]);
+    } finally {
+      console.error = originalError;
+    }
   });
 });

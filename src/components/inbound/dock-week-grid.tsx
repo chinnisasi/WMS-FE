@@ -1,6 +1,6 @@
 'use client';
 
-import { isOpenDay, weekCell, weekEntryLabel, type DockAppointment, type DockDoor, type DockSchedule } from '@/lib/dock-schedule';
+import { isOpenDay, weekCell, weekEntryLabel, weekIndex, type DockAppointment, type DockDoor, type DockSchedule } from '@/lib/dock-schedule';
 import { istDayLabel } from '@/lib/ist';
 
 /**
@@ -23,6 +23,8 @@ export function DockWeekGrid({
   onOpen: (appointmentId: string) => void;
   onDay: (date: string) => void;
 }) {
+  // Grouped once per render (door × day), never re-filtered per cell.
+  const index = weekIndex(appointments);
   return (
     <div className="max-h-[70vh] overflow-auto rounded-sm border border-(--border)" data-testid="dock-week-grid">
       <table className="border-collapse text-xs" aria-label="Dock doors by day">
@@ -49,7 +51,7 @@ export function DockWeekGrid({
                 {!door.active && <span className="text-(--muted-foreground)"> · inactive</span>}
               </th>
               {dates.map((date) => {
-                const cell = weekCell(appointments, door.id, date);
+                const cell = weekCell(index, door.id, date);
                 return (
                   <td key={date} className="border-l border-(--border) px-1 py-1 align-top">
                     <ul className="flex flex-col gap-0.5">

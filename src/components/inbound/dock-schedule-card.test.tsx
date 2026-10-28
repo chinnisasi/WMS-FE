@@ -81,6 +81,22 @@ let summary: Record<string, unknown> = EMPTY_SUMMARY;
 let windowMode: 'ok' | 'fail' = 'ok';
 let writeAnswers: ({ kind: 'ok'; appointment: Record<string, unknown> } | { kind: 'problem'; status: number; code: string; detail: string; extensions?: Record<string, unknown> })[] = [];
 let requests: { method: string; url: URL; body: unknown; key: string | null }[] = [];
+/** When set, the window read waits on it (a refresh mid-flight). */
+let holdWindow: Promise<void> | null = null;
+/** When set, the one-appointment read waits on it (the drawer's re-read lagging a write). */
+let holdAppointment: Promise<void> | null = null;
+/** When set, writes wait on it (a write in flight). */
+let holdWrite: Promise<void> | null = null;
+/** The next write's request is dropped (a transport failure after the server may have committed). */
+let dropNextWrite = false;
+
+function deferred(): { promise: Promise<void>; release: () => void } {
+  let release = () => undefined as void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -105,6 +121,7 @@ function stubRouter(): void {
       return json(200, { items: [{ id: 'c-glow', code: 'GLOW', name: 'GlowCo', status: 'active', systemOwned: false }] });
     }
     if (pathname === `${base}/receiving/dock-schedule`) {
+      if (holdWindow !== null) await holdWindow;
       if (windowMode === 'fail') return json(500, { code: 'internal', title: 'Boom', status: 500, detail: 'dock down' });
       return json(200, {
         // The server's clock: well before the fixture dates.
@@ -120,11 +137,17 @@ function stubRouter(): void {
     }
     const appointmentsBase = `${base}/receiving/dock-appointments`;
     if (pathname.startsWith(`${appointmentsBase}/`) && method === 'GET') {
+      if (holdAppointment !== null) await holdAppointment;
       const id = pathname.slice(appointmentsBase.length + 1);
       const found = appointments.find((a) => a.id === id);
       return found === undefined ? json(404, { code: 'not-found', title: 'Nope', status: 404, detail: 'no such appointment' }) : json(200, { appointment: found });
     }
     if (pathname.startsWith(appointmentsBase) && method !== 'GET') {
+      if (holdWrite !== null) await holdWrite;
+      if (dropNextWrite) {
+        dropNextWrite = false;
+        throw new TypeError('Failed to fetch');
+      }
       const answer = writeAnswers.shift();
       if (answer === undefined) return json(500, { code: 'internal', title: 'Unscripted write', status: 500 });
       if (answer.kind === 'problem') return json(answer.status, { code: answer.code, title: answer.detail, detail: answer.detail, status: answer.status, ...answer.extensions });
@@ -165,6 +188,10 @@ beforeEach(() => {
   windowMode = 'ok';
   writeAnswers = [];
   requests = [];
+  holdWindow = null;
+  holdAppointment = null;
+  holdWrite = null;
+  dropNextWrite = false;
   stubRouter();
 });
 
@@ -439,12 +466,20 @@ describe('states', () => {
     expect(card().querySelector('[data-testid="dock-day-grid"]')).not.toBeNull();
   });
 
-  test('Refresh re-reads, keeping the calendar on screen; Show cancelled asks for them', async () => {
+  test('Refresh re-reads, keeping the calendar on screen with "Refreshing…" mid-flight; Show cancelled asks for them', async () => {
     await mount('owner');
     const before = windowReads().length;
+    const gate = deferred();
+    holdWindow = gate.promise;
     await press(buttonByText(card(), 'Refresh'));
     expect(windowReads().length).toBe(before + 1);
+    // Mid-flight: the last data stays, and says it is refreshing.
     expect(card().querySelector('[data-testid="dock-day-grid"]')).not.toBeNull();
+    expect(card().textContent).toContain('Refreshing…');
+    holdWindow = null;
+    await act(async () => gate.release());
+    await settle();
+    expect(card().textContent).not.toContain('Refreshing…');
     const toggle = [...card().querySelectorAll('label')].find((l) => l.textContent === 'Show cancelled')!.querySelector('input')!;
     await press(toggle);
     expect(windowReads().at(-1)!.url.searchParams.get('includeCancelled')).toBe('true');
@@ -465,5 +500,179 @@ describe('states', () => {
       document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
     });
     expect((document.activeElement as HTMLElement).getAttribute('aria-label')).toBe('Book D2 at 09:30');
+  });
+});
+
+describe('code review fixes', () => {
+  const openBook = async () => {
+    await press(buttonByText(card(), 'Book a slot'));
+    return drawer()!.querySelector<HTMLFormElement>('form[aria-label="Book a dock appointment"]')!;
+  };
+  const startSelect = (form: HTMLFormElement) => form.querySelector<HTMLSelectElement>('select[aria-label="Start (IST)"]')!;
+  const dateInput = (form: HTMLFormElement) => form.querySelector<HTMLInputElement>('input[aria-label="Date"]')!;
+
+  test('WE1 — clearing the date never throws; it offers no start', async () => {
+    await mount('owner');
+    const form = await openBook();
+    setInput(dateInput(form), '');
+    expect([...startSelect(form).options].map((o) => o.value)).toEqual(['']);
+  });
+
+  test('WE2 / WE3 — a date change drops a start that is not an open slot of the new date (a closed Sunday has none)', async () => {
+    await mount('owner');
+    await press(buttonByLabel(card(), 'Book D3 at 10:30'));
+    const form = drawer()!.querySelector<HTMLFormElement>('form')!;
+    expect(startSelect(form).value).toBe('630');
+    setInput(dateInput(form), '2030-01-16');
+    expect(startSelect(form).value).toBe('630');
+    setInput(dateInput(form), SUNDAY);
+    expect(startSelect(form).value).toBe('');
+    expect(startSelect(form).options.length).toBe(1);
+  });
+
+  test('WV1 — a dropped booking retried sends the same key; an edit after a refusal sends a new one', async () => {
+    await mount('owner');
+    await press(buttonByLabel(card(), 'Book D3 at 10:30'));
+    const form = drawer()!.querySelector<HTMLFormElement>('form')!;
+    dropNextWrite = true;
+    await press(buttonByText(form, 'Book appointment'));
+    expect(form.querySelector('[role="alert"]')!.textContent).toContain('unreachable');
+    writeAnswers = [{ kind: 'problem', status: 409, code: 'dock-door-inactive', detail: 'x' }];
+    await press(buttonByText(form, 'Book appointment'));
+    expect(writes()[1]!.key).toBe(writes()[0]!.key);
+    setSelect(form.querySelector<HTMLSelectElement>('select[aria-label="Dock door"]')!, DOORS[3]!.id);
+    writeAnswers = [{ kind: 'ok', appointment: appointment({ dockDoorId: DOORS[3]!.id, doorCode: 'D4' }) }];
+    await press(buttonByText(form, 'Book appointment'));
+    expect(writes()[2]!.key).not.toBe(writes()[1]!.key);
+  });
+
+  test('WE5 — while a booking is in flight another block opens nothing, and Esc does not close the drawer', async () => {
+    appointments = [appointment({ dockDoorId: DOORS[0]!.id, doorCode: 'D1' })];
+    await mount('owner');
+    await press(buttonByLabel(card(), 'Book D3 at 10:30'));
+    const form = drawer()!.querySelector<HTMLFormElement>('form')!;
+    const gate = deferred();
+    holdWrite = gate.promise;
+    writeAnswers = [{ kind: 'ok', appointment: appointment({ id: '0198f7a2-1b3c-7d4e-8f90-0000000000a2', code: 'DA-0002' }) }];
+    await press(buttonByText(form, 'Book appointment'));
+    await press(card().querySelector<HTMLElement>('[data-testid="dock-block-DA-0001"]'));
+    expect(drawer()!.querySelector('form[aria-label="Book a dock appointment"]')).not.toBeNull();
+    act(() => {
+      form.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(drawer()).not.toBeNull();
+    holdWrite = null;
+    await act(async () => gate.release());
+    await settle();
+    expect(card().textContent).toContain('DA-0002 booked');
+  });
+
+  test('W15 — Esc in a form with edits returns focus to the drawer; a second Esc closes it', async () => {
+    await mount('owner');
+    const form = await openBook();
+    const note = form.querySelector<HTMLTextAreaElement>('textarea')!;
+    setInput(note, 'Fragile');
+    act(() => {
+      note.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(drawer()).not.toBeNull();
+    expect(document.activeElement).toBe(drawer()!.querySelector('h2'));
+    act(() => {
+      drawer()!.querySelector('h2')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(drawer()).toBeNull();
+  });
+
+  test('W6 — a failed re-read keeps the drawer and its draft', async () => {
+    appointments = [appointment()];
+    await mount('owner', { open: A1 });
+    await press(buttonByText(drawer()!, 'Reschedule'));
+    setInput(drawer()!.querySelector<HTMLTextAreaElement>('textarea')!, 'Keep me');
+    windowMode = 'fail';
+    await press(buttonByText(card(), 'Refresh'));
+    expect(card().textContent).toContain('Dock schedule unavailable');
+    expect(drawer()!.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Keep me');
+  });
+
+  test('W12 — after a cancel the drawer shows the answer (no Cancel offered again) while its own re-read lags', async () => {
+    appointments = [appointment()];
+    await mount('owner', { open: A1 });
+    await press(buttonByText(drawer()!, 'Cancel appointment'));
+    const group = drawer()!.querySelector<HTMLElement>('[role="group"][aria-label="Cancel DA-0001"]')!;
+    setInput(group.querySelector<HTMLInputElement>('input')!, 'Vendor postponed');
+    holdAppointment = new Promise(() => undefined);
+    writeAnswers = [{ kind: 'ok', appointment: appointment({ status: 'cancelled', cancelledAt: '2030-01-14T05:00:00.000Z', cancelledBy: 'u-1', cancelReason: 'Vendor postponed', updatedAt: '2030-01-14T05:00:00.000Z' }) }];
+    await press([...group.querySelectorAll('button')].find((b) => b.textContent === 'Cancel appointment'));
+    expect(drawer()!.querySelector('[data-testid="dock-detail-chip"]')!.textContent).toBe('Cancelled');
+    expect(buttonByText(drawer()!, 'Cancel appointment')).toBeUndefined();
+    expect(buttonByText(drawer()!, 'Reschedule')).toBeUndefined();
+  });
+
+  test('a stale refusal in the drawer re-reads the appointment as well as the window', async () => {
+    appointments = [appointment()];
+    await mount('owner', { open: A1 });
+    await press(buttonByText(drawer()!, 'Reschedule'));
+    const reads = () => requests.filter((r) => r.method === 'GET' && r.url.pathname.endsWith(`/dock-appointments/${A1}`)).length;
+    const before = reads();
+    writeAnswers = [{ kind: 'problem', status: 409, code: 'appointment-closed', detail: 'x' }];
+    await press(buttonByText(drawer()!.querySelector('form')!, 'Save changes'));
+    expect(reads()).toBeGreaterThan(before);
+  });
+
+  test('W8 / W9 — the grid has grid roles, and every booking of a merged block is keyboard-reachable', async () => {
+    schedule = { ...SCHEDULE, slotMinutes: 60 };
+    appointments = [
+      appointment({ startsAt: istInstantOf(TUESDAY, 600), endsAt: istInstantOf(TUESDAY, 630) }),
+      appointment({ id: '0198f7a2-1b3c-7d4e-8f90-0000000000a2', code: 'DA-0002', startsAt: istInstantOf(TUESDAY, 630), endsAt: istInstantOf(TUESDAY, 660) }),
+    ];
+    await mount('owner');
+    const grid = card().querySelector<HTMLElement>('[data-testid="dock-day-grid"]')!;
+    expect(grid.querySelector('table')!.getAttribute('role')).toBe('grid');
+    expect(grid.querySelectorAll('tbody tr[role="row"]').length).toBeGreaterThan(0);
+    expect(grid.querySelectorAll('td[role="gridcell"]').length).toBeGreaterThan(0);
+    const first = card().querySelector<HTMLElement>('[data-testid="dock-block-DA-0001"]')!;
+    const second = card().querySelector<HTMLElement>('[data-testid="dock-block-DA-0002"]')!;
+    expect(first.closest('td')).toBe(second.closest('td'));
+    expect(second.getAttribute('data-cell')).not.toBeNull();
+    act(() => first.focus());
+    act(() => {
+      first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    });
+    expect(document.activeElement).toBe(second);
+  });
+
+  test('W10 — Skip to list view lands on a list of the same day', async () => {
+    appointments = [appointment()];
+    await mount('owner');
+    await press(buttonByText(card(), 'Skip to list view'));
+    const last = windowReads().at(-1)!.url.searchParams;
+    expect([last.get('from'), last.get('to')]).toEqual([TUESDAY, TUESDAY]);
+    expect(card().querySelector('[data-testid="dock-day-grid"]')).toBeNull();
+    expect(card().textContent).toContain('DA-0001');
+  });
+
+  test('WE11 / WE12 — with Show cancelled a cancelled booking is a line that keeps the Book button; a closed day counts live ones only', async () => {
+    appointments = [appointment({ status: 'cancelled', cancelledAt: '2030-01-14T00:00:00.000Z', cancelledBy: 'u-1', cancelReason: 'x' })];
+    await mount('owner', { cancelled: true });
+    const line = card().querySelector<HTMLElement>('[data-testid="dock-cancelled-DA-0001"]')!;
+    expect(line.textContent).toBe('DA-0001 · Cancelled');
+    expect(line.closest('td')!.querySelector('button[aria-label="Book D3 at 10:30"]')).not.toBeNull();
+    view!.unmount();
+    view = undefined;
+    schedule = { ...SCHEDULE, openDays: [1, 2, 3, 4, 5] };
+    appointments = [appointment({ status: 'cancelled', startsAt: istInstantOf(SATURDAY, 600), endsAt: istInstantOf(SATURDAY, 660), cancelledAt: 'x', cancelledBy: 'u', cancelReason: 'x' })];
+    await mount('owner', { date: SATURDAY, cancelled: true });
+    expect(card().querySelector('[data-testid="dock-closed-day"]')!.textContent).toBe('Closed on Saturday');
+  });
+
+  test('W1 — a return to the tab seeds from the live URL, not the first load (a closed ?open= stays closed)', async () => {
+    appointments = [appointment()];
+    originalReplace.call(window.history, null, '', '/inbound?tab=dock');
+    try {
+      await mount('owner', { open: A1 });
+      expect(drawer()).toBeNull();
+    } finally {
+      originalReplace.call(window.history, null, '', '/');
+    }
   });
 });

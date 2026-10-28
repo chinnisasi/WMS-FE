@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiCreateDockDoor, fetchApiPutDockSchedule, fetchApiUpdateDockDoor } from '@/lib/api/client';
 import { notifyInboundChanged } from '@/lib/asns';
@@ -31,6 +31,10 @@ import { ConfirmRow } from '@/components/settings/confirm-row';
 import { lineButtonClass as buttonClass, lineInputClass as inputClass } from '@/components/shared/line-rows';
 import { StatusChip } from '@/components/shared/status-chip';
 import { ReadFailure } from '@/components/shared/surface';
+import { WarehousesFailure } from '@/components/shared/warehouses-failure';
+
+/** The card's anchor — the Dock schedule tab's first-use link (`/settings#dock-setup`). */
+export const DOCK_SETUP_ANCHOR = 'dock-setup';
 
 /**
  * Story 2-3b (decisions 1, 3) — Settings → Warehouses → "Dock doors and
@@ -102,16 +106,51 @@ function DockSetupSessioned() {
   const shown = banner !== null && banner.warehouseId === warehouseId ? banner.outcome : null;
   const show = (outcome: Outcome) => warehouseId !== null && setBanner({ warehouseId, outcome });
 
-  if (warehouseRead.state !== 'ready' || warehouseId === null) return null;
+  // W2 — `/settings#dock-setup` (the Dock schedule's first-use link): the card
+  // renders after the session and its reads, so the browser's own jump
+  // misses it — scroll once the reads settle (the audit-exports pattern).
+  const anchor = useRef<HTMLElement | null>(null);
+  const scrollPending = useRef(false);
+  useEffect(() => {
+    if (window.location.hash === `#${DOCK_SETUP_ANCHOR}`) scrollPending.current = true;
+  }, []);
+  const settled = doors.state !== 'loading' && schedule.state !== 'loading';
+  useEffect(() => {
+    if (!scrollPending.current || !settled) return;
+    scrollPending.current = false;
+    anchor.current?.scrollIntoView?.({ block: 'start' });
+  }, [settled]);
+
+  const header = (
+    <div className="flex flex-col gap-0.5">
+      <h2 className="font-medium">Dock doors and schedule</h2>
+      {warehouse !== undefined && (
+        <div className="text-(--muted-foreground)">
+          {`${warehouse.code} ${warehouse.name}`.trim()} — the doors trucks are booked to, and when the dock is open (IST).
+        </div>
+      )}
+    </div>
+  );
+
+  // W3 — a failed or loading warehouses read says so; it never leaves the card out.
+  if (warehouseRead.state !== 'ready' || warehouseId === null) {
+    return (
+      <section id={DOCK_SETUP_ANCHOR} ref={anchor} className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm" data-testid="dock-setup-card">
+        {header}
+        {warehouseRead.state === 'failed' ? (
+          <WarehousesFailure state={warehouseRead} />
+        ) : warehouseRead.state === 'loading' ? (
+          <div className="text-xs text-(--muted-foreground)">Loading the warehouses…</div>
+        ) : (
+          <div className="text-(--muted-foreground)">Create a warehouse first — dock doors live inside one.</div>
+        )}
+      </section>
+    );
+  }
 
   return (
-    <section id="dock-setup" className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm" data-testid="dock-setup-card">
-      <div className="flex flex-col gap-0.5">
-        <h2 className="font-medium">Dock doors and schedule</h2>
-        <div className="text-(--muted-foreground)">
-          {`${warehouse?.code ?? ''} ${warehouse?.name ?? ''}`.trim()} — the doors trucks are booked to, and when the dock is open (IST).
-        </div>
-      </div>
+    <section id={DOCK_SETUP_ANCHOR} ref={anchor} className="flex flex-col gap-3 rounded-md border border-(--border) p-3 text-sm" data-testid="dock-setup-card">
+      {header}
       {shown !== null && <FeedbackBanner tone={shown.tone} word={shown.word} reason={shown.reason} />}
 
       <div className="flex flex-col gap-2">
@@ -120,7 +159,7 @@ function DockSetupSessioned() {
           <ReadFailure word="Dock doors unavailable" reason={doors.reason} onRetry={doors.reload} />
         ) : (
           <DoorsTable
-            key={warehouseId}
+            key={`doors|${warehouseId}`}
             warehouseId={warehouseId}
             doors={doors.state === 'ready' ? doors.data : []}
             loading={doors.state === 'loading'}
@@ -129,7 +168,12 @@ function DockSetupSessioned() {
           />
         )}
         {canManage && doors.state === 'ready' && doors.data.length < DOCK_LIMITS.doorsPerWarehouse && (
-          <AddDoorForm key={warehouseId} warehouseId={warehouseId} onOutcome={show} />
+          <AddDoorForm key={`add|${warehouseId}`} warehouseId={warehouseId} onOutcome={show} />
+        )}
+        {canManage && doors.state === 'ready' && doors.data.length >= DOCK_LIMITS.doorsPerWarehouse && (
+          <div className="text-xs text-(--muted-foreground)" data-testid="dock-door-limit">
+            {DOCK_LIMITS.doorsPerWarehouse} doors — the most a warehouse can have. Deactivate or rename one instead.
+          </div>
         )}
       </div>
 
@@ -391,7 +435,7 @@ function EditDoorForm({
       }}
     >
       <fieldset disabled={busy} className="m-0 flex flex-wrap items-center gap-2 border-0 p-0">
-        <input type="text" aria-label="Door code" value={code} onChange={(event) => { setProblem(null); setCode(event.target.value); }} className={`${inputClass} w-28`} />
+        <input type="text" aria-label="Door code" maxLength={DOCK_LIMITS.doorCode + 2} value={code} onChange={(event) => { setProblem(null); setCode(event.target.value); }} className={`${inputClass} w-28`} />
         <input type="text" aria-label="Door name" maxLength={DOCK_LIMITS.doorName} value={name} onChange={(event) => { setProblem(null); setName(event.target.value); }} className={`${inputClass} w-48`} />
         <button type="submit" className={primaryClass}>
           {busy ? 'Saving…' : 'Save door'}

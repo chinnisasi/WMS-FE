@@ -44,6 +44,8 @@ interface DrawerContext {
   readonly canSchedule: boolean;
   readonly clients: readonly ClientDto[] | null;
   readonly tenantName: string | null;
+  /** The card's ticking clock. */
+  readonly nowMs: number;
 }
 
 /**
@@ -61,6 +63,8 @@ export function DockAppointmentDrawer({
   onClose,
   onDone,
   onStale,
+  onBusy,
+  written,
 }: {
   target: DockDrawerTarget;
   context: DrawerContext;
@@ -68,8 +72,16 @@ export function DockAppointmentDrawer({
   /** A write landed: the banner, and (for a booking) the new appointment to open. */
   onDone: (outcome: DockOutcome, appointment: DockAppointment) => void;
   onStale: () => void;
+  /** A write is in flight (the card then opens no other target — WE5). */
+  onBusy: (busy: boolean) => void;
+  /** The last write's answer (W12): shown until the drawer's own re-read catches up. */
+  written: DockAppointment | null;
 }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusyState] = useState(false);
+  const setBusy = (next: boolean) => {
+    setBusyState(next);
+    onBusy(next);
+  };
   if (target.kind === 'book') {
     return (
       <DetailDrawer title="Book a dock appointment" onClose={onClose} closeDisabled={busy} testId="dock-drawer">
@@ -83,13 +95,25 @@ export function DockAppointmentDrawer({
           tenantName={context.tenantName}
           onBusy={setBusy}
           onStale={onStale}
+          nowMs={context.nowMs}
           onCancel={onClose}
           onSaved={(appointment) => onDone(bookedOutcome(appointment), appointment)}
         />
       </DetailDrawer>
     );
   }
-  return <AppointmentDetail appointmentId={target.appointmentId} context={context} busy={busy} setBusy={setBusy} onClose={onClose} onDone={onDone} onStale={onStale} />;
+  return (
+    <AppointmentDetail
+      appointmentId={target.appointmentId}
+      context={context}
+      busy={busy}
+      setBusy={setBusy}
+      onClose={onClose}
+      onDone={onDone}
+      onStale={onStale}
+      written={written !== null && written.id === target.appointmentId ? written : null}
+    />
+  );
 }
 
 function AppointmentDetail({
@@ -100,6 +124,7 @@ function AppointmentDetail({
   onClose,
   onDone,
   onStale,
+  written,
 }: {
   appointmentId: string;
   context: DrawerContext;
@@ -108,13 +133,23 @@ function AppointmentDetail({
   onClose: () => void;
   onDone: (outcome: DockOutcome, appointment: DockAppointment) => void;
   onStale: () => void;
+  written: DockAppointment | null;
 }) {
   const read = useDockAppointment(appointmentId);
+  // A stale refusal re-reads the window AND this appointment (the drawer must not offer a move the server just refused).
+  const stale = () => {
+    read.reload();
+    onStale();
+  };
   const [panel, setPanel] = useState<'none' | 'reschedule' | 'cancel'>('none');
   const [reason, setReason] = useState('');
   const [refusal, setRefusal] = useState<string | null>(null);
 
-  const appointment = read.state === 'ready' ? read.data : null;
+  // W12 — the write's own answer wins until the re-read is at least as new
+  // (never the pre-write appointment with Reschedule / Cancel offered again).
+  const fromRead = read.state === 'ready' ? read.data : null;
+  const appointment =
+    written !== null && (fromRead === null || read.refreshing || fromRead.updatedAt < written.updatedAt) ? written : fromRead;
   const title = appointment?.code ?? 'Dock appointment';
   return (
     <DetailDrawer
@@ -124,10 +159,10 @@ function AppointmentDetail({
       closeDisabled={busy}
       testId="dock-drawer"
     >
-      {read.state === 'loading' && <div className="text-xs text-(--muted-foreground)">Loading the appointment…</div>}
+      {read.state === 'loading' && appointment === null && <div className="text-xs text-(--muted-foreground)">Loading the appointment…</div>}
       {read.state === 'failed' && <ReadFailure word="Appointment not loaded" reason={read.reason} onRetry={read.reload} />}
       {appointment !== null && (
-        <AppointmentFacts appointment={appointment} clients={context.clients} tenantName={context.tenantName} refreshing={read.refreshing} />
+        <AppointmentFacts appointment={appointment} clients={context.clients} tenantName={context.tenantName} refreshing={read.refreshing || read.state === 'loading'} />
       )}
       {refusal !== null && (
         <div role="alert" className="text-xs text-(--destructive)">
@@ -154,7 +189,7 @@ function AppointmentDetail({
             </div>
           ) : panel === 'reschedule' ? (
             <DockAppointmentForm
-              key={`${appointment.id}|${appointment.updatedAt}`}
+              key={appointment.id}
               mode={{ kind: 'reschedule', appointment } satisfies DockFormMode}
               warehouseId={context.warehouseId}
               schedule={context.schedule}
@@ -163,7 +198,8 @@ function AppointmentDetail({
               clients={context.clients}
               tenantName={context.tenantName}
               onBusy={setBusy}
-              onStale={onStale}
+              onStale={stale}
+              nowMs={context.nowMs}
               onCancel={() => setPanel('none')}
               onSaved={(saved) => {
                 setPanel('none');
@@ -182,9 +218,10 @@ function AppointmentDetail({
                 setPanel('none');
                 onDone(cancelledOutcome(cancelled), cancelled);
               }}
+              busy={busy}
               onRejected={(text) => {
                 setRefusal(text);
-                onStale();
+                stale();
               }}
             />
           )}
@@ -202,8 +239,10 @@ function CancelConfirm({
   onClose,
   onDone,
   onRejected,
+  busy,
 }: {
   appointment: DockAppointment;
+  busy: boolean;
   reason: string;
   setReason: (reason: string) => void;
   setBusy: (busy: boolean) => void;
@@ -216,10 +255,11 @@ function CancelConfirm({
     <div
       className="flex flex-col gap-1 rounded-sm border border-(--border) p-2 text-xs"
       onKeyDown={(event) => {
-        // The inline confirmation is the topmost layer: Esc closes it first.
+        // The inline confirmation is the topmost layer: Esc closes it first —
+        // never while the cancel is in flight (that would drop its key, WE5).
         if (event.key === 'Escape') {
           event.preventDefault();
-          onClose();
+          if (!busy) onClose();
         }
       }}
     >

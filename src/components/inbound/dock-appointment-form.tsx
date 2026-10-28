@@ -13,6 +13,7 @@ import {
   draftOfAppointment,
   durationOptions,
   emptyDockDraft,
+  isStaleDockRefusal,
   parseDockDraft,
   startOptions,
   type DockAppointment,
@@ -67,6 +68,7 @@ export function DockAppointmentForm({
   onCancel,
   onBusy,
   onStale,
+  nowMs,
 }: {
   mode: DockFormMode;
   warehouseId: string;
@@ -81,12 +83,15 @@ export function DockAppointmentForm({
   onBusy: (busy: boolean) => void;
   /** A refusal that says the calendar moved — the caller re-reads it. */
   onStale: () => void;
+  /** The card's ticking clock (60 s): past slots follow it. */
+  nowMs: number;
 }) {
   const original = mode.kind === 'reschedule' ? mode.appointment : null;
-  const [draft, setDraft] = useState<DockDraft>(() =>
+  const [initialDraft] = useState<DockDraft>(() =>
     mode.kind === 'reschedule' ? draftOfAppointment(mode.appointment) : emptyDockDraft({ ...mode.seed, slotMinutes: schedule.slotMinutes }),
   );
-  const [nowMs] = useState(() => Date.now());
+  const [draft, setDraft] = useState<DockDraft>(initialDraft);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initialDraft);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const keyRef = useRef<{ key: string; body: string } | null>(null);
@@ -98,9 +103,17 @@ export function DockAppointmentForm({
     setDraft((current) => ({ ...current, ...patch }));
   }
 
+  /** WE2 — a new date keeps the start only when it is an enabled slot of that date (never a past, off-grid or missing one). */
+  function editDate(date: string) {
+    const options = startOptions(schedule, date, nowMs, keepStartOn(date));
+    const keeps = options.some((option) => !option.disabled && String(option.minute) === draft.start);
+    edit(keeps ? { date } : { date, start: '' });
+  }
+
   const originalDraft = original === null ? null : draftOfAppointment(original);
   // The booking's own start and length stay choosable on its own date (A5).
-  const keepStart = originalDraft !== null && originalDraft.date === draft.date ? Number(originalDraft.start) : null;
+  const keepStartOn = (date: string) => (originalDraft !== null && originalDraft.date === date ? Number(originalDraft.start) : null);
+  const keepStart = keepStartOn(draft.date);
   const keepDuration = originalDraft === null ? null : Number(originalDraft.duration);
   const starts = startOptions(schedule, draft.date, nowMs, keepStart);
   const durations = durationOptions(schedule.slotMinutes, keepDuration);
@@ -145,10 +158,8 @@ export function DockAppointmentForm({
       onSaved(appointment);
     } catch (error) {
       setProblem(dockReason(error));
-      if (error instanceof ApiProblem) {
-        if (['po-not-open', 'asn-not-open', 'document-warehouse-mismatch', 'not-found'].includes(error.code)) links.reload();
-        if (['dock-slot-taken', 'dock-door-inactive', 'conflict', 'appointment-closed', 'appointment-no-show'].includes(error.code)) onStale();
-      }
+      if (error instanceof ApiProblem && ['po-not-open', 'asn-not-open', 'document-warehouse-mismatch', 'not-found'].includes(error.code)) links.reload();
+      if (isStaleDockRefusal(error)) onStale();
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -163,6 +174,16 @@ export function DockAppointmentForm({
       aria-label={label}
       noValidate
       className="flex flex-col gap-2 rounded-sm border border-(--border) p-3"
+      onKeyDown={(event) => {
+        // W15 — Esc never drops a write in flight, and never loses typed edits:
+        // in a dirty form the first Esc returns focus to the drawer (its heading);
+        // Esc from there closes it.
+        if (event.key !== 'Escape' || event.defaultPrevented) return;
+        if (busy || dirty) {
+          event.preventDefault();
+          if (!busy) event.currentTarget.closest('[role="dialog"]')?.querySelector<HTMLElement>('h2')?.focus();
+        }
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
@@ -179,7 +200,7 @@ export function DockAppointmentForm({
               min={original === null ? today : undefined}
               max={addIsoDays(today, 90)}
               value={draft.date}
-              onChange={(event) => edit({ date: event.target.value })}
+              onChange={(event) => editDate(event.target.value)}
               className={inputClass}
             />
           </label>
