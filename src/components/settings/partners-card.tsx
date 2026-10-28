@@ -7,6 +7,7 @@ import {
   fetchApiCreatePartnerLink,
   fetchApiUpdatePartner,
   fetchApiUpdatePartnerLink,
+  fetchApiUpdatePartnerLinkShelfLife,
   fetchApiUpdatePartnerStatus,
 } from '@/lib/api/client';
 import type { ClientDto, PartnerDto } from '@/lib/api/generated';
@@ -18,11 +19,20 @@ import {
   PARTNER_ROLES,
   PARTNER_ROLE_LABEL,
   createPartnerBody,
+  gstinChangeShelfLifeWarning,
   linkClientLabel,
+  linkShelfLifeCopy,
+  linkShelfLifeGstinWarning,
+  linkShelfLifeSummary,
+  MAX_SHELF_LIFE_DAYS,
+  MAX_SHELF_LIFE_PERCENT,
+  MIN_SHELF_LIFE_DAYS,
+  MIN_SHELF_LIFE_PERCENT,
   linkedClientsLabel,
   notifyPartnersChanged,
   panAfterGstinEdit,
   parseLinkClientCode,
+  parseLinkShelfLife,
   parsePartnerForm,
   parseReason,
   partnerFormOf,
@@ -451,6 +461,11 @@ function PartnerForm({
             onChange={(e) => edit({ ...fields, gstin: e.target.value, pan: panAfterGstinEdit(fields.gstin, e.target.value, fields.pan) })}
           />
           <span className="text-xs text-(--muted-foreground)">Blank for an unregistered supplier. One partner is one GST registration.</span>
+          {gstinChangeShelfLifeWarning(partner, fields.gstin) !== null ? (
+            <span role="note" className="text-xs font-medium text-(--warning)">
+              {gstinChangeShelfLifeWarning(partner, fields.gstin)}
+            </span>
+          ) : null}
         </label>
         <label className="flex min-w-40 flex-1 flex-col gap-1">
           <span className={labelClass}>PAN</span>
@@ -601,6 +616,40 @@ function PartnerLinksPanel({
   const rowInFlight = useRef<Set<string>>(new Set());
   const [rowBusy, setRowBusy] = useState<ReadonlySet<string>>(new Set());
   const [codeEdit, setCodeEdit] = useState<{ linkId: string; text: string } | null>(null);
+  // Story 4-3b — the consignee shelf-life editor: one link at a time, a
+  // per-draft key (minted on first save, reused across retries of the
+  // unchanged draft, cleared on any edit and on success).
+  const [shelfEdit, setShelfEdit] = useState<{ linkId: string; days: string; percent: string } | null>(null);
+  const shelfKeyRef = useRef<string | null>(null);
+  const shelfInFlight = useRef(false);
+  const [shelfBusy, setShelfBusy] = useState(false);
+
+  async function saveShelfLife(link: PartnerLink) {
+    if (shelfEdit === null || shelfInFlight.current) return;
+    const parsed = parseLinkShelfLife(shelfEdit.days, shelfEdit.percent);
+    if (parsed.body === null) {
+      setProblem(parsed.problem);
+      return;
+    }
+    const session = readSession();
+    if (session === null) return;
+    shelfInFlight.current = true;
+    setShelfBusy(true);
+    setProblem(null);
+    shelfKeyRef.current ??= ulid();
+    try {
+      const updated = await fetchApiUpdatePartnerLinkShelfLife(session.tenant.id, partner.id, link.id, parsed.body, shelfKeyRef.current);
+      shelfKeyRef.current = null;
+      setShelfEdit(null);
+      onDirtyChange(false);
+      onChanged(updated, 'Shelf-life rule saved', `${linkClientLabel(link.clientId, clients)} · applies to waves generated from now on.`);
+    } catch (error) {
+      onRejected('Shelf-life rule not saved', partnerReason(error, 'saved'));
+    } finally {
+      shelfInFlight.current = false;
+      setShelfBusy(false);
+    }
+  }
 
   const editAdd = (apply: () => void) => {
     keyRef.current = null;
@@ -690,6 +739,11 @@ function PartnerLinksPanel({
                 <span className="font-mono text-xs">{link.clientCode ?? 'no client code'}</span>
                 <span>{link.active ? 'On' : 'Off'}</span>
                 {link.isDefault ? <span className="text-xs font-medium">Default vendor</span> : null}
+                {link.role === 'consignee' ? (
+                  <span className="text-xs" data-shelf-life={link.id}>
+                    {linkShelfLifeSummary(link) ?? 'No shelf-life rule'}
+                  </span>
+                ) : null}
                 {editing ? (
                   <>
                     <input
@@ -737,6 +791,24 @@ function PartnerLinksPanel({
                     Edit code
                   </button>
                 )}
+                {link.role === 'consignee' && (shelfEdit === null || shelfEdit.linkId !== link.id) ? (
+                  <button
+                    type="button"
+                    disabled={busyRow || shelfBusy}
+                    className={rowButtonClass}
+                    onClick={() => {
+                      setProblem(null);
+                      shelfKeyRef.current = null;
+                      setShelfEdit({
+                        linkId: link.id,
+                        days: link.minShelfLifeDays == null ? '' : String(link.minShelfLifeDays),
+                        percent: link.minShelfLifePercent == null ? '' : String(link.minShelfLifePercent),
+                      });
+                    }}
+                  >
+                    Shelf life
+                  </button>
+                ) : null}
                 {link.active && link.role === 'vendor' && partner.status === 'active' ? (
                   link.isDefault ? (
                     <button type="button" disabled={busyRow} className={rowButtonClass} onClick={() => void patchLink(link, { isDefault: false }, 'Default vendor cleared')}>
@@ -756,6 +828,68 @@ function PartnerLinksPanel({
                   <button type="button" disabled={busyRow} className={rowButtonClass} onClick={() => void patchLink(link, { active: true }, 'Link switched on')}>
                     Switch on
                   </button>
+                ) : null}
+                {shelfEdit !== null && shelfEdit.linkId === link.id ? (
+                  <div role="group" aria-label={`Shelf life for ${linkClientLabel(link.clientId, clients)}`} className="flex w-full flex-col gap-2 rounded-sm border border-(--border) p-2">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs">Minimum days left (blank = none)</span>
+                        <input
+                          aria-label="Minimum days left"
+                          className={`${inputClass} w-32`}
+                          inputMode="numeric"
+                          min={MIN_SHELF_LIFE_DAYS}
+                          max={MAX_SHELF_LIFE_DAYS}
+                          value={shelfEdit.days}
+                          onChange={(e) => {
+                            shelfKeyRef.current = null;
+                            onDirtyChange(true);
+                            setProblem(null);
+                            setShelfEdit({ ...shelfEdit, days: e.target.value });
+                          }}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs">Minimum % of total life (blank = none)</span>
+                        <input
+                          aria-label="Minimum percent of total shelf life"
+                          className={`${inputClass} w-32`}
+                          inputMode="numeric"
+                          min={MIN_SHELF_LIFE_PERCENT}
+                          max={MAX_SHELF_LIFE_PERCENT}
+                          value={shelfEdit.percent}
+                          onChange={(e) => {
+                            shelfKeyRef.current = null;
+                            onDirtyChange(true);
+                            setProblem(null);
+                            setShelfEdit({ ...shelfEdit, percent: e.target.value });
+                          }}
+                        />
+                      </label>
+                      <button type="button" disabled={shelfBusy} className={primaryButtonClass} onClick={() => void saveShelfLife(link)}>
+                        {shelfBusy ? 'Saving…' : 'Save rule'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={shelfBusy}
+                        className={rowButtonClass}
+                        onClick={() => {
+                          setProblem(null);
+                          shelfKeyRef.current = null;
+                          onDirtyChange(false);
+                          setShelfEdit(null);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <p className="text-xs text-(--muted-foreground)">{linkShelfLifeCopy(linkClientLabel(link.clientId, clients))}</p>
+                    {linkShelfLifeGstinWarning(partner) !== null ? (
+                      <p role="note" className="text-xs font-medium">
+                        {linkShelfLifeGstinWarning(partner)}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </li>
             );

@@ -189,6 +189,12 @@ export function allocationReason(line: {
   batchReceivedOn?: string | null;
   allocationRule?: string | null;
   minOutboundShelfLifeDays?: number | null;
+  /** Story 4-3b — the frozen consignee rule and the planner's shortfall cause (absent on an older stored wave). */
+  consigneeName?: string | null;
+  consigneeMinShelfLifeDays?: number | null;
+  consigneeMinShelfLifePercent?: number | null;
+  consigneeShelfLifeBaseDays?: number | null;
+  shortfallCause?: string | null;
 }): string | null {
   const parts: string[] = [];
   if (line.batchCode != null) parts.push(`batch ${line.batchCode}`);
@@ -201,5 +207,30 @@ export function allocationReason(line: {
   }
   if (line.allocationRule === 'fefo' || line.allocationRule === 'fifo') parts.push(allocationRuleShort(line.allocationRule));
   if (line.minOutboundShelfLifeDays != null) parts.push(`needs ≥ ${line.minOutboundShelfLifeDays} days`);
+  const consignee = consigneeRuleText(line);
+  if (consignee !== null) parts.push(consignee);
+  if (line.shortfallCause === 'consignee-shelf-life') parts.push(`short: below ${line.consigneeName ?? 'the consignee'}'s shelf-life rule`);
+  else if (line.shortfallCause === 'consignee-unjudgeable') parts.push('short: SKU has no total shelf life');
   return parts.length === 0 ? null : parts.join(' · ');
+}
+
+/**
+ * Story 4-3b — the consignee half of a wave row (decision 9, A2): "DMart needs
+ * ≥ 126 days (70 % of 180 d)". An unjudgeable line (percent set, days null)
+ * says why. Null when the line carries no consignee rule (or an older server).
+ */
+export function consigneeRuleText(line: {
+  consigneeName?: string | null;
+  consigneeMinShelfLifeDays?: number | null;
+  consigneeMinShelfLifePercent?: number | null;
+  consigneeShelfLifeBaseDays?: number | null;
+}): string | null {
+  const days = line.consigneeMinShelfLifeDays ?? null;
+  const percent = line.consigneeMinShelfLifePercent ?? null;
+  if (days === null && percent === null) return null;
+  const name = line.consigneeName ?? 'the consignee';
+  if (days === null) return `${name} needs ${percent} % of total life (the SKU has none set)`;
+  const base = line.consigneeShelfLifeBaseDays ?? null;
+  const pct = percent === null ? '' : base === null ? ` (${percent} %)` : ` (${percent} % of ${base} d)`;
+  return `${name} needs ≥ ${days} days${pct}`;
 }

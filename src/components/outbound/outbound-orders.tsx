@@ -87,6 +87,7 @@ import { AllClientsNote, ClientFilterChip } from '@/components/shared/client-fil
 import { DrillBanner } from '@/components/shared/drill-banner';
 import { ReturnCreateForm } from '@/components/returns/return-create-form';
 import { CancelOrderDialog, PutBackSection, type CancelTarget } from '@/components/outbound/cancel-order-dialog';
+import { CustomerShelfLifeSection } from '@/components/outbound/customer-shelf-life';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
 import {
@@ -1211,6 +1212,8 @@ function OrderDetailBody({
       )}
       {/* Story 4-2b (A9) — what the cancel booked back into stock, per bin. */}
       {order.status === 'cancelled' && <PutBackSection orderId={orderId} />}
+      {/* Story 4-3b — the consignee's and the client's shelf-life rule, while the order can still be waved. */}
+      {order.status === 'accepted' && <CustomerShelfLifeSection orderId={orderId} />}
       {canManageReturns && canCreateReturn(order.status) && skuClientDeparted(order, detailClients) && (
         <div className="text-xs text-(--muted-foreground)" data-testid="return-client-departed">
           {RETURNS_CLIENT_DEPARTED}

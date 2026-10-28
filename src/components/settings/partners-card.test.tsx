@@ -130,6 +130,15 @@ function stubRouter(): void {
       partnerRows = partnerRows.map((row) => (row.id === 'p-1' ? { ...row, status: sent.status, inactiveReason: sent.reason ?? null } : row));
       return json(200, { partner: partnerRows[0] });
     }
+    // Story 4-3b — the consignee shelf-life PUT.
+    if (method === 'PUT' && pathname.endsWith('/shelf-life')) {
+      const sent = body as { minShelfLifeDays: number | null; minShelfLifePercent: number | null };
+      const linkId = pathname.split('/').at(-2);
+      partnerRows = partnerRows.map((row) =>
+        row.id === 'p-1' ? { ...row, links: (row.links as { id: string }[]).map((l) => (l.id === linkId ? { ...l, ...sent } : l)) } : row,
+      );
+      return json(200, { partner: partnerRows[0] });
+    }
     return json(404, { code: 'not-found', title: 'x', status: 404, detail: 'unrouted' });
   }) as typeof fetch);
 }
@@ -327,5 +336,69 @@ describe('PartnersCard', () => {
     expect(patches[0]!.key).not.toBeNull();
     expect(view.container.textContent).toContain('Inactive — stopped trading');
     expect(buttons(view.container, 'Reactivate')).toHaveLength(1);
+  });
+});
+
+describe('PartnersCard: the consignee shelf-life rule (story 4-3b)', () => {
+  const consignee = () =>
+    partner({
+      roles: ['vendor', 'consignee'],
+      links: [
+        { id: 'l-1', clientId: 'c-self', role: 'vendor', active: true, isDefault: true, clientCode: null },
+        { id: 'l-c', clientId: 'c-acme', role: 'consignee', active: false, isDefault: false, clientCode: null, minShelfLifeDays: 120, minShelfLifePercent: null },
+      ],
+    });
+
+  test('only a consignee row offers "Shelf life" (a switched-off one too) and shows its rule', async () => {
+    partnerRows = [consignee()];
+    writeSession(session('owner'));
+    view = render(<PartnersCard />);
+    await settle();
+    await click(buttons(view.container, 'Links')[0]!);
+    const rows = [...view.container.querySelectorAll('li[data-link]')];
+    const vendorRow = rows.find((row) => row.getAttribute('data-link') === 'l-1')!;
+    const consigneeRow = rows.find((row) => row.getAttribute('data-link') === 'l-c')!;
+    expect(buttons(vendorRow as HTMLElement, 'Shelf life')).toHaveLength(0);
+    expect(buttons(consigneeRow as HTMLElement, 'Shelf life')).toHaveLength(1);
+    expect(consigneeRow.textContent).toContain('Shelf life ≥ 120 days');
+  });
+
+  test('Save rule PUTs both keys (blank = null) with a key reused across a retry of the same draft; the copy and the no-GSTIN warning render', async () => {
+    partnerRows = [{ ...consignee(), gstin: null, pan: null }];
+    writeSession(session('owner'));
+    view = render(<PartnersCard />);
+    await settle();
+    await click(buttons(view.container, 'Links')[0]!);
+    await click(buttons(view.container, 'Shelf life')[0]!);
+    const editor = view.container.querySelector('[aria-label="Shelf life for ACME"]')!;
+    expect(editor.textContent).toContain('Orders to this consignee for ACME are planned only from batches with at least this much life left');
+    expect(editor.textContent).toContain('undated or unattributed stock does not');
+    expect(editor.textContent).toContain('No order can be matched to this consignee — it has no GSTIN.');
+    setValue(editor.querySelector('input[aria-label="Minimum days left"]') as HTMLInputElement, '');
+    setValue(editor.querySelector('input[aria-label="Minimum percent of total shelf life"]') as HTMLInputElement, '70');
+    refusal = { status: 500, code: 'internal', detail: 'boom' };
+    await click(buttons(editor as HTMLElement, 'Save rule')[0]!);
+    await click(buttons(view.container.querySelector('[aria-label="Shelf life for ACME"]') as HTMLElement, 'Save rule')[0]!);
+    const puts = requests.filter((r) => r.method === 'PUT');
+    expect(puts).toHaveLength(2);
+    expect(puts[0]!.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/partners/p-1/links/l-c/shelf-life`);
+    expect(puts[0]!.body).toEqual({ minShelfLifeDays: null, minShelfLifePercent: 70 });
+    expect(puts[0]!.key).not.toBeNull();
+    expect(puts[1]!.key).toBe(puts[0]!.key);
+    expect(view.container.textContent).toContain('Shelf-life rule saved');
+  });
+
+  test('an out-of-range value sends nothing and says why', async () => {
+    partnerRows = [consignee()];
+    writeSession(session('owner'));
+    view = render(<PartnersCard />);
+    await settle();
+    await click(buttons(view.container, 'Links')[0]!);
+    await click(buttons(view.container, 'Shelf life')[0]!);
+    const editor = view.container.querySelector('[aria-label="Shelf life for ACME"]')!;
+    setValue(editor.querySelector('input[aria-label="Minimum percent of total shelf life"]') as HTMLInputElement, '101');
+    await click(buttons(editor as HTMLElement, 'Save rule')[0]!);
+    expect(requests.filter((r) => r.method === 'PUT')).toHaveLength(0);
+    expect(view.container.textContent).toContain('Percent must be from 1 to 100');
   });
 });
