@@ -17,6 +17,7 @@ import {
   discardLabel,
   discardFailedWord,
   rejectedOpGuidance,
+  pickBinBlockedGuidance,
   rejectedOpDecisions,
   rejectedOpPayloadBinId,
   rejectedOpSummary,
@@ -340,6 +341,7 @@ function RejectedOpCard({
   // Story 13-2 — the buttons follow the server's per-type rule.
   const decisions = rejectedOpDecisions(entry);
   const summary = rejectedOpSummary(entry, skuCode);
+  const pickGuidance = pickBinBlockedGuidance(entry, binCode);
 
   return (
     <article className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
@@ -356,6 +358,12 @@ function RejectedOpCard({
         <span className="font-mono">{entry.problemCode}</span>
         {entry.problemDetail !== null && <span> — {entry.problemDetail}</span>}
       </div>
+      {/* Story 3-3b (A3) — a pick refused bin-blocked has no summary; its runbook still shows. */}
+      {open && pickGuidance !== null && (
+        <div className="text-xs text-(--muted-foreground)" data-testid="pick-bin-blocked-guidance">
+          {pickGuidance}
+        </div>
+      )}
       {summary !== null && (
         <div className="flex flex-col gap-0.5 text-xs">
           <div className="font-medium">{summary.heading}</div>

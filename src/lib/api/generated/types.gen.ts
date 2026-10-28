@@ -370,6 +370,26 @@ export type BinResponse = {
     type: 'shelf' | 'pallet' | 'floor' | 'staging' | 'floor-stack' | 'yard' | 'tank' | 'silo';
     blocked: boolean;
     /**
+     * Story 3-3b: why the bin is blocked (null while active). A bin blocked before 3-3b reads `other` with the backfill note.
+     */
+    blockedReason: 'damaged' | 'maintenance' | 'contamination' | 'temperature-excursion' | 'safety-hazard' | 'investigation' | 'other' | null;
+    /**
+     * Story 3-3b: the block's note (null when none, or while active)
+     */
+    blockedNote: string | null;
+    /**
+     * Story 3-3b: when the bin was blocked (ISO-8601; null while active)
+     */
+    blockedAt: string | null;
+    /**
+     * Story 3-3b: who blocked the bin (null while active, and for a block backfilled from before 3-3b)
+     */
+    blockedBy: string | null;
+    /**
+     * Story 3-3b: the blocker's display name (the email handle), null when blockedBy is
+     */
+    blockedByName: string | null;
+    /**
      * The one-way retirement instant (null while the bin is live) — Story 3.6
      */
     retiredAt: string | null;
@@ -473,7 +493,9 @@ export type BinLabelsRequestDto = {
 
 export type PatchBinDto = {
     /**
-     * true blocks the bin (broken); false unblocks. Mutually exclusive with the capacity attributes.
+     * RETIRED (story 3-3b): a body carrying `blocked` answers 400 validation-failed naming `POST …/bins/{binId}/block` and `…/unblock` (only a key stored by a pre-3-3b PATCH still replays). Mutually exclusive with the capacity attributes.
+     *
+     * @deprecated
      */
     blocked?: boolean;
     /**
@@ -500,6 +522,72 @@ export type PatchBinDto = {
      * Story 1-5b: the client this bin is dedicated to. Omit to leave unchanged; null to clear (shared — always allowed); a client id to dedicate. Refused on a system bin (400 validation-failed); an unknown client 404; a departed client 409 client-departed; a bin holding another client's stock or open QC holds 409 bin-client-conflict naming the SKUs. Mutually exclusive with blocked.
      */
     dedicatedClientId?: string | null;
+};
+
+export type BlockBinDto = {
+    /**
+     * Why the bin is blocked — `other` requires a note
+     */
+    reason: 'damaged' | 'maintenance' | 'contamination' | 'temperature-excursion' | 'safety-hazard' | 'investigation' | 'other';
+    /**
+     * What happened — trimmed, 1–500 characters (blank = none); required when reason is `other`
+     */
+    note?: string | null;
+};
+
+export type UnblockBinDto = {
+    /**
+     * Why the block is lifted — required, trimmed, 1–500 characters
+     */
+    note: string;
+};
+
+export type BinBlockImpactClientDto = {
+    clientId: string;
+    /**
+     * The client's display name ("<tenant> (your company)" for the tenant's own goods)
+     */
+    clientName: string;
+    /**
+     * Base-UoM units of the client's SKUs on hand in the bin
+     */
+    units: number;
+    /**
+     * Distinct SKUs of the client on hand in the bin
+     */
+    skuCount: number;
+    /**
+     * Planned (not yet picked) pick lines of the client's SKUs in the bin
+     */
+    plannedPickLines: number;
+};
+
+export type BinBlockImpactResponse = {
+    binId: string;
+    /**
+     * Base-UoM units on hand in the bin (every SKU) — they stop being promised
+     */
+    onHandUnits: number;
+    /**
+     * Distinct SKUs on hand in the bin
+     */
+    skuCount: number;
+    /**
+     * Planned pick lines in the bin — each will need a Skip and a re-plan
+     */
+    plannedPickLines: number;
+    /**
+     * Base-UoM units those planned lines draw from the bin
+     */
+    plannedPickUnits: number;
+    /**
+     * Open cycle-count lines in the bin (they stay open — a blocked bin is still counted)
+     */
+    openCountLines: number;
+    /**
+     * Per client: whose stock and storefronts the block hits (ordered by units, then name)
+     */
+    byClient: Array<BinBlockImpactClientDto>;
 };
 
 export type MergeBinDto = {
@@ -2200,6 +2288,10 @@ export type StockEntryDto = {
      * Whether the bin is a system bin (RECEIVING, QC-HOLD, RETURNS, IN-TRANSIT, DAMAGED) — present only under `order=location`
      */
     binSystemOwned?: boolean;
+    /**
+     * Story 3-3b — the bin is blocked: its stock stays on hand but is not promised (the "Blocked bin" chip)
+     */
+    binBlocked: boolean;
 };
 
 export type StockListResponse = {
@@ -3873,7 +3965,7 @@ export type PicklistLineEntryDto = {
      * Never drawn. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded.
      */
     shortfallQty: number;
-    reasonCode: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | null;
+    reasonCode: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | 'skipped-blocked-bin' | null;
     status: 'planned' | 'unfulfillable' | 'picked' | 'short' | 'cancelled';
     /**
      * ISO-8601 UTC
@@ -4138,7 +4230,7 @@ export type PicklistLineDto = {
     /**
      * Story 4.4: why a short line came up short; null on every other line
      */
-    reasonCode: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | null;
+    reasonCode: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | 'skipped-blocked-bin' | null;
     /**
      * The order line’s slice index (an order line may span bins)
      */
@@ -4269,9 +4361,9 @@ export type RecordPickDto = {
      */
     binStateEpoch?: number | null;
     /**
-     * Story 4.4: why this stop came up short. REQUIRED whenever qty is below the line’s planned quantity (including 0), refused outside the fixed set with a 400 naming the whole set, and ignored when qty equals the plan (that is an ordinary full pick). It is part of the idempotency payload hash — the reason is intent, not an observation.
+     * Story 4.4: why this stop came up short. REQUIRED whenever qty is below the line’s planned quantity (including 0), refused outside the fixed set with a 400 naming the whole set, and ignored when qty equals the plan (that is an ordinary full pick). It is part of the idempotency payload hash — the reason is intent, not an observation. Story 3-3b: `skipped-blocked-bin` skips a planned stop whose bin is now blocked — only with qty 0 at the stop's own bin (else 400 validation-failed) and only while the bin is blocked (else 409 bin-not-blocked); it re-plans the stop onto other bins and needs no bin scan.
      */
-    reasonCode?: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other';
+    reasonCode?: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | 'skipped-blocked-bin';
 };
 
 export type ReplannedSliceDto = {
@@ -4365,7 +4457,7 @@ export type PickDto = {
     /**
      * Why the stop came up short (story 4.4); null on a whole-quantity pick
      */
-    reasonCode: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | null;
+    reasonCode: 'bin-empty' | 'fewer-units-than-planned' | 'damaged-units' | 'stock-not-found' | 'other' | 'skipped-blocked-bin' | null;
     /**
      * True when this command RELEASED the order line’s hold (story 4.4): a short pick releases the whole hold and re-grants the remainder, because reservations are whole-quantity rows with no partial commit
      */
@@ -5040,6 +5132,10 @@ export type PutawayBinDto = {
      * Broken-bin flag — blocked bins reject placements
      */
     blocked: boolean;
+    /**
+     * Story 3-3b — why the bin is blocked (null while active); the handheld names it on its refusals. A client reading a snapshot cached before 3-3b treats an absent field as null
+     */
+    blockedReason: 'damaged' | 'maintenance' | 'contamination' | 'temperature-excursion' | 'safety-hazard' | 'investigation' | 'other' | null;
     /**
      * System bins (Receiving/QC-hold) are never placement targets
      */
@@ -14679,7 +14775,7 @@ export type TenancyControllerSetBinBlockedData = {
 
 export type TenancyControllerSetBinBlockedErrors = {
     /**
-     * Missing or malformed Idempotency-Key, invalid body, a system bin on the blocked arm (validation-failed names the bin — the capacity arm deliberately permits system bins), a system bin given a dedicated client (validation-failed, story 1-5b), a body mixing blocked with capacity attributes or a dedicated client, a body carrying neither (validation-failed), or a non-boolean blocked (validation-failed)
+     * Missing or malformed Idempotency-Key, invalid body, a body carrying `blocked` (validation-failed naming POST …/block and …/unblock — retired by story 3-3b; only a key stored by a pre-3-3b PATCH still replays), a system bin given a dedicated client (validation-failed, story 1-5b), a body mixing blocked with capacity attributes or a dedicated client, a body carrying neither (validation-failed), or a non-boolean blocked (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -14711,6 +14807,153 @@ export type TenancyControllerSetBinBlockedResponses = {
 };
 
 export type TenancyControllerSetBinBlockedResponse = TenancyControllerSetBinBlockedResponses[keyof TenancyControllerSetBinBlockedResponses];
+
+export type TenancyControllerBlockBinData = {
+    body: BlockBinDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        binId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}/block';
+};
+
+export type TenancyControllerBlockBinErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a reason outside the fixed set, `other` without a note, a note over 500 characters, or a system bin (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks bin.block (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse or bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The bin is already blocked (bin-already-blocked), the bin is retired (bin-retired), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerBlockBinError = TenancyControllerBlockBinErrors[keyof TenancyControllerBlockBinErrors];
+
+export type TenancyControllerBlockBinResponses = {
+    201: BinResponse;
+};
+
+export type TenancyControllerBlockBinResponse = TenancyControllerBlockBinResponses[keyof TenancyControllerBlockBinResponses];
+
+export type TenancyControllerUnblockBinData = {
+    body: UnblockBinDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        binId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}/unblock';
+};
+
+export type TenancyControllerUnblockBinErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a missing or blank note, a note over 500 characters, or a system bin (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks bin.block (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse or bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The bin is not blocked (bin-not-blocked), the bin is retired (bin-retired), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type TenancyControllerUnblockBinError = TenancyControllerUnblockBinErrors[keyof TenancyControllerUnblockBinErrors];
+
+export type TenancyControllerUnblockBinResponses = {
+    201: BinResponse;
+};
+
+export type TenancyControllerUnblockBinResponse = TenancyControllerUnblockBinResponses[keyof TenancyControllerUnblockBinResponses];
+
+export type TenancyControllerBinBlockImpactData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+        binId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/bins/{binId}/block-impact';
+};
+
+export type TenancyControllerBinBlockImpactErrors = {
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks bin.block (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Warehouse or bin does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type TenancyControllerBinBlockImpactError = TenancyControllerBinBlockImpactErrors[keyof TenancyControllerBinBlockImpactErrors];
+
+export type TenancyControllerBinBlockImpactResponses = {
+    200: BinBlockImpactResponse;
+};
+
+export type TenancyControllerBinBlockImpactResponse = TenancyControllerBinBlockImpactResponses[keyof TenancyControllerBinBlockImpactResponses];
 
 export type TenancyControllerMergeBinData = {
     body: MergeBinDto;
@@ -19365,6 +19608,10 @@ export type OutboundControllerListPicklistLinesData = {
          */
         status?: 'planned' | 'unfulfillable' | 'picked' | 'short' | 'cancelled';
         /**
+         * Story 3-3b — `true`: only stops skipped because their bin was blocked (reasonCode `skipped-blocked-bin`); `false`: every other line (the short-picks tile's drill — a skip is warehouse state, not a picking error). Exactly 'true' or 'false'
+         */
+        skippedBlockedBin?: 'true' | 'false';
+        /**
          * Story 9-1 — only rows whose `updated_at` is at or after this instant (inclusive). ISO-8601 with a zone designator
          */
         from?: string;
@@ -19969,7 +20216,7 @@ export type OutboundControllerRecordPickData = {
 
 export type OutboundControllerRecordPickErrors = {
     /**
-     * Missing or malformed Idempotency-Key, an invalid body, a quantity ABOVE the line’s planned quantity, a short pick with no reasonCode or one outside the fixed set (the 400 names the whole set), a blocked bin (bin-blocked), a retired bin (bin-retired), a system bin, the wrong item scanned (wrong-item naming the expected SKU), or a serial-arm violation (validation-failed)
+     * Missing or malformed Idempotency-Key, an invalid body, a quantity ABOVE the line’s planned quantity, a short pick with no reasonCode or one outside the fixed set (the 400 names the whole set), a blocked bin (bin-blocked — unless the pick was made before the block, story 3-3b, and the block is neither backfilled nor a contamination or temperature-excursion block; a zero-unit `skipped-blocked-bin` short of the planned stop is admitted), a `skipped-blocked-bin` reason with qty above 0 or at another bin than the stop’s (validation-failed), a retired bin (bin-retired), a system bin, the wrong item scanned (wrong-item naming the expected SKU), or a serial-arm violation (validation-failed)
      */
     400: ProblemDetailsDto;
     /**
@@ -19985,7 +20232,7 @@ export type OutboundControllerRecordPickErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * AD-14 case 3 — the bin’s state_epoch moved and it no longer covers the draw (pick-bin-short, naming the bin and its live on-hand; RE-PLANNABLE, the client keeps the op). AD-14 case 4 — a premise moved terminally: the hold is expired/terminal, or the line, picklist, wave or order was cancelled or already picked (pick-unresolvable; TERMINAL, the client quarantines with session attribution). Also: the wave is not yet released / the picklist is not yet ready (conflict, retryable), a concurrent idempotent request (conflict), or a serial that does not live in the scanned bin (serial-elsewhere); story 3-7a — the scanned bin holds on-hand of a batch of this SKU on an OPEN LIVE recall: an unscanned draw cannot tell the recalled units from good ones, so move them out first (recalled-lot-in-bin, members binCode, batchCodes, recallCodes; TERMINAL for the queued op — it lands in review). None of these persist anything and none consume the idempotency key
+     * AD-14 case 3 — the bin’s state_epoch moved and it no longer covers the draw (pick-bin-short, naming the bin and its live on-hand; RE-PLANNABLE, the client keeps the op). AD-14 case 4 — a premise moved terminally: the hold is expired/terminal, or the line, picklist, wave or order was cancelled or already picked (pick-unresolvable; TERMINAL, the client quarantines with session attribution). Also: the wave is not yet released / the picklist is not yet ready (conflict, retryable), a concurrent idempotent request (conflict), or a serial that does not live in the scanned bin (serial-elsewhere); story 3-7a — the scanned bin holds on-hand of a batch of this SKU on an OPEN LIVE recall: an unscanned draw cannot tell the recalled units from good ones, so move them out first (recalled-lot-in-bin, members binCode, batchCodes, recallCodes; TERMINAL for the queued op — it lands in review); story 3-3b — a `skipped-blocked-bin` Skip of a stop whose bin is no longer blocked (bin-not-blocked, member binCode — the stop is still planned; pick it normally). None of these persist anything and none consume the idempotency key
      */
     409: ProblemDetailsDto;
     /**

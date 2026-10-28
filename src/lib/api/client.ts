@@ -164,6 +164,9 @@ import {
   tenancyControllerMergeBin,
   tenancyControllerRegister,
   tenancyControllerSetBinBlocked,
+  tenancyControllerBlockBin,
+  tenancyControllerUnblockBin,
+  tenancyControllerBinBlockImpact,
   tenancyControllerRetireBin,
   tenancyControllerSetupChecklist,
   tenancyControllerSignIn,
@@ -510,6 +513,9 @@ import type {
   StockListResponse,
   PutKitDto,
   PatchBinDto,
+  BlockBinDto,
+  UnblockBinDto,
+  BinBlockImpactResponse,
   PatchProductDto,
   PatchSkuDto,
   ClientDto,
@@ -1142,6 +1148,69 @@ export async function fetchApiSetBinBlocked(
     path: { tenantId, warehouseId, binId },
     body,
     headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 3-3b — block a bin with a reason (`bin.block`): `{ reason, note? }`,
+ * `other` needs a note. Keyed per draft. The PATCH `blocked` arm is retired —
+ * `fetchApiSetBinBlocked` stays for the structure edits (class, client) only.
+ */
+export async function fetchApiBlockBin(
+  tenantId: string,
+  warehouseId: string,
+  binId: string,
+  body: BlockBinDto,
+  idempotencyKey: string,
+): Promise<BinResponse> {
+  const { data, error } = await tenancyControllerBlockBin({
+    path: { tenantId, warehouseId, binId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-3b — unblock a bin, with a required note (`bin.block`). Keyed per draft. */
+export async function fetchApiUnblockBin(
+  tenantId: string,
+  warehouseId: string,
+  binId: string,
+  body: UnblockBinDto,
+  idempotencyKey: string,
+): Promise<BinResponse> {
+  const { data, error } = await tenancyControllerUnblockBin({
+    path: { tenantId, warehouseId, binId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 3-3b — what blocking a bin would take out of service (`bin.block`):
+ * on-hand units and SKUs, planned pick lines, open count lines, per client.
+ * Advisory and read-only; no key.
+ */
+export async function fetchApiBinBlockImpact(
+  tenantId: string,
+  warehouseId: string,
+  binId: string,
+  options?: { signal?: AbortSignal },
+): Promise<BinBlockImpactResponse> {
+  const { data, error } = await tenancyControllerBinBlockImpact({
+    path: { tenantId, warehouseId, binId },
+    signal: options?.signal,
   });
   if (error || !data) {
     throw unwrapError(error, 400);

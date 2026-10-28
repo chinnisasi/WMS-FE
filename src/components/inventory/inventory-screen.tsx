@@ -45,6 +45,7 @@ import { roleHasCapability } from '@/lib/users';
 import { writeOffOffered } from '@/lib/write-off';
 import { batchBlockOutcome, batchLifecycleLabel, batchRecallCode, underRecallSentence } from '@/lib/batch-block';
 import { recallHref } from '@/lib/recalls';
+import { BLOCKED_BIN_CHIP, BLOCKED_BIN_CHIP_TITLE, stockRowBinBlocked } from '@/lib/bin-block';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { AdjustBanner, AdjustForm } from '@/components/inventory/adjust-form';
@@ -55,7 +56,7 @@ import { RecallsSection } from '@/components/inventory/recalls/recalls-section';
 import { WriteOffBanner, WriteOffPanel, type WriteOffResult } from '@/components/inventory/write-off';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { LoadingStatus, SkeletonRows } from '@/components/shared/skeleton';
-import { statusChipClass } from '@/components/shared/status-chip';
+import { StatusChip, statusChipClass } from '@/components/shared/status-chip';
 import { buttonClass, inputClass, ReadFailure, rowButtonClass, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
@@ -275,13 +276,23 @@ function skuIndex(state: ReturnType<typeof useSkuCatalog>): Readonly<Record<stri
   return state.state === 'ready' ? Object.fromEntries(state.data.map((sku) => [sku.id, sku])) : null;
 }
 
-function BinCell({ code, systemOwned }: { code: string; systemOwned: boolean }) {
+function BinCell({ code, systemOwned, blocked = false }: { code: string; systemOwned: boolean; blocked?: boolean }) {
   const label = systemBinLabel(code, systemOwned);
   return (
-    <span className="flex flex-col">
+    <span className="flex flex-col items-start gap-0.5">
       <span className="font-mono text-xs">{code}</span>
       {label !== null && <span className="text-xs text-(--muted-foreground)">{label}</span>}
+      {blocked && <BlockedBinChip />}
     </span>
+  );
+}
+
+/** Story 3-3b — the stock row's bin is blocked: on hand, not promised. */
+function BlockedBinChip() {
+  return (
+    <StatusChip tone="warning" title={BLOCKED_BIN_CHIP_TITLE}>
+      {BLOCKED_BIN_CHIP}
+    </StatusChip>
   );
 }
 
@@ -454,7 +465,7 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
     columns.push({
       key: 'bin',
       header: 'Bin',
-      render: (row) => <BinCell code={row.binCode ?? '—'} systemOwned={row.binSystemOwned === true} />,
+      render: (row) => <BinCell code={row.binCode ?? '—'} systemOwned={row.binSystemOwned === true} blocked={stockRowBinBlocked(row)} />,
     });
   }
   if (applied?.kind !== 'sku') {
@@ -470,7 +481,21 @@ function StockSection({ warehouseId, warehouses, refreshNote, active }: SectionP
       render: (row) => clientCell(skuOf(row)?.clientId, clients ?? [], tenantName),
     });
   }
-  columns.push({ key: 'quantity', header: 'On hand', numeric: true, render: (row) => quantityLabel(row.quantity, skuOf(row)) });
+  columns.push({
+    key: 'quantity',
+    header: 'On hand',
+    numeric: true,
+    // Story 3-3b — under a bin search the Bin column is gone, so the chip sits by the figure.
+    render: (row) =>
+      applied?.kind === 'bin' && stockRowBinBlocked(row) ? (
+        <span className="inline-flex items-center gap-2">
+          {quantityLabel(row.quantity, skuOf(row))}
+          <BlockedBinChip />
+        </span>
+      ) : (
+        quantityLabel(row.quantity, skuOf(row))
+      ),
+  });
   // Story 2-4a — the Action column appears only when a listed row can be
   // written off (a DAMAGED row and `stock.adjust`) or — story 3-2a —
   // adjusted (`adjustOffered`): a role without `stock.adjust` sees the table

@@ -89,9 +89,9 @@ describe('the bins the form offers', () => {
 
   test("the origin's SKUs sum per SKU and drop zero rows; batches with stock only", () => {
     const rows = [
-      { id: '1', warehouseId: 'w', skuId: 's1', binId: 'a', quantity: 3, createdAt: 'x' },
-      { id: '2', warehouseId: 'w', skuId: 's1', binId: 'a', quantity: 2, createdAt: 'x' },
-      { id: '3', warehouseId: 'w', skuId: 's2', binId: 'a', quantity: 0, createdAt: 'x' },
+      { id: '1', warehouseId: 'w', skuId: 's1', binId: 'a', quantity: 3, createdAt: 'x', binBlocked: false },
+      { id: '2', warehouseId: 'w', skuId: 's1', binId: 'a', quantity: 2, createdAt: 'x', binBlocked: false },
+      { id: '3', warehouseId: 'w', skuId: 's2', binId: 'a', quantity: 0, createdAt: 'x', binBlocked: false },
     ];
     expect(originSkuRows(rows)).toEqual([{ skuId: 's1', quantity: 5 }]);
     const batches = [
