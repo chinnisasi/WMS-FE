@@ -51,6 +51,7 @@ import { ClientContactsPanel } from '@/components/settings/client-contacts';
 import { ClientAddressesPanel } from '@/components/settings/client-addresses';
 import { ClientReceivingPolicyPanel } from '@/components/settings/client-receiving-policy';
 import { ClientAllocationPolicyPanel } from '@/components/settings/client-allocation-policy';
+import { ClientWebhooksPanel } from '@/components/settings/client-webhooks';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -74,6 +75,8 @@ type Panel =
   | { kind: 'receiving'; client: ClientDto }
   // Story 4-3a — the outbound allocation policy, beside the receiving policy.
   | { kind: 'allocation'; client: ClientDto }
+  // Story 5-2a — the client's outbound webhooks (owner-only).
+  | { kind: 'webhooks'; client: ClientDto }
   | { kind: ClientStatusAction; client: ClientDto };
 
 /** The panel's name in the discard question. */
@@ -87,6 +90,8 @@ function panelName(panel: Panel): string {
       return `${panel.client.code}'s receiving policy`;
     case 'allocation':
       return `${panel.client.code}'s allocation policy`;
+    case 'webhooks':
+      return `${panel.client.code}'s webhook endpoint`;
     default:
       return panel.client.code;
   }
@@ -203,6 +208,8 @@ function ClientsCardSessioned() {
             {rowButton('Addresses', `Addresses of ${client.code}`, { kind: 'addresses', client })}
             {rowButton('Receiving', `Receiving policy of ${client.code}`, { kind: 'receiving', client })}
             {rowButton('Allocation', `Allocation policy of ${client.code}`, { kind: 'allocation', client })}
+            {/* Story 5-2a — owner-only, never on the warehouse's own client. */}
+            {canManage && !client.systemOwned ? rowButton('Webhooks', `Webhooks of ${client.code}`, { kind: 'webhooks', client }) : null}
             {statusActions.includes('suspend') ? rowButton('Suspend', `Suspend ${client.code}`, { kind: 'suspend', client }) : null}
             {statusActions.includes('depart') ? rowButton('Depart', `Depart ${client.code}`, { kind: 'depart', client }) : null}
           </div>
@@ -323,6 +330,10 @@ function ClientsCardSessioned() {
           onSaved={() => notifyClientsChanged()}
           onDirtyChange={onDirtyChange}
         />
+      ) : null}
+
+      {canManage && panel?.kind === 'webhooks' ? (
+        <ClientWebhooksPanel key={panel.client.id} client={panel.client} onClose={() => show(null)} onDirtyChange={onDirtyChange} />
       ) : null}
 
       {panel?.kind === 'receiving' ? (
