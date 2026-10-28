@@ -223,6 +223,11 @@ export const CAPABILITIES = [
   // detail's "Create return" form and the /returns Cancel action; every
   // member reads returns. The ops grant is derived below — never hand-copied.
   'returns.manage',
+  // Story 2-8b — returns to vendor: create a return to vendor from DAMAGED
+  // stock and cancel one (a planner act, like returns.manage). Owner + Ops
+  // Manager; the pick is picks.execute (the handheld), the dispatch
+  // dispatch.execute. The ops grant is derived below — never hand-copied.
+  'rtv.manage',
   // Story 1-6c — the drug and FSSAI licences: add, edit and withdraw a client
   // or site licence (Compliance → Licences). OWNER-ONLY (see
   // OWNER_ONLY_CAPABILITIES) — the legal basis for holding drugs and food is

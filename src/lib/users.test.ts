@@ -65,7 +65,11 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
     // `receipt.photo-remove` (owner + ops_manager — evidence is removed by a manager) — 49 became 51.
     // Story 5-6a: + billing.configure (owner-only).
     // Story 5-5a: + billing.charge (owner + ops_manager + accountant — recording ad-hoc charges) — 52 became 53.
-    expect(ROLE_CAPABILITIES.owner.length).toBe(53);
+    // Story 2-8b: + rtv.manage (owner + ops_manager — returns to vendor) — 53 became 54.
+    expect(ROLE_CAPABILITIES.owner.length).toBe(54);
+    expect(
+      (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'rtv.manage')),
+    ).toEqual(['owner', 'ops_manager']);
     expect(
       (['owner', 'ops_manager', 'operator', 'accountant', 'client'] as const).filter((role) => roleHasCapability(role, 'receipt.attach')),
     ).toEqual(['owner', 'ops_manager', 'operator']);
@@ -247,6 +251,8 @@ describe('ROLE_CAPABILITIES (UI mirror of wms-be permissions.ts)', () => {
         'eway.manage',
         // Story 13-1 — return authorizations (decision 1: owner + ops manager).
         'returns.manage',
+        // Story 2-8b — returns to vendor (derived, never hand-copied).
+        'rtv.manage',
         // Story 2-3a — the gate-in (derived, never hand-copied).
         'gate.manage',
         // Story 3-1 — the bin-to-bin move (derived, never hand-copied).

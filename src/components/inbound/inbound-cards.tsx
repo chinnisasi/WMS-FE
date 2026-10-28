@@ -80,6 +80,7 @@ import { CameraGlyph } from '@/components/shared/photo-viewer';
 import { linePhotosLabel, photoCountLabel } from '@/lib/receipt-photos';
 import { inspectedResultLabel, inspectionSummary } from '@/lib/qc-inspection';
 import { GateInsCard } from '@/components/inbound/gate-ins-card';
+import { VendorReturnsCard } from '@/components/inbound/vendor-returns-card';
 import { PoCreateForm } from '@/components/inbound/po-create-form';
 import { ReadFailure, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
@@ -230,6 +231,10 @@ function InboundCardsSessioned({
           ))}
         {tab === 'qc-holds' && (
           <QcHoldsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} initialGrnId={qcGrnId} />
+        )}
+        {/* Story 2-8b — DAMAGED stock going back to its vendor. */}
+        {tab === 'rtvs' && (
+          <VendorReturnsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
         )}
       </PageTabPanel>
     </div>

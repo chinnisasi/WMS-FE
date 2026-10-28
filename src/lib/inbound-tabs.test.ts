@@ -14,7 +14,7 @@ import {
 } from './inbound-tabs';
 
 describe('inbound-tabs', () => {
-  test('the six tabs, in page order — Gate-in first (story 2-3a), Purchase orders still the default', () => {
+  test('the seven tabs, in page order — Gate-in first (story 2-3a), Returns to vendor after QC holds (story 2-8b), Purchase orders still the default', () => {
     expect(INBOUND_TABS.map((t) => t.label)).toEqual([
       'Gate-in',
       'Purchase orders',
@@ -22,7 +22,9 @@ describe('inbound-tabs', () => {
       'Goods receipts',
       'Awaiting putaway',
       'QC holds',
+      'Returns to vendor',
     ]);
+    expect(inboundTabHref('rtvs')).toBe('/inbound?tab=rtvs');
     expect(DEFAULT_INBOUND_TAB).toBe('pos');
   });
 
