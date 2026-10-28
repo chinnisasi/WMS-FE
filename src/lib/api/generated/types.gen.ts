@@ -5635,6 +5635,10 @@ export type CatalogOpenGateInDto = {
 export type CatalogDockAppointmentDocumentDto = {
     kind: 'po' | 'asn';
     code: string | null;
+    /**
+     * A26 — the document's client (named in the snapshot's `clients`), so the device prefixes a colliding code with the client's code
+     */
+    clientId: string | null;
 };
 
 export type CatalogDockAppointmentDto = {

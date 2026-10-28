@@ -667,12 +667,17 @@ describe('code review fixes', () => {
 
   test('W1 — a return to the tab seeds from the live URL, not the first load (a closed ?open= stays closed)', async () => {
     appointments = [appointment()];
-    originalReplace.call(window.history, null, '', '/inbound?tab=dock');
+    // Set the live URL through happy-dom itself: an earlier file can leave the
+    // document on about:blank, where a relative replaceState never lands.
+    const happy = (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM;
+    const before = window.location.href;
+    happy.setURL('http://localhost/inbound?tab=dock');
     try {
+      expect(window.location.search).toBe('?tab=dock');
       await mount('owner', { open: A1 });
       expect(drawer()).toBeNull();
     } finally {
-      originalReplace.call(window.history, null, '', '/');
+      happy.setURL(before);
     }
   });
 });
