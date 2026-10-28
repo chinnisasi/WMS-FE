@@ -84,18 +84,25 @@ export function pickLineStatusLabel(status: PickLineStatus): string {
   return PICK_LINE_STATUS_LABEL[status];
 }
 
-/** Story 4.4's fixed reason set, in plain words; `null` on every other line. */
-const PICK_REASON_LABEL: Readonly<Record<string, string>> = {
+/**
+ * Story 4.4's fixed reason set, in plain words; `null` on every other line.
+ * Keyed by the generated tuple (3-3b), so a reason the server adds must be labelled to compile.
+ */
+const PICK_REASON_LABEL: Readonly<Record<NonNullable<PicklistLineDto['reasonCode']>, string>> = {
   'bin-empty': 'Bin empty',
   'fewer-units-than-planned': 'Fewer units than planned',
   'damaged-units': 'Damaged units',
   'stock-not-found': 'Stock not found',
   other: 'Other',
+  // Story 3-3b — a planned stop skipped on the handheld because its bin was blocked (warehouse state, not a picking error).
+  'skipped-blocked-bin': 'Skipped — bin blocked',
 };
 
 export function pickReasonLabel(reasonCode: string | null): string | null {
   if (reasonCode === null) return null;
-  return PICK_REASON_LABEL[reasonCode] ?? reasonCode;
+  return Object.prototype.hasOwnProperty.call(PICK_REASON_LABEL, reasonCode)
+    ? PICK_REASON_LABEL[reasonCode as keyof typeof PICK_REASON_LABEL]
+    : reasonCode;
 }
 
 /**

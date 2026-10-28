@@ -27,6 +27,7 @@ import {
   rejectedOpPayloadBinId,
   rejectedOpSummary,
   rejectedOpGuidance,
+  pickBinBlockedGuidance,
   GATE_IN_UNLOAD_GONE_GUIDANCE,
   GATE_IN_UNLOAD_GUIDANCE,
   STOCK_MOVE_GUIDANCE,
@@ -1007,5 +1008,19 @@ describe('story 4-2b (A7) — a bench pack of an order cancelled while the parce
     expect(rejectedOpsResolveReason(problem('order-cancelled', 409, 'Order is not packable'), { opType: 'pack.execute' })).toBe(
       PACK_ORDER_CANCELLED_RESOLVE_REASON,
     );
+  });
+});
+
+describe('pickBinBlockedGuidance (story 3-3b, A3)', () => {
+  test('a pick.record row refused bin-blocked reads the runbook, naming the bin when known', () => {
+    expect(pickBinBlockedGuidance({ opType: 'pick.record', problemCode: 'bin-blocked' }, 'A-01')).toBe(
+      "The bin is blocked and this pick was not recorded — the units are still on A-01's books. Return the units to A-01, Discard this pick, then Skip the stop on the handheld so it is re-planned.",
+    );
+    expect(pickBinBlockedGuidance({ opType: 'pick.record', problemCode: 'bin-blocked' }, null)).toContain('Return the units to the bin');
+  });
+
+  test('every other row reads nothing', () => {
+    expect(pickBinBlockedGuidance({ opType: 'pick.record', problemCode: 'pick-unresolvable' }, 'A-01')).toBeNull();
+    expect(pickBinBlockedGuidance({ opType: 'stock.move', problemCode: 'bin-blocked' }, 'A-01')).toBeNull();
   });
 });

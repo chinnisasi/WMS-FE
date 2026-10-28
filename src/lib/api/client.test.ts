@@ -4,6 +4,9 @@ import { restoreGlobals, stubGlobal } from '../test/globals';
 
 import {
   ApiProblem,
+  fetchApiBinBlockImpact,
+  fetchApiBlockBin,
+  fetchApiUnblockBin,
   fetchApiAddRecallBatches,
   fetchApiCloseRecall,
   fetchApiListRecalls,
@@ -3416,6 +3419,49 @@ describe('return-to-vendor wrappers (story 2-8b)', () => {
       status: 409,
       extensions: { onHandQty: 10, availableQty: 4 },
     });
+    clearSession();
+  });
+});
+
+describe('bin block wrappers (story 3-3b)', () => {
+  const T = '0198f7a2-1b3c-7d4e-8f90-112233445566';
+  const W = '0198f7a2-1b3c-7d4e-8f90-222222222222';
+  const B = '0198f7a2-1b3c-7d4e-8f90-555555555555';
+  const base = `/api/v1/tenants/${T}/warehouses/${W}/bins/${B}`;
+
+  test('block and unblock POST their verb with the body as given and the Idempotency-Key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { id: B, code: 'A-01', blocked: true });
+    await fetchApiBlockBin(T, W, B, { reason: 'other', note: 'pest' }, 'KEY-BLOCK');
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/block`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe('KEY-BLOCK');
+    expect(await lastRequest!.clone().json()).toEqual({ reason: 'other', note: 'pest' });
+
+    await fetchApiUnblockBin(T, W, B, { note: 'repaired' }, 'KEY-UNBLOCK');
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/unblock`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe('KEY-UNBLOCK');
+    expect(await lastRequest!.clone().json()).toEqual({ note: 'repaired' });
+    clearSession();
+  });
+
+  test('the impact read is a keyless GET with no query', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { binId: B, onHandUnits: 0, skuCount: 0, plannedPickLines: 0, plannedPickUnits: 0, openCountLines: 0, byClient: [] });
+    const impact = await fetchApiBinBlockImpact(T, W, B);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/block-impact`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(impact.binId).toBe(B);
+    clearSession();
+  });
+
+  test('a refusal is an ApiProblem carrying its code', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { code: 'bin-already-blocked', status: 409, title: 'Bin already blocked', detail: 'A-01 is already blocked' });
+    await expect(fetchApiBlockBin(T, W, B, { reason: 'damaged' }, 'K')).rejects.toMatchObject({ code: 'bin-already-blocked', status: 409 });
     clearSession();
   });
 });

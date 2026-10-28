@@ -284,6 +284,21 @@ describe('the Inventory screen — Stock', () => {
     expect(tableRows()).toHaveLength(4);
   });
 
+  test('story 3-3b: a row whose bin is blocked carries the "Blocked bin" chip — beside the bin, or beside the figure under a bin search', async () => {
+    const blockedStock = STOCK.map((row) => (row.binId === BIN_D2 ? { ...row, binBlocked: true } : { ...row, binBlocked: false }));
+    overrides.push({
+      match: (pathname) => pathname.endsWith('/inventory/stock'),
+      respond: () => json(200, { items: blockedStock.filter((r) => requests.at(-1)!.params.binId === undefined || r.binId === requests.at(-1)!.params.binId), nextCursor: null }),
+    });
+    view = render(<InventoryScreen />);
+    await settle();
+    const chips = () => tableRows().map((row) => row.querySelector('[title^="The bin is blocked"]')?.textContent ?? null);
+    expect(chips()).toEqual([null, 'Blocked bin', 'Blocked bin', null]);
+    expect(cellTexts(tableRows()[1]!)[0]).toBe('D-01-02Blocked bin');
+    await search('d-01-02');
+    expect(tableRows().map(cellTexts).map((cells) => cells[2])).toEqual(['148 eachBlocked bin', '2.500 litreBlocked bin']);
+  });
+
   test('where is a SKU: the read sends skuId, walks every page, then totals across bins', async () => {
     // Two pages for the SKU: the total waits for the second.
     overrides.push({

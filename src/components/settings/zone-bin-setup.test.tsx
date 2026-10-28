@@ -93,6 +93,15 @@ let nextLabelsStatus = 200;
 let nextLabelsBody: unknown = null;
 /** Story 2-10a — the warehouse code the list answers. */
 let warehouseCode = 'W1';
+/** Story 3-3b — the next block/unblock answer (a problem), else the bin echoed blocked/unblocked. */
+let nextBlockStatus = 201;
+let nextBlockBody: unknown = null;
+/** Story 3-3b — the impact read's answer; null = it fails 500. */
+let impactBody: unknown = null;
+/** Story 3-3b — while set, a block/unblock POST waits on it (an in-flight request). */
+let blockGate: Promise<void> | null = null;
+/** Story 3-3b — the bins list read fails 500 while true. */
+let binsFail = false;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -150,6 +159,31 @@ function stubRouter(): void {
       const over = (body !== null && typeof body === 'object' ? body : {}) as Record<string, unknown>;
       return json(200, bin(over));
     }
+    // Story 3-3b — the block verbs and the impact read.
+    if (method === 'GET' && pathname.endsWith('/block-impact')) {
+      if (impactBody === null) return json(500, { code: 'internal', title: 'Boom', status: 500 });
+      return json(200, impactBody);
+    }
+    if (method === 'POST' && (pathname.endsWith('/block') || pathname.endsWith('/unblock'))) {
+      if (blockGate !== null) await blockGate;
+      if (nextBlockStatus !== 201) {
+        const refusal = nextBlockBody;
+        const status = nextBlockStatus;
+        nextBlockStatus = 201;
+        nextBlockBody = null;
+        return json(status, refusal);
+      }
+      const blocking = pathname.endsWith('/block');
+      const sent = (body ?? {}) as Record<string, unknown>;
+      return json(
+        201,
+        bin(
+          blocking
+            ? { blocked: true, blockedReason: sent['reason'], blockedNote: sent['note'] ?? null, blockedAt: '2026-10-26T08:35:00.000Z', blockedBy: 'u-1', blockedByName: 'priya' }
+            : { blocked: false, blockedReason: null, blockedNote: null, blockedAt: null, blockedBy: null, blockedByName: null },
+        ),
+      );
+    }
     if (method === 'GET' && pathname.endsWith('/warehouses')) {
       return json(200, {
         items: [{ id: WAREHOUSE_ID, code: warehouseCode, name: 'Main', origin: {}, createdAt: '2026-09-01T00:00:00.000Z' }],
@@ -167,6 +201,9 @@ function stubRouter(): void {
         return new Response(JSON.stringify(nextLabelsBody), { status: nextLabelsStatus, headers: { 'content-type': 'application/problem+json' } });
       }
       return new Response('^XA\n^XZ\n', { status: 200, headers: { 'content-type': 'text/plain; charset=us-ascii' } });
+    }
+    if (method === 'GET' && pathname.endsWith('/bins') && binsFail) {
+      return json(500, { code: 'internal', title: 'Boom', status: 500, detail: 'The bins read failed' });
     }
     if (method === 'GET' && pathname.endsWith('/bins') && binsPages !== null) {
       return json(200, binsPages[url.searchParams.get('cursor') ?? ''] ?? { items: [], nextCursor: null });
@@ -212,6 +249,11 @@ beforeEach(() => {
   nextLabelsStatus = 200;
   nextLabelsBody = null;
   warehouseCode = 'W1';
+  nextBlockStatus = 201;
+  nextBlockBody = null;
+  impactBody = null;
+  blockGate = null;
+  binsFail = false;
   stubRouter();
   writeSession(SESSION);
 });
@@ -904,9 +946,11 @@ describe('ZonesBinsSetup: bin labels (story 2-10a)', () => {
     view = await mount();
     await click(box('A-01-01'));
     expect(button('Print labels (1)')).toBeDefined();
-    // The bin is retired elsewhere; a reload (here, the block toggle's) shows it retired.
+    // The bin is retired elsewhere; a reload (here, a block's) shows it retired.
     binsItems = [bin({ retiredAt: '2026-10-01T00:00:00.000Z' }), bin({ id: TANK_ID, code: 'A-01-02', type: 'tank', maxWeightGrams: 1000 })];
     await click(button('Block'));
+    setSelect(view!.container.querySelector('select[aria-label="Block reason"]') as HTMLSelectElement, 'maintenance');
+    await click(button('Block bin'));
     expect(box('A-01-01').disabled).toBe(true);
     expect(button('Print labels (0)')!.disabled).toBe(true);
     // The pruned set is what the next tick stores.
@@ -948,5 +992,351 @@ describe('ZonesBinsSetup: bin labels (story 2-10a)', () => {
     view = await mount();
     expect(box('A-01-01')).not.toBeNull();
     expect(button('Print zone labels')).toBeDefined();
+  });
+});
+
+/**
+ * Story 3-3b — blocked locations. The claims a `src/lib` test cannot make:
+ *   1. Block and Unblock open a dialog and POST the verb they name — never
+ *      the retired PATCH `{blocked}` arm — with the per-draft key;
+ *   2. the dialog's own guards send nothing (no reason; Other with no note;
+ *      an unblock with no note);
+ *   3. the impact preview renders (and a failed read still lets the block go);
+ *   4. a stale 409 closes the dialog and re-reads;
+ *   5. the Status pill names the reason, with the note, who and when beneath;
+ *   6. the Status filter covers the WHOLE zone, not the page shown;
+ *   7. a role without `bin.block` is offered neither verb.
+ */
+describe('ZonesBinsSetup: blocked locations (story 3-3b)', () => {
+  const OTHER_ID = '0198f7a2-1b3c-7d4e-8f90-777777777777';
+  const blockedBin = (over: Record<string, unknown> = {}) =>
+    bin({
+      id: OTHER_ID,
+      code: 'A-01-09',
+      blocked: true,
+      blockedReason: 'damaged',
+      blockedNote: 'Rack upright bent',
+      blockedAt: '2026-10-26T08:35:00.000Z',
+      blockedBy: 'u-9',
+      blockedByName: 'ravi',
+      ...over,
+    });
+  const button = (label: string): HTMLButtonElement | undefined =>
+    [...view!.container.querySelectorAll('button')].find((b) => b.textContent === label);
+  const rowOf = (code: string) => [...view!.container.querySelectorAll('tbody tr')].find((tr) => tr.textContent!.includes(code))!;
+  const dialog = () => view!.container.querySelector('[data-testid="bin-block-dialog"]');
+  const blockPosts = () => requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/block'));
+  const unblockPosts = () => requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/unblock'));
+  const binGets = () => requests.filter((r) => r.method === 'GET' && r.pathname.endsWith('/bins'));
+  /** The header map's casing follows the runtime — read it case-blind. */
+  const keyOf = (r: Recorded) => Object.entries(r.headers).find(([k]) => k.toLowerCase() === 'idempotency-key')?.[1];
+  async function click(el: HTMLElement | undefined): Promise<void> {
+    expect(el).toBeDefined();
+    act(() => el!.click());
+    await settle();
+  }
+  function setTextarea(area: HTMLTextAreaElement, value: string): void {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    act(() => {
+      setter.call(area, value);
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  const reasonSelect = () => view!.container.querySelector('select[aria-label="Block reason"]') as HTMLSelectElement;
+  const noteArea = (label: 'Block note' | 'Unblock note') => view!.container.querySelector(`textarea[aria-label="${label}"]`) as HTMLTextAreaElement;
+
+  test('Block opens the dialog with the impact preview and POSTs …/block with the reason and note — never the PATCH', async () => {
+    impactBody = {
+      binId: SHELF_ID,
+      onHandUnits: 12,
+      skuCount: 3,
+      plannedPickLines: 2,
+      plannedPickUnits: 5,
+      openCountLines: 1,
+      byClient: [{ clientId: GLOW_ID, clientName: 'GlowCo', units: 12, skuCount: 3, plannedPickLines: 2 }],
+    };
+    view = await mount();
+    await click([...rowOf('A-01-01').querySelectorAll('button')].find((b) => b.textContent === 'Block'));
+    expect(dialog()).not.toBeNull();
+    const preview = view.container.querySelector('[data-testid="bin-block-impact"]')!.textContent!;
+    expect(preview).toContain('12 units of 3 SKUs on hand will stop being promised');
+    expect(preview).toContain('2 planned pick stops (5 units) will need a Skip and a re-plan');
+    expect(preview).toContain('1 open count line stays open');
+    expect(preview).toContain('GlowCo — 12 units of 3 SKUs · 2 planned pick stops');
+    expect(requests.some((r) => r.method === 'GET' && r.pathname.endsWith(`/bins/${SHELF_ID}/block-impact`))).toBe(true);
+
+    const before = binGets().length;
+    setSelect(reasonSelect(), 'damaged');
+    setTextarea(noteArea('Block note'), '  Rack upright bent  ');
+    await click(button('Block bin'));
+    expect(blockPosts()).toHaveLength(1);
+    expect(blockPosts()[0]!.pathname).toEndWith(`/warehouses/${WAREHOUSE_ID}/bins/${SHELF_ID}/block`);
+    expect(blockPosts()[0]!.body).toEqual({ reason: 'damaged', note: 'Rack upright bent' });
+    expect(keyOf(blockPosts()[0]!)).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(requests.some((r) => r.method === 'PATCH')).toBe(false);
+    expect(dialog()).toBeNull();
+    expect(view.container.textContent).toContain('A-01-01 blocked');
+    expect(view.container.textContent).toContain('is blocked (damaged)');
+    expect(binGets().length).toBeGreaterThan(before);
+  });
+
+  test('the dialog sends nothing without a reason, or for Other without a note; a blank optional note is dropped', async () => {
+    impactBody = { binId: SHELF_ID, onHandUnits: 0, skuCount: 0, plannedPickLines: 0, plannedPickUnits: 0, openCountLines: 0, byClient: [] };
+    view = await mount();
+    await click(button('Block'));
+    expect(view.container.querySelector('[data-testid="bin-block-impact"]')!.textContent).toBe(
+      'Nothing is on hand in this bin; no planned pick stops; no open count lines.',
+    );
+    await click(button('Block bin'));
+    expect(blockPosts()).toHaveLength(0);
+    expect(dialog()!.textContent).toContain('Pick a reason for the block.');
+    setSelect(reasonSelect(), 'other');
+    setTextarea(noteArea('Block note'), '   ');
+    await click(button('Block bin'));
+    expect(blockPosts()).toHaveLength(0);
+    expect(dialog()!.textContent).toContain('Say why in the note — the reason is Other.');
+    setSelect(reasonSelect(), 'maintenance');
+    await click(button('Block bin'));
+    expect(blockPosts()[0]!.body).toEqual({ reason: 'maintenance' });
+  });
+
+  test('a retry of the same draft reuses its key; an edit mints a new one', async () => {
+    view = await mount();
+    await click(button('Block'));
+    setSelect(reasonSelect(), 'maintenance');
+    nextBlockStatus = 409;
+    nextBlockBody = { code: 'conflict', title: 'Conflict', status: 409 };
+    await click(button('Block bin'));
+    expect(dialog()!.textContent).toContain('Another change to this bin is in flight');
+    nextBlockStatus = 409;
+    nextBlockBody = { code: 'conflict', title: 'Conflict', status: 409 };
+    await click(button('Block bin'));
+    expect(keyOf(blockPosts()[1]!)).toBeDefined();
+    expect(keyOf(blockPosts()[1]!)).toBe(keyOf(blockPosts()[0]!)!);
+    setSelect(reasonSelect(), 'safety-hazard');
+    await click(button('Block bin'));
+    expect(keyOf(blockPosts()[2]!)).not.toBe(keyOf(blockPosts()[0]!)!);
+    expect(blockPosts()[2]!.body).toEqual({ reason: 'safety-hazard' });
+  });
+
+  test('a failed impact read says so and still lets the block go ahead', async () => {
+    impactBody = null;
+    view = await mount();
+    await click(button('Block'));
+    expect(view.container.querySelector('[data-testid="bin-block-impact"]')!.textContent).toContain('You can still block the bin.');
+    setSelect(reasonSelect(), 'investigation');
+    await click(button('Block bin'));
+    expect(blockPosts()).toHaveLength(1);
+  });
+
+  test('the Status pill names the reason, with the note, who and when beneath; a backfilled block has no "by"', async () => {
+    binsItems = [bin(), blockedBin(), blockedBin({ id: TANK_ID, code: 'A-OLD', blockedReason: 'other', blockedNote: 'Blocked before story 3-3b recorded reasons', blockedBy: null, blockedByName: null })];
+    view = await mount();
+    expect(rowOf('A-01-09').textContent).toContain('Blocked — damaged');
+    expect(rowOf('A-01-09').querySelector('[data-testid="bin-block-byline"]')!.textContent).toBe('Rack upright bent · by ravi · 26 Oct 2026, 14:05 IST');
+    expect(rowOf('A-OLD').querySelector('[data-testid="bin-block-byline"]')!.textContent).toBe('Blocked before story 3-3b recorded reasons · 26 Oct 2026, 14:05 IST');
+    expect(rowOf('A-01-01').textContent).toContain('Active');
+    expect(rowOf('A-01-01').querySelector('[data-testid="bin-block-byline"]')).toBeNull();
+  });
+
+  test('Unblock asks for a note and POSTs …/unblock with it', async () => {
+    binsItems = [blockedBin()];
+    view = await mount();
+    await click(button('Unblock'));
+    expect(dialog()!.textContent).toContain('Now: Blocked — damaged (Rack upright bent · by ravi');
+    expect(view.container.querySelector('[data-testid="bin-block-impact"]')).toBeNull();
+    await click(button('Unblock bin'));
+    expect(unblockPosts()).toHaveLength(0);
+    expect(dialog()!.textContent).toContain('Say why the block is lifted — a note is required.');
+    setTextarea(noteArea('Unblock note'), 'Rack repaired and inspected');
+    await click(button('Unblock bin'));
+    expect(unblockPosts()).toHaveLength(1);
+    expect(unblockPosts()[0]!.pathname).toEndWith(`/bins/${OTHER_ID}/unblock`);
+    expect(unblockPosts()[0]!.body).toEqual({ note: 'Rack repaired and inspected' });
+    expect(blockPosts()).toHaveLength(0);
+    expect(view.container.textContent).toContain('A-01-01 unblocked');
+  });
+
+  test('a stale 409 (someone else blocked it) closes the dialog, says so and re-reads', async () => {
+    view = await mount();
+    await click(button('Block'));
+    setSelect(reasonSelect(), 'damaged');
+    const before = binGets().length;
+    nextBlockStatus = 409;
+    nextBlockBody = { code: 'bin-already-blocked', title: 'Bin already blocked', status: 409, detail: 'prose' };
+    await click(button('Block bin'));
+    expect(dialog()).toBeNull();
+    expect(view.container.textContent).toContain('This bin is already blocked — refresh the bins.');
+    expect(binGets().length).toBeGreaterThan(before);
+  });
+
+  test('the Status filter walks the whole zone: Blocked shows every blocked bin across pages, Active the rest', async () => {
+    const id = (n: number) => `0198f7a2-1b3c-7d4e-8f90-${String(n).padStart(12, '0')}`;
+    binsPages = {
+      '': { items: [bin({ id: id(1), code: 'A-1' }), blockedBin({ id: id(2), code: 'A-2' })], nextCursor: 'p2' },
+      p2: { items: [blockedBin({ id: id(3), code: 'A-3', blockedReason: 'contamination' }), bin({ id: id(4), code: 'A-R', retiredAt: '2026-10-01T00:00:00.000Z' })], nextCursor: null },
+    };
+    view = await mount();
+    const filter = view.container.querySelector('select[aria-label="Bin status filter"]') as HTMLSelectElement;
+    expect([...filter.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['All', 'Active', 'Blocked']);
+    setSelect(filter, 'blocked');
+    await settle();
+    const codes = () =>
+      [...view!.container.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent).find((t) => /^A-/.test(t ?? '')));
+    expect(codes()).toEqual(['A-2', 'A-3']);
+    expect(view.container.textContent).toContain('Blocked — contamination');
+    setSelect(filter, 'active');
+    await settle();
+    expect(codes()).toEqual(['A-1']);
+    setSelect(filter, 'all');
+    await settle();
+    expect(codes()).toEqual(['A-1', 'A-2']);
+  });
+
+  test('an operator (no bin.block) reads the status but is offered neither Block nor Unblock', async () => {
+    writeSession({ ...SESSION, user: { id: 'u-1', email: 'priya@example.com', role: 'operator', status: 'active' } });
+    binsItems = [bin(), blockedBin()];
+    view = await mount();
+    expect(rowOf('A-01-09').textContent).toContain('Blocked — damaged');
+    expect(button('Block')).toBeUndefined();
+    expect(button('Unblock')).toBeUndefined();
+  });
+  const codesShown = () =>
+    [...view!.container.querySelectorAll('tbody tr')].map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent).find((t) => /^A-/.test(t ?? '')));
+  const statusFilter = () => view!.container.querySelector('select[aria-label="Bin status filter"]') as HTMLSelectElement;
+
+  test('under Blocked, an unblocked bin leaves the list; under Active, a blocked bin leaves it', async () => {
+    binsItems = [bin(), blockedBin()];
+    view = await mount();
+    setSelect(statusFilter(), 'blocked');
+    await settle();
+    expect(codesShown()).toEqual(['A-01-09']);
+    await click(button('Unblock'));
+    setTextarea(noteArea('Unblock note'), 'Repaired');
+    binsItems = [bin(), blockedBin({ blocked: false, blockedReason: null, blockedNote: null, blockedAt: null, blockedBy: null, blockedByName: null })];
+    await click(button('Unblock bin'));
+    expect(codesShown()).toEqual([]);
+    expect(view.container.textContent).toContain('No blocked bins in this zone.');
+
+    setSelect(statusFilter(), 'active');
+    await settle();
+    expect(codesShown()).toEqual(['A-01-01', 'A-01-09']);
+    await click([...rowOf('A-01-01').querySelectorAll('button')].find((b) => b.textContent === 'Block'));
+    setSelect(reasonSelect(), 'damaged');
+    binsItems = [bin({ blocked: true, blockedReason: 'damaged' }), blockedBin({ blocked: false, blockedReason: null, blockedNote: null, blockedAt: null, blockedBy: null, blockedByName: null })];
+    await click(button('Block bin'));
+    expect(codesShown()).toEqual(['A-01-09']);
+  });
+
+  test('a filtered walk cut off at 20 pages says the list may be missing bins', async () => {
+    const id = (n: number) => `0198f7a2-1b3c-7d4e-8f90-${String(n).padStart(12, '0')}`;
+    binsPages = {};
+    for (let n = 0; n < 21; n++) {
+      binsPages[n === 0 ? '' : `p${n}`] = { items: [blockedBin({ id: id(n + 1), code: `A-${n + 1}` })], nextCursor: `p${n + 1}` };
+    }
+    view = await mount();
+    expect(view.container.querySelector('[role="note"]')).toBeNull();
+    setSelect(statusFilter(), 'blocked');
+    await settle();
+    await settle();
+    expect(codesShown()).toHaveLength(20);
+    expect(view.container.querySelector('[role="note"]')!.textContent).toContain('the list may be missing some');
+  });
+
+  test('a failed filtered read shows its banner and no empty-table claim; Retry re-reads', async () => {
+    view = await mount();
+    binsFail = true;
+    setSelect(statusFilter(), 'blocked');
+    await settle();
+    expect(view.container.textContent).toContain('Bins not loaded');
+    expect(view.container.textContent).toContain('The bins read failed');
+    expect(view.container.textContent).not.toContain('No blocked bins in this zone.');
+    expect(view.container.querySelector('tbody')).toBeNull();
+    binsFail = false;
+    binsItems = [blockedBin()];
+    await click(button('Retry'));
+    expect(view.container.textContent).not.toContain('Bins not loaded');
+    expect(codesShown()).toEqual(['A-01-09']);
+  });
+
+  test('with no zone, a filter shows the empty list — never a "Loading bins…" that never ends', async () => {
+    zonesItems = [];
+    view = await mount();
+    setSelect(statusFilter(), 'blocked');
+    await settle();
+    expect(view.container.textContent).not.toContain('Loading bins…');
+    expect(view.container.textContent).toContain('No blocked bins in this zone.');
+  });
+
+  test('Escape closes an idle dialog but not one in flight; a double click sends one POST; other rows wait', async () => {
+    binsItems = [bin(), blockedBin()];
+    view = await mount();
+    await click([...rowOf('A-01-01').querySelectorAll('button')].find((b) => b.textContent === 'Block'));
+    // While a dialog is open, the other row's verb is not offered.
+    expect([...rowOf('A-01-09').querySelectorAll('button')].find((b) => b.textContent === 'Unblock')!.disabled).toBe(true);
+    const escape = () =>
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      });
+    escape();
+    await settle();
+    expect(dialog()).toBeNull();
+    expect([...rowOf('A-01-09').querySelectorAll('button')].find((b) => b.textContent === 'Unblock')!.disabled).toBe(false);
+
+    await click([...rowOf('A-01-01').querySelectorAll('button')].find((b) => b.textContent === 'Block'));
+    setSelect(reasonSelect(), 'damaged');
+    let release!: () => void;
+    blockGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const submit = button('Block bin')!;
+    act(() => {
+      submit.click();
+      submit.click();
+    });
+    await settle();
+    escape();
+    await settle();
+    expect(dialog()).not.toBeNull();
+    release();
+    await settle();
+    expect(blockPosts()).toHaveLength(1);
+    expect(dialog()).toBeNull();
+  });
+
+  test('switching zone closes the dialog, and it does not come back on the way back', async () => {
+    const ZONE_B = '0198f7a2-1b3c-7d4e-8f90-999999999999';
+    zonesItems = [
+      { id: ZONE_ID, code: 'A', name: 'Fast movers' },
+      { id: ZONE_B, code: 'B', name: 'Bulk' },
+    ];
+    view = await mount();
+    await click(button('Block'));
+    expect(dialog()).not.toBeNull();
+    const zoneSelect = [...view.container.querySelectorAll('label')].find((l) => l.textContent!.startsWith('Zone bins'))!.querySelector('select')!;
+    setSelect(zoneSelect, ZONE_B);
+    await settle();
+    expect(dialog()).toBeNull();
+    setSelect(zoneSelect, ZONE_ID);
+    await settle();
+    expect(dialog()).toBeNull();
+  });
+
+  test('a 409 bin-retired or a 404 closes the dialog and re-reads', async () => {
+    for (const [status, code] of [
+      [409, 'bin-retired'],
+      [404, 'not-found'],
+    ] as const) {
+      view?.unmount();
+      view = await mount();
+      await click(button('Block'));
+      setSelect(reasonSelect(), 'damaged');
+      const before = binGets().length;
+      nextBlockStatus = status;
+      nextBlockBody = { code, title: 'x', status };
+      await click(button('Block bin'));
+      expect(dialog()).toBeNull();
+      expect(binGets().length).toBeGreaterThan(before);
+    }
   });
 });

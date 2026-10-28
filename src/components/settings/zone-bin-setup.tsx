@@ -37,6 +37,14 @@ import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { useWarehouseZones } from '@/lib/use-warehouse-zones';
 import { useZoneBins } from '@/lib/use-zone-bins';
+import { useZoneBinsByStatus } from '@/lib/use-zone-bins-by-status';
+import {
+  BIN_STATUS_FILTER_LABEL,
+  binBlockByline,
+  binBlockOutcome,
+  binBlockedLabel,
+  type BinStatusFilter,
+} from '@/lib/bin-block';
 import { notifyZonesChanged } from '@/lib/zones';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -46,6 +54,7 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
 import { BinLabelsDialog, type BinLabelsTarget } from '@/components/settings/BinLabelsDialog';
 import { MAX_LABELS_PER_PRINT, binPrintBlock } from '@/lib/bin-labels';
 import { StatusChip } from '@/components/shared/status-chip';
+import { BinBlockDialog } from '@/components/settings/bin-block-dialog';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -241,6 +250,9 @@ function ZonesBinsSetupSessioned() {
             />
           )}
           <ZoneBinsTable
+            // Story 3-3b — a warehouse switch remounts the table, so a block
+            // dialog (and every other open panel) never outlives its warehouse.
+            key={`bins-${warehouseId}`}
             tenantId={tenantId}
             warehouseId={warehouseId}
             zones={zones}
@@ -735,7 +747,7 @@ function ZoneBinsTable({
   selectedZoneId: string | null;
   onSelectZone: (zoneId: string | null) => void;
   bins: ReturnType<typeof useZoneBins>;
-  /** Story 1.5: the block toggle renders only for `bin.block` roles. */
+  /** Story 1.5: Block / Unblock render only for `bin.block` roles (3-3b: each opens its dialog). */
   canBlockBin: boolean;
   /** Story 3.6: merge/retire render only for `bin.retire` roles. */
   canRetireBin: boolean;
@@ -786,6 +798,16 @@ function ZoneBinsTable({
   // The picker's fetch sequence — a rapid second pick supersedes the first
   // fetch, so a stale response must never win the race into state.
   const mergeFetchSeq = useRef(0);
+  // Story 3-3b — the Block / Unblock dialog, scoped to the zone it was
+  // opened in (a zone switch reads as closed — derived, no effect).
+  const [blockPanel, setBlockPanel] = useState<{ zoneId: string | null; mode: 'block' | 'unblock'; bin: BinResponse } | null>(null);
+  const blockTarget = blockPanel !== null && blockPanel.zoneId === selectedZoneId ? blockPanel : null;
+  // Story 3-3b — the Status filter (All / Active / Blocked). `all` is the
+  // paged list; Active and Blocked walk the WHOLE zone (the server has no
+  // status filter, and a page-only filter would hide a blocked bin on a
+  // later page).
+  const [statusFilter, setStatusFilter] = useState<BinStatusFilter>('all');
+  const byStatus = useZoneBinsByStatus(warehouseId, selectedZoneId, statusFilter);
   // Story 2-10a — the label selection, scoped to the zone it was made in: a
   // zone switch reads as an empty selection (derived, no effect), while
   // paging inside the zone keeps it. `printTarget` opens the print panel.
@@ -793,7 +815,8 @@ function ZoneBinsTable({
     zoneId: null,
     ids: new Set(),
   });
-  const pageRows = bins?.items ?? [];
+  const pageRows: readonly BinResponse[] =
+    statusFilter === 'all' ? (bins?.items ?? []) : byStatus.state === 'ready' ? byStatus.data.items : [];
   // A ticked bin the refreshed page now shows unprintable (retired, merged
   // away, a code a barcode cannot carry) drops out of the selection; the next
   // tick or untick stores the pruned set.
@@ -861,6 +884,7 @@ function ZoneBinsTable({
       });
       setClassEditingBin(null);
       bins?.reload();
+      byStatus.reload();
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not updated', reason: binClassReason(error) });
     } finally {
@@ -894,6 +918,7 @@ function ZoneBinsTable({
       });
       setClientEditingBin(null);
       bins?.reload();
+      byStatus.reload();
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not updated', reason: binClientReason(error) });
     } finally {
@@ -902,32 +927,21 @@ function ZoneBinsTable({
     }
   }
 
-  async function toggleBlocked(bin: BinResponse) {
-    const session = readSession();
-    if (session === null) return;
-    setBusyBinId(bin.id);
-    setOutcome(null);
-    try {
-      const updated = await fetchApiSetBinBlocked(
-        tenantId,
-        warehouseId,
-        bin.id,
-        { blocked: !bin.blocked },
-        ulid(),
-      );
-      setOutcome({
-        tone: 'accepted',
-        word: updated.blocked ? `${updated.code} blocked` : `${updated.code} unblocked`,
-        reason: updated.blocked
-          ? 'Broken bins are hidden from putaway/pick suggestions.'
-          : 'The bin is available again.',
-      });
-      bins?.reload();
-    } catch (error) {
-      setOutcome({ tone: 'rejected', word: 'Not updated', reason: rejectionReason(error) });
-    } finally {
-      setBusyBinId(null);
-    }
+  /** Story 3-3b — a block / unblock settled: the banner from the RESPONSE, then every bins reader re-reads. */
+  function blockDone(mode: 'block' | 'unblock', updated: BinResponse) {
+    const outcome = binBlockOutcome(mode, updated);
+    setOutcome({ tone: 'accepted', word: outcome.word, reason: outcome.reason });
+    setBlockPanel(null);
+    bins?.reload();
+    byStatus.reload();
+  }
+
+  /** Story 3-3b — 409 already-blocked / not-blocked: someone else moved the bin on; close and re-read. */
+  function blockStale(reason: string) {
+    setOutcome({ tone: 'rejected', word: 'Not changed', reason });
+    setBlockPanel(null);
+    bins?.reload();
+    byStatus.reload();
   }
 
   /** Story 3.6 — the one-way retire; only an EMPTY bin is accepted by the API. */
@@ -944,6 +958,7 @@ function ZoneBinsTable({
         reason: 'Retirement is terminal: the code stays reserved, the bin leaves every suggestion and device snapshot.',
       });
       bins?.reload();
+      byStatus.reload();
       notifyZonesChanged();
     } catch (error) {
       // `bin-not-empty` names the offending (sku, batch, qty) rows verbatim.
@@ -975,6 +990,7 @@ function ZoneBinsTable({
       setMergeTargetId(null);
       setMergeTargets(null);
       bins?.reload();
+      byStatus.reload();
       notifyZonesChanged();
     } catch (error) {
       setOutcome({ tone: 'rejected', word: 'Not merged', reason: rejectionReason(error) });
@@ -1059,7 +1075,15 @@ function ZoneBinsTable({
         bin.retiredAt !== null ? (
           <StatusChip tone="neutral">Retired</StatusChip>
         ) : bin.blocked ? (
-          <StatusChip tone="danger">Blocked</StatusChip>
+          // Story 3-3b — "Blocked — damaged", with the note, who and when beneath.
+          <span className="flex flex-col items-start gap-0.5">
+            <StatusChip tone="danger">{binBlockedLabel(bin)}</StatusChip>
+            {binBlockByline(bin) !== null && (
+              <span className="text-xs text-(--muted-foreground)" data-testid="bin-block-byline">
+                {binBlockByline(bin)}
+              </span>
+            )}
+          </span>
         ) : (
           <StatusChip tone="neutral">{bin.systemOwned ? 'System' : 'Active'}</StatusChip>
         ),
@@ -1079,8 +1103,12 @@ function ZoneBinsTable({
                   {canBlockBin && (
                     <button
                       type="button"
-                      disabled={inert || busyBinId === bin.id}
-                      onClick={() => toggleBlocked(bin)}
+                      // One block dialog at a time: another row's verb would unmount it mid-request.
+                      disabled={inert || busyBinId === bin.id || blockPanel !== null}
+                      onClick={() => {
+                        setBlockPanel({ zoneId: selectedZoneId, mode: bin.blocked ? 'unblock' : 'block', bin });
+                        setOutcome(null);
+                      }}
                       className="rounded-sm border border-(--border) px-2 py-1 text-xs hover:bg-(--muted) disabled:opacity-40"
                     >
                       {busyBinId === bin.id ? '…' : bin.blocked ? 'Unblock' : 'Block'}
@@ -1149,7 +1177,50 @@ function ZoneBinsTable({
 
   return (
     <div className="flex flex-col gap-2">
-      <ZonePicker zones={zones} value={selectedZoneId} onChange={(id) => onSelectZone(id)} label="Zone bins" />
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <ZonePicker
+          zones={zones}
+          value={selectedZoneId}
+          onChange={(id) => {
+            // A block dialog belongs to its zone — a switch closes it, so it never reappears on the way back.
+            setBlockPanel(null);
+            onSelectZone(id);
+          }}
+          label="Zone bins"
+        />
+        {/* Story 3-3b — the Status filter; Active and Blocked cover the whole zone. */}
+        <label className="flex flex-col gap-1 sm:w-48">
+          <span className={labelClass}>Status</span>
+          <select
+            aria-label="Bin status filter"
+            className={selectClass}
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value as BinStatusFilter);
+              // Back to page one of the paged list, so All never resumes on a stale page.
+              bins?.onCursor(null);
+            }}
+          >
+            {(Object.keys(BIN_STATUS_FILTER_LABEL) as BinStatusFilter[]).map((value) => (
+              <option key={value} value={value}>
+                {BIN_STATUS_FILTER_LABEL[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {canBlockBin && blockTarget !== null && (
+        <BinBlockDialog
+          key={`${blockTarget.mode}-${blockTarget.bin.id}`}
+          mode={blockTarget.mode}
+          tenantId={tenantId}
+          warehouseId={warehouseId}
+          bin={blockTarget.bin}
+          onClose={() => setBlockPanel(null)}
+          onDone={(updated) => blockDone(blockTarget.mode, updated)}
+          onStale={blockStale}
+        />
+      )}
       {showLabels && selectedZoneId !== null && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <label className="flex items-center gap-1.5">
@@ -1320,13 +1391,41 @@ function ZoneBinsTable({
           </div>
         </div>
       )}
-      <DataTable<BinResponse>
-        columns={columns}
-        rows={bins?.items ?? []}
-        nextCursor={bins?.nextCursor ?? null}
-        onCursor={bins?.onCursor}
-        emptyMessage="No bins in this zone yet — generate a grid or add one manually."
-      />
+      {statusFilter !== 'all' && byStatus.state === 'failed' && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <FeedbackBanner tone="rejected" word="Bins not loaded" reason={byStatus.reason} />
+          <button
+            type="button"
+            onClick={() => byStatus.reload()}
+            className="rounded-sm border border-(--border) px-2 py-1 hover:bg-(--muted)"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {statusFilter !== 'all' && byStatus.state === 'ready' && byStatus.data.truncated && (
+        <div role="note" className="text-xs text-(--muted-foreground)">
+          This zone has more bins than one filtered read covers — the list may be missing some. Use All to page through every bin.
+        </div>
+      )}
+      {statusFilter !== 'all' && byStatus.state === 'loading' && <div className="text-(--muted-foreground)">Loading bins…</div>}
+      {/* A failed filtered read shows its banner only — an empty table would claim "No blocked bins". */}
+      {(statusFilter === 'all' || byStatus.state === 'ready') && (
+        <DataTable<BinResponse>
+          key={statusFilter}
+          columns={columns}
+          rows={pageRows}
+          nextCursor={statusFilter === 'all' ? (bins?.nextCursor ?? null) : null}
+          onCursor={statusFilter === 'all' ? bins?.onCursor : undefined}
+          emptyMessage={
+            statusFilter === 'blocked'
+              ? 'No blocked bins in this zone.'
+              : statusFilter === 'active'
+                ? 'No active bins in this zone.'
+                : 'No bins in this zone yet — generate a grid or add one manually.'
+          }
+        />
+      )}
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
     </div>
   );

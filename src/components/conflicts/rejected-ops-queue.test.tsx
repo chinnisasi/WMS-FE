@@ -716,3 +716,42 @@ describe('story 1-6d — a grn.licence-refused row: an owner accepts with a note
     expect(view.container.textContent).toContain('Accepting goods without a valid licence is an owner decision.');
   });
 });
+
+describe('RejectedOpsQueue: a pick refused bin-blocked (story 3-3b, A3)', () => {
+  test('an open pick.record row refused bin-blocked shows the runbook naming the bin; other rows do not', async () => {
+    opRows = [
+      rejectedOp({
+        opType: 'pick.record',
+        classification: 'rejected',
+        problemCode: 'bin-blocked',
+        problemDetail: 'Bin "A-01" is blocked (damaged) — picks from it are refused until it is unblocked.',
+        payload: { warehouseId: WAREHOUSE_ID, binId: BIN_ID, picklistLineId: 'L-1', qty: 3, occurredAt: '2026-09-20T00:00:00.000Z' },
+      }),
+      rejectedOp({ problemCode: 'bin-epoch-moved' }, BINLESS_OP_ID),
+    ];
+    view = await mount();
+    const guidance = [...view.container.querySelectorAll('[data-testid="pick-bin-blocked-guidance"]')];
+    expect(guidance).toHaveLength(1);
+    expect(guidance[0]!.textContent).toContain('Return the units to A-01, Discard this pick, then Skip the stop');
+    expect(guidance[0]!.closest('article')!.textContent).toContain('bin-blocked');
+  });
+
+  test('a resolved pick row refused bin-blocked shows no runbook', async () => {
+    opRows = [
+      rejectedOp({
+        opType: 'pick.record',
+        classification: 'rejected',
+        problemCode: 'bin-blocked',
+        status: 'discarded',
+        resolvedBy: 'u-1',
+        resolvedAt: '2026-09-21T00:00:00.000Z',
+        resolvedOutcome: null,
+        payload: { warehouseId: WAREHOUSE_ID, binId: BIN_ID, picklistLineId: 'L-1', qty: 3 },
+      }),
+    ];
+    view = await mount();
+    // The settled card renders (so the absence below is not an empty queue).
+    expect(article(view, 'bin-blocked').textContent).toContain('resolved by');
+    expect(view.container.querySelector('[data-testid="pick-bin-blocked-guidance"]')).toBeNull();
+  });
+});

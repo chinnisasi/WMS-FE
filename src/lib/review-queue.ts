@@ -1337,6 +1337,23 @@ function returnRestockSummary(
 // ── story 2-8b: a refused handheld return-to-vendor pick (an rtv.pick row) ──
 
 /**
+ * Story 3-3b (A3) — the runbook for a `pick.record` row refused `bin-blocked`.
+ * The handheld picked from a bin that is blocked, and the pick was not
+ * exempt, so the server recorded nothing: the units are still on the bin's
+ * books. The reviewer returns the units to the bin, discards the op, and the
+ * operator skips the stop on the handheld so it is re-planned. Null for every
+ * other row.
+ */
+export function pickBinBlockedGuidance(
+  entry: Pick<RejectedOpResponse, 'opType' | 'problemCode'>,
+  binCode: string | null,
+): string | null {
+  if (entry.opType !== 'pick.record' || entry.problemCode !== 'bin-blocked') return null;
+  const bin = binCode ?? 'the bin';
+  return `The bin is blocked and this pick was not recorded — the units are still on ${bin}'s books. Return the units to ${bin}, Discard this pick, then Skip the stop on the handheld so it is re-planned.`;
+}
+
+/**
  * The remedy an `rtv.pick` row's reviewer reads (Discard only): the pick
  * moved no stock, so there is nothing to undo in the system — only the
  * floor. A return that is no longer a draft (cancelled on the web, or picked

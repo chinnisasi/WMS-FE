@@ -463,6 +463,8 @@ describe('the picklist and stop copy', () => {
   test('a short-pick reason reads in words; an unrecognised one falls back to itself', () => {
     expect(pickReasonLabel(null)).toBeNull();
     expect(pickReasonLabel('bin-empty')).toBe('Bin empty');
+    // Story 3-3b — a Skip on a blocked bin's stop.
+    expect(pickReasonLabel('skipped-blocked-bin')).toBe('Skipped — bin blocked');
     expect(pickReasonLabel('invented-later')).toBe('invented-later');
   });
 });
