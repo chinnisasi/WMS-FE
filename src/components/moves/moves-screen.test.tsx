@@ -179,6 +179,12 @@ async function press(target: HTMLButtonElement): Promise<void> {
 }
 
 describe('the Moves page (story 3-1)', () => {
+  test('story 3-5b — the page links to Counts and stock takes (/moves/counts)', async () => {
+    await mount('accountant');
+    const link = [...view!.container.querySelectorAll('a')].find((a) => a.textContent === 'Counts and stock takes');
+    expect(link?.getAttribute('href')).toBe('/moves/counts');
+  });
+
   test('an accountant reads the recent moves and is offered no form at all', async () => {
     await mount('accountant');
     expect(form()).toBeNull();

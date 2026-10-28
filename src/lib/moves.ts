@@ -9,7 +9,7 @@ import type {
   StockEntryDto,
 } from '@/lib/api/generated';
 import { formatQuantity, parseQuantityInput } from '@/lib/format-quantity';
-import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
+import { UNREACHABLE_REASON, verbatim } from '@/lib/outbound-orders';
 import type { UserRole } from '@/lib/users';
 import { roleHasCapability } from '@/lib/users';
 
@@ -276,6 +276,9 @@ export function moveReason(error: unknown): string {
         return error.detail ?? 'That bin is retired — pick another.';
       case 'bin-blocked':
         return error.detail ?? 'The target bin is blocked — pick another.';
+      case 'bin-frozen':
+        // Story 3-5b — verbatim: the server names the bin, the take and its start.
+        return verbatim(error);
       case 'bin-full':
       case 'bin-overweight':
       case 'bin-volume-exceeded':

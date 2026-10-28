@@ -91,6 +91,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   stock_adjustment_policy: 'Adjustment policy',
   suggested_po: 'Suggested PO',
   temperature_excursion: 'Excursion',
+  // Story 3-5b — a stock take (started, recount requested, closed, abandoned).
+  stock_take: 'Stock take',
   tenant: 'Company',
   transfer_order: 'Transfer',
   user: 'User',

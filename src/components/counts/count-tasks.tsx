@@ -3,7 +3,9 @@
 import Link from 'next/link';
 import { Fragment, useMemo, useState } from 'react';
 
-import { fetchApiCreateCounts } from '@/lib/api/client';
+import { ApiProblem, fetchApiCancelCountTask, fetchApiCreateCounts } from '@/lib/api/client';
+import { cancelCountReason } from '@/lib/stock-takes';
+import { StatusChip } from '@/components/shared/status-chip';
 import type { CountTaskListEntryDto, SkuResponse } from '@/lib/api/generated';
 import {
   COUNT_TASK_ORIGINS,
@@ -167,6 +169,8 @@ export function CountTasks({
                       onToggle={() => setExpandedId(expandedId === task.id ? null : task.id)}
                       canResolve={canResolve}
                       canInspect={canManage || canResolve}
+                      canManage={canManage}
+                      tenantId={tenantId}
                     />
                   ))
                 )}
@@ -193,8 +197,13 @@ function TaskRow({
   onToggle,
   canResolve,
   canInspect,
+  canManage,
+  tenantId,
 }: {
   task: CountTaskListEntryDto;
+  /** Story 3-5b — the Cancel action (pending cycle counts only). */
+  canManage: boolean;
+  tenantId: string;
   viewerId: string | null;
   planners: Readonly<Record<string, string>> | null;
   expanded: boolean;
@@ -212,18 +221,28 @@ function TaskRow({
       <tr data-row-id={task.id} className="h-10 border-b border-(--border) last:border-b-0">
         <td className="px-3 py-1 font-medium">{task.binCode}</td>
         <td className="px-3 py-1">{COUNT_TASK_ORIGIN_LABEL[task.origin]}</td>
-        <td className="px-3 py-1">{COUNT_TASK_STATUS_LABEL[task.status]}</td>
+        <td className="px-3 py-1">
+          {COUNT_TASK_STATUS_LABEL[task.status]}
+          {task.stockTakeId !== null && (
+            <StatusChip tone="info" className="ml-2">
+              Stock take
+            </StatusChip>
+          )}
+        </td>
         <td className="data px-3 py-1 text-right">{task.lineCount}</td>
         <td className="px-3 py-1">{varianceCountLabel(task)}</td>
         <td className="px-3 py-1">{createdByLabel(task.createdBy, viewerId, planners)}</td>
         <td className="px-3 py-1">{ledgerRecordedLabel(task.createdAt)}</td>
         <td className="px-3 py-1">{task.completedAt === null ? '—' : ledgerRecordedLabel(task.completedAt)}</td>
         <td className="px-3 py-1">
-          {canInspect && (
-            <button type="button" className={rowButtonClass} aria-expanded={expanded} onClick={onToggle}>
-              {expanded ? 'Hide' : 'Details'}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {canInspect && (
+              <button type="button" className={rowButtonClass} aria-expanded={expanded} onClick={onToggle}>
+                {expanded ? 'Hide' : 'Details'}
+              </button>
+            )}
+            {canManage && task.status === 'pending' && task.stockTakeId === null && <CancelCount tenantId={tenantId} taskId={task.id} binCode={task.binCode} />}
+          </div>
         </td>
       </tr>
       {expanded && canInspect && (
@@ -464,5 +483,66 @@ function NewCountForm({ tenantId, warehouseId, onClose }: { tenantId: string; wa
         </button>
       </div>
     </form>
+  );
+}
+
+/** The cancel refusals that mean the row on screen is stale. */
+const STALE_CANCEL_CODES: ReadonlySet<string> = new Set(['count-task-cancelled', 'count-task-completed', 'stock-take-task']);
+
+/**
+ * Story 3-5b — cancel a pending cycle count (`counts.manage`), with an inline
+ * confirm. A stock take's tasks carry no Cancel (the take is abandoned whole).
+ */
+function CancelCount({ tenantId, taskId, binCode }: { tenantId: string; taskId: string; binCode: string }) {
+  const [confirming, setConfirming] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const keyed = useKeyedSubmit();
+  async function cancel() {
+    setRefusal(null);
+    try {
+      const sent = await keyed.run((key) => fetchApiCancelCountTask(tenantId, taskId, key));
+      if (!sent.sent) return;
+      setConfirming(false);
+      notifyCountsChanged();
+    } catch (error) {
+      setRefusal(cancelCountReason(error));
+      // A fresh key for the next try; a stale row (already counted,
+      // cancelled, or a take's) is re-read.
+      keyed.invalidate();
+      if (error instanceof ApiProblem && STALE_CANCEL_CODES.has(error.code)) notifyCountsChanged();
+    }
+  }
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        className={rowButtonClass}
+        onClick={() => {
+          setRefusal(null);
+          setConfirming(true);
+        }}
+      >
+        Cancel
+      </button>
+    );
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2 text-xs">
+      <span>Cancel the count of {binCode}? A handheld that counts it later is sent for review.</span>
+      <button type="button" className={rowButtonClass} disabled={keyed.busy} onClick={() => void cancel()}>
+        {keyed.busy ? 'Cancelling…' : 'Yes, cancel'}
+      </button>
+      <button
+        type="button"
+        className={rowButtonClass}
+        onClick={() => {
+          setRefusal(null);
+          setConfirming(false);
+        }}
+      >
+        Keep
+      </button>
+      {refusal !== null && <span className="text-(--destructive)">{refusal}</span>}
+    </span>
   );
 }

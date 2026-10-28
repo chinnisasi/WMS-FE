@@ -143,10 +143,13 @@ describe('page-tabs — the pages', () => {
     expect(RETURNS_PAGE_TABS.parse({ tab: 'nope' })).toBeNull();
     expect(RETURNS_PAGE_TABS.id).toBe('returns');
     // Story 3-5a — counts under Moves: Tasks (the bare route) and Schedule; no drill.
+    // Story 3-5b — and Stock takes.
     expect(COUNTS_PAGE_TABS.tabs.map((t) => [t.id, t.label])).toEqual([
       ['tasks', 'Tasks'],
       ['schedule', 'Schedule'],
+      ['takes', 'Stock takes'],
     ]);
+    expect(COUNTS_PAGE_TABS.href('takes')).toBe('/moves/counts?tab=takes');
     expect(COUNTS_PAGE_TABS.href('tasks')).toBe('/moves/counts');
     expect(COUNTS_PAGE_TABS.href('schedule')).toBe('/moves/counts?tab=schedule');
     expect(COUNTS_PAGE_TABS.id).toBe('moves-counts');

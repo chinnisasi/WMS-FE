@@ -62,12 +62,13 @@ function zone(id: string, code: string): ZoneResponse {
 
 describe('counts — labels', () => {
   test('status, origin and skip-reason words', () => {
-    expect(COUNT_TASK_STATUS_LABEL).toEqual({ pending: 'Pending', completed: 'Counted' });
+    expect(COUNT_TASK_STATUS_LABEL).toEqual({ pending: 'Pending', completed: 'Counted', cancelled: 'Cancelled' });
     expect(COUNT_TASK_ORIGIN_LABEL).toEqual({ on_demand: 'On demand', scheduled: 'Scheduled', recount: 'Recount' });
     expect(COUNT_SKIP_REASON_LABEL).toEqual({
       'count-task-open': 'already has an open count',
       'system-bin': 'a system bin — not countable',
       'bin-retired': 'retired',
+      'stock-take': 'in a stock take',
     });
     expect(VARIANCE_QUEUE_HREF).toBe('/conflicts?queue=variances');
   });
