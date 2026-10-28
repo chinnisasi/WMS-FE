@@ -36,6 +36,8 @@ export interface BatchLifecycleFacts {
   readonly blockedAt: string | null;
   readonly blockedByName: string | null;
   readonly expired: boolean;
+  /** Story 3-7a — the OPEN LIVE recall naming the batch (absent on an older response — read as none). */
+  readonly recallCode?: string | null;
 }
 
 /** The reason inside a status line ("Blocked — failed QC …"). */
@@ -48,7 +50,8 @@ const BATCH_BLOCK_REASON_SHORT: Readonly<Record<BatchBlockReason, string>> = {
   other: 'other',
 };
 
-function reasonWord(reason: string | null): string {
+/** A block reason in a sentence ("failed QC"); an unknown reason reads as sent. */
+export function batchBlockReasonWord(reason: string | null): string {
   if (reason === null) return 'no reason';
   return Object.prototype.hasOwnProperty.call(BATCH_BLOCK_REASON_SHORT, reason) ? BATCH_BLOCK_REASON_SHORT[reason as BatchBlockReason] : reason;
 }
@@ -65,7 +68,7 @@ export function batchLifecycleLabel(batch: BatchLifecycleFacts): string {
       .filter((part): part is string => part !== null)
       .join(', ');
     const note = batch.blockedNote === null || batch.blockedNote === '' ? '' : `: ${batch.blockedNote}`;
-    const blocked = `Blocked — ${reasonWord(batch.blockedReason)}${note}${by === '' ? '' : ` (${by})`}`;
+    const blocked = `Blocked — ${batchBlockReasonWord(batch.blockedReason)}${note}${by === '' ? '' : ` (${by})`}`;
     return batch.expired ? `${blocked} · Expired` : blocked;
   }
   if (batch.expired) return 'Expired';
@@ -123,6 +126,11 @@ export function batchBlockReason(error: unknown): string {
       return 'This request was already sent with different details — close and try again.';
     case 'conflict':
       return 'Another change to this batch is in flight — refresh and try again.';
+    case 'batch-under-recall': {
+      // Story 3-7a (A4) — the standalone unblock is refused while an open live recall names the batch.
+      const code = typeof error.extensions.recallCode === 'string' ? error.extensions.recallCode : null;
+      return `${underRecallSentence(code)}.`;
+    }
     case 'request-failed':
       return UNREACHABLE;
     default:
@@ -144,7 +152,7 @@ export function batchBlockOutcome(kind: 'block' | 'unblock', response: BatchBloc
   if (kind === 'block') {
     return {
       word: 'Blocked',
-      reason: `Batch ${batch.code} is blocked (${reasonWord(batch.blockedReason)}) in every warehouse — its stock stays on hand but is no longer promised or picked by default. Orders already reserved against it stand.`,
+      reason: `Batch ${batch.code} is blocked (${batchBlockReasonWord(batch.blockedReason)}) in every warehouse — its stock stays on hand but is no longer promised or picked by default. Orders already reserved against it stand.`,
     };
   }
   return {
@@ -153,4 +161,35 @@ export function batchBlockOutcome(kind: 'block' | 'unblock', response: BatchBloc
       ? `Batch ${batch.code} is unblocked, but it is past its expiry — its stock is still not promised.`
       : `Batch ${batch.code} is unblocked — its stock is promisable again.`,
   };
+}
+
+// ── story 3-7a — a batch under recall ────────────────────────────────────────
+
+/** The open live recall naming the batch, or null (an absent field reads as none). */
+export function batchRecallCode(batch: { readonly recallCode?: string | null }): string | null {
+  return typeof batch.recallCode === 'string' && batch.recallCode !== '' ? batch.recallCode : null;
+}
+
+/**
+ * Why Unblock is not offered: "Under recall RCL-000001 — release it from the
+ * recall". A lot blocked for ANOTHER reason before the recall is never
+ * released by the recall's close (it keeps its reason): it is unblocked here,
+ * once the recall is closed. `blockedReason` absent or `recall` keeps the
+ * release wording.
+ */
+export function underRecallSentence(code: string | null, blockedReason?: string | null): string {
+  const named = code === null ? 'Under an open recall' : `Under recall ${code}`;
+  if (blockedReason !== undefined && blockedReason !== null && blockedReason !== 'recall') {
+    return `${named} — blocked for ${batchBlockReasonWord(blockedReason)} before the recall; unblock it here once ${code ?? 'the recall'} is closed`;
+  }
+  return `${named} — release it from the recall`;
+}
+
+/** The nudge beside the standalone `recall` block reason (A4): a recall document does more than a block. */
+export const OPEN_A_RECALL_NUDGE = 'Recalling a lot? Open a recall instead — it blocks, traces and reports.';
+
+/** True when a 409 says the batch is under recall (the dialog shows the recall link, not a retry). */
+export function batchUnderRecallRefusal(error: unknown): string | null | false {
+  if (!(error instanceof ApiProblem) || error.code !== 'batch-under-recall') return false;
+  return typeof error.extensions.recallCode === 'string' ? error.extensions.recallCode : null;
 }

@@ -4,6 +4,9 @@ import type { BlockBatchDto } from '@/lib/api/generated';
 import { ApiProblem } from '@/lib/api/client';
 import {
   BATCH_BLOCK_REASONS,
+  batchRecallCode,
+  batchUnderRecallRefusal,
+  underRecallSentence,
   batchBlockOutcome,
   batchBlockReason,
   batchBlockStale,
@@ -79,5 +82,28 @@ describe('refusals and outcomes', () => {
     expect(batchBlockOutcome('block', { batch }).reason).toContain('in every warehouse');
     expect(batchBlockOutcome('unblock', { batch: { ...batch, status: 'active', blockedReason: null } }).reason).toBe('Batch LOT-A is unblocked — its stock is promisable again.');
     expect(batchBlockOutcome('unblock', { batch: { ...batch, status: 'active', blockedReason: null, expired: true } }).reason).toContain('past its expiry');
+  });
+});
+
+describe('story 3-7a — a batch under recall (A4)', () => {
+  test('the recall code (absent or empty reads as none) and the sentence', () => {
+    expect(batchRecallCode({ recallCode: 'RCL-000001' })).toBe('RCL-000001');
+    expect(batchRecallCode({})).toBeNull();
+    expect(batchRecallCode({ recallCode: null })).toBeNull();
+    expect(underRecallSentence('RCL-000001')).toBe('Under recall RCL-000001 — release it from the recall');
+    expect(underRecallSentence('RCL-000001', 'recall')).toBe('Under recall RCL-000001 — release it from the recall');
+    // Blocked for another reason before the recall: the close never releases it.
+    expect(underRecallSentence('RCL-000001', 'qc-failed')).toBe(
+      'Under recall RCL-000001 — blocked for failed QC before the recall; unblock it here once RCL-000001 is closed',
+    );
+  });
+
+  test('the 409 batch-under-recall is worded the same way, naming extensions.recallCode', () => {
+    const refusal = new ApiProblem('batch-under-recall', 409, 'prose', 'Batch under recall', { recallCode: 'RCL-000004' });
+    expect(batchBlockReason(refusal)).toBe('Under recall RCL-000004 — release it from the recall.');
+    expect(batchUnderRecallRefusal(refusal)).toBe('RCL-000004');
+    expect(batchUnderRecallRefusal(new ApiProblem('batch-under-recall', 409))).toBeNull();
+    expect(batchUnderRecallRefusal(new ApiProblem('batch-not-blocked', 409))).toBe(false);
+    expect(batchBlockStale(refusal)).toBe(false);
   });
 });

@@ -30,6 +30,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   // Story 3-3a — a batch (lot) blocked or unblocked.
   batch: 'Batch',
   batch_alert: 'Batch alert',
+  // Story 3-7a — a batch recall (opened, lots added, closed, a report downloaded).
+  batch_recall: 'Batch recall',
   bin: 'Bin',
   // Story 3-1 — a bin-to-bin move (`stock.moved`).
   bin_move: 'Bin move',

@@ -233,7 +233,7 @@ describe('the Inventory screen — Stock', () => {
 
     const tablist = view.container.querySelector('[role="tablist"][aria-label="Inventory lists"]')!;
     // Story 3-2a — the owner holds stock.adjust, so the Adjust tab shows.
-    expect([...tablist.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['Stock', 'Batches', 'Ledger', 'Adjust']);
+    expect([...tablist.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['Stock', 'Batches', 'Recalls', 'Ledger', 'Adjust']);
     expect(tablist.querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('stock');
     expect(panel().querySelector('h2')?.textContent).toBe('Stock');
 
@@ -747,6 +747,96 @@ describe('the Inventory screen — Batches', () => {
     expect(panel().querySelector('[data-testid="bin-codes-note"]')?.textContent).toContain('Bin codes not loaded');
     expect(button('Retry bin codes')).toBeDefined();
     expect(cellTexts(tableRows()[0]!)[3]).toBe('Active');
+  });
+});
+
+describe('story 3-7a — a batch under recall (A4)', () => {
+  const UNDER_RECALL = {
+    id: BATCH_A,
+    code: 'LOT-A',
+    mfgDate: null,
+    expiryDate: '2027-01-01T00:00:00.000Z',
+    status: 'blocked',
+    blockedReason: 'recall',
+    blockedNote: 'RCL-000007: Allergen',
+    blockedAt: '2026-10-17T09:30:00.000Z',
+    blockedBy: 'u-1',
+    blockedByName: 'owner',
+    expired: false,
+    recallCode: 'RCL-000007',
+    quantity: 12,
+  };
+
+  async function setSelect(selector: string, value: string): Promise<void> {
+    const element = panel().querySelector(selector) as HTMLSelectElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(element, value);
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  test('a lot under an open live recall: the recall badge links to it, and Unblock is not offered — it says why', async () => {
+    overrides.push({ match: (p) => p.endsWith('/inventory/batches'), respond: () => json(200, { items: [UNDER_RECALL] }) });
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    const badge = panel().querySelector('[data-testid="batch-recall-badge"]') as HTMLAnchorElement;
+    expect(badge.textContent).toContain('Under recall RCL-000007');
+    expect(badge.getAttribute('href')).toBe('/inventory?tab=recalls&recall=RCL-000007');
+    const unblock = button('Unblock LOT-A');
+    expect(unblock.disabled).toBe(true);
+    expect(unblock.title).toBe('Under recall RCL-000007 — release it from the recall.');
+  });
+
+  test('a lot blocked for another reason before the recall: Unblock waits for the close, and the words say so', async () => {
+    overrides.push({ match: (p) => p.endsWith('/inventory/batches'), respond: () => json(200, { items: [{ ...UNDER_RECALL, blockedReason: 'qc-failed' }] }) });
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    const unblock = button('Unblock LOT-A');
+    expect(unblock.disabled).toBe(true);
+    expect(unblock.title).toBe('Under recall RCL-000007 — blocked for failed QC before the recall; unblock it here once RCL-000007 is closed.');
+  });
+
+  test('a 409 batch-under-recall (the recall opened after the list was read) is worded the same way, linked, with no retry', async () => {
+    overrides.push({
+      match: (p) => p.endsWith('/inventory/batches'),
+      respond: () => json(200, { items: [{ ...UNDER_RECALL, recallCode: null }] }),
+    });
+    overrides.push({
+      match: (p) => p.endsWith(`/inventory/batches/${BATCH_A}/unblock`),
+      respond: () =>
+        new Response(JSON.stringify({ code: 'batch-under-recall', status: 409, title: 'Batch under recall', detail: 'prose', recallCode: 'RCL-000009' }), {
+          status: 409,
+          headers: { 'content-type': 'application/problem+json' },
+        }),
+    });
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    await click(button('Unblock LOT-A'));
+    const note = panel().querySelector('textarea[aria-label="Unblock note"]') as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(note, 'Brand withdrew');
+      note.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(button('Unblock batch'));
+    const said = panel().querySelector('[data-testid="under-recall-note"]')!;
+    expect(said.textContent).toContain('Under recall RCL-000009 — release it from the recall');
+    expect(said.querySelector('a')?.getAttribute('href')).toBe('/inventory?tab=recalls&recall=RCL-000009');
+    expect(button('Unblock batch').disabled).toBe(true);
+  });
+
+  test('choosing the standalone recall reason nudges towards a recall document', async () => {
+    view = render(<InventoryScreen initialTab="batches" />);
+    await settle();
+    await search('GLOW-SERUM-30', 'sku');
+    await click(button('Block LOT-A'));
+    expect(panel().querySelector('[data-testid="open-a-recall-nudge"]')).toBeNull();
+    await setSelect('select[aria-label="Block reason"]', 'recall');
+    const nudge = panel().querySelector('[data-testid="open-a-recall-nudge"]')!;
+    expect(nudge.textContent).toContain('Recalling a lot? Open a recall instead — it blocks, traces and reports.');
+    expect(nudge.querySelector('a')?.getAttribute('href')).toBe('/inventory?tab=recalls');
   });
 });
 
@@ -1420,7 +1510,7 @@ describe('story 3-2a — the stock adjustment', () => {
     view = render(<InventoryScreen initialTab="adjust" />);
     await settle();
     const tabs = [...view.container.querySelectorAll('[role="tab"]')].map((t) => t.getAttribute('data-tab'));
-    expect(tabs).toEqual(['stock', 'batches', 'ledger']);
+    expect(tabs).toEqual(['stock', 'batches', 'recalls', 'ledger']);
     // No tabpanel whose tab is missing: a labelled region instead (aria-labelledby never dangles).
     expect(view.container.querySelector('[role="tabpanel"]')).toBeNull();
     const region = view.container.querySelector('[role="region"][aria-label="Adjust"]')!;

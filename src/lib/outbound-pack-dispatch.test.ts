@@ -484,6 +484,17 @@ describe('refusal mappers', () => {
     );
   });
 
+  test('3-7a: order-holds-recalled-batch names the lots and recalls and the two ways out — never verbatim', () => {
+    const refusal = new ApiProblem('order-holds-recalled-batch', 409, 'server prose', 'Order holds a recalled batch', {
+      batchCodes: ['LOT-A', 'LOT-B'],
+      recallCodes: ['RCL-000001'],
+    });
+    expect(dispatchReason(refusal)).toBe(
+      'This order holds lots LOT-A, LOT-B on recall RCL-000001 — it cannot ship while the recall is open. Release the lot from the recall (Inventory → Recalls), or keep the order back until it can be unpacked.',
+    );
+    expect(dispatchReason(new ApiProblem('order-holds-recalled-batch', 409, 'x'))).toContain('holds a lot on an open recall');
+  });
+
   test('the pack 422 key reuse names the parcel, because the key spans a whole draft', () => {
     expect(packReason(new ApiProblem('idempotency-key-reuse', 422, 'Key reuse'))).toBe(
       'This pack was already processed with a different parcel.',

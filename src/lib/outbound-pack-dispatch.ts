@@ -434,6 +434,8 @@ export function packReason(error: unknown): string {
  */
 export function dispatchReason(error: unknown): string {
   if (error instanceof ApiProblem) {
+    // Story 3-7a — its picks drew a lot on an OPEN LIVE recall: named, with the two ways out.
+    if (error.code === 'order-holds-recalled-batch') return recalledBatchSentence(error);
     if (error.status === 409) return verbatim(error);
     switch (error.code) {
       case 'not-found':
@@ -453,6 +455,25 @@ export function dispatchReason(error: unknown): string {
     }
   }
   return UNREACHABLE_REASON;
+}
+
+function namedCodes(error: ApiProblem, key: string): readonly string[] {
+  const raw = error.extensions[key];
+  return Array.isArray(raw) ? raw.filter((value): value is string => typeof value === 'string' && value !== '') : [];
+}
+
+/**
+ * Story 3-7a — `order-holds-recalled-batch`: the lots and recalls named
+ * (`extensions.batchCodes`, `recallCodes`), and the remedies — release the
+ * lot from the recall (Inventory → Recalls → close, releasing it), or keep
+ * the order back until the packed-order cancel/unpack (deferred from 4.2).
+ */
+export function recalledBatchSentence(error: ApiProblem): string {
+  const lots = namedCodes(error, 'batchCodes');
+  const recalls = namedCodes(error, 'recallCodes');
+  const lotWords = lots.length === 0 ? 'a lot' : `${lots.length === 1 ? 'lot' : 'lots'} ${lots.join(', ')}`;
+  const recallWords = recalls.length === 0 ? 'an open recall' : `${recalls.length === 1 ? 'recall' : 'recalls'} ${recalls.join(', ')}`;
+  return `This order holds ${lotWords} on ${recallWords} — it cannot ship while the recall is open. Release the lot from the recall (Inventory → Recalls), or keep the order back until it can be unpacked.`;
 }
 
 /* ------------------------------------------------------------------ */

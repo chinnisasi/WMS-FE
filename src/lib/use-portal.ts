@@ -17,6 +17,8 @@ import {
   fetchApiPortalOrders,
   fetchApiPortalPurchaseOrder,
   fetchApiPortalPurchaseOrders,
+  fetchApiPortalRecall,
+  fetchApiPortalRecalls,
   fetchApiPortalReturn,
   fetchApiPortalReturns,
   fetchApiPortalService,
@@ -35,6 +37,8 @@ import type {
   PortalOrderRowDto,
   PortalPurchaseOrderDetailResponse,
   PortalPurchaseOrderRowDto,
+  PortalRecallDetailResponse,
+  PortalRecallListEntryDto,
   PortalReturnDetailResponse,
   PortalReturnRowDto,
   PortalSkuDto,
@@ -263,6 +267,16 @@ export function usePortalReturns(filter: PortalReturnFilter) {
 }
 
 /** Story 4-7a — one return's lines and the decisions on its units, oldest first. */
+/** Story 3-7a — this client's recalls, newest first. */
+export function usePortalRecalls() {
+  return usePortalList<PortalRecallListEntryDto>('recalls', 'your recalls', (tenantId, cursor) => fetchApiPortalRecalls(tenantId, cursorOption(cursor)));
+}
+
+/** Story 3-7a — one of this client's recalls (no bin, no actor). */
+export function usePortalRecall(recallId: string | null): ResourceState<PortalRecallDetailResponse> & Reloadable {
+  return usePortalDetail(recallId, 'This recall', fetchApiPortalRecall);
+}
+
 export function usePortalReturn(rmaId: string | null): ResourceState<PortalReturnDetailResponse> & Reloadable {
   return usePortalDetail(rmaId, 'This return', fetchApiPortalReturn);
 }

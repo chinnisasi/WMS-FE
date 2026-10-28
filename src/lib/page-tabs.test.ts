@@ -123,6 +123,8 @@ describe('page-tabs — the pages', () => {
     expect(INVENTORY_PAGE_TABS.tabs.map((t) => [t.id, t.label])).toEqual([
       ['stock', 'Stock'],
       ['batches', 'Batches'],
+      // Story 3-7a — batch recalls.
+      ['recalls', 'Recalls'],
       ['ledger', 'Ledger'],
       // Story 3-2a — the adjustment form (role-filtered by the screen).
       ['adjust', 'Adjust'],

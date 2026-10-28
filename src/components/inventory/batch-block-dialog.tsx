@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 import { fetchApiBlockBatch, fetchApiUnblockBatch } from '@/lib/api/client';
@@ -9,7 +10,11 @@ import {
   BATCH_BLOCK_NOTE_MAX,
   BATCH_BLOCK_REASONS,
   BATCH_BLOCK_REASON_LABEL,
+  OPEN_A_RECALL_NUDGE,
   batchBlockReason,
+  batchRecallCode,
+  batchUnderRecallRefusal,
+  underRecallSentence,
   batchBlockStale,
   batchLifecycleLabel,
   parseBlockDraft,
@@ -17,6 +22,7 @@ import {
   type BatchBlockReason,
   type BatchLifecycleFacts,
 } from '@/lib/batch-block';
+import { recallHref } from '@/lib/recalls';
 import { ulid } from '@/lib/ulid';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -47,7 +53,11 @@ export function BatchBlockDialog({
   const [reason, setReason] = useState<BatchBlockReason | ''>('');
   const [note, setNote] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
+  // Story 3-7a (A4) — a 409 `batch-under-recall` names the recall to release it from.
+  const [underRecall, setUnderRecall] = useState<{ code: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
+  const knownRecall = batchRecallCode(batch);
+  const recallBlocksUnblock = mode === 'unblock' && knownRecall !== null;
   const inFlight = useRef(false);
   const keyRef = useRef<{ key: string; body: string } | null>(null);
   const first = useRef<HTMLSelectElement | HTMLTextAreaElement | null>(null);
@@ -93,7 +103,7 @@ export function BatchBlockDialog({
       setProblem('Your session expired — sign in again.');
       return;
     }
-    if (inFlight.current) return;
+    if (inFlight.current || recallBlocksUnblock) return;
     const parsed = mode === 'block' ? parseBlockDraft({ reason, note }) : parseUnblockDraft(note);
     if (parsed.kind === 'refused') {
       setProblem(parsed.problem);
@@ -115,6 +125,12 @@ export function BatchBlockDialog({
       if (batchBlockStale(error)) {
         keyRef.current = null;
         onStale(batchBlockReason(error));
+        return;
+      }
+      const recalled = batchUnderRecallRefusal(error);
+      if (recalled !== false) {
+        keyRef.current = null;
+        setUnderRecall({ code: recalled });
         return;
       }
       setProblem(batchBlockReason(error));
@@ -145,6 +161,7 @@ export function BatchBlockDialog({
             : `Now: ${batchLifecycleLabel(batch)}. Unblocking makes its unexpired stock promisable again.`}
         </span>
       </div>
+      {recallBlocksUnblock && <UnderRecallNote code={knownRecall} blockedReason={batch.blockedReason} />}
       {mode === 'block' && (
         <label className="flex flex-col gap-1">
           <span className="text-xs text-(--muted-foreground)">Reason</span>
@@ -169,6 +186,15 @@ export function BatchBlockDialog({
           </select>
         </label>
       )}
+      {mode === 'block' && reason === 'recall' && (
+        // Story 3-7a (A4) — the standalone reason is kept; a recall document does more.
+        <p className="text-xs" data-testid="open-a-recall-nudge">
+          {OPEN_A_RECALL_NUDGE}{' '}
+          <Link href={recallHref()} className="text-(--primary) underline underline-offset-2">
+            Go to Recalls
+          </Link>
+        </p>
+      )}
       <label className="flex flex-col gap-1">
         <span className="text-xs text-(--muted-foreground)">
           {mode === 'block' ? 'Note (optional; required for Other)' : 'Note (required) — why the block is lifted'}
@@ -188,12 +214,14 @@ export function BatchBlockDialog({
           }}
         />
       </label>
+      {underRecall !== null && <UnderRecallNote code={underRecall.code} blockedReason={batch.blockedReason} />}
       {problem !== null && <FeedbackBanner tone="rejected" word={mode === 'block' ? 'Not blocked' : 'Not unblocked'} reason={problem} />}
       <div className="flex gap-2">
         <button
           type="button"
           className={buttonClass}
-          disabled={busy}
+          disabled={busy || recallBlocksUnblock || underRecall !== null}
+          title={recallBlocksUnblock ? `${underRecallSentence(knownRecall, batch.blockedReason)}.` : undefined}
           onClick={() => {
             void submit();
           }}
@@ -205,5 +233,19 @@ export function BatchBlockDialog({
         </button>
       </div>
     </div>
+  );
+}
+
+/** Story 3-7a (A4) — "Under recall RCL-x — release it from the recall", linked to that recall. */
+export function UnderRecallNote({ code, blockedReason }: { readonly code: string | null; readonly blockedReason?: string | null }) {
+  const releasable = blockedReason === undefined || blockedReason === null || blockedReason === 'recall';
+  return (
+    <p role="status" className="rounded-sm border border-(--warning) bg-(--warning)/10 px-2 py-1 text-xs" data-testid="under-recall-note">
+      {underRecallSentence(code, blockedReason)}.{' '}
+      <Link href={recallHref(code)} className="text-(--primary) underline underline-offset-2">
+        {code === null ? 'Open Recalls' : `Open ${code}`}
+      </Link>{' '}
+      {releasable ? '— closing the recall with this lot released unblocks it.' : '— closing the recall leaves it blocked for its own reason.'}
+    </p>
   );
 }
