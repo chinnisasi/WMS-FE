@@ -136,6 +136,10 @@ import {
   receivingControllerGetQcHold,
   receivingControllerInspectQcHold,
   receivingControllerListGoodsReceiptLines,
+  receivingControllerListLpns,
+  receivingControllerMintLpns,
+  receivingControllerPrintLpnLabels,
+  receivingControllerVoidLpn,
   receivingControllerListReceiptPhotos,
   receivingControllerAddReceiptPhoto,
   receivingControllerRemoveReceiptPhoto,
@@ -409,6 +413,12 @@ import type {
   AdjustmentPendingListResponse,
   BinGridResponse,
   BinLabelsRequestDto,
+  LpnLabelsRequestDto,
+  LpnListResponse,
+  LpnResponse,
+  MintLpnsRequestDto,
+  MintLpnsResponse,
+  VoidLpnRequestDto,
   BinListResponse,
   BinMergeResponse,
   BinResponse,
@@ -5121,7 +5131,7 @@ export async function fetchApiStockTakeReport(
   if (error || !data) {
     throw unwrapError(error, response?.status ?? 400);
   }
-  return data as Blob;
+  return data;
 }
 
 /** Story 3-5a — the warehouse's cycle-count schedule (any staff role). */
@@ -6372,6 +6382,63 @@ export async function fetchApiListGoodsReceiptLines(
   const { data, error } = await receivingControllerListGoodsReceiptLines({ path: { tenantId, grnId }, signal: options?.signal });
   if (error || !data) {
     throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 2-10b — one goods receipt's LPNs (licence plates) in code order, every status — any member. */
+export async function fetchApiListLpns(tenantId: string, grnId: string, options?: { signal?: AbortSignal }): Promise<LpnListResponse> {
+  const { data, error } = await receivingControllerListLpns({ path: { tenantId, grnId }, signal: options?.signal });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-10b — mints LPNs for lines of a recorded goods receipt
+ * (`labels.execute`): one per declared quantity, in request order. The key is
+ * per draft — reused across retries of an unchanged request.
+ */
+export async function fetchApiMintLpns(tenantId: string, grnId: string, body: MintLpnsRequestDto, idempotencyKey: string): Promise<MintLpnsResponse> {
+  const { data, error } = await receivingControllerMintLpns({
+    path: { tenantId, grnId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 2-10b — voids an active LPN (`labels.execute`) with a reason (and a note, required with `other`). */
+export async function fetchApiVoidLpn(tenantId: string, grnId: string, lpnId: string, body: VoidLpnRequestDto, idempotencyKey: string): Promise<LpnResponse> {
+  const { data, error } = await receivingControllerVoidLpn({
+    path: { tenantId, grnId, lpnId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-10b — LPN labels as a file (ZPL `text/plain` or a PDF), as a Blob
+ * (the bin-labels pattern). A refusal is problem+json → `ApiProblem`; the
+ * listing arms carry `extensions.lpnCodes`, `too-many-labels` carries
+ * `extensions.count`. The caller names the file (`lpnLabelsFilename`).
+ */
+export async function fetchApiLpnLabels(tenantId: string, grnId: string, body: LpnLabelsRequestDto): Promise<Blob> {
+  const { data, error, response } = await receivingControllerPrintLpnLabels({
+    path: { tenantId, grnId },
+    body,
+    parseAs: 'blob',
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
   }
   return data;
 }

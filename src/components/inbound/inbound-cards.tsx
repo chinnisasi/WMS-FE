@@ -45,6 +45,9 @@ import { grnDamagedSuffix, grnLineAppliedLabel, grnLineBatchDatesLabel, grnLineC
 import { GrnLineSerials } from '@/components/inbound/grn-line-serials';
 import { StatusChip } from '@/components/shared/status-chip';
 import { useGoodsReceiptLines } from '@/lib/use-grn-lines';
+import { useGrnLpns } from '@/lib/use-grn-lpns';
+import { lpnCountLabel, unlabelledOf } from '@/lib/lpn-labels';
+import { LpnDownloadAll, LpnLabelsPanel } from '@/components/inbound/lpn-labels-panel';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { ulid } from '@/lib/ulid';
 import { grnDocument, notifyInboundChanged } from '@/lib/asns';
@@ -496,6 +499,8 @@ function GoodsReceiptsCard({
   const openPhotos = photosFor !== null && photosFor.warehouseId === warehouseId ? photosFor : null;
   const role = useSyncExternalStore(subscribeSession, () => readSession()?.user.role, () => undefined);
   const canAttach = roleHasCapability(role, 'receipt.attach');
+  // Story 2-10b — `labels.execute`: the Labels panel and "Download all LPN labels".
+  const canLabel = roleHasCapability(role, 'labels.execute');
   const skuMap = useSkuMap();
   // Story 1-1 — the receipt's client (the PO's, the ASN's, or a blind
   // receipt's chosen one), shown once the tenant holds more than its own
@@ -646,8 +651,10 @@ function GoodsReceiptsCard({
             expandedId === grn.id ? (
               <GoodsReceiptLinesPanel
                 grnId={grn.id}
+                grnCode={grn.code}
                 skuMap={skuMap}
                 canAttach={canAttach}
+                canLabel={canLabel}
                 onPhotos={(lineId) => setPhotosFor({ warehouseId, grnId: grn.id, grnCode: grn.code, lineId })}
               />
             ) : null
@@ -698,18 +705,29 @@ function qcHoldableBin(bin: { readonly code: string; readonly systemOwned: boole
  */
 function GoodsReceiptLinesPanel({
   grnId,
+  grnCode,
   skuMap,
   canAttach,
+  canLabel,
   onPhotos,
 }: {
   grnId: string;
+  grnCode: string;
   skuMap: Readonly<Record<string, SkuResponse>> | null;
   /** Story 2-5a — `receipt.attach`: a line with no photos offers "Add photo". */
   canAttach: boolean;
+  /** Story 2-10b — `labels.execute`: each line offers "Labels"; the receipt "Download all LPN labels". */
+  canLabel: boolean;
   /** Story 2-5a — open the photos dialog on one line. */
   onPhotos: (lineId: string) => void;
 }) {
   const lines = useGoodsReceiptLines(grnId);
+  // Story 2-10b (A12) — every member sees a line's LPN count; the panel stays behind labels.execute.
+  const lpns = useGrnLpns(grnId);
+  const [labelsFor, setLabelsFor] = useState<string | null>(null);
+  const tenantId = useSyncExternalStore(subscribeSession, () => readSession()?.tenant.id ?? null, () => null);
+  const allLpns = lpns.state === 'ready' ? lpns.data.items : [];
+  const lpnLines = lpns.state === 'ready' ? lpns.data.lines : [];
   if (lines.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading the lines…</div>;
   if (lines.state === 'failed') return <ReadFailure word="Receipt lines unavailable" reason={lines.reason} onRetry={lines.reload} />;
   return (
@@ -741,12 +759,46 @@ function GoodsReceiptLinesPanel({
               · {grnLineConditionLabel(line, sku)}
               {grnLineAppliedLabel(line, sku)}
               <LinePhotosButton line={line} canAttach={canAttach} onOpen={() => onPhotos(line.id)} />
+              {lpnCountLabel(allLpns.filter((lpn) => lpn.grnLineId === line.id)) !== null && (
+                <span className="text-(--muted-foreground)" data-testid="grn-line-lpns">
+                  {' '}
+                  · {lpnCountLabel(allLpns.filter((lpn) => lpn.grnLineId === line.id))}
+                </span>
+              )}
+              {canLabel && lpns.state === 'ready' && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    aria-expanded={labelsFor === line.id}
+                    onClick={() => setLabelsFor(labelsFor === line.id ? null : line.id)}
+                    className="ml-1 rounded-sm border border-(--border) px-1.5 py-0.5 align-middle text-xs hover:bg-(--muted)"
+                  >
+                    Labels
+                  </button>
+                </>
+              )}
               {/* Story 2-6a — the line's serials, unreadable units and QC skip. */}
               <GrnLineSerials line={line} />
+              {canLabel && labelsFor === line.id && tenantId !== null && (
+                <LpnLabelsPanel
+                  tenantId={tenantId}
+                  grnId={grnId}
+                  grnCode={grnCode}
+                  line={line}
+                  sku={sku}
+                  lpns={allLpns.filter((lpn) => lpn.grnLineId === line.id)}
+                  unlabelled={unlabelledOf(lpnLines, line.id)}
+                  onClose={() => setLabelsFor(null)}
+                />
+              )}
             </div>
           );
         })
       )}
+      {/* A failed LPN read says so, with Retry — never a silent loss of the counts and Labels buttons. */}
+      {lpns.state === 'failed' && <ReadFailure word="Receipt LPNs unavailable" reason={lpns.reason} onRetry={lpns.reload} />}
+      {canLabel && tenantId !== null && <LpnDownloadAll tenantId={tenantId} grnId={grnId} grnCode={grnCode} lpns={allLpns} />}
     </div>
   );
 }
