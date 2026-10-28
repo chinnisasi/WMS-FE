@@ -13,6 +13,7 @@ import {
   HAZARD_CLASSES,
   parseShelfLifeInput,
   parseSkuCreateDraft,
+  SHELF_LIFE_HINT,
   SHELF_LIFE_LABEL,
   shelfLifeWarning,
   skuMasterReason,
@@ -279,6 +280,7 @@ function SkuCreateCardAllowed() {
             <label className="flex flex-1 flex-col gap-1">
               <span className={labelClass}>{SHELF_LIFE_LABEL}</span>
               <input className={inputClass} type="text" inputMode="numeric" value={draft.shelfLifeDays} placeholder="—" onChange={(e) => edit({ shelfLifeDays: e.target.value })} />
+              <span className="text-xs text-(--muted-foreground)">{SHELF_LIFE_HINT}</span>
             </label>
           </div>
           {shelfWarning !== null ? (

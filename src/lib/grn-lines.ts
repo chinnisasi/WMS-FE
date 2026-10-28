@@ -112,6 +112,23 @@ export function grnLineRecallLabel(line: Pick<GoodsReceiptLineEntryDto, 'recallC
   return typeof line.recallCode === 'string' && line.recallCode !== '' ? `Under recall ${line.recallCode} — keep it apart` : null;
 }
 
+/**
+ * Story 2-4b — the line's batch dates after its code: `mfg 2026-09-01 · exp
+ * 2027-02-28 (from shelf life)` — the expiry marked when the server derived
+ * it from the mfg date and the SKU's shelf life (A5). Each part only when
+ * set; null when neither is (and on an older answer without the keys).
+ */
+export function grnLineBatchDatesLabel(
+  line: Partial<Pick<GoodsReceiptLineEntryDto, 'batchMfgDate' | 'batchExpiryDate' | 'expirySource'>>,
+): string | null {
+  const parts: string[] = [];
+  if (typeof line.batchMfgDate === 'string' && line.batchMfgDate !== '') parts.push(`mfg ${line.batchMfgDate}`);
+  if (typeof line.batchExpiryDate === 'string' && line.batchExpiryDate !== '') {
+    parts.push(`exp ${line.batchExpiryDate}${line.expirySource === 'derived' ? ' (from shelf life)' : ''}`);
+  }
+  return parts.length === 0 ? null : parts.join(' · ');
+}
+
 /** The QC-on-receipt skip in words (A22), or null. */
 export function qcSkippedLabel(line: Pick<GoodsReceiptLineEntryDto, 'qcSkipped'>): string | null {
   return line.qcSkipped === 'serial-tracked' ? 'QC on receipt skipped — serial-tracked' : null;

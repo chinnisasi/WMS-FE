@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { grnDamagedSuffix, grnLineAppliedLabel, grnLineConditionLabel, grnShortSuffix } from './grn-lines';
+import { grnDamagedSuffix, grnLineAppliedLabel, grnLineBatchDatesLabel, grnLineConditionLabel, grnShortSuffix } from './grn-lines';
 
 /** Story 2-4a — a goods receipt's condition in words. */
 
@@ -30,5 +30,19 @@ describe('the list suffixes', () => {
     expect(grnDamagedSuffix({} as never)).toBe('');
     expect(grnShortSuffix({ shortUnits: 2 })).toBe(' · 2 short');
     expect(grnShortSuffix({ shortUnits: 0 })).toBe('');
+  });
+});
+
+describe('story 2-4b: grnLineBatchDatesLabel', () => {
+  test('mfg and exp after the batch, the expiry marked when derived from shelf life', () => {
+    expect(grnLineBatchDatesLabel({ batchMfgDate: '2026-09-01', batchExpiryDate: '2027-02-28', expirySource: 'derived' })).toBe(
+      'mfg 2026-09-01 · exp 2027-02-28 (from shelf life)',
+    );
+    expect(grnLineBatchDatesLabel({ batchMfgDate: null, batchExpiryDate: '2027-01-31', expirySource: 'typed' })).toBe('exp 2027-01-31');
+    expect(grnLineBatchDatesLabel({ batchMfgDate: '2026-09-01', batchExpiryDate: null, expirySource: null })).toBe('mfg 2026-09-01');
+    expect(grnLineBatchDatesLabel({ batchMfgDate: null, batchExpiryDate: '2027-01-31', expirySource: null })).toBe('exp 2027-01-31');
+    expect(grnLineBatchDatesLabel({ batchMfgDate: null, batchExpiryDate: null, expirySource: null })).toBeNull();
+    // An older answer without the keys says nothing.
+    expect(grnLineBatchDatesLabel({})).toBeNull();
   });
 });

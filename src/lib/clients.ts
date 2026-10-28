@@ -1201,6 +1201,8 @@ export interface ReceivingPolicy {
   readonly qcOnReceipt: boolean;
   readonly expiryRequired: boolean;
   readonly minShelfLifeDays: number | null;
+  /** Story 2-4b — set a batch's expiry from mfg + the SKU's shelf life. Absent on an older answer (reads as on). */
+  readonly deriveExpiry?: boolean;
 }
 
 /** The policy form's fields (text where the owner types). */
@@ -1209,6 +1211,8 @@ export interface ReceivingPolicyFields {
   readonly qcOnReceipt: boolean;
   readonly expiryRequired: boolean;
   readonly minShelfLifeDays: string;
+  /** Story 2-4b — the shelf-life derivation switch. */
+  readonly deriveExpiry: boolean;
 }
 
 export type ReceivingPolicyField = 'tolerance' | 'minShelfLife';
@@ -1219,6 +1223,7 @@ export function receivingPolicyFieldsOf(policy: ReceivingPolicy): ReceivingPolic
     qcOnReceipt: policy.qcOnReceipt,
     expiryRequired: policy.expiryRequired,
     minShelfLifeDays: policy.minShelfLifeDays === null ? '' : String(policy.minShelfLifeDays),
+    deriveExpiry: policy.deriveExpiry ?? true,
   };
 }
 
@@ -1251,6 +1256,7 @@ export function parseReceivingPolicyDraft(
       qcOnReceipt: fields.qcOnReceipt,
       expiryRequired: fields.expiryRequired,
       minShelfLifeDays,
+      deriveExpiry: fields.deriveExpiry,
     },
     problems: null,
   };
@@ -1263,6 +1269,13 @@ export function receivingToleranceLabel(bps: number): string {
 
 export function qcOnReceiptLabel(on: boolean): string {
   return on ? 'On — every booked line is held for QC until released' : 'Off';
+}
+
+/** Story 2-4b — the derivation switch's checkbox label (and its read-only rendering). */
+export const DERIVE_EXPIRY_LABEL = "Set expiry from the SKU's shelf life when the label's expiry is not typed";
+
+export function deriveExpiryLabel(on: boolean | undefined): string {
+  return on === false ? "Off — only the label's typed expiry is used" : "On — mfg date + the SKU's shelf life when no expiry is typed";
 }
 
 export function expiryRequiredLabel(required: boolean): string {

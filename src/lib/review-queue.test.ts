@@ -635,6 +635,30 @@ describe('story 1-2b — the expiry refusals and the shelf-life row', () => {
     expect(rejectedOpDecisions({ decisions: ['apply', 'discard'], payload: shelfRow.payload })).toEqual(['apply', 'discard']);
   });
 
+  test('story 2-4b: a derived judged expiry says where it came from; a pre-2-4b row reads byte for byte as before', () => {
+    const derived = {
+      ...shelfRow,
+      payload: {
+        ...shelfRow.payload,
+        lines: [{ poLineId: 'pl-1', skuId: 'a', batchCode: 'L7', mfgDate: '2026-05-01T00:00:00Z', expiryDate: null, qty: 10 }],
+        refusals: [
+          {
+            ...shelfRow.payload.refusals[0]!,
+            expiryDate: '2026-10-28',
+            remainingDays: 1,
+            derivedExpiry: { expiryDate: '2026-10-28', mfgDate: '2026-05-01', shelfLifeDays: 180 },
+          },
+        ],
+      },
+    };
+    expect(rejectedOpSummary(derived)?.lines).toEqual([
+      'MILK-1 × 10 · batch L7 · expires 2026-10-28 (derived from mfg 2026-05-01 + 180 days) — shelf life too short (1 day left, minimum 90 days) (ACME)',
+    ]);
+    // A malformed marker adds nothing.
+    const malformed = { ...derived, payload: { ...derived.payload, refusals: [{ ...derived.payload.refusals[0]!, derivedExpiry: { mfgDate: 7 } }] } };
+    expect(rejectedOpSummary(malformed)?.lines[0]).toContain('expires 2026-10-28 — shelf life too short');
+  });
+
   test('Accept anyway needs a trimmed note of at most 500 characters; only the shelf-life row asks for one', () => {
     expect(applyNeedsNote(shelfRow)).toBe(true);
     expect(applyNeedsNote({ opType: 'grn.lines-refused' })).toBe(false);

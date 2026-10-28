@@ -37,6 +37,8 @@ import {
   percentToBps,
   bpsToPercent,
   parseReceivingPolicyDraft,
+  deriveExpiryLabel,
+  DERIVE_EXPIRY_LABEL,
   receivingPolicyFieldsOf,
   receivingToleranceLabel,
   qcOnReceiptLabel,
@@ -655,11 +657,13 @@ describe('story 1-2b — the receiving policy', () => {
   });
 
   test('the form → the full-replace body; a minimum only beside Expiry required; problems per field', () => {
-    const fields = { tolerancePercent: '2.5', qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: '90' };
+    // Story 2-4b — the form carries the derivation switch and sends it (explicit pin update).
+    const fields = { tolerancePercent: '2.5', qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: '90', deriveExpiry: true };
     expect(parseReceivingPolicyDraft(fields)).toEqual({
-      body: { receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: 90 },
+      body: { receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: 90, deriveExpiry: true },
       problems: null,
     });
+    expect(parseReceivingPolicyDraft({ ...fields, deriveExpiry: false }).body?.deriveExpiry).toBe(false);
     expect(parseReceivingPolicyDraft({ ...fields, minShelfLifeDays: ' ' }).body?.minShelfLifeDays).toBeNull();
     // Without Expiry required the minimum is never sent (the backend 400s the pair).
     expect(parseReceivingPolicyDraft({ ...fields, expiryRequired: false }).body).toEqual({
@@ -667,6 +671,7 @@ describe('story 1-2b — the receiving policy', () => {
       qcOnReceipt: true,
       expiryRequired: false,
       minShelfLifeDays: null,
+      deriveExpiry: true,
     });
     const days = 'The minimum shelf life is a whole number of days from 1 to 3650, or blank for none.';
     for (const bad of ['0', '3651', '1.5', 'x', '-3']) {
@@ -676,12 +681,18 @@ describe('story 1-2b — the receiving policy', () => {
       body: null,
       problems: { tolerance: 'The tolerance takes at most two decimal places (0.01 %).', minShelfLife: days },
     });
+    // Story 2-4b — an older answer without the switch reads as on; a sent one is kept.
     expect(receivingPolicyFieldsOf({ receivingToleranceBps: 1, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null })).toEqual({
       tolerancePercent: '0.01',
       qcOnReceipt: false,
       expiryRequired: false,
       minShelfLifeDays: '',
+      deriveExpiry: true,
     });
+    expect(receivingPolicyFieldsOf({ receivingToleranceBps: 0, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null, deriveExpiry: false }).deriveExpiry).toBe(false);
+    expect(deriveExpiryLabel(undefined)).toBe("On — mfg date + the SKU's shelf life when no expiry is typed");
+    expect(deriveExpiryLabel(false)).toBe("Off — only the label's typed expiry is used");
+    expect(DERIVE_EXPIRY_LABEL).toBe("Set expiry from the SKU's shelf life when the label's expiry is not typed");
   });
 
   test('the read-only words, the panel notes and the saved outcome', () => {

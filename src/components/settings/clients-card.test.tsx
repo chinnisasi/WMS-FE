@@ -66,7 +66,7 @@ let contactRows: { id: string; isPrimary: boolean; [key: string]: unknown }[] = 
 /** Story 1-2a — when set, the next departure answers 409 with these blockers. */
 let departBlockers: unknown[] | null = null;
 /** Story 1-2b — the receiving policy the GET answers per client, and a refusal the next PUT answers. */
-let policies: Record<string, { receivingToleranceBps: number; qcOnReceipt: boolean; expiryRequired: boolean; minShelfLifeDays: number | null }> = {};
+let policies: Record<string, { receivingToleranceBps: number; qcOnReceipt: boolean; expiryRequired: boolean; minShelfLifeDays: number | null; deriveExpiry?: boolean }> = {};
 let policyRefusal: { status: number; code: string; detail: string } | null = null;
 /** Story 4-3a — the allocation policy the GET answers per client, its counts, and a refusal the next PUT answers. */
 let allocations: Record<string, { allocationRule: 'fefo' | 'fifo'; minOutboundShelfLifeDays: number | null }> = {};
@@ -724,7 +724,8 @@ describe('ClientsCard', () => {
       const puts = requests.filter((r) => r.method === 'PUT');
       expect(puts).toHaveLength(2);
       expect(puts[1]!.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-acme/receiving-policy`);
-      expect(puts[1]!.body).toEqual({ receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: 90 });
+      // Story 2-4b — the form sends the derivation switch too (on: the read carried none) — an explicit pin update.
+      expect(puts[1]!.body).toEqual({ receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: true, minShelfLifeDays: 90, deriveExpiry: true });
       expect(puts[1]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
       expect(puts[1]!.key).toBe(puts[0]!.key);
       expect(view.container.textContent).toContain("ACME's receiving policy saved");
@@ -733,7 +734,7 @@ describe('ClientsCard', () => {
       await toggle(field(form, 'expiryRequired'));
       await submit(form);
       const third = requests.filter((r) => r.method === 'PUT')[2]!;
-      expect(third.body).toEqual({ receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: false, minShelfLifeDays: null });
+      expect(third.body).toEqual({ receivingToleranceBps: 250, qcOnReceipt: true, expiryRequired: false, minShelfLifeDays: null, deriveExpiry: true });
       expect(third.key).not.toBe(puts[1]!.key);
     });
 
@@ -777,7 +778,23 @@ describe('ClientsCard', () => {
       await submit(form);
       const put = requests.find((r) => r.method === 'PUT')!;
       expect(put.pathname).toBe(`/api/v1/tenants/${TENANT_ID}/clients/c-self/receiving-policy`);
-      expect(put.body).toEqual({ receivingToleranceBps: 500, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null });
+      // Story 2-4b — plus the derivation switch (explicit pin update).
+      expect(put.body).toEqual({ receivingToleranceBps: 500, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null, deriveExpiry: true });
+    });
+
+    test('story 2-4b: the derivation switch — ticked when on, unticking sends deriveExpiry false; a policy with it off reads unticked', async () => {
+      policies = { 'c-acme': { receivingToleranceBps: 0, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null, deriveExpiry: true } };
+      writeSession(session('owner'));
+      view = render(<ClientsCard />);
+      await settle();
+      await openPolicy('ACME');
+      const form = policyForm('ACME')!;
+      expect(field(form, 'deriveExpiry').checked).toBe(true);
+      expect(form.textContent).toContain("Set expiry from the SKU's shelf life when the label's expiry is not typed");
+      await toggle(field(form, 'deriveExpiry'));
+      await submit(form);
+      const put = requests.find((r) => r.method === 'PUT')!;
+      expect(put.body).toEqual({ receivingToleranceBps: 0, qcOnReceipt: false, expiryRequired: false, minShelfLifeDays: null, deriveExpiry: false });
     });
 
     test('a 400 validation-failed renders on the field its detail names; a client-side refusal sends nothing', async () => {
