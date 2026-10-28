@@ -9,15 +9,22 @@ import { SESSION_HINT_COOKIE } from '@/lib/auth';
  * session writers maintain (`SESSION_HINT_COOKIE`; no token material, TTL
  * matches the token's).
  *
- * - No hint + anything except the auth pages → `/login`.
+ * - No hint + anything except the auth pages and the public pages → `/login`.
  * - Hint + an auth page → the app root (signed-in users don't loiter on
  *   /login//register).
+ * - Story 6-1c — the PUBLIC pages (`/accept-invite`, `/reset-password`) are
+ *   never redirected, with or without a hint: an emailed link must open for
+ *   someone who has never signed in (the invite was broken for new invitees),
+ *   and a reset link opened in a signed-in browser must not bounce to `/`.
  *
  * The hint is a UX gate, not an enforcement boundary: the backend still
  * rejects every unauthenticated API call, and an expired token reads as
  * signed-out through `readSession()` regardless of a not-yet-expired cookie.
  */
-const AUTH_PATHS = ['/login', '/register'];
+const AUTH_PATHS = ['/login', '/register', '/forgot-password'];
+const PUBLIC_PATHS = ['/accept-invite', '/reset-password'];
+
+const under = (pathname: string, paths: readonly string[]) => paths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
 /**
  * The gate decision, as a plain function (bun:test has no Next runtime —
@@ -27,7 +34,8 @@ const AUTH_PATHS = ['/login', '/register'];
 export type GateDecision = { kind: 'redirect'; pathname: string } | { kind: 'next' };
 
 export function gate(pathname: string, hasHint: boolean): GateDecision {
-  const isAuthPath = AUTH_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  if (under(pathname, PUBLIC_PATHS)) return { kind: 'next' };
+  const isAuthPath = under(pathname, AUTH_PATHS);
   if (!hasHint && !isAuthPath) return { kind: 'redirect', pathname: '/login' };
   if (hasHint && isAuthPath) return { kind: 'redirect', pathname: '/' };
   return { kind: 'next' };

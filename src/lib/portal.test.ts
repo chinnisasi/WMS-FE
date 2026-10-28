@@ -13,6 +13,7 @@ import {
   portalWarehouseOptions,
   lineCountLabel,
   loginNotice,
+  PASSWORD_RESET_DONE_NOTICE,
   orderDestination,
   orderReference,
   PORTAL_NAV,
@@ -90,6 +91,11 @@ describe('portal refusals', () => {
   test('story 1-2a: a departed client — the sign-in, the ended session and a portal read all say the account has ended', () => {
     expect(PORTAL_DEPARTED_MESSAGE).toBe("Your company's account with the warehouse has ended.");
     expect(loginNotice(undefined, 'client-departed')).toBe(PORTAL_DEPARTED_MESSAGE);
+    // Story 6-1c — a completed reset, and the session end it caused.
+    expect(loginNotice(undefined, undefined, 'done')).toBe(PASSWORD_RESET_DONE_NOTICE);
+    expect(loginNotice(undefined, undefined, 'other')).toBeNull();
+    expect(loginNotice('suspended', undefined, 'done')).toBe(PORTAL_SUSPENDED_MESSAGE);
+    expect(loginNotice(undefined, 'password-reset')).toBe('Your password was reset — sign in with the new password.');
     expect(portalReadReason(new ApiProblem('client-departed', 403), 'your stock')).toBe(PORTAL_DEPARTED_MESSAGE);
     expect(portalAsnReason(new ApiProblem('client-departed', 403))).toBe(PORTAL_DEPARTED_MESSAGE);
   });

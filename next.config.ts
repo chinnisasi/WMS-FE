@@ -11,9 +11,14 @@ const nextConfig: NextConfig = {
   // time, so one image serves every environment.
   output: 'standalone',
   // Story 5-1a — the accept-invite URL carries a one-time token: the page
-  // never leaks it in a Referer (the page's metadata says the same).
+  // never leaks it in a Referer (the page's metadata says the same). Story
+  // 6-1c — the reset page too (its token rides the fragment, which a Referer
+  // never carries, but the page sends none at all).
   async headers() {
-    return [{ source: '/accept-invite', headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }] }];
+    return [
+      { source: '/accept-invite', headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }] },
+      { source: '/reset-password', headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }] },
+    ];
   },
 };
 

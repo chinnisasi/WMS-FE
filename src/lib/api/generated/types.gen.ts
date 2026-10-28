@@ -166,6 +166,55 @@ export type SecondFactorSignInResponse = {
     secondFactorFailedAttempts?: number;
 };
 
+export type PasswordResetRequestDto = {
+    email: string;
+};
+
+export type PasswordResetRequestedResponse = {
+    message: string;
+};
+
+export type PasswordResetCheckDto = {
+    /**
+     * The token from the reset link (`#token=…`)
+     */
+    token: string;
+};
+
+export type PasswordResetCheckResponse = {
+    /**
+     * The account the link resets
+     */
+    email: string;
+    /**
+     * When the link stops working
+     */
+    expiresAt: string;
+    /**
+     * The account uses two-factor sign-in: the confirm needs a code (TOTP or backup)
+     */
+    secondFactorRequired: boolean;
+};
+
+export type PasswordResetConfirmDto = {
+    /**
+     * The token from the reset link (`#token=…`)
+     */
+    token: string;
+    password: string;
+    /**
+     * Required when `secondFactorRequired`: a 6-digit code from the authenticator app, or a backup code `XXXXX-XXXXX`
+     */
+    code?: string;
+};
+
+export type PasswordResetConfirmResponse = {
+    /**
+     * The account whose password was set — sign in with it
+     */
+    email: string;
+};
+
 export type RefreshResponse = {
     accessToken: string;
     tokenType: string;
@@ -13302,11 +13351,11 @@ export type TenancyControllerSignInErrors = {
      */
     409: ProblemDetailsDto;
     /**
-     * Too many failed attempts for this email from this address (sign-in-locked; `retryAfterSeconds`)
+     * Too many failed attempts for this email from this address — or, story 6-1c, on this browser’s device cookie (sign-in-locked; `retryAfterSeconds`)
      */
     423: ProblemDetailsDto;
     /**
-     * Too many attempts from this address (rate-limited; `retryAfterSeconds`)
+     * Too many attempts from this address, or (story 6-1c) too many untrusted attempts for this account or from this address this hour (rate-limited; `retryAfterSeconds`)
      */
     429: ProblemDetailsDto;
 };
@@ -13356,6 +13405,96 @@ export type TenancyControllerSignInSecondFactorResponses = {
 };
 
 export type TenancyControllerSignInSecondFactorResponse = TenancyControllerSignInSecondFactorResponses[keyof TenancyControllerSignInSecondFactorResponses];
+
+export type TenancyControllerRequestPasswordResetData = {
+    body: PasswordResetRequestDto;
+    path?: never;
+    query?: never;
+    url: '/tenants/password-reset';
+};
+
+export type TenancyControllerRequestPasswordResetErrors = {
+    /**
+     * Invalid body
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Too many reset requests from this address this hour (rate-limited; `retryAfterSeconds`)
+     */
+    429: ProblemDetailsDto;
+};
+
+export type TenancyControllerRequestPasswordResetError = TenancyControllerRequestPasswordResetErrors[keyof TenancyControllerRequestPasswordResetErrors];
+
+export type TenancyControllerRequestPasswordResetResponses = {
+    202: PasswordResetRequestedResponse;
+};
+
+export type TenancyControllerRequestPasswordResetResponse = TenancyControllerRequestPasswordResetResponses[keyof TenancyControllerRequestPasswordResetResponses];
+
+export type TenancyControllerCheckPasswordResetData = {
+    body: PasswordResetCheckDto;
+    path?: never;
+    query?: never;
+    url: '/tenants/password-reset/check';
+};
+
+export type TenancyControllerCheckPasswordResetErrors = {
+    /**
+     * Invalid body, or the link is not valid (reset-link-invalid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Too many reset attempts from this address (rate-limited; `retryAfterSeconds`)
+     */
+    429: ProblemDetailsDto;
+};
+
+export type TenancyControllerCheckPasswordResetError = TenancyControllerCheckPasswordResetErrors[keyof TenancyControllerCheckPasswordResetErrors];
+
+export type TenancyControllerCheckPasswordResetResponses = {
+    200: PasswordResetCheckResponse;
+};
+
+export type TenancyControllerCheckPasswordResetResponse = TenancyControllerCheckPasswordResetResponses[keyof TenancyControllerCheckPasswordResetResponses];
+
+export type TenancyControllerConfirmPasswordResetData = {
+    body: PasswordResetConfirmDto;
+    path?: never;
+    query?: never;
+    url: '/tenants/password-reset/confirm';
+};
+
+export type TenancyControllerConfirmPasswordResetErrors = {
+    /**
+     * Invalid body (the password is 8–200 characters), or the link is not valid (reset-link-invalid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * The account uses two-factor sign-in and no code was sent, or its factor changed since the check (second-factor-needed — nothing counted); or the code is wrong (second-factor-invalid; `attemptsLeft`)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * Two-factor sign-in is locked for this account (second-factor-locked; `retryAfterSeconds`, null until an owner unlocks)
+     */
+    423: ProblemDetailsDto;
+    /**
+     * Too many reset attempts from this address, or too many codes tried on reset links for this account today (rate-limited; `retryAfterSeconds`)
+     */
+    429: ProblemDetailsDto;
+    /**
+     * The stored second-factor secret cannot be opened with the configured key (second-factor-unavailable); nothing was counted
+     */
+    503: ProblemDetailsDto;
+};
+
+export type TenancyControllerConfirmPasswordResetError = TenancyControllerConfirmPasswordResetErrors[keyof TenancyControllerConfirmPasswordResetErrors];
+
+export type TenancyControllerConfirmPasswordResetResponses = {
+    200: PasswordResetConfirmResponse;
+};
+
+export type TenancyControllerConfirmPasswordResetResponse = TenancyControllerConfirmPasswordResetResponses[keyof TenancyControllerConfirmPasswordResetResponses];
 
 export type TenancyControllerRefreshSessionData = {
     body?: never;
