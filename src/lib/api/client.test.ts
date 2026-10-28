@@ -183,6 +183,12 @@ import {
   fetchApiListBreaches,
   fetchApiListSuggestedPos,
   fetchApiListBatchAlerts,
+  fetchApiCancelVendorReturn,
+  fetchApiCreateVendorReturn,
+  fetchApiDispatchVendorReturn,
+  fetchApiGetVendorReturn,
+  fetchApiListVendorReturns,
+  fetchApiReturnableDamaged,
 } from './client';
 import { SESSION_STORAGE_KEY, writeSession, clearSession, PORTAL_SUSPENDED_EVENT } from '../auth';
 import type { StoredSession } from '../auth';
@@ -3321,6 +3327,95 @@ describe('story 3-7a — the recall wrappers', () => {
     stubFetch(200, { id: R });
     await fetchApiPortalRecall(T, R);
     expect(path()).toBe(`/api/v1/tenants/${T}/portal/recalls/${R}`);
+    clearSession();
+  });
+});
+
+describe('return-to-vendor wrappers (story 2-8b)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const T = SESSION.tenant.id;
+  const W = '0198f7a2-1b3c-7d4e-8f90-0000000000a1';
+  const C = '0198f7a2-1b3c-7d4e-8f90-0000000000c9';
+  const R = '0198f7a2-1b3c-7d4e-8f90-0000000000f1';
+  const base = `/api/v1/tenants/${T}/vendor-returns`;
+  const RTV = { id: R, code: 'RTV-0001', status: 'draft', lines: [] };
+
+  test('create POSTs the body with the Idempotency-Key, no query', async () => {
+    writeSession(SESSION);
+    stubFetch(201, RTV);
+    const body = {
+      warehouseId: W,
+      vendorId: C,
+      consigneeAddress: 'registered' as const,
+      lines: [{ skuId: C, quantity: 2.5, reasonCode: 'damaged' as const }],
+    };
+    const res = await fetchApiCreateVendorReturn(T, body, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(base);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    expect(res.code).toBe('RTV-0001');
+    clearSession();
+  });
+
+  test('the list sends no query on a bare first page, then each filter only when set', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListVendorReturns(T);
+    expect(new URL(lastRequest!.url).pathname).toBe(base);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await fetchApiListVendorReturns(T, { warehouseId: W, clientId: C, status: 'picked', cursor: 'c1', limit: 100 });
+    const url = new URL(lastRequest!.url);
+    expect(Object.fromEntries(url.searchParams)).toEqual({ warehouseId: W, clientId: C, status: 'picked', cursor: 'c1', limit: '100' });
+    clearSession();
+  });
+
+  test('the detail GETs one return', async () => {
+    writeSession(SESSION);
+    stubFetch(200, RTV);
+    await fetchApiGetVendorReturn(T, R);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/${R}`);
+    clearSession();
+  });
+
+  test('dispatch and cancel POST to their verbs with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, RTV);
+    const capture = { brandDocument: { type: 'challan' as const, number: 'CH-77', date: '2026-10-22' }, vehicleNumber: 'KA01AB1234', packageCount: 1 };
+    await fetchApiDispatchVendorReturn(T, R, capture, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/${R}/dispatch`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(capture);
+    await fetchApiCancelVendorReturn(T, R, 'vendor refused', KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/${R}/cancel`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ reason: 'vendor refused' });
+    clearSession();
+  });
+
+  test('the returnable read is warehouse-scoped and always names the client; skuId only when set', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { warehouseId: W, clientId: C, truncated: false, arms: [] });
+    await fetchApiReturnableDamaged(T, W, C);
+    let url = new URL(lastRequest!.url);
+    expect(url.pathname).toBe(`/api/v1/tenants/${T}/warehouses/${W}/vendor-returns/returnable`);
+    expect(Object.fromEntries(url.searchParams)).toEqual({ clientId: C });
+    await fetchApiReturnableDamaged(T, W, C, { skuId: R });
+    url = new URL(lastRequest!.url);
+    expect(url.searchParams.get('skuId')).toBe(R);
+    clearSession();
+  });
+
+  test('a refusal is an ApiProblem carrying its code and extensions', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { code: 'rtv-exceeds-damaged', status: 409, detail: 'too many', onHandQty: 10, availableQty: 4 });
+    await expect(fetchApiCreateVendorReturn(T, { warehouseId: W, vendorId: C, consigneeAddress: 'dispatch', lines: [] }, KEY)).rejects.toMatchObject({
+      code: 'rtv-exceeds-damaged',
+      status: 409,
+      extensions: { onHandQty: 10, availableQty: 4 },
+    });
     clearSession();
   });
 });

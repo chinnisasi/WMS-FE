@@ -8,7 +8,7 @@ import type {
 } from '@/lib/api/generated';
 import { ApiProblem } from '@/lib/api/client';
 import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
-import { formatQuantity, parseQuantityInput } from '@/lib/format-quantity';
+import { formatCount, formatQuantity, parseQuantityInput } from '@/lib/format-quantity';
 import { parseSerialList, storageClassSatisfies } from '@/lib/moves';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
@@ -564,6 +564,22 @@ export function pendSourceText(entry: { readonly sourceDeviceId?: string | null 
 }
 
 /**
+ * Story 2-8b (A2) — a DAMAGED write-off refused because open returns to
+ * vendor claim the units (409 `damaged-claimed-by-rtv`): the RTV codes and
+ * the figures from the problem's extensions.
+ */
+export function damagedClaimedByRtvReason(error: ApiProblem): string {
+  const raw = error.extensions['vendorReturnCodes'];
+  const codes = Array.isArray(raw) ? raw.filter((code): code is string => typeof code === 'string') : [];
+  const claimed = typeof error.extensions['claimedQty'] === 'number' ? (error.extensions['claimedQty'] as number) : null;
+  const onHand = typeof error.extensions['onHandQty'] === 'number' ? (error.extensions['onHandQty'] as number) : null;
+  const by = codes.length === 0 ? 'an open return to vendor' : codes.join(', ');
+  const figures =
+    claimed === null || onHand === null ? '' : ` (${formatCount(claimed)} of the ${formatCount(onHand)} on hand)`;
+  return `These damaged units are claimed by ${by}${figures} — cancel the return to vendor first, or write off fewer units.`;
+}
+
+/**
  * A refused adjustment in words, by `code` — a fixed sentence for every
  * code, never the server's detail. Two codes are split by the problem's
  * fixed TITLE (a controller constant, never the detail): `insufficient-on-hand`
@@ -586,6 +602,8 @@ export function adjustReason(error: unknown, context: { readonly batchCode?: str
       return 'The DAMAGED bin only takes a write-off — use Write off on its row.';
     case 'kit-cannot-hold-stock':
       return 'A kit holds no stock — adjust its component SKUs.';
+    case 'damaged-claimed-by-rtv':
+      return damagedClaimedByRtvReason(error);
     case 'duplicate-serial':
       return 'A serial is already in stock — an Add takes only serials that are not on hand.';
     case 'serial-elsewhere':

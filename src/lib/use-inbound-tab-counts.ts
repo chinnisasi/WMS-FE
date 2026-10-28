@@ -8,6 +8,7 @@ import {
   fetchApiListPurchaseOrders,
   fetchApiListPutawayTasks,
   fetchApiListQcHolds,
+  fetchApiListVendorReturns,
 } from '@/lib/api/client';
 import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
 import { INBOUND_CHANGED_EVENT } from '@/lib/asns';
@@ -19,6 +20,8 @@ import { sumTabCounts, type CountedInboundTab, type PilledInboundTab, type TabCo
 const PO_PAGE = 200;
 const ASN_PAGE = 100;
 const QC_PAGE = 200;
+/** The vendor-returns list's `@Max(100)` page size. */
+const RTV_PAGE = 100;
 
 export type InboundTabCounts = Partial<Record<PilledInboundTab, TabCount>>;
 
@@ -92,6 +95,15 @@ export function useInboundTabCounts(
       fetchApiListQcHolds(tenantId, { warehouseId, status: 'open', limit: QC_PAGE, ...client }).then((r) =>
         page(r.items, r.nextCursor),
       ),
+    );
+    // Story 2-8b — open returns to vendor: drafts (awaiting the pick) plus picked (awaiting the dispatch).
+    void settle(
+      'rtvs',
+      Promise.all(
+        (['draft', 'picked'] as const).map((status) =>
+          fetchApiListVendorReturns(tenantId, { warehouseId, status, limit: RTV_PAGE, ...client }).then((r) => page(r.items, r.nextCursor)),
+        ),
+      ).then(sumTabCounts),
     );
     return () => {
       cancelled = true;

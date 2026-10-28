@@ -18,6 +18,8 @@ export const INBOUND_TABS = [
   { id: 'grns', label: 'Goods receipts' },
   { id: 'putaway', label: 'Awaiting putaway' },
   { id: 'qc-holds', label: 'QC holds' },
+  // Story 2-8b — returns to vendor: DAMAGED stock going back to its vendor.
+  { id: 'rtvs', label: 'Returns to vendor' },
 ] as const;
 
 export type InboundTab = (typeof INBOUND_TABS)[number]['id'];
@@ -60,7 +62,8 @@ export function initialInboundTab(drill: ParsedDrill, tab: InboundTab | null): I
 /**
  * Tab counts (inbound-tabs): the open / actionable items behind each tab —
  * open POs, ASNs still to receive (announced + partially received), tasks
- * awaiting putaway, open QC holds. Goods receipts are history and carry no
+ * awaiting putaway, open QC holds, open returns to vendor (draft + picked —
+ * story 2-8b). Goods receipts are history and carry no
  * count. The lists are keyset-paged with no total, so a count is read from
  * one page at the route's maximum size; a full page with more behind it
  * reads "N+" — never a misleadingly small number.

@@ -537,6 +537,8 @@ const BLOCKER_WORDS: Readonly<Record<string, (n: number) => string>> = {
   'pending-over-receipts': (n) => `${plural(n, 'over-receipt', 'over-receipts')} awaiting a decision`,
   'open-orders': (n) => plural(n, 'open order', 'open orders'),
   'open-rmas': (n) => plural(n, 'open return', 'open returns'),
+  // Story 2-8b — draft or picked returns to vendor (cancel or dispatch them: Inbound → Returns to vendor).
+  'open-vendor-returns': (n) => plural(n, 'open return to vendor', 'open returns to vendor'),
   // Story 3-7a — an open LIVE recall of its lots (close it first: Inventory → Recalls; a mock never blocks).
   'open-recalls': (n) => plural(n, 'open recall', 'open recalls'),
   'pending-adjustments': (n) => `${plural(n, 'stock adjustment', 'stock adjustments')} awaiting approval`,

@@ -136,6 +136,12 @@ import {
   receivingControllerPlaceQcHold,
   receivingControllerReleaseQcHold,
   receivingControllerReleaseReceiptHolds,
+  vendorReturnsControllerCancel,
+  vendorReturnsControllerCreate,
+  vendorReturnsControllerDispatch,
+  vendorReturnsControllerGet,
+  vendorReturnsControllerList,
+  vendorReturnsControllerReturnable,
   receivingControllerRejectOverReceipt,
   replenishmentControllerDeleteReorderPolicy,
   replenishmentControllerDismissBatchAlert,
@@ -556,6 +562,11 @@ import type {
   GateInUnloadResponse,
   GateOutDto,
   UnloadGateInDto,
+  CreateVendorReturnDto,
+  DispatchVendorReturnDto,
+  ReturnableDamagedResponse,
+  VendorReturnDto,
+  VendorReturnListResponse,
   RegisterTenantDto,
   RejectedOpListResponse,
   RejectedOpResolveResponse,
@@ -6216,4 +6227,125 @@ export async function fetchApiAdjustStock(
   return 'pendingAdjustment' in data
     ? { kind: 'pending', pending: data as StockAdjustmentPendingResponse }
     : { kind: 'applied', adjustment: data as StockAdjustmentResponse };
+}
+
+// ── story 2-8b: returns to vendor ───────────────────────────────────────────
+
+/** Story 2-8b — the RTV statuses (the list's `status` filter). */
+export type VendorReturnStatusFilter = VendorReturnDto['status'];
+
+/**
+ * Story 2-8b — creates a return to vendor (`rtv.manage`): a draft drawing on
+ * one client's DAMAGED stock, the vendor and the brand frozen. The key is per
+ * draft (reused on a retry of the unchanged body).
+ */
+export async function fetchApiCreateVendorReturn(
+  tenantId: string,
+  body: CreateVendorReturnDto,
+  idempotencyKey: string,
+): Promise<VendorReturnDto> {
+  const { data, error } = await vendorReturnsControllerCreate({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * Story 2-8b — the tenant's returns to vendor, newest first; `warehouseId`,
+ * `clientId` and `status` ride the query only when set.
+ */
+export async function fetchApiListVendorReturns(
+  tenantId: string,
+  options?: {
+    warehouseId?: string;
+    clientId?: string;
+    status?: VendorReturnStatusFilter;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  },
+): Promise<VendorReturnListResponse> {
+  const { data, error } = await vendorReturnsControllerList({
+    path: { tenantId },
+    query: definedQuery({
+      warehouseId: options?.warehouseId,
+      clientId: options?.clientId,
+      status: options?.status,
+      cursor: options?.cursor,
+      limit: options?.limit,
+    }),
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-8b — one return to vendor: its frozen parties, lines, pick, dispatch and cancellation. */
+export async function fetchApiGetVendorReturn(
+  tenantId: string,
+  vendorReturnId: string,
+  options?: { signal?: AbortSignal },
+): Promise<VendorReturnDto> {
+  const { data, error } = await vendorReturnsControllerGet({ path: { tenantId, vendorReturnId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * Story 2-8b — dispatches a picked return (`dispatch.execute`): the brand's
+ * document, the e-way bill, the carrier and the packages; the units leave
+ * DAMAGED (`rtv.dispatched`).
+ */
+export async function fetchApiDispatchVendorReturn(
+  tenantId: string,
+  vendorReturnId: string,
+  body: DispatchVendorReturnDto,
+  idempotencyKey: string,
+): Promise<VendorReturnDto> {
+  const { data, error } = await vendorReturnsControllerDispatch({
+    path: { tenantId, vendorReturnId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 2-8b — cancels a draft or picked return (`rtv.manage`), with a reason. */
+export async function fetchApiCancelVendorReturn(
+  tenantId: string,
+  vendorReturnId: string,
+  reason: string,
+  idempotencyKey: string,
+): Promise<VendorReturnDto> {
+  const { data, error } = await vendorReturnsControllerCancel({
+    path: { tenantId, vendorReturnId },
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * Story 2-8b — one client's DAMAGED arms in a warehouse with what is still
+ * available after the open claims, and per arm the GRN lines it may be
+ * sourced from. `skuId` narrows it (A15).
+ */
+export async function fetchApiReturnableDamaged(
+  tenantId: string,
+  warehouseId: string,
+  clientId: string,
+  options?: { skuId?: string; signal?: AbortSignal },
+): Promise<ReturnableDamagedResponse> {
+  const { data, error } = await vendorReturnsControllerReturnable({
+    path: { tenantId, warehouseId },
+    query: { clientId, ...(options?.skuId === undefined ? {} : { skuId: options.skuId }) },
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
 }

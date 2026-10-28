@@ -75,6 +75,9 @@ export function ledgerReferenceLabel(doc: LedgerReferenceDocDto | null): string 
   if (doc.asnLineId !== undefined) parts.push(`ASN line ${shortId(doc.asnLineId)}`);
   // Story 3-1 — the bin-to-bin move the event belongs to.
   if (doc.moveId !== undefined) parts.push(`move ${shortId(doc.moveId)}`);
+  // Story 2-8b — the return to vendor (and its line) a `rtv.dispatched` draw belongs to.
+  if (doc.vendorReturnId !== undefined) parts.push(`return to vendor ${shortId(doc.vendorReturnId)}`);
+  if (doc.grnLineId !== undefined && doc.vendorReturnId !== undefined) parts.push(`GRN line ${shortId(doc.grnLineId)}`);
   if (doc.note !== undefined) parts.push(`“${doc.note}”`);
   return parts.join(' · ');
 }
