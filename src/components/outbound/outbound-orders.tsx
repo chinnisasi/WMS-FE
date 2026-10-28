@@ -867,7 +867,7 @@ function OrdersTable({
                     // One dialog at a time: a second order's Cancel waits
                     // until the open one is closed.
                     disabled={cancelTarget !== null}
-                    onClick={() => setCancelTarget({ id: order.id, label: orderLabel(order), status: order.status })}
+                    onClick={(event) => setCancelTarget({ id: order.id, label: orderLabel(order), status: order.status, opener: event.currentTarget })}
                     className={rowButtonClass}
                   >
                     Cancel

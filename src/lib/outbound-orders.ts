@@ -513,7 +513,7 @@ export function defaultRestockDestination(
 }
 
 /** Story 4-2b (A8) — the window between the booking and the physical put-back. */
-export const RESTOCK_BOOKING_WINDOW = 'Stock is booked into these bins now — put the units back before the bins are counted.';
+export const RESTOCK_BOOKING_WINDOW = 'Stock is booked into these bins now and can be allocated to new picks straight away — put the units back before the bins are picked or counted.';
 
 /**
  * Story 4-2b — one warning per recalled lot the plan carries: its units stay
@@ -575,10 +575,26 @@ export function parseRestockDestination(destination: RestockDestination, binId: 
 }
 
 /** Story 4-2b — the success banner, built from the response. */
-export function restockOutcome(response: CancelWithRestockResponse, label: string): Outcome {
+export function restockOutcome(
+  response: CancelWithRestockResponse,
+  label: string,
+  /**
+   * The re-read plan's `restocked` count, for the already-cancelled no-op: a
+   * retry after a lost response (perhaps with another destination, so a new
+   * key) answers `restock: null` although the first attempt put units back.
+   */
+  alreadyRestocked = 0,
+): Outcome {
   const restock = response.restock;
   if (restock === null) {
-    return { tone: 'accepted', word: `Order ${label} cancelled`, reason: 'It was already cancelled — nothing changed.' };
+    return {
+      tone: 'accepted',
+      word: `Order ${label} cancelled`,
+      reason:
+        alreadyRestocked > 0
+          ? 'This order was already cancelled — its units were put back here:'
+          : 'It was already cancelled — nothing changed.',
+    };
   }
   const parts: string[] = [];
   parts.push(

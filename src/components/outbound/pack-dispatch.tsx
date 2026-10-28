@@ -283,7 +283,8 @@ function PackDispatchTable({
                 canPack={canPack}
                 canDispatch={canDispatch}
                 canLabel={canLabel}
-                onCancel={canCancel && cancelTarget === null ? setCancelTarget : undefined}
+                // One dialog at a time; the button stays mounted so focus can return to it on close.
+                onCancel={canCancel ? (target) => setCancelTarget((open) => open ?? target) : undefined}
               />
             ) : null
           }
@@ -468,7 +469,7 @@ function PackDispatchPanel({
                   <button
                     type="button"
                     className={rowButtonClass}
-                    onClick={() => onCancel({ id: order.id, label: orderLabel(order), status: order.status })}
+                    onClick={(event) => onCancel({ id: order.id, label: orderLabel(order), status: order.status, opener: event.currentTarget })}
                   >
                     Cancel order
                   </button>

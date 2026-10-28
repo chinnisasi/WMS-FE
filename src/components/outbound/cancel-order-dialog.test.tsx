@@ -217,7 +217,7 @@ describe('CancelOrderDialog', () => {
     expect(text).toContain('LOT-1');
     expect(text).toContain('SN-1, SN-2');
     expect(container.querySelector('[data-testid="restock-booking-window"]')?.textContent).toBe(
-      'Stock is booked into these bins now — put the units back before the bins are counted.',
+      'Stock is booked into these bins now and can be allocated to new picks straight away — put the units back before the bins are picked or counted.',
     );
     // An accepted order goes back to its origin bins by default.
     expect(radio(container, 'origin').checked).toBe(true);
@@ -300,6 +300,76 @@ describe('CancelOrderDialog', () => {
     const container = await mount('ready_to_dispatch');
     await submit(container);
     expect(cancels.length).toBe(0);
+  });
+
+  test('a refusal re-reads the plan: a shipment manifested meanwhile becomes the refusal, with no Confirm', async () => {
+    plan = { ...plan, shipment: { id: 'sh-1', status: 'labelled', carrierName: 'Delhivery', trackingNumber: 'DL123', manifestId: null } };
+    const container = await mount();
+    expect(container.querySelector('[data-testid="restock-void-notice"]')).not.toBeNull();
+    cancelAnswer = () => {
+      // The manifest landed between the dialog's read and the confirm.
+      plan = { ...plan, shipment: { id: 'sh-1', status: 'manifested', carrierName: 'Delhivery', trackingNumber: 'DL123', manifestId: 'mf-1' } };
+      return json(409, {
+        code: 'shipment-manifested',
+        status: 409,
+        title: 'Shipment manifested',
+        detail: 'Delhivery DL123 is on manifest MF-1 — receive it as a return.',
+        manifestId: 'mf-1',
+        shipmentId: 'sh-1',
+      });
+    };
+    await submit(container);
+    expect(cancels.length).toBe(1);
+    expect(container.querySelector('[data-testid="restock-manifested"]')).not.toBeNull();
+    expect(confirmButton(container)).toBeNull();
+  });
+
+  test('a replayed no-op after a lost response still names where the units went', async () => {
+    cancelAnswer = () => {
+      // The first attempt committed; this retry (a new key) finds the order cancelled.
+      plan = {
+        orderId: ORDER_ID,
+        orderStatus: 'cancelled',
+        shipment: null,
+        lines: [],
+        restocked: [
+          {
+            orderLineId: 'ol-1',
+            skuId: 'sku-1',
+            skuCode: 'TEE-M',
+            skuName: 'Tee, medium',
+            uom: 'each',
+            toBinId: 'bin-b',
+            toBinCode: 'B-02',
+            batchId: 'batch-1',
+            batchCode: 'LOT-1',
+            qty: 2,
+            serialCount: 2,
+            restockedAt: '2026-10-13T08:33:00.000Z',
+            restockId: 'rs-1',
+            recallCode: null,
+          },
+        ],
+      };
+      return json(200, { order: { id: ORDER_ID, status: 'cancelled', lines: [] }, restock: null });
+    };
+    const container = await mount();
+    await submit(container);
+    const result = container.querySelector('[data-testid="cancel-order-result"]')!;
+    expect(result.textContent).toContain('This order was already cancelled — its units were put back here:');
+    expect(result.textContent).not.toContain('nothing changed');
+    expect(container.querySelector('[data-testid="put-back-line"]')?.textContent).toContain('TEE-M × 2 each → B-02 (LOT-1)');
+  });
+
+  test('a no-op with nothing restocked says nothing changed', async () => {
+    cancelAnswer = () => {
+      plan = { orderId: ORDER_ID, orderStatus: 'cancelled', shipment: null, lines: [], restocked: [] };
+      return json(200, { order: { id: ORDER_ID, status: 'cancelled', lines: [] }, restock: null });
+    };
+    const container = await mount();
+    await submit(container);
+    expect(container.querySelector('[data-testid="cancel-order-result"]')?.textContent).toContain('It was already cancelled — nothing changed.');
+    expect(container.querySelector('[data-testid="put-back-line"]')).toBeNull();
   });
 
   test('after success: the put-back list from the response and the voided label, then Close', async () => {

@@ -83,7 +83,7 @@ describe('defaultRestockDestination (A8)', () => {
 
 describe('the dialog copy', () => {
   test('the booking window', () => {
-    expect(RESTOCK_BOOKING_WINDOW).toBe('Stock is booked into these bins now — put the units back before the bins are counted.');
+    expect(RESTOCK_BOOKING_WINDOW).toBe('Stock is booked into these bins now and can be allocated to new picks straight away — put the units back before the bins are picked or counted.');
   });
   test('one recall warning per recalled lot', () => {
     const warnings = restockRecallWarnings([
@@ -157,5 +157,6 @@ describe('restockOutcome', () => {
   });
   test('the already-cancelled no-op', () => {
     expect(restockOutcome({ order, restock: null }, 'SO-1').reason).toBe('It was already cancelled — nothing changed.');
+    expect(restockOutcome({ order, restock: null }, 'SO-1', 2).reason).toBe('This order was already cancelled — its units were put back here:');
   });
 });

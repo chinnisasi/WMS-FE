@@ -1784,6 +1784,17 @@ describe('story 4-2b — Cancel on the packed section, the cancelled panel, a vo
     expect(dialog!.textContent).toContain('Nothing has been picked');
   });
 
+  test('keeping the order returns focus to the packed section\'s Cancel order button', async () => {
+    view = await mount('owner');
+    await expand(view, 'order-2');
+    await pressButton(view, 'Cancel order');
+    await settle();
+    await pressButton(view, 'Keep the order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="cancel-order-dialog"]')).toBeNull();
+    expect((document.activeElement as HTMLElement | null)?.textContent).toBe('Cancel order');
+  });
+
   test('a role without orders.manage gets no Cancel on the packed section', async () => {
     view = await mount('operator');
     await expand(view, 'order-2');

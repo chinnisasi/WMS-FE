@@ -47,6 +47,8 @@ export interface CancelTarget {
   readonly id: string;
   readonly label: string;
   readonly status: OrderStatus;
+  /** The button that opened the dialog: focus returns to it on close (WCAG 2.4.3), when it is still on the page. */
+  readonly opener?: HTMLElement | null;
 }
 
 type SkuMap = Readonly<Record<string, SkuResponse>> | null;
@@ -105,6 +107,17 @@ export function CancelOrderDialog({
     mounted.current = true;
     return () => {
       mounted.current = false;
+    };
+  }, []);
+
+  // Focus back to the opener on close. The cleanup runs after the parent's
+  // commit, so the opener is already re-enabled; a row the refetch removed
+  // (a cancelled order leaves the pipeline) is no longer connected and is skipped.
+  const opener = useRef(order.opener ?? null);
+  useEffect(() => {
+    const target = opener.current;
+    return () => {
+      if (target !== null && target.isConnected) target.focus();
     };
   }, []);
 
@@ -212,7 +225,15 @@ export function CancelOrderDialog({
       </div>
 
       {result !== null ? (
-        <CancelResult response={result} label={order.label} skuMap={skuMap} onClose={onClose} />
+        <CancelResult
+          response={result}
+          label={order.label}
+          // A replayed no-op (`restock: null`) after a lost response: the
+          // re-read plan still names where the units went.
+          restocked={ready?.restocked ?? []}
+          skuMap={skuMap}
+          onClose={onClose}
+        />
       ) : plan.state === 'loading' ? (
         <div className="flex flex-col gap-2" data-testid="restock-plan-loading">
           <LoadingStatus label="Loading what goes back…" />
@@ -422,18 +443,29 @@ function PlanLines({ lines, skuMap }: { lines: readonly RestockPlanLineDto[]; sk
 function CancelResult({
   response,
   label,
+  restocked,
   skuMap,
   onClose,
 }: {
   response: CancelWithRestockResponse;
   label: string;
+  /** The plan's `restocked` list — rendered when the response is the already-cancelled no-op. */
+  restocked: readonly RestockedEntryDto[];
   skuMap: SkuMap;
   onClose: () => void;
 }) {
   const restock = response.restock;
+  const earlier = restock === null ? restocked : [];
   return (
     <div className="flex flex-col gap-3" data-testid="cancel-order-result">
-      <FeedbackBanner {...restockOutcome(response, label)} />
+      <FeedbackBanner {...restockOutcome(response, label, earlier.length)} />
+      {earlier.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className={labelClass}>Put back</span>
+          <PutBackList lines={earlier} skuMap={skuMap} />
+          <p className="text-xs font-medium">{RESTOCK_BOOKING_WINDOW}</p>
+        </div>
+      )}
       {restock !== null && restock.lines.length > 0 && (
         <div className="flex flex-col gap-1">
           <span className={labelClass}>Put back</span>
