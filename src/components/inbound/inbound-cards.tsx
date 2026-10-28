@@ -46,7 +46,7 @@ import { GrnLineSerials } from '@/components/inbound/grn-line-serials';
 import { StatusChip } from '@/components/shared/status-chip';
 import { useGoodsReceiptLines } from '@/lib/use-grn-lines';
 import { useGrnLpns } from '@/lib/use-grn-lpns';
-import { lpnCountLabel } from '@/lib/lpn-labels';
+import { lpnCountLabel, unlabelledOf } from '@/lib/lpn-labels';
 import { LpnDownloadAll, LpnLabelsPanel } from '@/components/inbound/lpn-labels-panel';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { ulid } from '@/lib/ulid';
@@ -726,7 +726,8 @@ function GoodsReceiptLinesPanel({
   const lpns = useGrnLpns(grnId);
   const [labelsFor, setLabelsFor] = useState<string | null>(null);
   const tenantId = useSyncExternalStore(subscribeSession, () => readSession()?.tenant.id ?? null, () => null);
-  const allLpns = lpns.state === 'ready' ? lpns.data : [];
+  const allLpns = lpns.state === 'ready' ? lpns.data.items : [];
+  const lpnLines = lpns.state === 'ready' ? lpns.data.lines : [];
   if (lines.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading the lines…</div>;
   if (lines.state === 'failed') return <ReadFailure word="Receipt lines unavailable" reason={lines.reason} onRetry={lines.reload} />;
   return (
@@ -787,6 +788,7 @@ function GoodsReceiptLinesPanel({
                   line={line}
                   sku={sku}
                   lpns={allLpns.filter((lpn) => lpn.grnLineId === line.id)}
+                  unlabelled={unlabelledOf(lpnLines, line.id)}
                   onClose={() => setLabelsFor(null)}
                 />
               )}
@@ -794,6 +796,8 @@ function GoodsReceiptLinesPanel({
           );
         })
       )}
+      {/* A failed LPN read says so, with Retry — never a silent loss of the counts and Labels buttons. */}
+      {lpns.state === 'failed' && <ReadFailure word="Receipt LPNs unavailable" reason={lpns.reason} onRetry={lpns.reload} />}
       {canLabel && tenantId !== null && <LpnDownloadAll tenantId={tenantId} grnId={grnId} grnCode={grnCode} lpns={allLpns} />}
     </div>
   );

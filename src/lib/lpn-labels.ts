@@ -9,7 +9,7 @@
  * where the server's sentence is the only place the number lives.
  */
 import { ApiProblem } from '@/lib/api/client';
-import type { LpnDto, LpnLabelsRequestDto, MintLpnsRequestDto, SkuResponse, VoidLpnRequestDto } from '@/lib/api/generated';
+import type { LpnDto, LpnLabelsRequestDto, LpnLineUnlabelledDto, MintLpnsRequestDto, SkuResponse, VoidLpnRequestDto } from '@/lib/api/generated';
 import { MAX_LABELS_PER_PRINT, type LabelFormat, type LabelPaper } from '@/lib/bin-labels';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { istDateOf } from '@/lib/rate-cards';
@@ -68,13 +68,12 @@ export function labelledQuantity(lpns: readonly Pick<LpnDto, 'qty' | 'status'>[]
 }
 
 /**
- * What is still unlabelled on a line, as far as the web can tell: its
- * applied units minus its labelled total. The server's cap also counts
- * approved over-receipt excess and failed inspections — its refusal names the
- * exact remainder.
+ * What may still go on labels for a line — the server's own figure (the list
+ * read's `lines[].unlabelledQty`: applied + approved excess − failed
+ * inspection − placed − active labels), 0 when the read does not name the line.
  */
-export function unlabelledQuantity(appliedQty: number, lpns: readonly Pick<LpnDto, 'qty' | 'status'>[]): number {
-  return Math.max(0, (Math.round(appliedQty * SCALE) - Math.round(labelledQuantity(lpns) * SCALE)) / SCALE);
+export function unlabelledOf(lines: readonly Pick<LpnLineUnlabelledDto, 'grnLineId' | 'unlabelledQty'>[], grnLineId: string): number {
+  return lines.find((line) => line.grnLineId === grnLineId)?.unlabelledQty ?? 0;
 }
 
 /** "3 labels: 40, 40, 20" — or, for a long split, "120 labels: 119 × 40 and 1 × 20". */
@@ -211,4 +210,14 @@ export function lpnRefusal(error: unknown): LpnRefusal {
     default:
       return { reason: error.detail ?? `The labels could not be processed (${error.code}).`, lpnCodes: [] };
   }
+}
+
+/**
+ * The words when the mint succeeded but the download after it did not: the
+ * labels EXIST — say which, and point at the reprint, so nobody creates them
+ * twice.
+ */
+export function mintedButNotDownloaded(codes: readonly string[], downloadReason: string): string {
+  const range = codes.length === 0 ? 'The labels' : codes.length === 1 ? codes[0]! : `${codes[0]}–${codes[codes.length - 1]}`;
+  return `${range} ${codes.length === 1 ? 'was' : 'were'} created, but the download failed (${downloadReason}) — tick ${codes.length === 1 ? 'it' : 'them'} in the list and download again; do not create them again.`;
 }

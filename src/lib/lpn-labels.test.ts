@@ -12,8 +12,9 @@ import {
   lpnRefusal,
   mintBody,
   splitLabelQuantities,
+  mintedButNotDownloaded,
   splitPreview,
-  unlabelledQuantity,
+  unlabelledOf,
   voidBody,
 } from '@/lib/lpn-labels';
 
@@ -53,15 +54,27 @@ describe('LPN labels (story 2-10b)', () => {
     expect(defaultUnitsPerLabel(null, 70)).toBe(70);
   });
 
-  test('labelled and unlabelled: voided LPNs free their quantity', () => {
+  test("unlabelledOf reads the server's per-line figure; an unnamed line is 0", () => {
+    const lines = [{ grnLineId: 'l1', unlabelledQty: 40 }, { grnLineId: 'l2', unlabelledQty: 12.5 }];
+    expect(unlabelledOf(lines, 'l1')).toBe(40);
+    expect(unlabelledOf(lines, 'l2')).toBe(12.5);
+    expect(unlabelledOf(lines, 'l3')).toBe(0);
+  });
+
+  test('a mint whose download failed names what was created and points at the reprint', () => {
+    expect(mintedButNotDownloaded(['LPN-000001', 'LPN-000002', 'LPN-000003'], 'offline')).toBe(
+      'LPN-000001–LPN-000003 were created, but the download failed (offline) — tick them in the list and download again; do not create them again.',
+    );
+    expect(mintedButNotDownloaded(['LPN-000009'], 'x')).toContain('LPN-000009 was created');
+  });
+
+  test('labelled: voided LPNs free their quantity', () => {
     const lpns = [
       { qty: 40, status: 'active' as const },
       { qty: 40, status: 'placed' as const },
       { qty: 15.5, status: 'voided' as const },
     ];
     expect(labelledQuantity(lpns)).toBe(80);
-    expect(unlabelledQuantity(100, lpns)).toBe(20);
-    expect(unlabelledQuantity(70, lpns)).toBe(0);
     expect(lpnCountLabel(lpns)).toBe('2 LPNs');
     expect(lpnCountLabel([{ status: 'voided' }])).toBeNull();
     expect(lpnCountLabel([{ status: 'active' }])).toBe('1 LPN');

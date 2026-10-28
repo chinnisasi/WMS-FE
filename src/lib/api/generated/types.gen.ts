@@ -5949,11 +5949,23 @@ export type LpnDto = {
     voidNote: string | null;
 };
 
+export type LpnLineUnlabelledDto = {
+    grnLineId: string;
+    /**
+     * Base units that may still go on labels: applied + approved over-receipt excess − failed-inspection units − Σ the line's placements − Σ its active LPNs, floored at 0 (the mint's own cap)
+     */
+    unlabelledQty: number;
+};
+
 export type LpnListResponse = {
     /**
      * Every LPN of the goods receipt (any status), in code order
      */
     items: Array<LpnDto>;
+    /**
+     * One entry per line of the goods receipt, in receipt order
+     */
+    lines: Array<LpnLineUnlabelledDto>;
 };
 
 export type MintLpnsLineDto = {

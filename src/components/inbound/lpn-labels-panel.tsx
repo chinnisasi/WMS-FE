@@ -15,11 +15,11 @@ import {
   lpnLabelsBody,
   lpnLabelsFilename,
   lpnRefusal,
+  mintedButNotDownloaded,
   lpnStatusLabel,
   mintBody,
   splitLabelQuantities,
   splitPreview,
-  unlabelledQuantity,
   voidBody,
   type LpnRefusal,
 } from '@/lib/lpn-labels';
@@ -102,6 +102,9 @@ async function downloadLpnLabels(
   return names;
 }
 
+/** A mint that committed, whose download then failed (its message is the full sentence). */
+class MintedNotDownloaded extends Error {}
+
 function RefusalView({ refusal }: { refusal: LpnRefusal }) {
   return (
     <div role="alert" className="flex flex-col gap-1 text-xs text-(--destructive)">
@@ -180,18 +183,20 @@ export function LpnLabelsPanel({
   line,
   sku,
   lpns,
+  unlabelled,
   onClose,
 }: {
   tenantId: string;
   grnId: string;
   grnCode: string;
-  line: Pick<GoodsReceiptLineEntryDto, 'id' | 'skuCode' | 'appliedQty'>;
+  line: Pick<GoodsReceiptLineEntryDto, 'id' | 'skuCode'>;
   sku: SkuResponse | null;
   /** This line's LPNs, code order. */
   lpns: readonly LpnDto[];
+  /** What may still go on labels — the server's figure (the list read's `lines[].unlabelledQty`). */
+  unlabelled: number;
   onClose: () => void;
 }) {
-  const unlabelled = unlabelledQuantity(line.appliedQty, lpns);
   const precision = sku?.uomPrecision ?? 0;
   const [perLabel, setPerLabel] = useState(() => String(defaultUnitsPerLabel(sku, unlabelled) || ''));
   const [format, setFormat] = useState<LabelFormat>('zpl');
@@ -217,7 +222,7 @@ export function LpnLabelsPanel({
     try {
       setDone(await work());
     } catch (error) {
-      setRefusal(lpnRefusal(error));
+      setRefusal(error instanceof MintedNotDownloaded ? { reason: error.message, lpnCodes: [] } : lpnRefusal(error));
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -232,7 +237,13 @@ export function LpnLabelsPanel({
       const minted = await fetchApiMintLpns(tenantId, grnId, body, mintKey.current.key);
       mintKey.current = null;
       notifyInboundChanged();
-      const names = await downloadLpnLabels(tenantId, grnId, grnCode, minted.lpns.map((lpn) => lpn.id), format, paper);
+      let names: string[];
+      try {
+        names = await downloadLpnLabels(tenantId, grnId, grnCode, minted.lpns.map((lpn) => lpn.id), format, paper);
+      } catch (error) {
+        // The labels EXIST: say which, and point at the reprint — never invite a second create.
+        throw new MintedNotDownloaded(mintedButNotDownloaded(minted.lpns.map((lpn) => lpn.code), lpnRefusal(error).reason));
+      }
       return `${minted.lpns.length} ${minted.lpns.length === 1 ? 'label' : 'labels'} created (${minted.lpns[0]!.code}${minted.lpns.length > 1 ? `–${minted.lpns[minted.lpns.length - 1]!.code}` : ''}); ${names.join(', ')} downloaded`;
     });
   }
