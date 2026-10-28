@@ -82,6 +82,12 @@ const DRILLS: readonly { name: string; apiPath: string; query: Record<string, st
   { name: 'pending over-receipts (live)', apiPath: `${tn}/receiving/over-receipts`, query: { warehouseId: W, status: 'pending', to: TO } },
   { name: 'blind GRNs (windowed)', apiPath: `${tn}/receiving/goods-receipts`, query: { warehouseId: W, blind: 'true', from: FROM, to: TO } },
   { name: 'backordered channel orders (windowed)', apiPath: `${wh}/outbound/orders`, query: { source: 'ingested', backordered: 'true', from: FROM, to: TO } },
+  // Story 4-2c (A15) — the SM-4 tile counts root orders, so its drill passes followOn=false.
+  {
+    name: 'backordered channel orders, roots only (windowed — the SM-4 drill)',
+    apiPath: `${wh}/outbound/orders`,
+    query: { source: 'ingested', backordered: 'true', followOn: 'false', from: FROM, to: TO },
+  },
   { name: 'accepted orders (live)', apiPath: `${wh}/outbound/orders`, query: { status: 'accepted', to: TO } },
   { name: 'ready to dispatch (live)', apiPath: `${wh}/outbound/orders`, query: { status: 'ready_to_dispatch', to: TO } },
   { name: 'open expiry alerts (live)', apiPath: `${tn}/replenishment/batch-alerts`, query: { warehouseId: W, kind: 'expiry_upcoming', status: 'open', to: TO } },
@@ -272,6 +278,7 @@ describe('parseDrill — unsupported, all or nothing', () => {
     ['an unknown enum value', 'replenishment', { list: 'batch-alerts', kind: 'expired' }],
     ['an unregistered ledger type', 'ledger', { list: 'ledger', warehouseId: W, type: 'pick.dropped' }],
     ['a non-boolean flag', 'outbound', { list: 'orders', warehouseId: W, backordered: 'yes' }],
+    ['a non-boolean followOn', 'outbound', { list: 'orders', warehouseId: W, followOn: 'no' }],
     ['a boolean in another case', 'inbound', { list: 'grns', blind: 'TRUE' }],
     ['a list this screen does not serve', 'outbound', { list: 'invoices', warehouseId: W }],
     ['an unknown list', 'compliance', { list: 'hsn' }],
@@ -330,6 +337,12 @@ describe('describeDrill — the banner sentence', () => {
       'source and backordered',
       { list: 'orders', warehouseId: W, source: 'ingested', backordered: true, from: FROM, to: TO },
       'Orders · Channel orders · With a backordered line · 06 Oct 2026, 00:00 – 06 Oct 2026, 15:30 IST · MAIN Chennai DC',
+    ],
+    [
+      // Story 4-2c (A15) — the SM-4 drill narrows to root orders, and says so.
+      'source, backordered and roots only',
+      { list: 'orders', warehouseId: W, source: 'ingested', backordered: true, followOn: false, from: FROM, to: TO },
+      'Orders · Channel orders · With a backordered line · Original orders only · 06 Oct 2026, 00:00 – 06 Oct 2026, 15:30 IST · MAIN Chennai DC',
     ],
     [
       'blind receipts',

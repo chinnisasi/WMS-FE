@@ -3060,6 +3060,22 @@ export type OrderDto = {
      */
     clientId?: string | null;
     /**
+     * Story 4-2c — on a backorder follow-on (the order a short dispatch opened for the unshipped remainder): its parent order; null on a root order. Absent only on a replayed response stored before 4-2c — read absent as null.
+     */
+    followOnOfOrderId?: string | null;
+    /**
+     * Story 4-2c — on a follow-on: the chain's root (the client's original order; the label's short id when it has no number); null on a root. Absent only on a replayed response stored before 4-2c — read absent as null.
+     */
+    followOnRootOrderId?: string | null;
+    /**
+     * Story 4-2c — on a follow-on: its place in the chain, the label suffix `-BO{seq}` (`1042-BO1`, then `1042-BO2`); null on a root. Absent only on a replayed response stored before 4-2c — read absent as null.
+     */
+    followOnSeq?: number | null;
+    /**
+     * Story 4-2c — the follow-on this order's short dispatch opened; null when everything shipped (or before dispatch). Absent only on a replayed response stored before 4-2c — read absent as null.
+     */
+    followOnOrderId?: string | null;
+    /**
      * ISO-8601 UTC creation time
      */
     createdAt: string;
@@ -3174,6 +3190,61 @@ export type OrderImportResponseDto = {
 
 export type CancelOrderDto = {
     [key: string]: unknown;
+};
+
+export type AllocatedLineDto = {
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    /**
+     * Ordered, base units
+     */
+    qty: number;
+    /**
+     * What the line now holds, base units (may be below qty — a partial grant, as at acceptance)
+     */
+    reservedQty: number;
+};
+
+export type StillShortLineDto = {
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    /**
+     * Still awaiting stock, base units
+     */
+    shortQty: number;
+};
+
+export type SkippedAllocationLineDto = {
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    /**
+     * Why the line was not reserved this run: `sku-inactive` — the SKU is inactive and its stock does not cover the line in full (an inactive SKU sells existing stock only); `licence-not-covered` — licence enforcement is on and the order's goods are not covered at this warehouse today; `contended` — another allocation reserved it at the same moment
+     */
+    reason: 'sku-inactive' | 'licence-not-covered' | 'contended';
+};
+
+export type AllocationDto = {
+    orderId: string;
+    warehouseId: string;
+    /**
+     * Lines reserved by this run (empty when nothing could be — still 200)
+     */
+    allocated: Array<AllocatedLineDto>;
+    /**
+     * Eligible lines still awaiting stock after this run
+     */
+    stillShort: Array<StillShortLineDto>;
+    /**
+     * Eligible lines this run did not reserve, with the reason
+     */
+    skipped: Array<SkippedAllocationLineDto>;
+};
+
+export type AllocateOrderResponse = {
+    allocation: AllocationDto;
 };
 
 export type CancelOrderWithRestockDto = {
@@ -3541,6 +3612,22 @@ export type DispatchDto = {
      */
     totalUnits: number;
     /**
+     * Story 4-2c — the follow-on order this dispatch opened for what did not ship (accepted, every line backordered; it ships when stock arrives — `followOnSeq + 1`, or 1, names it `-BO{n}`); null when everything shipped. Absent only on a replayed response stored before 4-2c — read absent as null.
+     */
+    followOnOrderId?: string | null;
+    /**
+     * Story 4-2c — THIS order's parent when it is itself a follow-on; null on a root. Absent before 4-2c.
+     */
+    followOnOfOrderId?: string | null;
+    /**
+     * Story 4-2c — THIS order's chain root when it is a follow-on; null on a root. Absent before 4-2c.
+     */
+    followOnRootOrderId?: string | null;
+    /**
+     * Story 4-2c — THIS order's `-BO{seq}` when it is a follow-on; null on a root. Absent before 4-2c.
+     */
+    followOnSeq?: number | null;
+    /**
      * The reservation holds this dispatch retired committed → released — the ATP correction. Empty when the order had none left to retire.
      */
     retiredReservationIds: Array<string>;
@@ -3730,6 +3817,22 @@ export type OrderEntryDto = {
      * Story 21-2b — the client the order is for, derived from its SKUs
      */
     clientId?: string | null;
+    /**
+     * Story 4-2c — on a backorder follow-on (the order a short dispatch opened for the unshipped remainder): its parent order; null on a root order.
+     */
+    followOnOfOrderId?: string | null;
+    /**
+     * Story 4-2c — on a follow-on: the chain's root (the client's original order; the label's short id when it has no number); null on a root.
+     */
+    followOnRootOrderId?: string | null;
+    /**
+     * Story 4-2c — on a follow-on: its place in the chain, the label suffix `-BO{seq}` (`1042-BO1`, then `1042-BO2`); null on a root.
+     */
+    followOnSeq?: number | null;
+    /**
+     * Story 4-2c — the follow-on this order's short dispatch opened; null when everything shipped (or before dispatch).
+     */
+    followOnOrderId?: string | null;
     /**
      * ISO-8601 UTC creation time
      */
@@ -5074,6 +5177,18 @@ export type CatalogPackTaskDto = {
      * Story 4-2a — the cash to collect on delivery for this order, integer paise; null means prepaid.
      */
     codAmountPaise: number | null;
+    /**
+     * Story 4-2c — what the order ORDERED of this SKU (its lines' quantities, base units). Below it, `pickedQty` ships short and the rest follows as a separate (backorder) order. Absent on a device snapshot from before 4-2c.
+     */
+    orderedQty?: number;
+    /**
+     * Story 4-2c — true when ANY line of the order was picked below its quantity (order-level, repeated on each of its SKU rows — a SKU that picked nothing has no row of its own): the bench warns "Short — the rest ships later as a follow-on order", and on a COD order that the courier collects the full amount on this parcel.
+     */
+    orderShortfall?: boolean;
+    /**
+     * Story 4-2c — the order's place in a backorder chain (the label suffix `-BO{seq}`; the pack card's "Backorder" chip); null on an original order.
+     */
+    followOnSeq?: number | null;
 };
 
 export type CatalogHandlingUnitDto = {
@@ -10117,6 +10232,14 @@ export type OrderRefDto = {
      * Story 4-1b — the client's own order number; null when none (or when the order row is missing)
      */
     clientOrderRef: string | null;
+    /**
+     * Story 4-2c — a backorder follow-on's place in its chain (the label's `-BO{seq}`); null on a root order. Absent on a response built before 4-2c — read absent as null
+     */
+    followOnSeq?: number | null;
+    /**
+     * Story 4-2c — a follow-on's chain root (the label's short id when the order has no number); null on a root order
+     */
+    followOnRootOrderId?: string | null;
     orderId: string;
 };
 
@@ -11029,6 +11152,22 @@ export type PortalOrderRowDto = {
      * Top-level lines — a kit counts once
      */
     lineCount: number;
+    /**
+     * Story 4-2c — on a backorder follow-on (the order a short shipment opened for what did not ship): the order it follows; null on your original order
+     */
+    followOnOfOrderId?: string | null;
+    /**
+     * Story 4-2c — on a follow-on: your original order (the chain's root); null on the original
+     */
+    followOnRootOrderId?: string | null;
+    /**
+     * Story 4-2c — on a follow-on: its place in the chain — the label suffix `-BO{seq}` (1042-BO1); null on the original
+     */
+    followOnSeq?: number | null;
+    /**
+     * Story 4-2c — the follow-on this order's short shipment opened for the units that did not ship; null when everything shipped
+     */
+    followOnOrderId?: string | null;
     createdAt: string;
 };
 
@@ -11202,6 +11341,10 @@ export type PortalOrderComponentDto = {
      * Base units
      */
     qty: number;
+    /**
+     * Story 4-2c — what shipped of this line once the order is dispatched, base units (a kit: the number of complete kits); null before dispatch
+     */
+    shippedQty?: number | null;
 };
 
 export type PortalOrderLineDto = {
@@ -11211,6 +11354,10 @@ export type PortalOrderLineDto = {
      * Base units
      */
     qty: number;
+    /**
+     * Story 4-2c — what shipped of this line once the order is dispatched, base units (a kit: the number of complete kits); null before dispatch
+     */
+    shippedQty?: number | null;
     /**
      * A kit line's components; empty for a plain line
      */
@@ -11253,6 +11400,22 @@ export type PortalOrderDetailResponse = {
      * Top-level lines — a kit counts once
      */
     lineCount: number;
+    /**
+     * Story 4-2c — on a backorder follow-on (the order a short shipment opened for what did not ship): the order it follows; null on your original order
+     */
+    followOnOfOrderId?: string | null;
+    /**
+     * Story 4-2c — on a follow-on: your original order (the chain's root); null on the original
+     */
+    followOnRootOrderId?: string | null;
+    /**
+     * Story 4-2c — on a follow-on: its place in the chain — the label suffix `-BO{seq}` (1042-BO1); null on the original
+     */
+    followOnSeq?: number | null;
+    /**
+     * Story 4-2c — the follow-on this order's short shipment opened for the units that did not ship; null when everything shipped
+     */
+    followOnOrderId?: string | null;
     createdAt: string;
     lines: Array<PortalOrderLineDto>;
 };
@@ -18068,6 +18231,67 @@ export type OutboundControllerCancelOrderResponses = {
 
 export type OutboundControllerCancelOrderResponse = OutboundControllerCancelOrderResponses[keyof OutboundControllerCancelOrderResponses];
 
+export type OutboundControllerAllocateOrderData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/allocate';
+};
+
+export type OutboundControllerAllocateOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks orders.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not accepted (order-not-accepted), it is on an open wave (order-on-open-wave — extensions.waveId), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The reservation store is unreachable (reservation-store-unavailable) — nothing reserved
+     */
+    503: ProblemDetailsDto;
+};
+
+export type OutboundControllerAllocateOrderError = OutboundControllerAllocateOrderErrors[keyof OutboundControllerAllocateOrderErrors];
+
+export type OutboundControllerAllocateOrderResponses = {
+    /**
+     * What this run reserved, what still awaits stock and what it skipped (the idempotency snapshot)
+     */
+    200: AllocateOrderResponse;
+};
+
+export type OutboundControllerAllocateOrderResponse = OutboundControllerAllocateOrderResponses[keyof OutboundControllerAllocateOrderResponses];
+
 export type OutboundControllerCancelOrderWithRestockData = {
     body: CancelOrderWithRestockDto;
     headers: {
@@ -18531,6 +18755,10 @@ export type OutboundControllerListOrdersData = {
          * Story 4-1b — an EXACT, case-sensitive match on the order's client order number (any status) OR its channel reference (externalEventId). Trimmed; blank is no search; over 200 characters (a channel reference's ceiling) is 400. Composes with every other filter, the client filter included
          */
         reference?: string;
+        /**
+         * Story 4-2c — `true`: only backorder follow-ons (orders a short dispatch opened for the unshipped remainder); `false`: only root orders (the SM-4 drill — a follow-on is not a new client order). Exactly 'true' or 'false'
+         */
+        followOn?: boolean;
     };
     url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/orders';
 };

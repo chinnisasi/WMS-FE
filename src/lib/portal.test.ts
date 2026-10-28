@@ -16,6 +16,9 @@ import {
   PASSWORD_RESET_DONE_NOTICE,
   orderDestination,
   orderReference,
+  portalFollowOnOfText,
+  portalLineShipped,
+  portalShippedShortText,
   PORTAL_NAV,
   PORTAL_DISPOSITION_OUTCOME_LABEL,
   PORTAL_DISPOSITION_REASON_LABEL,
@@ -477,5 +480,43 @@ describe('story 4-7a — the portal returns', () => {
     expect(portalReturnFilterQuery('dispositioned')).toBe('dispositioned');
     expect(portalReturnOrder({ orderReference: null })).toBe('—');
     expect(portalReturnOrder({ orderReference: 'SHOP-#1' })).toBe('SHOP-#1');
+  });
+});
+
+// ── Story 4-2c — backorder follow-ons in the portal ─────────────────────────
+
+describe('portal backorders (story 4-2c)', () => {
+  test('a follow-on reference carries -BO{seq}; with no reference it reads "Manual · backorder 1" — never an internal id', () => {
+    expect(orderReference({ source: 'manual', externalRef: null, clientOrderRef: '1042', followOnSeq: 1 })).toBe('1042-BO1');
+    expect(orderReference({ source: 'ingested', externalRef: 'SHOP-1', clientOrderRef: null, followOnSeq: 2 })).toBe('SHOP-1-BO2');
+    expect(orderReference({ source: 'manual', externalRef: null, clientOrderRef: null, followOnSeq: 1 })).toBe('Manual · backorder 1');
+    expect(orderReference({ source: 'manual', externalRef: null, clientOrderRef: '1042', followOnSeq: null })).toBe('1042');
+  });
+
+  test('a follow-on detail reads "Backorder of 1042"; an original reads nothing', () => {
+    expect(portalFollowOnOfText({ source: 'manual', externalRef: null, clientOrderRef: '1042', followOnSeq: 1 })).toMatch(/^Backorder of 1042 — /);
+    expect(portalFollowOnOfText({ source: 'manual', externalRef: null, clientOrderRef: null, followOnSeq: 2 })).toMatch(/^Backorder 2 of your original order/);
+    expect(portalFollowOnOfText({ source: 'manual', externalRef: null, clientOrderRef: '1042' })).toBeNull();
+  });
+
+  test('a dispatched parent with a follow-on: "Shipped 7 of 10 — 3 follow in 1042-BO1; ask the warehouse to cancel the remainder"', () => {
+    const base = { source: 'manual' as const, externalRef: null, clientOrderRef: '1042', status: 'dispatched' as const, followOnOrderId: 'fo-1' };
+    expect(portalShippedShortText({ ...base, lines: [{ qty: 6, shippedQty: 6 }, { qty: 4, shippedQty: 1 }] })).toBe(
+      'Shipped 7 of 10 — 3 follow in 1042-BO1; ask the warehouse to cancel the remainder',
+    );
+    // A follow-on that itself shipped short opens the next in the chain.
+    expect(portalShippedShortText({ ...base, followOnSeq: 1, lines: [{ qty: 3, shippedQty: 1 }] })).toBe(
+      'Shipped 1 of 3 — 2 follow in 1042-BO2; ask the warehouse to cancel the remainder',
+    );
+    // Nothing before dispatch, with no follow-on, or with no shipped figure (pre-4-2c).
+    expect(portalShippedShortText({ ...base, status: 'accepted', lines: [{ qty: 4, shippedQty: null }] })).toBeNull();
+    expect(portalShippedShortText({ ...base, followOnOrderId: null, lines: [{ qty: 4, shippedQty: 3 }] })).toBeNull();
+    expect(portalShippedShortText({ ...base, lines: [{ qty: 4 }] })).toBeNull();
+  });
+
+  test('a line\'s shipped figure, or null before dispatch', () => {
+    expect(portalLineShipped({ qty: 10, shippedQty: 7 })).toBe('7 of 10 shipped');
+    expect(portalLineShipped({ qty: 10, shippedQty: null })).toBeNull();
+    expect(portalLineShipped({ qty: 10 })).toBeNull();
   });
 });

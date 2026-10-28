@@ -381,6 +381,57 @@ describe('the portal surfaces — ready, empty, failed', () => {
     expect(components.textContent).toContain('MUG — Mug');
   });
 
+  test('story 4-2c: a follow-on row is chipped "Backorder"; a dispatched parent says what shipped and what follows', async () => {
+    const row = (id: string, over: Record<string, unknown>) => ({
+      id,
+      status: 'dispatched',
+      source: 'manual',
+      externalRef: null,
+      clientOrderRef: '1042',
+      warehouseName: 'Whitefield',
+      destinationName: null,
+      destinationCity: null,
+      destinationPincode: null,
+      lineCount: 1,
+      createdAt: '2026-10-08T10:00:00.000Z',
+      ...over,
+    });
+    routes = {
+      '/portal/orders': [
+        200,
+        {
+          items: [
+            row('fo-1', { status: 'accepted', followOnOfOrderId: ORDER_ID, followOnRootOrderId: ORDER_ID, followOnSeq: 1 }),
+            row(ORDER_ID, { followOnOrderId: 'fo-1' }),
+          ],
+          nextCursor: null,
+        },
+      ],
+      [`/portal/orders/${ORDER_ID}`]: [
+        200,
+        {
+          ...row(ORDER_ID, { followOnOrderId: 'fo-1' }),
+          lines: [
+            { skuCode: 'TEA', skuName: 'Tea', qty: 6, shippedQty: 6, components: [] },
+            { skuCode: 'MUG', skuName: 'Mug', qty: 4, shippedQty: 1, components: [] },
+          ],
+        },
+      ],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    const refs = [...view.container.querySelectorAll('[data-testid="portal-order-ref"]')].map((node) => node.textContent);
+    expect(refs).toEqual(['1042-BO1', '1042']);
+    expect(view.container.querySelectorAll('[data-testid="backorder-chip"]')).toHaveLength(1);
+    const lines = [...view.container.querySelectorAll('button')].filter((b) => b.textContent === 'Lines');
+    click(lines[1]!);
+    await settle();
+    expect(view.container.querySelector('[data-testid="portal-shipped-short"]')!.textContent).toBe(
+      'Shipped 7 of 10 — 3 follow in 1042-BO1; ask the warehouse to cancel the remainder',
+    );
+    expect(view.container.querySelector('[data-testid="portal-line-shipped"]')!.textContent).toContain('1 of 4 shipped');
+  });
+
   test('Orders: empty and failed', async () => {
     view = render(<PortalOrders />);
     await settle();

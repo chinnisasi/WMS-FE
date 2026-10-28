@@ -1,7 +1,7 @@
 'use client';
 
 import { useTodayIst } from '@/components/shared/use-today-ist';
-import { OrderFieldChips, PriorityChip, ShipByChip } from '@/components/shared/order-chips';
+import { BackorderChip, OrderFieldChips, PriorityChip, ShipByChip } from '@/components/shared/order-chips';
 import { compareOrderUrgency } from '@/lib/order-fields';
 import { useEffect, useRef, useState } from 'react';
 
@@ -568,6 +568,8 @@ function WaveGenerateForm({
                       {orderLabel(order) !== shortOrderId(order.id) && (
                         <span className="font-mono text-(--muted-foreground)">{shortOrderId(order.id)}</span>
                       )}
+                      {/* Story 4-2c — a backorder follow-on (its label already carries -BO{seq}). */}
+                      <BackorderChip followOnSeq={order.followOnSeq} />
                       <OrderFieldChips order={order} todayIst={todayIst} />
                     </label>
                   </li>

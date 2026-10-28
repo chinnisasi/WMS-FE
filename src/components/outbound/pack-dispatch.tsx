@@ -1,7 +1,9 @@
 'use client';
 
 import { useTodayIst } from '@/components/shared/use-today-ist';
-import { OrderFieldChips } from '@/components/shared/order-chips';
+import { BackorderChip, OrderFieldChips } from '@/components/shared/order-chips';
+import Link from 'next/link';
+import { findOrderHref } from '@/lib/palette';
 import { manifestCodLabel, orderTypeLabel, paymentLine } from '@/lib/order-fields';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -27,6 +29,9 @@ import {
   canLabelOrder,
   connectionOptionLabel,
   DISPATCH_TERMINAL_WARNING,
+  benchIsShort,
+  codShortWarning,
+  dispatchFollowOn,
   dispatchOutcome,
   dispatchReason,
   dispatchRecordLabel,
@@ -43,6 +48,8 @@ import {
   parseLabelDraft,
   parseManifestDraft,
   packOutcome,
+  SHORT_PARCEL_NOTE,
+  slipIsShort,
   packReason,
   packedLineLabel,
   packScanDraftFromLines,
@@ -199,8 +206,12 @@ function PackDispatchTable({
           </span>
           {/* Story 4-1b — the order label, the short id beneath. */}
           <span className="flex flex-col">
-            <span className="font-mono text-xs" data-testid="order-label">
-              {orderLabel(order)}
+            <span className="flex items-center gap-1">
+              <span className="font-mono text-xs" data-testid="order-label">
+                {orderLabel(order)}
+              </span>
+              {/* Story 4-2c — a backorder follow-on (the rest of a short shipment). */}
+              <BackorderChip followOnSeq={order.followOnSeq} />
             </span>
             <span className="font-mono text-[11px] text-(--muted-foreground)" title={order.id}>
               {shortOrderId(order.id)}
@@ -401,12 +412,25 @@ function PackDispatchPanel({
             <div className="data text-xs">
               {quantityLabel(slip.totalUnits, sharedQuantityUom(slip.lines, uomOf))} in the parcel
             </div>
+            {/* Story 4-2c — a short parcel says the rest follows (the follow-on opens at dispatch). */}
+            {slipIsShort(slip) && (
+              <div className="flex items-center gap-1 text-xs font-medium" data-testid="slip-short-note">
+                <span aria-hidden>↳</span>
+                {SHORT_PARCEL_NOTE}
+              </div>
+            )}
+            {codShortWarning(slip.codAmountPaise, slipIsShort(slip)) !== null && (
+              <div className="text-xs" data-testid="slip-cod-short">
+                {codShortWarning(slip.codAmountPaise, slipIsShort(slip))}
+              </div>
+            )}
           </div>
         </div>
       )}
       {record !== null && (
         <div className="flex flex-col gap-2">
           <FeedbackBanner {...dispatchOutcome(record, uomOf)} />
+          <DispatchFollowOnNote record={record} />
           <div className="flex flex-col gap-2 rounded-sm border border-(--border) bg-(--muted) p-3">
             <div className="text-xs font-medium">Dispatch record</div>
             <div className="data text-xs font-medium" data-testid="dispatch-payment">
@@ -437,6 +461,7 @@ function PackDispatchPanel({
             tenantId={tenantId}
             orderId={orderId}
             lines={order.lines}
+            codAmountPaise={order.codAmountPaise ?? null}
             skuMap={skuMap}
             onPacked={setSlip}
           />
@@ -499,6 +524,33 @@ function PackDispatchPanel({
   );
 }
 
+/**
+ * Story 4-2c — the dispatch confirmation's follow-on: "Shipped short —
+ * follow-on 1042-BO1 created; it ships when stock arrives", with a link that
+ * finds it on Orders (the search strips `-BO{n}` and lists the chain). An
+ * unnamed chain (its label is a short id, which the search does not match)
+ * names the follow-on without a link.
+ */
+function DispatchFollowOnNote({ record }: { record: DispatchDto }) {
+  const followOn = dispatchFollowOn(record);
+  if (followOn === null) return null;
+  const named = (record.clientOrderRef ?? '') !== '' || (record.externalEventId ?? '') !== '';
+  return (
+    <FeedbackBanner
+      tone="warning"
+      word="Shipped short"
+      reason={`${followOn.sentence}.`}
+      action={
+        named ? (
+          <Link href={findOrderHref(followOn.label)} className="text-xs text-(--primary) underline underline-offset-2" data-testid="dispatch-follow-on-link">
+            Open {followOn.label}
+          </Link>
+        ) : undefined
+      }
+    />
+  );
+}
+
 /** The line list a panel shows when it has no bench affordance to offer. */
 function ReadOnlyLines({
   lines,
@@ -544,12 +596,15 @@ function PackBench({
   tenantId,
   orderId,
   lines,
+  codAmountPaise,
   skuMap,
   onPacked,
 }: {
   tenantId: string;
   orderId: string;
   lines: readonly OrderLineDto[];
+  /** Story 4-2c — the order's COD amount (null: prepaid): the short-parcel warning. */
+  codAmountPaise: number | null;
   /** Decorates each line with its SKU's code, name and unit — never a gate. */
   skuMap: Readonly<Record<string, SkuResponse>> | null;
   onPacked: (pack: PackDto) => void;
@@ -716,6 +771,14 @@ function PackBench({
           </label>
         </div>
       </fieldset>
+      {/* Story 4-2c (decision 4) — warned before it happens: a short COD parcel collects the full amount. */}
+      {codShortWarning(codAmountPaise, benchIsShort(lines, scans)) !== null && (
+        <FeedbackBanner
+          tone="warning"
+          word="Short COD parcel"
+          reason={codShortWarning(codAmountPaise, benchIsShort(lines, scans))!}
+        />
+      )}
       <div>
         <button type="submit" disabled={pending} className={primaryClass}>
           {pending ? 'Packing…' : 'Pack this order'}

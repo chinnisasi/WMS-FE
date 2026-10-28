@@ -1,6 +1,7 @@
 import { ApiProblem } from '@/lib/api/client';
 import type {
   AddressDto,
+  AllocationDto,
   BinResponse,
   CancelWithRestockResponse,
   OrderDto,
@@ -222,6 +223,160 @@ export function kitParentHoldLabel(
   if (orderStatus === 'cancelled') return 'Kit — order cancelled; holds released';
   if (line.status === 'backordered') return 'Kit — nothing held; a component is short';
   return KIT_PARENT_HOLDS_LABEL;
+}
+
+/* ------------------------------------------------------------------ */
+/* Backorders: the live hold, and "Allocate now" (story 4-2c)          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Story 4-2c (decision 9) — a line's LIVE state while the order is
+ * `accepted`: "Reserved n" when the line holds all it ordered, "Awaiting
+ * stock n" when some of it still has nothing behind it (with what it does
+ * hold named first). Read from `reservedQty` / `shortfallQty` — never from
+ * `status`, which is the acceptance-time fact ("Backordered at acceptance")
+ * and is never changed by allocation. A kit parent's `shortfallQty` is live
+ * too (derived from its components' holds), so the same rule serves it.
+ * Null once the order has left `accepted` (packed, dispatched, cancelled —
+ * its holds are committed or retired, and the hold span says so).
+ */
+export function lineHoldText(
+  line: Pick<OrderLineDto, 'reservedQty' | 'shortfallQty'> & Partial<Pick<OrderLineDto, 'qty' | 'reservationId' | 'reservationState'>>,
+  orderStatus: OrderStatus,
+  uom?: QuantityUom | null,
+): { readonly tone: 'success' | 'warning'; readonly word: string } | null {
+  if (orderStatus !== 'accepted') return null;
+  const q = (value: number) => quantityLabel(value, uom ?? null);
+  // Code review C32 — a line whose hold EXPIRED (7-day TTL) or was released
+  // still caches its reserved quantity; it holds nothing now and awaits its
+  // whole quantity (the allocation re-grants it — A1).
+  if (holdIsDead(line) && line.qty !== undefined) {
+    return { tone: 'warning', word: `Awaiting stock ${q(line.qty)}` };
+  }
+  if (line.shortfallQty > 0) {
+    const held = line.reservedQty > 0 ? `Reserved ${q(line.reservedQty)} · ` : '';
+    return { tone: 'warning', word: `${held}Awaiting stock ${q(line.shortfallQty)}` };
+  }
+  return { tone: 'success', word: `Reserved ${q(line.reservedQty)}` };
+}
+
+/** The acceptance-time line badge — history, never the live state (story 4-2c). */
+export function acceptanceBadgeLabel(line: Pick<OrderLineDto, 'status'>): string {
+  return line.status === 'backordered' ? 'Backordered at acceptance' : 'Open';
+}
+
+/**
+ * Story 4-2c — "Allocate now" shows when the order is `accepted` and some
+ * leaf line holds nothing (`reservationId === null`) with stock still owed
+ * (`shortfallQty > 0`). A kit PARENT never counts on its own: its
+ * `reservationId` is always null (its components carry the holds), so the
+ * rule reads its components instead. The caller also gates on
+ * `orders.manage`; the server is the authority either way.
+ */
+export function canAllocateOrder(
+  order: {
+    readonly status: OrderStatus;
+    readonly lines: readonly (Pick<OrderLineDto, 'id' | 'parentLineId' | 'reservationId' | 'shortfallQty'> & Partial<Pick<OrderLineDto, 'reservationState'>>)[];
+  },
+): boolean {
+  if (order.status !== 'accepted') return false;
+  const parents = new Set(order.lines.map((line) => line.parentLineId).filter((id): id is string => id !== null));
+  // Code review C32 — also a leaf line whose hold expired or was released:
+  // the server reads the journal by owner, not the cached id (A1).
+  return order.lines.some(
+    (line) => !parents.has(line.id) && ((line.reservationId === null && line.shortfallQty > 0) || holdIsDead(line)),
+  );
+}
+
+/** A line that names a hold the journal no longer holds (`expired` / `released`). */
+function holdIsDead(line: { readonly reservationId?: string | null; readonly reservationState?: string | null }): boolean {
+  return (
+    line.reservationId !== undefined &&
+    line.reservationId !== null &&
+    (line.reservationState === 'expired' || line.reservationState === 'released')
+  );
+}
+
+/** Why the allocation did not reserve a line this run, in plain words. */
+export const ALLOCATION_SKIP_REASON: Readonly<Record<AllocationDto['skipped'][number]['reason'], string>> = {
+  'sku-inactive': 'the SKU is inactive and its free stock does not cover the line in full (an inactive SKU sells existing stock only)',
+  'licence-not-covered': 'no valid licence covers it at this warehouse today',
+  contended: 'another order was reserving the same stock at that moment — try again',
+};
+
+/**
+ * Story 4-2c — the "Allocate now" result, as one sentence plus one line per
+ * skipped SKU. x = Σ `allocated.reservedQty`, z = Σ `stillShort.shortQty`,
+ * y = x + z: "Reserved x of y units; z still awaiting stock". A run that
+ * reserves nothing is a calm outcome (200), never an error. Counts are summed
+ * across SKUs, so they are named "units" (a mixed set has no single unit).
+ */
+export function allocationResultText(allocation: AllocationDto): {
+  readonly tone: 'accepted' | 'warning';
+  readonly word: string;
+  readonly reason: string;
+  readonly skipped: readonly string[];
+} {
+  const reserved = allocation.allocated.reduce((sum, line) => sum + line.reservedQty, 0);
+  const awaiting = allocation.stillShort.reduce((sum, line) => sum + line.shortQty, 0);
+  const units = (value: number) => `${formatCount(value)} ${value === 1 ? 'unit' : 'units'}`;
+  const skipped = allocation.skipped.map((line) => `${line.skuCode}: not reserved — ${ALLOCATION_SKIP_REASON[line.reason] ?? line.reason}.`);
+  if (reserved === 0) {
+    if (allocation.stillShort.length === 0 && allocation.skipped.length === 0) {
+      return { tone: 'accepted', word: 'Nothing to reserve', reason: 'Every line already holds its stock.', skipped };
+    }
+    return {
+      tone: 'warning',
+      word: 'Nothing reserved yet',
+      reason:
+        allocation.skipped.length === 0
+          ? 'Nothing could be reserved yet — no stock is free for these lines. The order stays accepted and is retried as stock arrives.'
+          : `Nothing could be reserved this time${awaiting > 0 ? `; ${units(awaiting)} still awaiting stock` : ''}.`,
+      skipped,
+    };
+  }
+  const total = reserved + awaiting;
+  return {
+    tone: awaiting === 0 && skipped.length === 0 ? 'accepted' : 'warning',
+    word: awaiting === 0 ? 'Reserved' : 'Partly reserved',
+    reason:
+      awaiting === 0
+        ? `Reserved ${formatCount(reserved)} of ${units(total)}; nothing is awaiting stock.`
+        : `Reserved ${formatCount(reserved)} of ${units(total)}; ${formatCount(awaiting)} still awaiting stock.`,
+    skipped,
+  };
+}
+
+/** Story 4-2c — "Allocate now" refusals, branching on the problem `code`. */
+export function allocateReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'order-not-accepted':
+        return 'This order is no longer accepted — it has moved on (packed, dispatched or cancelled). Refresh to see where it is.';
+      case 'order-on-open-wave': {
+        const waveId = error.extensions['waveId'];
+        const wave = typeof waveId === 'string' && waveId !== '' ? `wave …${waveId.slice(-8)}` : 'an open wave';
+        return `This order is on ${wave} — the wave plans its stock. Cancel the wave to re-plan it, then allocate.`;
+      }
+      case 'reservation-store-unavailable':
+        return 'The reservation store is unreachable — nothing was reserved; retry in a moment.';
+      case 'not-found':
+        return 'This order no longer exists — refresh the list.';
+      case 'role-denied':
+        return 'Your role cannot allocate orders.';
+      case 'permission-denied':
+        return 'That order belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This allocation was already processed — refresh to see the result.';
+      case 'conflict':
+        return 'The same allocation is still in flight — retry to read the settled result.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      default:
+        return error.detail ?? `Not allocated (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
 }
 
 export interface Outcome {

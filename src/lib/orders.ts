@@ -4,7 +4,9 @@
  * and the staff surfaces share it.
  *
  * The label rule (decision 7): the client's own order number, else the sales
- * channel's reference (`externalEventId`), else the id's short form. The
+ * channel's reference (`externalEventId`), else the id's short form (the
+ * chain ROOT's, on a backorder follow-on — 4-2c), plus `-BO{seq}` on a
+ * follow-on. The
  * backend returns the raw fields; the web composes the label here. The
  * backend's one SQL use of the rule (the client wind-down blocker,
  * `coalesce(client_order_ref, external_event_id, right(id::text, 8))`) takes
@@ -17,6 +19,13 @@ export interface OrderLabelFields {
   readonly id: string;
   readonly clientOrderRef?: string | null;
   readonly externalEventId?: string | null;
+  /**
+   * Story 4-2c — on a backorder follow-on: the chain's root order. Its short
+   * id names an unnamed chain (never the follow-on's own id).
+   */
+  readonly followOnRootOrderId?: string | null;
+  /** Story 4-2c — on a follow-on: its place in the chain, the `-BO{seq}` suffix. */
+  readonly followOnSeq?: number | null;
 }
 
 /**
@@ -28,13 +37,47 @@ export function shortOrderId(id: string): string {
   return id.slice(-8);
 }
 
-/** `clientOrderRef ?? externalEventId ?? shortOrderId(id)` — a blank value never wins. */
-export function orderLabel(order: OrderLabelFields): string {
+/** The backorder suffix: `-BO1`, `-BO2`, … (story 4-2c). */
+export function followOnSuffix(seq: number): string {
+  return `-BO${seq}`;
+}
+
+/**
+ * The chain's root label, with no suffix: `clientOrderRef ?? externalEventId
+ * ?? shortOrderId(followOnRootOrderId ?? id)` — a blank value never wins. A
+ * follow-on carries its root's identity, so the root and every follow-on
+ * share it.
+ */
+export function orderRootLabel(order: OrderLabelFields): string {
   const ref = order.clientOrderRef ?? null;
   if (ref !== null && ref !== '') return ref;
   const channel = order.externalEventId ?? null;
   if (channel !== null && channel !== '') return channel;
-  return shortOrderId(order.id);
+  return shortOrderId(order.followOnRootOrderId ?? order.id);
+}
+
+/**
+ * The ONE order label rule (stories 4-1b, 4-2c): the root label, plus
+ * `-BO{seq}` on a backorder follow-on — `1042-BO1`; an unnamed root
+ * `…a1b2c3d4` names its second follow-on `a1b2c3d4-BO2`.
+ */
+export function orderLabel(order: OrderLabelFields): string {
+  const seq = order.followOnSeq ?? null;
+  return orderRootLabel(order) + (seq === null ? '' : followOnSuffix(seq));
+}
+
+/**
+ * The label of the follow-on THIS order's short dispatch opened (story 4-2c):
+ * the same root label, next in the chain — `1042` opens `1042-BO1`, `1042-BO1`
+ * opens `1042-BO2`.
+ */
+export function nextFollowOnLabel(order: OrderLabelFields): string {
+  return orderRootLabel(order) + followOnSuffix((order.followOnSeq ?? 0) + 1);
+}
+
+/** True on a backorder follow-on (an order a short dispatch opened). */
+export function isFollowOn(order: Pick<OrderLabelFields, 'followOnSeq'>): boolean {
+  return order.followOnSeq !== undefined && order.followOnSeq !== null;
 }
 
 /** The backend's `MAX_CLIENT_ORDER_REF_LENGTH` (wms-be `order.command.ts`). */

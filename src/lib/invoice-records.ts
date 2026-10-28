@@ -96,7 +96,14 @@ export function orderRefLabel(ref: Pick<OrderRefDto, 'externalEventId' | 'orderI
  * response lacking the number reads as none.
  */
 export function orderRefOrderLabel(ref: Omit<OrderRefDto, 'clientOrderRef'> & { readonly clientOrderRef?: string | null }): string {
-  return orderLabel({ id: ref.orderId, clientOrderRef: ref.clientOrderRef ?? null, externalEventId: ref.externalEventId });
+  // Story 4-2c — a backorder follow-on reads `1042-BO1` (its root's label, suffixed).
+  return orderLabel({
+    id: ref.orderId,
+    clientOrderRef: ref.clientOrderRef ?? null,
+    externalEventId: ref.externalEventId,
+    followOnRootOrderId: ref.followOnRootOrderId ?? null,
+    followOnSeq: ref.followOnSeq ?? null,
+  });
 }
 
 /** The record count noun of a line's kind. */

@@ -14,6 +14,8 @@ import type {
 import { parseQuantityInput, quantityLabel, sharedQuantityUom, type QuantityUom } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON, verbatim, type OrderStatus, type Outcome } from '@/lib/outbound-orders';
 import { istDateTimeLabel } from '@/lib/audit-exports';
+import { formatInrPaise } from '@/lib/order-fields';
+import { nextFollowOnLabel } from '@/lib/orders';
 
 /**
  * Pure copy and derivation for the Outbound pack & dispatch surface
@@ -339,6 +341,76 @@ export function dispatchOutcome(
 }
 
 /* ------------------------------------------------------------------ */
+/* Short parcels and the backorder follow-on (story 4-2c)              */
+/* ------------------------------------------------------------------ */
+
+/** The slip's note when any line packed below its ordered quantity. */
+export const SHORT_PARCEL_NOTE = 'Items short on this parcel follow in a separate shipment';
+
+/** Story 4-2c — true when any slip line packed below what was ordered. */
+export function slipIsShort(pack: Pick<PackDto, 'lines'>): boolean {
+  return pack.lines.some((line) => line.shortfallQty > 0);
+}
+
+/**
+ * Story 4-2c (decision 4) — the COD warning on a short parcel: the courier
+ * collects the order's FULL amount on this first parcel, and the follow-on
+ * ships prepaid. Null on a prepaid (or legacy) order, or with no shortfall.
+ */
+export function codShortWarning(codAmountPaise: number | null | undefined, short: boolean): string | null {
+  if (codAmountPaise === null || codAmountPaise === undefined || !short) return null;
+  return `Cash on delivery — the courier collects the full ${formatInrPaise(codAmountPaise)} on this parcel; the rest follows prepaid`;
+}
+
+/**
+ * Story 4-2c — before packing, is the parcel going to be short? A line still
+ * awaiting stock (`shortfallQty > 0` on the order line) cannot have been
+ * picked in full, and a scanned entry below its ordered quantity packs short.
+ * An unparseable entry is the bench's own problem, not a shortfall.
+ */
+export function benchIsShort(
+  lines: readonly Pick<OrderLineDto, 'shortfallQty'>[],
+  scans: readonly PackScanDraftLine[],
+): boolean {
+  if (lines.some((line) => line.shortfallQty > 0)) return true;
+  return scans.some((scan) => {
+    const value = Number(scan.scanned.trim());
+    return scan.scanned.trim() !== '' && Number.isFinite(value) && value < scan.orderedQty;
+  });
+}
+
+/**
+ * Story 4-2c — the dispatch confirmation's follow-on sentence: "Shipped short
+ * — follow-on 1042-BO1 created; it ships when stock arrives", with the
+ * follow-on's label (this order's root label, next in the chain). Null when
+ * the dispatch opened no follow-on (everything shipped, or the remainder was
+ * under one unit).
+ */
+export function dispatchFollowOn(dispatch: DispatchDto): { readonly orderId: string; readonly label: string; readonly sentence: string } | null {
+  const followOnOrderId = dispatch.followOnOrderId ?? null;
+  if (followOnOrderId === null) return null;
+  const label = nextFollowOnLabel({
+    id: dispatch.orderId,
+    clientOrderRef: dispatch.clientOrderRef ?? null,
+    externalEventId: dispatch.externalEventId,
+    followOnRootOrderId: dispatch.followOnRootOrderId ?? null,
+    followOnSeq: dispatch.followOnSeq ?? null,
+  });
+  // Code review C33 — no unit count: a sum across SKUs mixes units, counts a
+  // kit parent (whose own line never ships — its components do) as wholly
+  // short, and includes sub-unit remainders that open no follow-on line. The
+  // follow-on itself lists exactly what is owed.
+  return {
+    orderId: followOnOrderId,
+    label,
+    sentence: `Shipped short — follow-on ${label} created for the rest; it ships when stock arrives`,
+  };
+}
+
+/** Story 4-2c (decision 10) — the zero-unit pack refusal, in its own words. */
+export const PACK_NOTHING_PICKED_REASON = 'Nothing was picked for this order — cancel the wave to re-plan it, or cancel the order';
+
+/* ------------------------------------------------------------------ */
 /* Slip and record labels                                              */
 /* ------------------------------------------------------------------ */
 
@@ -406,6 +478,8 @@ export function dispatchRecordLabel(
  */
 export function packReason(error: unknown): string {
   if (error instanceof ApiProblem) {
+    // Story 4-2c — every pick of the order came up empty: no empty parcel.
+    if (error.code === 'pack-nothing-picked') return `${PACK_NOTHING_PICKED_REASON}.`;
     if (error.status === 409) return verbatim(error);
     if (error.status === 422 && error.code === 'pack-mismatch') return verbatim(error);
     switch (error.code) {

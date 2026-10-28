@@ -3,8 +3,11 @@ import { describe, expect, test } from 'bun:test';
 import {
   CLIENT_ORDER_REF_RE,
   clientOrderRefBody,
+  isFollowOn,
   MAX_CLIENT_ORDER_REF_LENGTH,
+  nextFollowOnLabel,
   orderLabel,
+  orderRootLabel,
   parseClientOrderRef,
   parseOrderSearch,
   shortOrderId,
@@ -26,6 +29,35 @@ describe('the order label (story 4-1b)', () => {
     // An older stored response carries no clientOrderRef key at all.
     expect(orderLabel({ id: ID, externalEventId: null })).toBe('2e3f4a5b');
     expect(orderLabel({ id: ID, clientOrderRef: '', externalEventId: '' })).toBe('2e3f4a5b');
+  });
+});
+
+describe('the backorder label suffix (story 4-2c)', () => {
+  const ROOT = '0198f7a2-0000-7000-8000-0000a1b2c3d4';
+  const FOLLOW_ON = '0198f7a9-9999-7999-8999-9999deadbeef';
+
+  test('a follow-on reads its root label plus -BO{seq}: 1042-BO1, AMZ-9-BO2', () => {
+    expect(orderLabel({ id: FOLLOW_ON, clientOrderRef: '1042', followOnRootOrderId: ROOT, followOnSeq: 1 })).toBe('1042-BO1');
+    expect(orderLabel({ id: FOLLOW_ON, externalEventId: 'AMZ-9', followOnRootOrderId: ROOT, followOnSeq: 2 })).toBe('AMZ-9-BO2');
+  });
+
+  test('an unnamed chain takes the ROOT’s short id, never the follow-on’s own: …a1b2c3d4 → a1b2c3d4-BO2', () => {
+    expect(orderLabel({ id: FOLLOW_ON, clientOrderRef: null, externalEventId: null, followOnRootOrderId: ROOT, followOnSeq: 2 })).toBe('a1b2c3d4-BO2');
+    expect(orderRootLabel({ id: FOLLOW_ON, followOnRootOrderId: ROOT, followOnSeq: 2 })).toBe('a1b2c3d4');
+  });
+
+  test('a root order (null or absent follow-on fields) reads exactly as before', () => {
+    expect(orderLabel({ id: ROOT, clientOrderRef: '1042', followOnRootOrderId: null, followOnSeq: null })).toBe('1042');
+    expect(orderLabel({ id: ROOT })).toBe('a1b2c3d4');
+    expect(isFollowOn({ followOnSeq: null })).toBe(false);
+    expect(isFollowOn({})).toBe(false);
+    expect(isFollowOn({ followOnSeq: 1 })).toBe(true);
+  });
+
+  test('nextFollowOnLabel names the follow-on a short dispatch opens: 1042 → 1042-BO1; 1042-BO1 → 1042-BO2', () => {
+    expect(nextFollowOnLabel({ id: ROOT, clientOrderRef: '1042' })).toBe('1042-BO1');
+    expect(nextFollowOnLabel({ id: FOLLOW_ON, clientOrderRef: '1042', followOnRootOrderId: ROOT, followOnSeq: 1 })).toBe('1042-BO2');
+    expect(nextFollowOnLabel({ id: ROOT })).toBe('a1b2c3d4-BO1');
   });
 });
 
