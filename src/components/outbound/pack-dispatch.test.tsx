@@ -327,6 +327,8 @@ let manifestRows: unknown[] = [];
 let manifestsNextCursor: string | null = null;
 /** Story 1-5a: the tenant's clients (null → the read 404s). */
 let clientsBody: unknown[] | null = null;
+/** Story 4-2b — the restock plan per order (default: nothing drawn, nothing restocked). */
+let restockPlans: Record<string, unknown> = {};
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -424,6 +426,13 @@ function stubRouter(): void {
       }
       return json(200, { items: manifestRows, nextCursor: manifestsNextCursor });
     }
+    if (method === 'GET' && /\/outbound\/orders\/[^/]+\/restock-plan$/.test(pathname)) {
+      const orderId = pathname.split('/')[pathname.split('/').length - 2]!;
+      return json(
+        200,
+        restockPlans[orderId] ?? { orderId, orderStatus: orderStatuses[orderId] ?? 'accepted', shipment: null, lines: [], restocked: [] },
+      );
+    }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname)) {
       const id = pathname.split('/').pop()!;
       if (failDetail) {
@@ -485,6 +494,7 @@ beforeEach(() => {
   shipmentsByOrder = {};
   ratesByOrder = {};
   manifestRows = [];
+  restockPlans = {};
   stubRouter();
   // The slip and record render `new Date(packedAt).toLocaleString()`; pinning
   // the clock keeps those strings stable across machines.
@@ -1756,5 +1766,81 @@ describe('Pack & Dispatch: the client filter (story 1-5a)', () => {
     expect(manifestListReads().every((r) => !new URLSearchParams(r.search).has('clientId'))).toBe(true);
     expect(view.container.querySelector('[data-testid="client-filter-chip"]')).toBeNull();
     expect(view.container.querySelector('[data-testid="all-clients-note"]')).toBeNull();
+  });
+});
+
+describe('story 4-2b — Cancel on the packed section, the cancelled panel, a voided label', () => {
+  test('orders.manage gets "Cancel order" on a packed order; it opens the shared dialog above the table', async () => {
+    view = await mount('owner');
+    await expand(view, 'order-2');
+    expect(buttonLabels(view)).toContain('Cancel order');
+    await pressButton(view, 'Cancel order');
+    await settle();
+    const dialog = view.container.querySelector('[data-testid="cancel-order-dialog"]');
+    expect(dialog).not.toBeNull();
+    // Rendered outside the table, so the result outlives the row leaving the pipeline.
+    expect(dialog!.closest('table')).toBeNull();
+    // A packed order opens on "All into one bin" once it has lines (none here: nothing to choose).
+    expect(dialog!.textContent).toContain('Nothing has been picked');
+  });
+
+  test('keeping the order returns focus to the packed section\'s Cancel order button', async () => {
+    view = await mount('owner');
+    await expand(view, 'order-2');
+    await pressButton(view, 'Cancel order');
+    await settle();
+    await pressButton(view, 'Keep the order');
+    await settle();
+    expect(view.container.querySelector('[data-testid="cancel-order-dialog"]')).toBeNull();
+    expect((document.activeElement as HTMLElement | null)?.textContent).toBe('Cancel order');
+  });
+
+  test('a role without orders.manage gets no Cancel on the packed section', async () => {
+    view = await mount('operator');
+    await expand(view, 'order-2');
+    expect(buttonLabels(view)).toContain('Dispatch this order');
+    expect(buttonLabels(view)).not.toContain('Cancel order');
+  });
+
+  test('a cancelled order (the detail ahead of the list) says it was restocked, lists the put-back and shows the label voided', async () => {
+    shipmentsByOrder['order-2'] = {
+      ...(shipmentFixture('order-2') as Record<string, unknown>),
+      status: 'voided',
+      voidedAt: '2026-09-16T12:00:00.000Z',
+      voidedBy: 'priya@example.com',
+    };
+    restockPlans['order-2'] = {
+      orderId: 'order-2',
+      orderStatus: 'cancelled',
+      shipment: null,
+      lines: [],
+      restocked: [
+        {
+          orderLineId: 'line-a',
+          skuId: 'sku-1',
+          skuCode: 'SPICE-01',
+          skuName: 'Turmeric',
+          uom: 'kg',
+          toBinId: 'bin-1',
+          toBinCode: 'HOLD-01',
+          batchId: null,
+          batchCode: null,
+          qty: 4,
+          serialCount: 0,
+          restockedAt: '2026-09-16T12:00:00.000Z',
+          restockId: 'rs-1',
+          recallCode: null,
+        },
+      ],
+    };
+    view = await mount('owner');
+    orderStatuses['order-2'] = 'cancelled';
+    await expand(view, 'order-2');
+    expect(text(view)).toContain('were restocked');
+    expect(view.container.querySelector('[data-testid="put-back-section"]')?.textContent).toContain('SPICE-01 × 4.000 kg → HOLD-01');
+    const voided = view.container.querySelector('[data-testid="label-voided"]');
+    expect(voided?.textContent).toContain('Voided');
+    expect(voided?.textContent).toContain('by priya@example.com');
+    expect(buttonLabels(view)).not.toContain('Cancel order');
   });
 });

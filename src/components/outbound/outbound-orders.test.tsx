@@ -49,6 +49,8 @@ let ordersResponder: ((url: URL) => { items: Record<string, unknown>[]; nextCurs
 let createdClientId: string | undefined;
 /** Story 4-1c — every order-import POST: its form fields and key. */
 let orderImports: { form: Record<string, string>; key: string | null }[] = [];
+/** Story 4-2b — the restock plan's `restocked` list (empty by default). */
+let restockedBody: Record<string, unknown>[] = [];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -169,6 +171,10 @@ function stubRouter(): void {
       listUrls.push(url);
       return json(200, ordersResponder === null ? { items: [], nextCursor: null } : ordersResponder(url));
     }
+    if (method === 'GET' && /\/outbound\/orders\/[^/]+\/restock-plan$/.test(pathname)) {
+      const orderId = pathname.split('/')[pathname.split('/').length - 2]!;
+      return json(200, { orderId, orderStatus: order?.status ?? 'accepted', shipment: null, lines: [], restocked: restockedBody });
+    }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+$/.test(pathname)) {
       if (order === null) {
         return json(404, { code: 'not-found', title: 'No such order', status: 404 });
@@ -208,6 +214,7 @@ beforeEach(() => {
   ordersResponder = null;
   createdClientId = undefined;
   orderImports = [];
+  restockedBody = [];
   stubRouter();
   writeSession(SESSION);
 });
@@ -1525,5 +1532,115 @@ describe('Import orders from a file (story 4-1c)', () => {
     expect(panel.textContent).toContain('1 backordered');
     expect(listUrls.length).toBeGreaterThan(listsBefore);
     expect(listUrls.at(-1)!.searchParams.get('cursor')).toBeNull();
+  });
+});
+
+describe('Orders list: Cancel with restock (story 4-2b)', () => {
+  function rows(): Record<string, unknown>[] {
+    return [
+      { ...entry('o-acc', 'c-self'), clientOrderRef: 'SO-ACC', status: 'accepted' },
+      { ...entry('o-rtd', 'c-self'), clientOrderRef: 'SO-RTD', status: 'ready_to_dispatch' },
+      { ...entry('o-dsp', 'c-self'), clientOrderRef: 'SO-DSP', status: 'dispatched' },
+      { ...entry('o-cnc', 'c-self'), clientOrderRef: 'SO-CNC', status: 'cancelled' },
+    ];
+  }
+  function cancelButtons(container: HTMLElement): HTMLButtonElement[] {
+    return [...container.querySelectorAll('button')].filter((b) => b.textContent === 'Cancel');
+  }
+
+  test('orders.manage sees Cancel on accepted and packed rows only, and it opens the shared dialog', async () => {
+    ordersResponder = () => ({ items: rows(), nextCursor: null });
+    view = render(<OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01" role="owner" />);
+    await settle();
+    const buttons = cancelButtons(view.container);
+    expect(buttons.length).toBe(2);
+    const rowText = buttons.map((b) => b.closest('tr')?.textContent ?? '');
+    expect(rowText[0]).toContain('SO-ACC');
+    expect(rowText[1]).toContain('SO-RTD');
+    await act(async () => buttons[1]!.click());
+    await settle();
+    const dialog = view.container.querySelector('[data-testid="cancel-order-dialog"]');
+    expect(dialog?.getAttribute('aria-label')).toBe('Cancel order SO-RTD');
+    // The old inline confirm is gone: nothing posts to /cancel.
+    expect(requests.some((r) => r.method === 'POST' && r.pathname.endsWith('/cancel'))).toBe(false);
+  });
+
+  test('closing the dialog returns focus to the Cancel button that opened it', async () => {
+    ordersResponder = () => ({ items: rows(), nextCursor: null });
+    view = render(<OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01" role="owner" />);
+    await settle();
+    const opener = cancelButtons(view.container)[0]!;
+    await act(async () => opener.click());
+    await settle();
+    const dialog = view.container.querySelector<HTMLElement>('[data-testid="cancel-order-dialog"]')!;
+    expect(document.activeElement).toBe(dialog);
+    const close = [...dialog.querySelectorAll('button')].find((b) => b.textContent === 'Close' || b.textContent === 'Keep the order')!;
+    await act(async () => close.click());
+    await settle();
+    expect(view.container.querySelector('[data-testid="cancel-order-dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(cancelButtons(view.container)[0]!);
+  });
+
+  test('a role without orders.manage is offered no Cancel at all (hidden, not disabled)', async () => {
+    ordersResponder = () => ({ items: rows(), nextCursor: null });
+    view = render(<OutboundOrders tenantId={TENANT_ID} warehouseId="wh-1" warehouseLabel="BLR-01" role="operator" />);
+    await settle();
+    expect(view.container.textContent).toContain('SO-RTD');
+    expect(cancelButtons(view.container).length).toBe(0);
+  });
+});
+
+describe('OrderDetailPanel: Put back (story 4-2b)', () => {
+  function detailOrder(status: string): Record<string, unknown> {
+    return {
+      id: 'order-1',
+      tenantId: TENANT_ID,
+      warehouseId: 'wh-1',
+      status,
+      source: 'manual',
+      integrationId: null,
+      externalEventId: null,
+      destination: null,
+      clientOrderRef: 'SO-1',
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+      lines: [line({ skuId: 'pad-sku' })],
+    };
+  }
+  beforeEach(() => {
+    restockedBody = [
+      {
+        orderLineId: 'line-1',
+        skuId: 'pad-sku',
+        skuCode: 'PAD-01',
+        skuName: 'Foam pad',
+        uom: 'each',
+        toBinId: 'bin-1',
+        toBinCode: 'A-01-01',
+        batchId: null,
+        batchCode: 'LOT-9',
+        qty: 2,
+        serialCount: 0,
+        restockedAt: '2026-10-13T08:33:00.000Z',
+        restockId: 'rs-1',
+        recallCode: null,
+      },
+    ];
+  });
+
+  test('a cancelled order shows what the cancel put back, per bin', async () => {
+    order = detailOrder('cancelled');
+    view = await mount('order-1');
+    const section = view.container.querySelector('[data-testid="put-back-section"]');
+    expect(section).not.toBeNull();
+    expect(section!.textContent).toContain('PAD-01 × 2 each → A-01-01 (LOT-9)');
+    expect(requests.some((r) => r.pathname.endsWith('/order-1/restock-plan'))).toBe(true);
+  });
+
+  test('a non-cancelled order shows no Put back section and reads no plan', async () => {
+    order = detailOrder('accepted');
+    view = await mount('order-1');
+    expect(view.container.querySelector('[data-testid="put-back-section"]')).toBeNull();
+    expect(requests.some((r) => r.pathname.endsWith('/restock-plan'))).toBe(false);
   });
 });

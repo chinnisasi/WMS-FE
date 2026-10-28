@@ -3127,6 +3127,167 @@ export type CancelOrderDto = {
     [key: string]: unknown;
 };
 
+export type CancelOrderWithRestockDto = {
+    /**
+     * ONE storage bin of the order’s warehouse every drawn unit goes back to. Absent (or null): each draw returns to the bin it was drawn from. The bin passes every placement gate (system, retired, blocked, storage class, dedicated client, secure, bulk, hazard, capacity, weight, volume, fit) and the reconcile-quarantine check
+     */
+    restockBinId?: string | null;
+};
+
+export type RestockLineDto = {
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * The SKU’s base unit of measure
+     */
+    uom: string;
+    /**
+     * The bin the units were booked into
+     */
+    toBinId: string;
+    toBinCode: string;
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * Units put back, base UoM
+     */
+    qty: number;
+    /**
+     * Serial-tracked units among them (the serial numbers are on the ledger)
+     */
+    serialCount: number;
+    /**
+     * The open live recall (RCL-…) the lot is on — its units stay blocked wherever they land; null otherwise
+     */
+    recallCode: string | null;
+};
+
+export type VoidedShipmentDto = {
+    id: string;
+    carrierName: string;
+    trackingNumber: string;
+};
+
+export type RestockSummaryDto = {
+    /**
+     * The restock — every pick.restocked event of this cancel names it
+     */
+    restockId: string;
+    /**
+     * ISO-8601 UTC
+     */
+    restockedAt: string;
+    /**
+     * origin — every draw went back to its own bin; bin — all into restockBinId
+     */
+    destination: 'origin' | 'bin';
+    restockBinId: string | null;
+    lines: Array<RestockLineDto>;
+    /**
+     * Σ lines[].qty, base units
+     */
+    totalUnits: number;
+    /**
+     * The order’s planned / unfulfillable pick lines withdrawn
+     */
+    cancelledPickLineCount: number;
+    releasedReservationIds: Array<string>;
+    retiredReservationIds: Array<string>;
+    /**
+     * Catch-weight cases the pack consumed, now active again
+     */
+    handlingUnitIds: Array<string>;
+    /**
+     * The labelled, unmanifested shipment this cancel voided; null when there was none
+     */
+    voidedShipment: VoidedShipmentDto | null;
+};
+
+export type CancelWithRestockResponse = {
+    order: OrderDto;
+    /**
+     * null only when the order was already cancelled (the idempotent no-op)
+     */
+    restock: RestockSummaryDto | null;
+};
+
+export type RestockPlanShipmentDto = {
+    id: string;
+    status: 'labelled' | 'manifested' | 'voided';
+    carrierName: string;
+    trackingNumber: string;
+    manifestId: string | null;
+};
+
+export type RestockPlanLineDto = {
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    uom: string;
+    /**
+     * The bin the units were drawn from
+     */
+    fromBinId: string;
+    fromBinCode: string;
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * Units still to put back, base UoM
+     */
+    qty: number;
+    /**
+     * The serials to scan back
+     */
+    serialNumbers: Array<string>;
+    /**
+     * The open live recall the lot is on; null otherwise
+     */
+    recallCode: string | null;
+};
+
+export type RestockedEntryDto = {
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    uom: string;
+    toBinId: string;
+    toBinCode: string;
+    batchId: string | null;
+    batchCode: string | null;
+    /**
+     * Units put back, base UoM
+     */
+    qty: number;
+    serialCount: number;
+    /**
+     * ISO-8601 UTC
+     */
+    restockedAt: string;
+    restockId: string;
+    recallCode: string | null;
+};
+
+export type RestockPlanResponse = {
+    orderId: string;
+    orderStatus: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
+    /**
+     * The order’s shipment (any status); null before a label
+     */
+    shipment: RestockPlanShipmentDto | null;
+    /**
+     * The draws still to put back — empty unless the order is accepted or ready_to_dispatch
+     */
+    lines: Array<RestockPlanLineDto>;
+    /**
+     * What a cancel already put back (the "Put back" list)
+     */
+    restocked: Array<RestockedEntryDto>;
+};
+
 export type PackScanLineDto = {
     /**
      * The SKU the operator scanned
@@ -3362,9 +3523,9 @@ export type ShipmentDto = {
     tenantId: string;
     warehouseId: string;
     /**
-     * labelled or manifested
+     * labelled, manifested, or (story 4-2b) voided — the label of an order cancelled with restock before it was manifested
      */
-    status: 'labelled' | 'manifested';
+    status: 'labelled' | 'manifested' | 'voided';
     /**
      * The connection the label generated through
      */
@@ -3409,6 +3570,14 @@ export type ShipmentDto = {
      * Story 4-2a — the cash to collect on delivery, integer paise; null means prepaid (nothing to collect). Absent only on a replayed response stored before 4-2a — read absent as null.
      */
     codAmountPaise?: number | null;
+    /**
+     * Story 4-2b — when the label was voided (status voided); null otherwise. Absent on a response stored before 4-2b — read absent as null.
+     */
+    voidedAt?: string | null;
+    /**
+     * Story 4-2b — who voided it; null otherwise. Absent on a response stored before 4-2b.
+     */
+    voidedBy?: string | null;
 };
 
 export type ShipmentResponse = {
@@ -16331,7 +16500,7 @@ export type InventoryControllerListEventsData = {
         /**
          * Story 9-1 — only events of these types (repeatable: `?type=a&type=b`; one value is a one-element list). An unknown type is refused (400 validation-failed naming the known set)
          */
-        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged' | 'qc.failed' | 'stock.moved' | 'return.restocked' | 'return.scrapped'>;
+        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pick.restocked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged' | 'qc.failed' | 'stock.moved' | 'return.restocked' | 'return.scrapped'>;
         /**
          * Story 9-1 — only events RECORDED at or after this instant (`recorded_at` — the server stamp, never the device `occurred_at`). ISO-8601 with a zone designator
          */
@@ -17760,6 +17929,110 @@ export type OutboundControllerCancelOrderResponses = {
 
 export type OutboundControllerCancelOrderResponse = OutboundControllerCancelOrderResponses[keyof OutboundControllerCancelOrderResponses];
 
+export type OutboundControllerCancelOrderWithRestockData = {
+    body: CancelOrderWithRestockDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/cancel-with-restock';
+};
+
+export type OutboundControllerCancelOrderWithRestockErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter, restockBinId not a uuid, or restockBinId a system bin (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks orders.manage (role-denied), or a secure destination bin without secure.move (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The order does not exist in this tenant, or restockBinId names no bin of the order’s warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is dispatched — receive it back as a return (order-dispatched); its shipment is manifested, naming the manifest (shipment-manifested); its label was booked with a real courier whose AWB this build cannot cancel (shipment-void-unsupported); a destination bin refuses the intake, naming the bin, with the gate’s own code (bin-retired, bin-blocked, bin-storage-mismatch, bin-client-mismatch, bin-occupancy-conflict, bin-segregation-conflict, hazard-segregation-conflict, bin-full, bin-overweight, bin-volume-exceeded, bin-item-oversize); a (SKU, destination) under an open reconcile quarantine (restock-scope-quarantined); a serial no longer this order’s draw — counted, adjusted or moved while in the tote (restock-serial-moved); a case the pack recorded is no longer packed into the order (handling-unit-not-packed); the order was picked while it was being cancelled, or a concurrent idempotent request (conflict). Nothing is written on any refusal
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload — including a key used on /cancel (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * The reservation store is unreachable (reservation-store-unavailable)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type OutboundControllerCancelOrderWithRestockError = OutboundControllerCancelOrderWithRestockErrors[keyof OutboundControllerCancelOrderWithRestockErrors];
+
+export type OutboundControllerCancelOrderWithRestockResponses = {
+    /**
+     * The cancelled order and what was put back (the idempotency snapshot — a replay re-serves it byte for byte)
+     */
+    200: CancelWithRestockResponse;
+};
+
+export type OutboundControllerCancelOrderWithRestockResponse = OutboundControllerCancelOrderWithRestockResponses[keyof OutboundControllerCancelOrderWithRestockResponses];
+
+export type OutboundControllerGetRestockPlanData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/restock-plan';
+};
+
+export type OutboundControllerGetRestockPlanErrors = {
+    /**
+     * Malformed orderId path parameter (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No order with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerGetRestockPlanError = OutboundControllerGetRestockPlanErrors[keyof OutboundControllerGetRestockPlanErrors];
+
+export type OutboundControllerGetRestockPlanResponses = {
+    /**
+     * The restock plan
+     */
+    200: RestockPlanResponse;
+};
+
+export type OutboundControllerGetRestockPlanResponse = OutboundControllerGetRestockPlanResponses[keyof OutboundControllerGetRestockPlanResponses];
+
 export type OutboundControllerPackOrderData = {
     body: PackOrderDto;
     headers: {
@@ -17854,7 +18127,7 @@ export type OutboundControllerDispatchOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The order is already dispatched under a different key, or is not packed — it reads accepted or cancelled (conflict, naming the status); story 3-7a — its picks drew a lot that is on an OPEN LIVE recall: release the lot from the recall (close it with the lot in releaseBatchIds) or wait for the packed-order cancel/unpack (order-holds-recalled-batch, members batchCodes and recallCodes); a lot blocked for any other reason still ships; or a concurrent idempotent request (conflict). Nothing is written
+     * The order is already dispatched under a different key, or is not packed — it reads accepted or cancelled (conflict, naming the status); story 3-7a — its picks drew a lot that is on an OPEN LIVE recall: release the lot from the recall (close it with the lot in releaseBatchIds) or cancel the order with restock (order-holds-recalled-batch, members batchCodes and recallCodes); a lot blocked for any other reason still ships; or a concurrent idempotent request (conflict). Nothing is written
      */
     409: ProblemDetailsDto;
     /**

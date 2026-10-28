@@ -285,6 +285,10 @@ export function rejectedOpsResolveReason(error: unknown, entry?: Pick<RejectedOp
         return error.detail ?? 'This rejected op no longer exists — refresh the queue.';
       case 'role-denied':
         return 'Your role cannot resolve rejected ops.';
+      // Story 4-2b (A7) — a re-run of a bench pack whose order was cancelled
+      // (with restock) while the parcel sat at the bench: it can never pack.
+      case 'order-cancelled':
+        return PACK_ORDER_CANCELLED_RESOLVE_REASON;
       case 'decision-not-available':
         // Story 13-2 — the per-type rule (a return.receive row is Discard
         // only); the buttons follow it, so reaching this is a stale page.
@@ -322,11 +326,33 @@ const LEGACY_DECISIONS: readonly RejectedOpDecision[] = ['apply', 'recount', 'di
  * Recount additionally needs a payload bin — the server's own recount read.
  */
 export function rejectedOpDecisions(
-  entry: Pick<RejectedOpResponse, 'decisions' | 'payload'>,
+  entry: Pick<RejectedOpResponse, 'decisions' | 'payload'> & Partial<Pick<RejectedOpResponse, 'opType' | 'problemCode'>>,
 ): readonly RejectedOpDecision[] {
+  // Story 4-2b (A7) — a bench pack refused because its order was cancelled is
+  // Discard only: an Apply would re-run the pack against a cancelled order,
+  // which can only be refused again. The op stays retained until discarded.
+  if (isCancelledOrderPack(entry)) return ['discard'];
   const admitted = entry.decisions ?? LEGACY_DECISIONS;
   return admitted.filter((decision) => decision !== 'recount' || rejectedOpPayloadBinId(entry.payload) !== null);
 }
+
+/** Story 4-2b (A7) — a `pack.execute` op refused 409 `order-cancelled`. */
+export function isCancelledOrderPack(entry: Partial<Pick<RejectedOpResponse, 'opType' | 'problemCode'>>): boolean {
+  return entry.opType === 'pack.execute' && entry.problemCode === 'order-cancelled';
+}
+
+/**
+ * Story 4-2b (A7, A9) — the remedy for a bench pack whose order was cancelled
+ * while the parcel was at the bench. The cancel already booked the units back
+ * into stock; the parcel still physically holds them, so they go back where
+ * the order's "Put back" list (on the web order) says.
+ */
+export const PACK_ORDER_CANCELLED_GUIDANCE =
+  'This order was cancelled while the parcel was at the bench — open the parcel and put its units back where the order\'s "Put back" list says (Outbound → Orders, expand the order), then discard this row.';
+
+/** Story 4-2b (A7) — the resolve refusal when an Apply re-ran that pack anyway. */
+export const PACK_ORDER_CANCELLED_RESOLVE_REASON =
+  'This order was cancelled — the pack cannot run. Open the parcel, put its units back where the order\'s "Put back" list says, then discard this row.';
 
 /** The authorization remedy (human decision 4 — Discard only): the units were not on the return. */
 export const RETURN_RECEIVE_REVIEW_GUIDANCE = 'Create a return authorization for these units, then receive them again.';
@@ -519,6 +545,8 @@ export function rejectedOpGuidance(
 ): readonly string[] {
   // Story 4-7a — a refused handheld restock: Discard only; the web records it to match the floor.
   if (entry.opType === 'return.restock') return [returnRestockGuidance(binCode)];
+  // Story 4-2b (A7) — a bench pack of an order cancelled while the parcel was at the bench: Discard only.
+  if (isCancelledOrderPack(entry)) return [PACK_ORDER_CANCELLED_GUIDANCE];
   // Story 2-3a — a refused device unload: Discard only; the web re-records it.
   if (entry.opType === 'gate-in.unload') return [gateInUnloadGuidance(entry.problemCode)];
   // Story 3-1 — a refused handheld move: Apply re-runs it, or Discard.

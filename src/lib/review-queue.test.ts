@@ -22,6 +22,8 @@ import {
   isOwnerOnlyVariance,
   ledgerListReason,
   rejectedOpDecisions,
+  PACK_ORDER_CANCELLED_GUIDANCE,
+  PACK_ORDER_CANCELLED_RESOLVE_REASON,
   rejectedOpPayloadBinId,
   rejectedOpSummary,
   rejectedOpGuidance,
@@ -981,5 +983,29 @@ describe('story 4-7a — a refused handheld restock (return.restock)', () => {
     const serial = photoSummary({ opType: 'return.restock', problemCode: 'some-new-code', payload: { ...payload, batchCode: null, serialNumbers: ['SN-1', 'SN-2'] } });
     expect(serial?.lines[0]).toContain('serials SN-1, SN-2');
     expect(serial?.lines[0]).toContain('— some-new-code');
+  });
+});
+
+describe('story 4-2b (A7) — a bench pack of an order cancelled while the parcel was at the bench', () => {
+  const row = { opType: 'pack.execute' as const, problemCode: 'order-cancelled', payload: { orderId: 'o1' } };
+
+  test('is Discard only, whatever the server row admits', () => {
+    expect(rejectedOpDecisions({ ...row, decisions: ['apply', 'discard'] })).toEqual(['discard']);
+    expect(rejectedOpDecisions(row)).toEqual(['discard']);
+    // Any other pack refusal keeps the server's rule.
+    expect(rejectedOpDecisions({ ...row, problemCode: 'conflict', decisions: ['apply', 'discard'] })).toEqual(['apply', 'discard']);
+  });
+
+  test('the guidance points at the order’s Put back list', () => {
+    expect(rejectedOpGuidance(row)).toEqual([PACK_ORDER_CANCELLED_GUIDANCE]);
+    expect(PACK_ORDER_CANCELLED_GUIDANCE).toContain('open the parcel');
+    expect(PACK_ORDER_CANCELLED_GUIDANCE).toContain('"Put back"');
+    expect(rejectedOpGuidance({ ...row, problemCode: 'conflict' })).toEqual([]);
+  });
+
+  test('a resolve refused order-cancelled reads as the remedy, not the raw 409', () => {
+    expect(rejectedOpsResolveReason(problem('order-cancelled', 409, 'Order is not packable'), { opType: 'pack.execute' })).toBe(
+      PACK_ORDER_CANCELLED_RESOLVE_REASON,
+    );
   });
 });

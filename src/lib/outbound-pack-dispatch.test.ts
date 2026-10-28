@@ -475,6 +475,12 @@ describe('refusal mappers', () => {
     );
   });
 
+  test('story 4-2b — the pack of a cancelled order shows its 409 order-cancelled detail verbatim', () => {
+    const detail =
+      "Order SO-1 was cancelled while the parcel was at the bench — open the parcel and return its units to stock; the order's restock list is on the web.";
+    expect(packReason(new ApiProblem('order-cancelled', 409, detail))).toBe(detail);
+  });
+
   test('the dispatch 409 arm is verbatim; its 422 key reuse is fixed house copy', () => {
     expect(
       dispatchReason(new ApiProblem('order-not-packed', 409, 'The order reads accepted.', 'Order not packed')),

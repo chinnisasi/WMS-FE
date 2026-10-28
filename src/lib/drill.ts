@@ -71,6 +71,8 @@ export const LEDGER_EVENT_TYPES = [
   'putaway.placed',
   'bin.merged',
   'pick.picked',
+  // Story 4-2b — a cancelled order's drawn units put back into stock.
+  'pick.restocked',
   'pack.packed',
   'dispatch.dispatched',
   'excursion.recorded',
@@ -97,6 +99,7 @@ export const LEDGER_TYPE_LABEL: Readonly<Record<LedgerEventType, string>> = {
   'putaway.placed': 'Put away',
   'bin.merged': 'Bin merged',
   'pick.picked': 'Picked',
+  'pick.restocked': 'Restocked',
   'pack.packed': 'Packed',
   'dispatch.dispatched': 'Dispatched',
   'excursion.recorded': 'Excursion recorded',

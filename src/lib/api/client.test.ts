@@ -95,6 +95,8 @@ import {
   fetchApiListClients,
   fetchApiRenameClient,
   fetchApiCancelOrder,
+  fetchApiCancelOrderWithRestock,
+  fetchApiGetRestockPlan,
   fetchApiCancelWave,
   fetchApiCreateKit,
   fetchApiCreateOrder,
@@ -619,6 +621,32 @@ describe('outbound order wrappers (story 4.2b)', () => {
       lines: [{ skuId: 'sku-1', quantity: 4 }],
       destination,
     });
+    clearSession();
+  });
+
+  test('story 4-2b — cancel-with-restock sends the destination body and the Idempotency-Key header', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { order: { id: ORDER_ID, status: 'cancelled', lines: [] }, restock: null });
+    await fetchApiCancelOrderWithRestock(SESSION.tenant.id, ORDER_ID, { restockBinId: 'bin-1' }, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/orders/${ORDER_ID}/cancel-with-restock`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ restockBinId: 'bin-1' });
+    clearSession();
+  });
+
+  test('story 4-2b — the restock plan is a keyless GET', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { orderId: ORDER_ID, orderStatus: 'accepted', shipment: null, lines: [], restocked: [] });
+    const plan = await fetchApiGetRestockPlan(SESSION.tenant.id, ORDER_ID);
+    expect(plan.orderId).toBe(ORDER_ID);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(
+      `/api/v1/tenants/${SESSION.tenant.id}/outbound/orders/${ORDER_ID}/restock-plan`,
+    );
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
     clearSession();
   });
 
