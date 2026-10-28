@@ -9,6 +9,8 @@ import {
   MIN_SHELF_LIFE_DAYS_MAX,
   MIN_SHELF_LIFE_DAYS_MIN,
   QC_NOT_HELD_NOTE,
+  DERIVE_EXPIRY_LABEL,
+  deriveExpiryLabel,
   expiryRequiredLabel,
   minShelfLifeLabel,
   parseReceivingPolicyDraft,
@@ -176,6 +178,8 @@ function PolicyBody({
           <dd>{expiryRequiredLabel(current.expiryRequired)}</dd>
           <dt className={labelClass}>Minimum remaining shelf life</dt>
           <dd>{minShelfLifeLabel(current.minShelfLifeDays)}</dd>
+          <dt className={labelClass}>Expiry from shelf life</dt>
+          <dd>{deriveExpiryLabel(current.deriveExpiry)}</dd>
         </dl>
         {notes}
       </>
@@ -248,6 +252,17 @@ function PolicyBody({
             {problems.minShelfLife}
           </span>
         ) : null}
+      </label>
+
+      {/* Story 2-4b (A6) — the per-client derivation switch (default on). */}
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          name="deriveExpiry"
+          checked={fields.deriveExpiry}
+          onChange={(event) => edit({ ...fields, deriveExpiry: event.target.checked })}
+        />
+        <span className={labelClass}>{DERIVE_EXPIRY_LABEL}</span>
       </label>
 
       {notes}

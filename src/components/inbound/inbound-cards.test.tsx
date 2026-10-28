@@ -205,7 +205,8 @@ function stubRouter(): void {
     if (pathname === `${base}/receiving/goods-receipts/g-1/lines`) {
       return json(200, {
         items: [
-          { id: 'gl-1', skuId: 's-acme', skuCode: 'TSHIRT-M', skuName: 'T-shirt M', batchId: null, batchCode: 'LOT-9', qty: 3, appliedQty: 3, damagedQty: 2, damageReasonCode: 'crushed', shortQty: 1, shortReasonCode: 'not-shipped' },
+          // Story 2-4b — gl-1 carries the batch dates (its expiry derived from shelf life); gl-2 is an older answer without the keys.
+          { id: 'gl-1', skuId: 's-acme', skuCode: 'TSHIRT-M', skuName: 'T-shirt M', batchId: null, batchCode: 'LOT-9', batchMfgDate: '2026-09-01', batchExpiryDate: '2027-02-28', expirySource: 'derived', qty: 3, appliedQty: 3, damagedQty: 2, damageReasonCode: 'crushed', shortQty: 1, shortReasonCode: 'not-shipped' },
           { id: 'gl-2', skuId: 's-beta', skuCode: 'TSHIRT-M', skuName: 'T-shirt M', batchId: null, batchCode: null, qty: 0, appliedQty: 0, damagedQty: 4, damageReasonCode: 'wet' },
         ],
       });
@@ -639,7 +640,8 @@ describe('Goods receipts — damaged and short (story 2-4a)', () => {
     const lines = [...view.container.querySelectorAll('[data-testid="grn-line"]')].map((line) => line.textContent ?? '');
     expect(lines).toEqual([
       // Story 2-5a — an owner (receipt.attach) is offered "Add photo" on a line with none.
-      'TSHIRT-M T-shirt M · batch LOT-9 · good 3 · damaged 2 (Crushed) · short 1 (Not shipped) Add photo',
+      // Story 2-4b — the batch's mfg and expiry follow its code, the expiry marked when derived (explicit pin update).
+      'TSHIRT-M T-shirt M · batch LOT-9 · mfg 2026-09-01 · exp 2027-02-28 (from shelf life) · good 3 · damaged 2 (Crushed) · short 1 (Not shipped) Add photo',
       'TSHIRT-M T-shirt M · good 0 · damaged 4 (Wet) Add photo',
     ]);
     // Toggling again hides it.

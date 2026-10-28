@@ -26,6 +26,7 @@ import {
   PACKAGING_REFRESH_NOTE,
   parsePackagingDraft,
   parseShelfLifeInput,
+  SHELF_LIFE_HINT,
   SHELF_LIFE_LABEL,
   shelfLifeLabel,
   shelfLifeWarning,
@@ -1031,6 +1032,7 @@ function SkuEditForm({
             onChange={(e) => setShelfLifeDays(e.target.value)}
             placeholder="—"
           />
+          <span className="text-xs text-(--muted-foreground)">{SHELF_LIFE_HINT}</span>
         </label>
       </div>
       {shelfWarning !== null ? (

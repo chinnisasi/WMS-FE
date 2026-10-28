@@ -196,6 +196,8 @@ export const PACKAGING_REFRESH_NOTE =
 
 /** The shelf-life field's label (decision 5 — total life, not the client's minimum remaining life). */
 export const SHELF_LIFE_LABEL = 'Shelf life — total days from manufacture';
+/** Story 2-4b — the shelf-life field's hint (both SKU forms): what the number now does at receipt. */
+export const SHELF_LIFE_HINT = "Sets a received batch's expiry from its mfg date when none is typed";
 
 /** A trimmed barcode against the rule, or the sentence that refuses it (null = fine). */
 export function barcodeProblem(raw: string, field = 'Barcode'): string | null {

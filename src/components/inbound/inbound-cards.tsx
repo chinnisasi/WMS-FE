@@ -41,7 +41,7 @@ import { readyClients } from '@/lib/use-clients';
 import { clientFilterForDrill, clientFilterKey, hiddenByClientFilterNote } from '@/lib/active-client';
 import { poCreatedOutcome } from '@/lib/purchase-orders';
 import { grnGateInLabel } from '@/lib/gate-ins';
-import { grnDamagedSuffix, grnLineAppliedLabel, grnLineConditionLabel, grnLineRecallLabel, grnShortSuffix } from '@/lib/grn-lines';
+import { grnDamagedSuffix, grnLineAppliedLabel, grnLineBatchDatesLabel, grnLineConditionLabel, grnLineRecallLabel, grnShortSuffix } from '@/lib/grn-lines';
 import { GrnLineSerials } from '@/components/inbound/grn-line-serials';
 import { StatusChip } from '@/components/shared/status-chip';
 import { useGoodsReceiptLines } from '@/lib/use-grn-lines';
@@ -728,6 +728,8 @@ function GoodsReceiptLinesPanel({
                   · batch <span className="font-mono">{line.batchCode}</span>
                 </>
               )}
+              {/* Story 2-4b — the batch's mfg and expiry, the expiry marked when derived from shelf life. */}
+              {grnLineBatchDatesLabel(line) !== null && <span data-testid="grn-line-batch-dates"> · {grnLineBatchDatesLabel(line)}</span>}
               {grnLineRecallLabel(line) !== null && (
                 <>
                   {' '}

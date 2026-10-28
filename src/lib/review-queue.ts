@@ -682,7 +682,8 @@ function grnLinesRefusedSummary(
     if (typeof batchCode === 'string') parts.push(`batch ${batchCode}`);
     // Story 1-2b — the expiry the rule judged (the refusal's; else the line's own).
     const expiry = typeof refusal['expiryDate'] === 'string' ? refusal['expiryDate'] : item['expiryDate'];
-    if (typeof expiry === 'string') parts.push(`expires ${expiry}`);
+    // Story 2-4b — a derived judged expiry says where it came from.
+    if (typeof expiry === 'string') parts.push(`expires ${expiry}${derivedExpiryWords(refusal)}`);
     const owner = typeof refusal['skuClientLabel'] === 'string' ? refusal['skuClientLabel'] : null;
     const reason = grnRefusalWords(String(refusal['reason'] ?? entry.problemCode));
     // Story 1-6d — a licence refusal names each missing need and holder.
@@ -701,6 +702,19 @@ function grnLinesRefusedSummary(
         ? ` — ${clientLabel} has departed`
         : ` on a receipt for ${clientLabel}`;
   return { heading: `${grn} — ${noun} not booked${forClient}`, lines: rendered };
+}
+
+/**
+ * Story 2-4b — ` (derived from mfg 2026-05-01 + 180 days)` when the refusal's
+ * judged expiry was derived from the mfg date and the SKU's shelf life; empty
+ * otherwise (every pre-2-4b row).
+ */
+function derivedExpiryWords(refusal: Record<string, unknown>): string {
+  const derived = refusal['derivedExpiry'];
+  if (typeof derived !== 'object' || derived === null) return '';
+  const { mfgDate, shelfLifeDays } = derived as { mfgDate?: unknown; shelfLifeDays?: unknown };
+  if (typeof mfgDate !== 'string' || typeof shelfLifeDays !== 'number') return '';
+  return ` (derived from mfg ${mfgDate} + ${shelfLifeDays} ${shelfLifeDays === 1 ? 'day' : 'days'})`;
 }
 
 /**

@@ -5,6 +5,7 @@ import type { SkuResponse } from '@/lib/api/generated';
 import {
   HAZARD_CLASSES,
   PACKAGING_REFRESH_NOTE,
+  SHELF_LIFE_HINT,
   SHELF_LIFE_LABEL,
   STORAGE_CLASSES,
   barcodeProblem,
@@ -173,6 +174,8 @@ describe('story 1-4 — the SKU master rules mirrored from the server', () => {
     expect(parseShelfLifeInput('3651').problem).toBe('Shelf life must be 1–3650 days.');
     expect(parseShelfLifeInput('1.5').problem).toBe('Shelf life must be a whole number of days.');
     expect(SHELF_LIFE_LABEL).toBe('Shelf life — total days from manufacture');
+    // Story 2-4b — the hint both SKU forms show under the field.
+    expect(SHELF_LIFE_HINT).toBe("Sets a received batch's expiry from its mfg date when none is typed");
   });
 
   test('the shelf-life warning fires only below the client minimum', () => {

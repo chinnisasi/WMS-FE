@@ -937,7 +937,7 @@ export type SkuResponse = {
      */
     uomConversions: Array<SkuUomConversionResponse>;
     /**
-     * Story 1-4 — total shelf life in days from manufacture (1–3650), or null when unset. Not the client policy's minimum REMAINING shelf life.
+     * Story 1-4 — total shelf life in days from manufacture (1–3650), or null when unset. Not the client policy's minimum REMAINING shelf life. Story 2-4b — a received batch with a mfg date and no typed expiry gets its expiry set from it (mfg + this many days), unless the client's receiving policy turns that off.
      */
     shelfLifeDays: number | null;
     /**
@@ -1121,7 +1121,7 @@ export type CreateSkuDto = {
      */
     reorderQty?: number;
     /**
-     * Total shelf life in days from manufacture
+     * Total shelf life in days from manufacture. Story 2-4b — a received batch with a mfg date and no typed expiry gets its expiry set from it (mfg + this many days), unless the client's receiving policy turns that off.
      */
     shelfLifeDays?: number;
     /**
@@ -1321,7 +1321,7 @@ export type PatchSkuDto = {
      */
     barcode?: string;
     /**
-     * Total shelf life in days from manufacture (1–3650). Omit to leave unchanged; null to clear.
+     * Total shelf life in days from manufacture (1–3650). Omit to leave unchanged; null to clear. Story 2-4b — a received batch with a mfg date and no typed expiry gets its expiry set from it (mfg + this many days), unless the client's receiving policy turns that off. Editing it never re-dates a batch already received.
      */
     shelfLifeDays?: number | null;
     /**
@@ -4547,7 +4547,7 @@ export type GrnLineInputDto = {
      */
     batchCode?: string | null;
     /**
-     * Optional batch mfg date (ISO-8601 UTC, Z-suffixed)
+     * Optional batch mfg date (ISO-8601 UTC, Z-suffixed). Story 2-4b — a date-only mfg is sent as its date at midnight UTC (`YYYY-MM-DDT00:00:00Z`); ONLY that shape feeds the shelf-life derivation (a batch-tracked line with no typed expiry gets expiry = the mfg's IST date + the SKU's shelfLifeDays). Any other instant is stored as before and derives nothing (a pre-2-4b handheld's misread date arrives as an IST-midnight instant)
      */
     mfgDate?: string | null;
     /**
@@ -4635,6 +4635,21 @@ export type GateInLinkDto = {
     reason: 'unknown' | 'other-warehouse';
 };
 
+export type DerivedExpiryDto = {
+    /**
+     * The derived expiry (YYYY-MM-DD, IST)
+     */
+    expiryDate: string;
+    /**
+     * The mfg date it was derived from (YYYY-MM-DD, IST) — the batch's stored mfg, else the first line's
+     */
+    mfgDate: string;
+    /**
+     * The SKU's shelf life used, in days from manufacture
+     */
+    shelfLifeDays: number;
+};
+
 export type GrnLineDto = {
     id: string;
     grnId: string;
@@ -4701,6 +4716,14 @@ export type GrnLineDto = {
      * Story 2-6a — present on a serial line of a QC-on-receipt client's receipt: it booked UNHELD (QC on receipt does not hold serial-tracked lines)
      */
     qcSkipped?: 'serial-tracked';
+    /**
+     * Story 2-4b — present only when this receipt DERIVED the line's batch expiry: no line typed one and the batch had none, so it is the mfg's IST date + the SKU's shelf life
+     */
+    derivedExpiry?: DerivedExpiryDto;
+    /**
+     * Story 2-4b — present only when a typed expiry on this receipt REPLACED the batch's earlier derived one: that derived date (YYYY-MM-DD, IST)
+     */
+    replacedDerivedExpiry?: string;
 };
 
 export type MissingLicenceDto = {
@@ -4811,6 +4834,10 @@ export type RejectedGrnLineDto = {
      * Story 2-6a — a whole-line refusal's unreadable units (not booked); present only when > 0
      */
     unreadableSerialQty?: number;
+    /**
+     * Story 2-4b — present only on an expiry refusal whose judged expiry the receipt DERIVED from mfg + shelf life (`shelf-life-short`, or a `batch-expiry-mismatch` after a concurrent receipt set the batch's expiry first)
+     */
+    derivedExpiry?: DerivedExpiryDto;
 };
 
 export type UnmatchedGrnLineDto = {
@@ -5030,6 +5057,10 @@ export type CatalogSnapshotSkuDto = {
      * Story 12.8 (UX-DR29): the SKU's storage class (defaults to `ambient`). It rides the snapshot beside the bin arm's class so the device's offline conformance mirror can refuse a non-conforming placement or draw in the Rejected banner — a refusal only the server knew about would queue in a dead zone and come back hours later as a rejection the operator can no longer act on.
      */
     storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
+    /**
+     * Story 2-4b: the SKU's total shelf life in days from manufacture, or null. A receipt line of a batch-tracked SKU with a mfg date and no typed expiry gets expiry = mfg + this (server-side); the handheld previews it. Absent (an older server) or null = no preview
+     */
+    shelfLifeDays: number | null;
     /**
      * Story 1-1: the client the SKU belongs to. Code and barcode are unique per (tenant, client), so one barcode may name several SKUs; the device resolves a scan through the work's own SKUs first, then the document's client (`clients` names each)
      */
@@ -5526,6 +5557,10 @@ export type CatalogClientReceivingPolicyDto = {
      * Minimum remaining shelf life in IST calendar days, or null
      */
     minShelfLifeDays: number | null;
+    /**
+     * Story 2-4b — the server sets a batch's expiry from mfg + the SKU's shelfLifeDays when no expiry is typed (the device previews it). Absent (an older server) reads as true
+     */
+    deriveExpiry?: boolean;
 };
 
 export type CatalogSnapshotClientDto = {
@@ -5796,6 +5831,18 @@ export type GoodsReceiptLineEntryDto = {
     skuName: string;
     batchId: string | null;
     batchCode: string | null;
+    /**
+     * Story 2-4b — the batch's mfg date (YYYY-MM-DD, IST); null when unset or no batch
+     */
+    batchMfgDate: string | null;
+    /**
+     * Story 2-4b — the batch's expiry date (YYYY-MM-DD, IST); null when unset or no batch
+     */
+    batchExpiryDate: string | null;
+    /**
+     * Story 2-4b — where the batch's expiry came from: `derived` (mfg + the SKU's shelf life — shown as "from shelf life"), `typed` (a receipt line's label date), or null (no expiry, or set before 2-4b / outside a receipt)
+     */
+    expirySource: 'typed' | 'derived' | null;
     /**
      * The good units (0 on an all-damaged line)
      */
@@ -9702,6 +9749,10 @@ export type ClientReceivingPolicyDto = {
      * The minimum remaining shelf life, in IST calendar days from the receipt's business date to the expiry date; a shorter line is refused (`shelf-life-short`, its own review row, Accept anyway with a note). Only beside expiryRequired; null = none
      */
     minShelfLifeDays: number | null;
+    /**
+     * Story 2-4b — a batch-tracked receipt line with a mfg date and no typed expiry gets its batch expiry set from the SKU's shelf life (mfg + shelfLifeDays), judged by the rules above like a typed one. Default true; false makes this client's receipts take only the label's typed date. Optional: a mutation answer stored before 2-4b replays without it; every fresh read carries it
+     */
+    deriveExpiry?: boolean;
 };
 
 export type ClientAllocationPolicyDto = {
@@ -9858,6 +9909,10 @@ export type ClientReceivingPolicyResponse = {
      * The minimum remaining shelf life, in IST calendar days from the receipt's business date to the expiry date; a shorter line is refused (`shelf-life-short`, its own review row, Accept anyway with a note). Only beside expiryRequired; null = none
      */
     minShelfLifeDays: number | null;
+    /**
+     * Story 2-4b — a batch-tracked receipt line with a mfg date and no typed expiry gets its batch expiry set from the SKU's shelf life (mfg + shelfLifeDays), judged by the rules above like a typed one. Default true; false makes this client's receipts take only the label's typed date. Optional: a mutation answer stored before 2-4b replays without it; every fresh read carries it
+     */
+    deriveExpiry?: boolean;
     clientId: string;
     /**
      * How many of the client's SKUs are NOT batch-tracked (kits excluded) — the expiry rules do not reach them; they receive as before
@@ -9876,6 +9931,10 @@ export type UpdateClientReceivingPolicyDto = {
      * IST calendar days; null for none. Requires expiryRequired
      */
     minShelfLifeDays: number | null;
+    /**
+     * Story 2-4b — set a received batch's expiry from the SKU's shelf life when the label's expiry is not typed. Optional (the one field a PUT may omit): absent keeps the client's current value
+     */
+    deriveExpiry?: boolean;
 };
 
 export type ClientAllocationPolicyResponse = {
