@@ -161,6 +161,9 @@ import {
   tenancyControllerSetupChecklist,
   tenancyControllerSignIn,
   tenancyControllerSignInSecondFactor,
+  tenancyControllerRequestPasswordReset,
+  tenancyControllerCheckPasswordReset,
+  tenancyControllerConfirmPasswordReset,
   usersControllerAcceptInvite,
   usersControllerInviteUser,
   usersControllerListUsers,
@@ -566,6 +569,11 @@ import type {
   EnrollChallengeResponse,
   SecondFactorSignInDto,
   SecondFactorSignInResponse,
+  PasswordResetRequestDto,
+  PasswordResetRequestedResponse,
+  PasswordResetCheckResponse,
+  PasswordResetConfirmDto,
+  PasswordResetConfirmResponse,
   SecondFactorStatusResponse,
   SecondFactorSetupDto,
   SecondFactorSetupResponse,
@@ -653,13 +661,19 @@ const retryCopies = new WeakMap<Request, Request>();
 /**
  * Story 6-1a — the session routes manage tokens themselves; nothing refreshes
  * around them. Story 6-1b — the second sign-in step is one too: its 401 (a
- * wrong code) must never sign anyone out or trigger a refresh.
+ * wrong code) must never sign anyone out or trigger a refresh. Story 6-1c
+ * (A13) — the three password-reset routes as well: no bearer attached, no
+ * refresh, no sign-out on their answers (a reset opened in a signed-in tab).
  */
 export function isSessionRoute(url: string): boolean {
-  return /\/tenants\/(sign-in|sign-in\/second-factor|session\/refresh|session\/sign-out)$/.test(new URL(url).pathname);
+  return /\/tenants\/(sign-in|sign-in\/second-factor|session\/refresh|session\/sign-out|password-reset|password-reset\/check|password-reset\/confirm)$/.test(
+    new URL(url).pathname,
+  );
 }
 
 client.interceptors.request.use(async (request) => {
+  // Story 6-1c (A13) — a reset route carries no credential but its own token.
+  if (/\/tenants\/password-reset(\/check|\/confirm)?$/.test(new URL(request.url).pathname)) return request;
   let session = readSession();
   // Story 6-1a — a lapsed access token is refreshed BEFORE the request, not
   // after a guaranteed 401 (a reopened tab, a laptop back from sleep).
@@ -869,6 +883,31 @@ export async function fetchApiSignIn(
   if (error || !data) {
     throw unwrapError(error, 400);
   }
+  return data;
+}
+
+/** Story 6-1c — asks for a reset link. One 202 body for every email; only a limit (429) or a malformed address (400) refuses. */
+export async function fetchApiRequestPasswordReset(body: PasswordResetRequestDto): Promise<PasswordResetRequestedResponse> {
+  const { data, error } = await tenancyControllerRequestPasswordReset({ body });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 6-1c — validates a reset link (changes nothing): its account and whether a code is needed. */
+export async function fetchApiCheckPasswordReset(token: string): Promise<PasswordResetCheckResponse> {
+  const { data, error } = await tenancyControllerCheckPasswordReset({ body: { token } });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * Story 6-1c — sets the new password. `include`, so the browser keeps the
+ * `wms_device` cookie the confirm sets (the next sign-in from this browser
+ * is trusted). It issues no session.
+ */
+export async function fetchApiConfirmPasswordReset(body: PasswordResetConfirmDto): Promise<PasswordResetConfirmResponse> {
+  const { data, error } = await tenancyControllerConfirmPasswordReset({ body, credentials: 'include' });
+  if (error || !data) throw unwrapError(error, 400);
   return data;
 }
 

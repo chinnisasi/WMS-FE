@@ -98,9 +98,14 @@ export function portalShellRoute(
   return { kind: 'render' };
 }
 
-/** The login page's notice for its query (`portal=suspended`), or null. */
-export function loginNotice(portal: string | undefined, ended?: string): string | null {
+/** Story 6-1c — after a completed reset (`/login?reset=done`); A10: the code used at the reset is spent. */
+export const PASSWORD_RESET_DONE_NOTICE =
+  'Password changed — sign in with your new password. If you use two-factor sign-in, wait for the next code in your app.';
+
+/** The login page's notice for its query (`portal=suspended`, `ended=…`, story 6-1c `reset=done`), or null. */
+export function loginNotice(portal: string | undefined, ended?: string, reset?: string): string | null {
   if (portal === 'suspended') return PORTAL_SUSPENDED_MESSAGE;
+  if (reset === 'done') return PASSWORD_RESET_DONE_NOTICE;
   // Own keys only: `?ended=constructor` must not read an Object.prototype member.
   return ended !== undefined && Object.hasOwn(SESSION_ENDED_NOTICE, ended) ? SESSION_ENDED_NOTICE[ended]! : null;
 }
@@ -122,6 +127,8 @@ export const SESSION_ENDED_NOTICE: Readonly<Record<string, string>> = {
   legacy: 'Sign-in was upgraded — please sign in again.',
   // Story 6-1b.
   ...SECOND_FACTOR_ENDED_NOTICE,
+  // Story 6-1c — a completed reset ended every session.
+  'password-reset': 'Your password was reset — sign in with the new password.',
 };
 
 export interface PortalNavItem {

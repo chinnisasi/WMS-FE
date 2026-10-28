@@ -89,8 +89,13 @@ export function secondFactorReason(error: unknown): string {
       return 'Use My account → Security to change your own authenticator — another owner resets yours.';
     case 'sign-in-locked':
       return 'Too many wrong passwords. Try again later, or ask an owner to unlock your account.';
-    case 'rate-limited':
-      return 'Too many attempts from this network. Wait a minute and try again.';
+    case 'rate-limited': {
+      // Story 6-1c (A12) — the server's wait, in minutes (an hour bucket's is long).
+      const retry = error.extensions?.retryAfterSeconds;
+      return typeof retry === 'number' && Number.isFinite(retry) && retry > 0
+        ? `Too many attempts. Try again in ${minutesText(retry)}.`
+        : 'Too many attempts from this network. Wait a minute and try again.';
+    }
     case 'role-denied':
       return error.detail ?? 'Your role does not allow this.';
     case 'not-found':
