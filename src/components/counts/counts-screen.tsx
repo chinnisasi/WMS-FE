@@ -16,6 +16,7 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
 
 import { CountSchedule } from './count-schedule';
 import { CountTasks } from './count-tasks';
+import { StockTakes } from './stock-takes';
 
 /**
  * Story 3-5a — the Counts surface (`/moves/counts`): the count tasks of the
@@ -142,6 +143,18 @@ function CountsSessioned({ initialTab, initialCreating }: { initialTab: CountsTa
         )}
         {tab === 'schedule' && (
           <CountSchedule key={`schedule-${warehouseId}`} tenantId={tenantId} warehouseId={warehouseId} canManage={canManage} />
+        )}
+        {tab === 'takes' && (
+          <StockTakes
+            key={warehouseId}
+            tenantId={tenantId}
+            warehouseId={warehouseId}
+            canManage={canManage}
+            canResolve={canResolve}
+            isOwner={role === 'owner'}
+            active={active}
+            warehouseCode={items.find((w) => w.id === warehouseId)?.code ?? 'warehouse'}
+          />
         )}
       </PageTabPanel>
     </div>

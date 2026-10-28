@@ -5141,6 +5141,10 @@ export type PutawayBinDto = {
      */
     systemOwned: boolean;
     /**
+     * Story 3-5b — the bin is frozen for a stock take: the handheld refuses every movement into or out of it offline (count it, or wait for the take to close). A client reading a snapshot cached before 3-5b treats an absent field as false
+     */
+    frozen: boolean;
+    /**
      * Story 12.8 (UX-DR29): the bin's storage class (defaults to `ambient`). It rides the snapshot beside the SKU arm's class (the catalog snapshot) so the device's offline conformance mirror can refuse a non-conforming placement in the Rejected banner — before anything queues.
      */
     storageClass: 'ambient' | 'chilled' | 'frozen' | 'controlled' | 'hazardous' | 'secure';
@@ -5380,9 +5384,29 @@ export type CatalogCountTaskDto = {
      */
     createdAt: string;
     /**
+     * Story 3-5b (additive) — the stock take this task counts for; null = a cycle count. The count stays blind — nothing else about the take rides the card
+     */
+    stockTakeId: string | null;
+    /**
      * The SKUs the task lists (blind — no expected quantity); every line must be counted at submit, and SKUs found in the bin may be added
      */
     lines: Array<CatalogCountTaskLineDto>;
+};
+
+export type CatalogStockTakeDto = {
+    stockTakeId: string;
+    /**
+     * The zones frozen; null = the whole warehouse
+     */
+    zoneIds: Array<string> | null;
+    /**
+     * The freeze instant (ISO-8601 UTC)
+     */
+    frozenAt: string;
+    /**
+     * Pending count tasks of the take (recounts included)
+     */
+    pendingTasks: number;
 };
 
 export type CatalogOpenReturnSerialDto = {
@@ -5623,6 +5647,10 @@ export type CatalogSnapshotResponse = {
      * Story 5-3 (additive): the STORED pending count tasks of this warehouse — the Count inbox tasks whose submit the operator executes (every task line must be counted; 0 is a valid explicit count). The expectations were FROZEN at task start and are read here, never recomputed
      */
     countTasks: Array<CatalogCountTaskDto>;
+    /**
+     * Story 3-5b (additive): the warehouse's counting (and posting) stock takes — the handheld groups their count tasks by zone and refuses movements into or out of a frozen bin (bins[].frozen). An older server omits it
+     */
+    stockTakes: Array<CatalogStockTakeDto>;
     /**
      * Story 13-2 (additive): the warehouse's return authorizations that can still receive (open or partially received) — the handheld receives returned units against them offline, grading each unit; units not on an authorization are queued for review, never refused on the device
      */
@@ -7396,7 +7424,7 @@ export type BulkSkippedCountBinDto = {
     /**
      * count-task-open: the bin already has a pending count; system-bin / bin-retired: a listed bin that cannot be counted
      */
-    reason: 'count-task-open' | 'system-bin' | 'bin-retired';
+    reason: 'count-task-open' | 'system-bin' | 'bin-retired' | 'stock-take';
 };
 
 export type CreateCountsBulkResponse = {
@@ -7633,7 +7661,7 @@ export type CountTaskListEntryDto = {
     warehouseId: string;
     binId: string;
     binCode: string;
-    status: 'pending' | 'completed';
+    status: 'pending' | 'completed' | 'cancelled';
     origin: 'on_demand' | 'scheduled' | 'recount';
     /**
      * The planner; null = the system (scheduler or a recount)
@@ -7645,6 +7673,10 @@ export type CountTaskListEntryDto = {
     lineCount: number;
     varianceCount: number;
     openVarianceCount: number;
+    /**
+     * Story 3-5b — the stock take this task counts for; null = a cycle count (only a cycle count can be cancelled)
+     */
+    stockTakeId: string | null;
 };
 
 export type CountTaskListResponse = {
@@ -7657,7 +7689,7 @@ export type CountTaskDetailTaskDto = {
     warehouseId: string;
     binId: string;
     binCode: string;
-    status: 'pending' | 'completed';
+    status: 'pending' | 'completed' | 'cancelled';
     origin: 'on_demand' | 'scheduled' | 'recount';
     /**
      * The bin state epoch frozen at task start
@@ -7671,6 +7703,18 @@ export type CountTaskDetailTaskDto = {
      * A movement moved the bin between task start and submit (OQ-2) — the submit minted a recount; false while pending
      */
     epochConflict: boolean;
+    /**
+     * Story 3-5b — the stock take this task counts for; null = a cycle count
+     */
+    stockTakeId: string | null;
+    /**
+     * Story 3-5b — who cancelled it (null unless cancelled)
+     */
+    cancelledBy: string | null;
+    /**
+     * Story 3-5b — when it was cancelled (null unless cancelled)
+     */
+    cancelledAt: string | null;
 };
 
 export type CountTaskDetailLineDto = {
@@ -7770,6 +7814,257 @@ export type SubmitCountResponse = {
      * The auto-created recount task when the epoch conflicted (OQ-2)
      */
     recountTaskId: string | null;
+};
+
+export type CancelledCountTaskDto = {
+    id: string;
+    status: 'cancelled';
+    warehouseId: string;
+    binId: string;
+    cancelledBy: string;
+    cancelledAt: string;
+};
+
+export type CancelCountTaskResponse = {
+    countTask: CancelledCountTaskDto;
+};
+
+export type StartStockTakeDto = {
+    /**
+     * The zones to freeze and count (1–50, each once); absent or null = the whole warehouse
+     */
+    zoneIds?: Array<string> | null;
+    note?: string | null;
+};
+
+export type StockTakeSummaryDto = {
+    id: string;
+    warehouseId: string;
+    /**
+     * Sorted; null = the whole warehouse
+     */
+    zoneIds: Array<string> | null;
+    status: 'counting' | 'posting' | 'closed' | 'abandoned';
+    note: string | null;
+    /**
+     * Bins frozen at the start
+     */
+    binCount: number;
+    startedBy: string;
+    /**
+     * The freeze instant (ISO-8601 UTC)
+     */
+    startedAt: string;
+    approvedBy: string | null;
+    approvedAt: string | null;
+    closedBy: string | null;
+    closedAt: string | null;
+    abandonedBy: string | null;
+    abandonedAt: string | null;
+    /**
+     * The abandon note (the start note stays in `note`)
+     */
+    abandonNote: string | null;
+    /**
+     * Handheld writes admitted after the freeze on bins already released (the detail totals add the live rows)
+     */
+    deviceWrites: number;
+    postedCount: number | null;
+    unpostedCount: number | null;
+};
+
+export type StartStockTakeResponse = {
+    stockTake: StockTakeSummaryDto;
+    /**
+     * Pending cycle tasks already on an in-scope bin, now counted for the take
+     */
+    adoptedTaskCount: number;
+    createdTaskCount: number;
+    /**
+     * Older open variances on in-scope bins marked recounted against the take
+     */
+    supersededVarianceCount: number;
+};
+
+export type StockTakeProgressDto = {
+    bins: number;
+    /**
+     * Bins with a completed count and no pending task
+     */
+    counted: number;
+    /**
+     * Pending count tasks (recounts included)
+     */
+    pending: number;
+};
+
+export type StockTakeListEntryDto = {
+    stockTake: StockTakeSummaryDto;
+    progress: StockTakeProgressDto;
+};
+
+export type StockTakeListResponse = {
+    items: Array<StockTakeListEntryDto>;
+    nextCursor?: string | null;
+};
+
+export type StockTakeTotalsDto = {
+    bins: number;
+    /**
+     * Bins with a completed count and no pending task
+     */
+    counted: number;
+    /**
+     * Pending count tasks (recounts included)
+     */
+    pending: number;
+    recountPending: number;
+    withVariance: number;
+    openVariances: number;
+    /**
+     * Open variances over their frozen threshold — the post needs the owner
+     */
+    overThreshold: number;
+    /**
+     * Handheld writes admitted on the frozen bins after the freeze
+     */
+    deviceWrites: number;
+};
+
+export type StockTakeZoneDto = {
+    zoneId: string;
+    zoneCode: string;
+    bins: number;
+    counted: number;
+    pending: number;
+    withVariance: number;
+};
+
+export type StockTakeBinRefDto = {
+    binId: string;
+    binCode: string;
+};
+
+export type StockTakeDetailResponse = {
+    stockTake: StockTakeSummaryDto;
+    totals: StockTakeTotalsDto;
+    zones: Array<StockTakeZoneDto>;
+    /**
+     * Counted bins that moved since their count (up to 50) — recount them before posting
+     */
+    recountRequiredBins: Array<StockTakeBinRefDto>;
+    recountRequiredCount: number;
+    /**
+     * The close's approval token over the open variances — send it back on close
+     */
+    openVarianceDigest: string;
+};
+
+export type StockTakeVarianceEntryDto = {
+    id: string;
+    taskId: string;
+    binId: string;
+    binCode: string;
+    zoneCode: string;
+    skuId: string;
+    skuCode: string;
+    skuName: string | null;
+    clientId: string;
+    /**
+     * Base units — the book quantity the count was compared against
+     */
+    expectedQuantity: number;
+    countedQuantity: number;
+    delta: number;
+    status: 'open' | 'adjusted' | 'recounted';
+    thresholdQuantity: number | null;
+    /**
+     * Over the frozen threshold — owner only
+     */
+    overThreshold: boolean;
+    epochConflict: boolean;
+    /**
+     * The variance belongs to its bin's latest take task
+     */
+    latest: boolean;
+    /**
+     * Needs a batch- or serial-level count (not yet supported) — cannot be posted
+     */
+    needsLotCount: boolean;
+    /**
+     * The close's refusal code once closed and left unposted
+     */
+    unpostedCode: string | null;
+};
+
+export type StockTakeVarianceListResponse = {
+    items: Array<StockTakeVarianceEntryDto>;
+    nextCursor?: string | null;
+};
+
+export type RecountStockTakeBinsDto = {
+    /**
+     * Bins of the stock take to recount (1–500, each once)
+     */
+    binIds: Array<string>;
+};
+
+export type StockTakeRecountEntryDto = {
+    binId: string;
+    binCode: string;
+    taskId: string;
+};
+
+export type RecountStockTakeResponse = {
+    stockTake: StockTakeSummaryDto;
+    recounts: Array<StockTakeRecountEntryDto>;
+    recountedVarianceCount: number;
+};
+
+export type CloseStockTakeDto = {
+    /**
+     * The `openVarianceDigest` the stock take detail served when the variances were reviewed — a mismatch is 409 stock-take-changed
+     */
+    openVarianceDigest: string;
+};
+
+export type UnpostedVarianceDto = {
+    varianceId: string;
+    binId: string;
+    binCode: string;
+    skuId: string;
+    skuCode: string;
+    /**
+     * The adjustment guard's machine code, or basis-moved
+     */
+    code: string;
+    detail: string;
+    /**
+     * A batch-, serial- or catch-weight-tracked SKU — needs a batch- or serial-level count (not yet supported)
+     */
+    needsLotCount: boolean;
+};
+
+export type CloseStockTakeResponse = {
+    stockTake: StockTakeSummaryDto;
+    postedCount: number;
+    /**
+     * Variances left open (they stay on the variance queue)
+     */
+    unposted: Array<UnpostedVarianceDto>;
+};
+
+export type AbandonStockTakeDto = {
+    note?: string | null;
+};
+
+export type AbandonStockTakeResponse = {
+    stockTake: StockTakeSummaryDto;
+    cancelledTaskCount: number;
+    /**
+     * Pending tasks a variance names as its recount — released to the cycle queue (still pending), not cancelled
+     */
+    releasedTaskCount: number;
 };
 
 export type CountPolicyDto = {
@@ -9276,7 +9571,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -9303,7 +9598,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -15051,7 +15346,7 @@ export type TenancyControllerRetireBinErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The bin is already retired (bin-retired — retirement is terminal)
+     * The bin is already retired (bin-retired — retirement is terminal), or a stock take froze it (bin-frozen — story 3-5b: close or abandon the take first)
      */
     409: ProblemDetailsDto;
     /**
@@ -17249,7 +17544,7 @@ export type DevicesControllerResolveRejectedOpErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * Row already resolved (rejected-op-resolved), a decision the op type does not admit — story 13-2: a return.receive row is Discard only; story 1-2b: a grn.shelf-life-refused row admits Apply and Discard; story 1-6d: so does a grn.licence-refused row (decision-not-available, member decisions), a pending count task on the bin (count-task-open), or the re-executed command's own conflict (verbatim)
+     * Row already resolved (rejected-op-resolved), a decision the op type does not admit — story 13-2: a return.receive row is Discard only; story 1-2b: a grn.shelf-life-refused row admits Apply and Discard; story 1-6d: so does a grn.licence-refused row (decision-not-available, member decisions), a pending count task on the bin (count-task-open), a recount of a bin frozen by a stock take (bin-in-stock-take — story 3-5b), or the re-executed command's own conflict (verbatim)
      */
     409: ProblemDetailsDto;
     /**
@@ -23056,7 +23351,7 @@ export type MovementsControllerListCountTasksData = {
          * Narrow to one warehouse
          */
         warehouseId?: string;
-        status?: 'pending' | 'completed';
+        status?: 'pending' | 'completed' | 'cancelled';
         origin?: 'on_demand' | 'scheduled' | 'recount';
         /**
          * Narrow to one bin
@@ -23137,7 +23432,7 @@ export type MovementsControllerCreateCountErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The single bin already has a pending count task (count-task-open), or a concurrent idempotent request (conflict)
+     * The single bin is frozen by a stock take (bin-in-stock-take — checked first), already has a pending count task (count-task-open), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -23237,7 +23532,7 @@ export type MovementsControllerSubmitCountErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The task is already completed (count-task-completed), or a concurrent idempotent request (conflict)
+     * The task is already completed (count-task-completed) or was cancelled (count-task-cancelled), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -23256,6 +23551,468 @@ export type MovementsControllerSubmitCountResponses = {
 };
 
 export type MovementsControllerSubmitCountResponse = MovementsControllerSubmitCountResponses[keyof MovementsControllerSubmitCountResponses];
+
+export type MovementsControllerCancelCountTaskData = {
+    body?: never;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        taskId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/counts/{taskId}/cancel';
+};
+
+export type MovementsControllerCancelCountTaskErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed taskId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks counts.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The count task does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The task is completed (count-task-completed) or already cancelled (count-task-cancelled), it belongs to a stock take (stock-take-task), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerCancelCountTaskError = MovementsControllerCancelCountTaskErrors[keyof MovementsControllerCancelCountTaskErrors];
+
+export type MovementsControllerCancelCountTaskResponses = {
+    /**
+     * The task cancelled (the idempotency snapshot)
+     */
+    200: CancelCountTaskResponse;
+};
+
+export type MovementsControllerCancelCountTaskResponse = MovementsControllerCancelCountTaskResponses[keyof MovementsControllerCancelCountTaskResponses];
+
+export type MovementsControllerStartStockTakeData = {
+    body: StartStockTakeDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/warehouses/{warehouseId}/stock-takes';
+};
+
+export type MovementsControllerStartStockTakeErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — no zones, more than 50, a repeated zone, a note over 200 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks counts.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse or a zone does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A bin is already frozen by another take (stock-take-overlap, naming it), a count task was created on a bin while the take started (conflict — retry), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * No storage bin in scope (stock-take-empty), more than 3,000 bins frozen in the warehouse (too-many-bins), or the key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerStartStockTakeError = MovementsControllerStartStockTakeErrors[keyof MovementsControllerStartStockTakeErrors];
+
+export type MovementsControllerStartStockTakeResponses = {
+    /**
+     * The take counting (the idempotency snapshot)
+     */
+    201: StartStockTakeResponse;
+};
+
+export type MovementsControllerStartStockTakeResponse = MovementsControllerStartStockTakeResponses[keyof MovementsControllerStartStockTakeResponses];
+
+export type MovementsControllerListStockTakesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: {
+        warehouseId?: string;
+        status?: 'counting' | 'posting' | 'closed' | 'abandoned';
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/movements/stock-takes';
+};
+
+export type MovementsControllerListStockTakesErrors = {
+    /**
+     * Malformed filter, cursor or limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse filter names a warehouse outside this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerListStockTakesError = MovementsControllerListStockTakesErrors[keyof MovementsControllerListStockTakesErrors];
+
+export type MovementsControllerListStockTakesResponses = {
+    200: StockTakeListResponse;
+};
+
+export type MovementsControllerListStockTakesResponse = MovementsControllerListStockTakesResponses[keyof MovementsControllerListStockTakesResponses];
+
+export type MovementsControllerGetStockTakeData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        stockTakeId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/stock-takes/{stockTakeId}';
+};
+
+export type MovementsControllerGetStockTakeErrors = {
+    /**
+     * Malformed stockTakeId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The stock take does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerGetStockTakeError = MovementsControllerGetStockTakeErrors[keyof MovementsControllerGetStockTakeErrors];
+
+export type MovementsControllerGetStockTakeResponses = {
+    200: StockTakeDetailResponse;
+};
+
+export type MovementsControllerGetStockTakeResponse = MovementsControllerGetStockTakeResponses[keyof MovementsControllerGetStockTakeResponses];
+
+export type MovementsControllerListStockTakeVariancesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        stockTakeId: string;
+    };
+    query?: {
+        status?: 'open' | 'adjusted' | 'recounted';
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/movements/stock-takes/{stockTakeId}/variances';
+};
+
+export type MovementsControllerListStockTakeVariancesErrors = {
+    /**
+     * Malformed stockTakeId, status, cursor or limit (validation-failed / invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or a role with neither counts.manage nor variances.resolve (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The stock take does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerListStockTakeVariancesError = MovementsControllerListStockTakeVariancesErrors[keyof MovementsControllerListStockTakeVariancesErrors];
+
+export type MovementsControllerListStockTakeVariancesResponses = {
+    200: StockTakeVarianceListResponse;
+};
+
+export type MovementsControllerListStockTakeVariancesResponse = MovementsControllerListStockTakeVariancesResponses[keyof MovementsControllerListStockTakeVariancesResponses];
+
+export type MovementsControllerDownloadStockTakeReportData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        stockTakeId: string;
+    };
+    query: {
+        format: 'csv' | 'xlsx';
+        /**
+         * Only this client's (SKU, bin) rows; an unknown client is 404
+         */
+        clientId?: string;
+    };
+    url: '/tenants/{tenantId}/movements/stock-takes/{stockTakeId}/report';
+};
+
+export type MovementsControllerDownloadStockTakeReportErrors = {
+    /**
+     * Malformed stockTakeId or clientId, or a missing/unknown format (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or a role with neither counts.manage nor variances.resolve (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The stock take or the client does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type MovementsControllerDownloadStockTakeReportError = MovementsControllerDownloadStockTakeReportErrors[keyof MovementsControllerDownloadStockTakeReportErrors];
+
+export type MovementsControllerDownloadStockTakeReportResponses = {
+    /**
+     * The report file
+     */
+    200: Blob | File;
+};
+
+export type MovementsControllerDownloadStockTakeReportResponse = MovementsControllerDownloadStockTakeReportResponses[keyof MovementsControllerDownloadStockTakeReportResponses];
+
+export type MovementsControllerRecountStockTakeBinsData = {
+    body: RecountStockTakeBinsDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        stockTakeId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/stock-takes/{stockTakeId}/recount';
+};
+
+export type MovementsControllerRecountStockTakeBinsErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, no bins, more than 500, a repeated bin, or a bin outside the take (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks variances.resolve (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The stock take does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The take is not counting (stock-take-not-counting), a named bin already has a pending task (count-task-open), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerRecountStockTakeBinsError = MovementsControllerRecountStockTakeBinsErrors[keyof MovementsControllerRecountStockTakeBinsErrors];
+
+export type MovementsControllerRecountStockTakeBinsResponses = {
+    /**
+     * The recounts (the idempotency snapshot)
+     */
+    200: RecountStockTakeResponse;
+};
+
+export type MovementsControllerRecountStockTakeBinsResponse = MovementsControllerRecountStockTakeBinsResponses[keyof MovementsControllerRecountStockTakeBinsResponses];
+
+export type MovementsControllerCloseStockTakeData = {
+    body: CloseStockTakeDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        stockTakeId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/stock-takes/{stockTakeId}/close';
+};
+
+export type MovementsControllerCloseStockTakeErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a malformed openVarianceDigest (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks variances.resolve (role-denied), or an open variance is over its frozen threshold and the caller is not the owner (variance-owner-required, naming them)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The stock take does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The take is closed or abandoned (stock-take-not-counting), bins are still pending (stock-take-incomplete), counted bins moved since their count (stock-take-recount-required, listing up to 20 and the total), the open variances changed since they were reviewed (stock-take-changed), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerCloseStockTakeError = MovementsControllerCloseStockTakeErrors[keyof MovementsControllerCloseStockTakeErrors];
+
+export type MovementsControllerCloseStockTakeResponses = {
+    /**
+     * The take closed (the idempotency snapshot)
+     */
+    200: CloseStockTakeResponse;
+};
+
+export type MovementsControllerCloseStockTakeResponse = MovementsControllerCloseStockTakeResponses[keyof MovementsControllerCloseStockTakeResponses];
+
+export type MovementsControllerAbandonStockTakeData = {
+    body: AbandonStockTakeDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        stockTakeId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/movements/stock-takes/{stockTakeId}/abandon';
+};
+
+export type MovementsControllerAbandonStockTakeErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or a note over 200 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid web session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks counts.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The stock take does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The take is posting, closed or abandoned (stock-take-not-counting), a recount was created meanwhile (conflict — retry), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type MovementsControllerAbandonStockTakeError = MovementsControllerAbandonStockTakeErrors[keyof MovementsControllerAbandonStockTakeErrors];
+
+export type MovementsControllerAbandonStockTakeResponses = {
+    /**
+     * The take abandoned (the idempotency snapshot)
+     */
+    200: AbandonStockTakeResponse;
+};
+
+export type MovementsControllerAbandonStockTakeResponse = MovementsControllerAbandonStockTakeResponses[keyof MovementsControllerAbandonStockTakeResponses];
 
 export type MovementsControllerGetCountPoliciesData = {
     body?: never;
@@ -23595,7 +24352,7 @@ export type MovementsControllerResolveCountVarianceErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The variance is already resolved (variance-resolved), the task's frozen bin epoch no longer matches (variance-basis-moved — recount is the remedy), the bin already has an open count task on the RECOUNT arm (count-task-open — approve_adjust under an open sibling task is legal), or a concurrent idempotent request (conflict)
+     * The variance belongs to a counting or posting stock take (variance-in-stock-take — the take's own verbs resolve it), is already resolved (variance-resolved), the task's frozen bin epoch no longer matches (variance-basis-moved — recount is the remedy), the bin already has an open count task on the RECOUNT arm (count-task-open — approve_adjust under an open sibling task is legal), or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -25691,7 +26448,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */

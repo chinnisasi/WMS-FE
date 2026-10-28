@@ -59,6 +59,7 @@ function task(id: string, binCode: string, patch: Record<string, unknown> = {}):
     lineCount: 1,
     varianceCount: 1,
     openVarianceCount: 1,
+    stockTakeId: null,
     ...patch,
   };
 }
@@ -167,6 +168,34 @@ function stubRouter(): void {
         recountTaskId: null,
       });
     }
+    // Story 3-5b — the stock takes and the cancel.
+    if (pathname === `${base}/movements/stock-takes` && method === 'GET') {
+      return json(200, url.searchParams.has('cursor') ? takesSecondPage : takesFirstPage);
+    }
+    if (pathname === `${base}/movements/stock-takes/${TAKE}` && method === 'GET') return json(200, takeDetail);
+    if (pathname === `${base}/movements/stock-takes/${TAKE}/variances`) {
+      return json(200, url.searchParams.has('cursor') ? { items: varianceRows.slice(1), nextCursor: null } : { items: varianceRows.slice(0, 1), nextCursor: varianceRows.length > 1 ? 'v-2' : null });
+    }
+    if (pathname === `${base}/movements/stock-takes/${TAKE}/close` && method === 'POST') {
+      return json(200, { stockTake: { ...TAKE_SUMMARY, status: 'closed' }, postedCount: 1, unposted: [] });
+    }
+    if (pathname === `${base}/movements/stock-takes/${TAKE}/recount` && method === 'POST') {
+      const binIds = (body as { binIds: string[] }).binIds;
+      return json(200, { stockTake: TAKE_SUMMARY, recounts: binIds.map((binId) => ({ binId, binCode: binId === 'b1' ? 'A-01' : 'A-02', taskId: `r-${binId}` })), recountedVarianceCount: 1 });
+    }
+    if (pathname === `${base}/movements/stock-takes/${TAKE}/abandon` && method === 'POST') {
+      return json(200, { stockTake: { ...TAKE_SUMMARY, status: 'abandoned' }, cancelledTaskCount: 2, releasedTaskCount: 1 });
+    }
+    if (pathname === `${base}/movements/stock-takes/${TAKE}/report`) {
+      return new Response('status,zone_code\nprovisional,A\n', { status: 200, headers: { 'content-type': 'text/csv; charset=utf-8' } });
+    }
+    if (pathname === `${base}/movements/warehouses/${WH}/stock-takes` && method === 'POST') {
+      return json(201, { stockTake: TAKE_SUMMARY, adoptedTaskCount: 0, createdTaskCount: 2, supersededVarianceCount: 0 });
+    }
+    if (pathname === `${base}/movements/counts/${TASK2}/cancel` && method === 'POST') {
+      if (cancelRefusal !== null) return json(409, { code: cancelRefusal, title: 'Refused', detail: 'Refused', status: 409 });
+      return json(200, { countTask: { id: TASK2, status: 'cancelled', warehouseId: WH, binId: 'bin-A-02', cancelledBy: 'u-1', cancelledAt: '2026-10-28T08:00:00.000Z' } });
+    }
     const policiesPath = `${base}/movements/warehouses/${WH}/count-policies`;
     if (pathname === policiesPath && method === 'GET') return json(200, { policies });
     if (pathname === policiesPath && method === 'PUT') {
@@ -182,6 +211,26 @@ function stubRouter(): void {
   }) as unknown as typeof fetch);
 }
 
+const TAKE = '0198f7a2-1b3c-7d4e-8f90-0000000000e1';
+const TAKE_SUMMARY = {
+  id: TAKE, warehouseId: WH, zoneIds: [ZA], status: 'counting', note: null, binCount: 2, startedBy: 'u-1', startedAt: '2026-10-28T04:30:00.000Z',
+  approvedBy: null, approvedAt: null, closedBy: null, closedAt: null, abandonedBy: null, abandonedAt: null, postedCount: null, unpostedCount: null,
+};
+const DIGEST = 'a'.repeat(64);
+let takeDetail: Record<string, unknown>;
+let takesFirstPage: { items: Record<string, unknown>[]; nextCursor: string | null };
+let takesSecondPage: { items: Record<string, unknown>[]; nextCursor: string | null };
+let varianceRows: Record<string, unknown>[];
+let cancelRefusal: string | null = null;
+
+function variance(id: string, binId: string, binCode: string, patch: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id, taskId: `t-${id}`, binId, binCode, zoneCode: 'A', skuId: SKU, skuCode: 'SKU-1', skuName: 'Soap', clientId: 'c-self',
+    expectedQuantity: 5, countedQuantity: 9, delta: 4, status: 'open', thresholdQuantity: 3, overThreshold: true, epochConflict: false,
+    latest: true, needsLotCount: false, unpostedCode: null, ...patch,
+  };
+}
+
 let view: Rendered | undefined;
 
 beforeEach(() => {
@@ -193,6 +242,22 @@ beforeEach(() => {
   zonesFail = 0;
   bigZone = false;
   pendingDetailEmpty = false;
+  takeDetail = {
+    stockTake: TAKE_SUMMARY,
+    totals: { bins: 2, counted: 2, pending: 0, recountPending: 0, withVariance: 1, openVariances: 1, overThreshold: 1, deviceWrites: 0 },
+    zones: [{ zoneId: ZA, zoneCode: 'A', bins: 2, counted: 2, pending: 0, withVariance: 1 }],
+    recountRequiredBins: [],
+    recountRequiredCount: 0,
+    openVarianceDigest: DIGEST,
+  };
+  takesFirstPage = { items: [{ stockTake: TAKE_SUMMARY, progress: { bins: 2, counted: 2, pending: 0 } }], nextCursor: null };
+  takesSecondPage = { items: [], nextCursor: null };
+  varianceRows = [
+    variance('tv1', 'b1', 'A-01'),
+    variance('tv2', 'b2', 'A-02', { overThreshold: false, delta: 1, countedQuantity: 6, epochConflict: true }),
+    variance('tv-old', 'b2', 'A-02', { latest: false, status: 'recounted', delta: 9 }),
+  ];
+  cancelRefusal = null;
   stubRouter();
 });
 
@@ -476,5 +541,197 @@ describe('the Schedule tab', () => {
     const table = root().querySelector<HTMLElement>('[data-testid="count-schedule"]')!;
     expect(table.textContent).toContain('Every 30 days');
     expect(table.querySelectorAll('button, input')).toHaveLength(0);
+  });
+});
+
+describe('story 3-5b — the Stock takes tab and the cancel', () => {
+  let downloads: { name: string }[];
+  let originalCreate: typeof URL.createObjectURL;
+  let originalRevoke: typeof URL.revokeObjectURL;
+  let originalClick: typeof HTMLAnchorElement.prototype.click;
+  beforeEach(() => {
+    downloads = [];
+    originalCreate = URL.createObjectURL;
+    originalRevoke = URL.revokeObjectURL;
+    originalClick = HTMLAnchorElement.prototype.click;
+    URL.createObjectURL = (() => 'blob:test/1') as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      downloads.push({ name: this.download });
+    };
+  });
+  afterEach(() => {
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
+    HTMLAnchorElement.prototype.click = originalClick;
+  });
+
+  const takeWrites = (suffix: string) => writes().filter((r) => r.url.pathname.endsWith(suffix));
+  async function openTake(role: UserRole = 'owner'): Promise<void> {
+    await mount(role, 'takes');
+    await press(button(root().querySelector('[data-testid="stock-takes"]') as HTMLElement, 'Open'));
+  }
+
+  test('the list opens a take; the variances are read across two pages; a superseded row is not rendered; the epoch tag shows', async () => {
+    await openTake();
+    expect(root().textContent).toContain('As of');
+    expect(root().querySelector('[role="progressbar"]')!.getAttribute('aria-valuenow')).toBe('100');
+    const reads = requests.filter((r) => r.url.pathname.endsWith('/variances'));
+    expect(reads.map((r) => r.url.searchParams.get('cursor'))).toEqual([null, 'v-2']);
+    expect(root().querySelector('[data-variance-id="tv1"]')).not.toBeNull();
+    expect(root().querySelector('[data-variance-id="tv2"]')!.textContent).toContain('moved — recount');
+    expect(root().querySelector('[data-variance-id="tv-old"]')).toBeNull();
+    expect(root().textContent).toContain('Owner decides');
+  });
+
+  test('Post and close re-reads detail and variances together and sends the digest of that read', async () => {
+    await openTake();
+    const before = requests.length;
+    takeDetail = { ...takeDetail, openVarianceDigest: 'b'.repeat(64) };
+    await press(button(root(), 'Post and close'));
+    const refetched = requests.slice(before).map((r) => r.url.pathname);
+    expect(refetched.some((p) => p.endsWith(`/stock-takes/${TAKE}`))).toBe(true);
+    expect(refetched.some((p) => p.endsWith('/variances'))).toBe(true);
+    expect(root().textContent).toContain('Post 1 variance (1 over the threshold) to the ledger and lift the freeze on 2 bins?');
+    await press(button(root(), 'Yes, post and close'));
+    const close = takeWrites('/close')[0]!;
+    expect(close.body).toEqual({ openVarianceDigest: 'b'.repeat(64) });
+    expect(close.key).not.toBeNull();
+    expect(root().textContent).toContain('Stock take closed');
+  });
+
+  test('Post and close is disabled, with the reason, while counts are pending or bins need a recount; a manager is refused for over-threshold', async () => {
+    takeDetail = { ...takeDetail, totals: { ...(takeDetail.totals as object), pending: 2 } };
+    await openTake();
+    expect(button(root(), 'Post and close')!.disabled).toBe(true);
+    expect(root().textContent).toContain('2 counts are still pending — count every bin first.');
+    view!.unmount();
+    view = undefined;
+    takeDetail = { ...takeDetail, totals: { ...(takeDetail.totals as object), pending: 0 } };
+    await openTake('ops_manager');
+    expect(button(root(), 'Post and close')!.disabled).toBe(true);
+    expect(root().textContent).toContain('only the owner can post this take');
+  });
+
+  test('the recount-required banner names the bins, says how many more, and Recount these bins posts their ids', async () => {
+    takeDetail = { ...takeDetail, recountRequiredBins: [{ binId: 'b1', binCode: 'A-01' }], recountRequiredCount: 3 };
+    await openTake();
+    expect(root().textContent).toContain('3 counted bins moved since their count: A-01 …and 2 more — recount them before posting.');
+    await press(button(root(), 'Recount these bins'));
+    const recount = takeWrites('/recount')[0]!;
+    expect(recount.body).toEqual({ binIds: ['b1'] });
+    expect(recount.key).not.toBeNull();
+    expect(root().textContent).toContain('Recount planned');
+  });
+
+  test('Recount selected posts the checked bins with a key and shows the outcome', async () => {
+    await openTake();
+    await act(async () => {
+      root().querySelector<HTMLInputElement>('input[aria-label="Recount A-02"]')!.click();
+    });
+    await settle();
+    const action = [...root().querySelectorAll('button')].find((b) => b.textContent?.startsWith('Recount selected'))!;
+    expect(action.textContent).toBe('Recount selected (A-02)');
+    await press(action);
+    expect(takeWrites('/recount')[0]!.body).toEqual({ binIds: ['b2'] });
+    expect(root().textContent).toContain('A-02');
+  });
+
+  test('Abandon posts {note: null} with a key and says what happened', async () => {
+    await openTake();
+    await press(button(root(), 'Abandon'));
+    await press(button(root(), 'Yes, abandon'));
+    const abandon = takeWrites('/abandon')[0]!;
+    expect(abandon.body).toEqual({ note: null });
+    expect(abandon.key).not.toBeNull();
+    expect(root().textContent).toContain('2 pending count(s) cancelled, 1 kept as cycle counts');
+  });
+
+  test('the report: format and client ride the query; the file is named here (provisional while counting)', async () => {
+    await openTake();
+    setSelect(root().querySelector<HTMLSelectElement>('select[aria-label="Client"]')!, 'c-glow');
+    setSelect(root().querySelector<HTMLSelectElement>('select[aria-label="Format"]')!, 'xlsx');
+    await press(button(root(), 'Download provisional report'));
+    const read = requests.find((r) => r.url.pathname.endsWith('/report'))!;
+    expect(Object.fromEntries(read.url.searchParams)).toEqual({ format: 'xlsx', clientId: 'c-glow' });
+    expect(downloads).toEqual([{ name: 'stock-take-BLR-2026-10-28-GLOW-provisional.xlsx' }]);
+  });
+
+  test('a closed take shows no actions and a Download report; a posting take shows Resume posting', async () => {
+    takeDetail = { ...takeDetail, stockTake: { ...TAKE_SUMMARY, status: 'closed' } };
+    await openTake();
+    expect(button(root(), 'Post and close')).toBeUndefined();
+    expect(button(root(), 'Abandon')).toBeUndefined();
+    expect(button(root(), 'Download report')).toBeDefined();
+    view!.unmount();
+    view = undefined;
+    takeDetail = { ...takeDetail, stockTake: { ...TAKE_SUMMARY, status: 'posting' } };
+    await openTake();
+    expect(root().textContent).toContain('Posting in progress');
+    await press(button(root(), 'Resume posting'));
+    expect(takeWrites('/close')[0]!.body).toEqual({ openVarianceDigest: DIGEST });
+  });
+
+  test('an operator sees no New stock take, no variance table and no post', async () => {
+    await openTake('operator');
+    expect(root().querySelector('[data-testid="stock-take-variances"]')).toBeNull();
+    expect(button(root(), 'Post and close')).toBeUndefined();
+    expect(requests.some((r) => r.url.pathname.endsWith('/variances'))).toBe(false);
+  });
+
+  test('the list loads more by keyset cursor', async () => {
+    takesFirstPage = { ...takesFirstPage, nextCursor: 'st-2' };
+    takesSecondPage = { items: [{ stockTake: { ...TAKE_SUMMARY, id: 'older', status: 'closed' }, progress: { bins: 1, counted: 1, pending: 0 } }], nextCursor: null };
+    await mount('owner', 'takes');
+    await press(button(root(), 'Load more'));
+    expect(requests.filter((r) => r.url.pathname.endsWith('/stock-takes')).at(-1)!.url.searchParams.get('cursor')).toBe('st-2');
+    expect(root().querySelector('[data-testid="stock-takes"]')!.textContent).toContain('Closed');
+  });
+
+  test('New stock take warns, counts the shared cap, POSTs the zones with a key, then opens the take', async () => {
+    await mount('owner', 'takes');
+    await press(button(root(), 'New stock take'));
+    expect(root().textContent).toContain('Every movement into or out of these bins is refused until the take is closed or abandoned. Sync every handheld first.');
+    await act(async () => {
+      root().querySelector<HTMLInputElement>('input[aria-label="A"]')!.click();
+    });
+    await settle();
+    // The counting take in the list already freezes 2 bins (the cap is shared).
+    expect(root().textContent).toContain('2 bins, and 2 already frozen by other stock takes — at most 3000 can be frozen in one warehouse at once.');
+    await press(button(root(), 'Start stock take'));
+    const start = writes().find((r) => r.url.pathname.endsWith('/stock-takes'))!;
+    expect(start.body).toEqual({ zoneIds: [ZA], note: null });
+    expect(start.key).not.toBeNull();
+    expect(root().querySelector('form[aria-label="New stock take"]')).toBeNull();
+    await press(button(root(), 'Back to the list'));
+    expect(root().querySelector('form[aria-label="New stock take"]')).toBeNull();
+  });
+
+  test('a pending cycle count can be cancelled (inline confirm, re-read); a take\'s task wears the chip and has no Cancel', async () => {
+    firstPage = { items: [...firstPage.items, task('take-task', 'A-09', { status: 'pending', stockTakeId: TAKE, completedAt: null, completedBy: null })], nextCursor: null };
+    await mount('owner');
+    expect(row('A-09')!.textContent).toContain('Stock take');
+    expect(button(row('A-09')!, 'Cancel')).toBeUndefined();
+    const reads = listReads().length;
+    await press(button(row('A-02')!, 'Cancel'));
+    await press(button(row('A-02')!, 'Yes, cancel'));
+    const cancel = writes().find((r) => r.url.pathname.endsWith('/cancel'))!;
+    expect(cancel.url.pathname).toBe(`/api/v1/tenants/${T}/movements/counts/${TASK2}/cancel`);
+    expect(cancel.key).not.toBeNull();
+    expect(listReads().length).toBeGreaterThan(reads);
+  });
+
+  test('a 409 cancel refusal is shown, re-reads the list and a retry sends a fresh key', async () => {
+    cancelRefusal = 'count-task-completed';
+    await mount('owner');
+    const reads = listReads().length;
+    await press(button(row('A-02')!, 'Cancel'));
+    await press(button(row('A-02')!, 'Yes, cancel'));
+    expect(root().textContent).toContain('This count was already counted — nothing to cancel.');
+    expect(listReads().length).toBeGreaterThan(reads);
+    await press(button(row('A-02')!, 'Yes, cancel'));
+    const keys = writes().filter((r) => r.url.pathname.endsWith('/cancel')).map((r) => r.key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
   });
 });

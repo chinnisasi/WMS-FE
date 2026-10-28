@@ -33,7 +33,7 @@ export type CountSkipReason = BulkSkippedCountBinDto['reason'];
 export type CountVarianceStatus = CountTaskDetailVarianceDto['status'];
 export type AbcClass = CountPolicyDto['abcClass'];
 
-export const COUNT_TASK_STATUSES: readonly CountTaskStatus[] = ['pending', 'completed'];
+export const COUNT_TASK_STATUSES: readonly CountTaskStatus[] = ['pending', 'completed', 'cancelled'];
 export const COUNT_TASK_ORIGINS: readonly CountTaskOrigin[] = ['on_demand', 'scheduled', 'recount'];
 export const ABC_CLASSES: readonly AbcClass[] = ['a', 'b', 'c'];
 
@@ -41,6 +41,8 @@ export const ABC_CLASSES: readonly AbcClass[] = ['a', 'b', 'c'];
 export const COUNT_TASK_STATUS_LABEL: Readonly<Record<CountTaskStatus, string>> = {
   pending: 'Pending',
   completed: 'Counted',
+  // Story 3-5b — the cancel verb, or a stock take's abandon.
+  cancelled: 'Cancelled',
 };
 
 export const COUNT_TASK_ORIGIN_LABEL: Readonly<Record<CountTaskOrigin, string>> = {
@@ -53,6 +55,8 @@ export const COUNT_SKIP_REASON_LABEL: Readonly<Record<CountSkipReason, string>> 
   'count-task-open': 'already has an open count',
   'system-bin': 'a system bin — not countable',
   'bin-retired': 'retired',
+  // Story 3-5b — frozen for a stock take (the take counts it).
+  'stock-take': 'in a stock take',
 };
 
 export const COUNT_VARIANCE_STATUS_LABEL: Readonly<Record<CountVarianceStatus, string>> = {
@@ -80,7 +84,8 @@ export function countTasksEmptyMessage(status: CountTaskStatus | null, origin: C
 
 /** A list row's variance cell: "—" before the count, "None", or "2 (1 open)". */
 export function varianceCountLabel(entry: Pick<CountTaskListEntryDto, 'status' | 'varianceCount' | 'openVarianceCount'>): string {
-  if (entry.status === 'pending') return '—';
+  // Story 3-5b — a cancelled count was never counted.
+  if (entry.status === 'pending' || entry.status === 'cancelled') return '—';
   if (entry.varianceCount === 0) return 'None';
   return entry.openVarianceCount === 0 ? `${entry.varianceCount}` : `${entry.varianceCount} (${entry.openVarianceCount} open)`;
 }

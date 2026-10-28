@@ -95,6 +95,15 @@ import {
   inventoryControllerRejectAdjustment,
   movementsControllerCreateCount,
   movementsControllerDeleteCountPolicy,
+  movementsControllerCancelCountTask,
+  movementsControllerStartStockTake,
+  movementsControllerListStockTakes,
+  movementsControllerGetStockTake,
+  movementsControllerListStockTakeVariances,
+  movementsControllerDownloadStockTakeReport,
+  movementsControllerRecountStockTakeBins,
+  movementsControllerCloseStockTake,
+  movementsControllerAbandonStockTake,
   movementsControllerGetCountPolicies,
   movementsControllerGetCountTask,
   movementsControllerListCountTasks,
@@ -424,6 +433,14 @@ import type {
   CreateZoneDto,
   CountVarianceListResponse,
   CountPoliciesResponse,
+  CancelCountTaskResponse,
+  StartStockTakeResponse,
+  StockTakeListResponse,
+  StockTakeDetailResponse,
+  StockTakeVarianceListResponse,
+  RecountStockTakeResponse,
+  CloseStockTakeResponse,
+  AbandonStockTakeResponse,
   CountPolicyDto,
   CountTaskDetailResponse,
   CountTaskListResponse,
@@ -4896,7 +4913,7 @@ export async function fetchApiListCountTasks(
   tenantId: string,
   options?: {
     warehouseId?: string;
-    status?: 'pending' | 'completed';
+    status?: 'pending' | 'completed' | 'cancelled';
     origin?: 'on_demand' | 'scheduled' | 'recount';
     binId?: string;
     cursor?: string;
@@ -4954,6 +4971,157 @@ export async function fetchApiCreateCounts(
   }
   // The 201 is oneOf the single and the bulk shapes; a bulk body only ever answers the bulk one.
   return data as CreateCountsBulkResponse;
+}
+
+/**
+ * Story 3-5b — cancel a PENDING cycle count (`counts.manage`). A stock take's
+ * task answers 409 `stock-take-task` (abandon the take instead).
+ */
+export async function fetchApiCancelCountTask(tenantId: string, taskId: string, idempotencyKey: string): Promise<CancelCountTaskResponse> {
+  const { data, error } = await movementsControllerCancelCountTask({
+    path: { tenantId, taskId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 3-5b — start a stock take (`counts.manage`): the whole warehouse
+ * (`zoneIds` null) or the named zones. The key is the draft's.
+ */
+export async function fetchApiStartStockTake(
+  tenantId: string,
+  warehouseId: string,
+  body: { zoneIds: readonly string[] | null; note: string | null },
+  idempotencyKey: string,
+): Promise<StartStockTakeResponse> {
+  const { data, error } = await movementsControllerStartStockTake({
+    path: { tenantId, warehouseId },
+    body: { zoneIds: body.zoneIds === null ? null : [...body.zoneIds], note: body.note },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-5b — the warehouse's stock takes, newest first (any staff role). */
+export async function fetchApiListStockTakes(
+  tenantId: string,
+  options?: { warehouseId?: string; cursor?: string; limit?: number },
+): Promise<StockTakeListResponse> {
+  const { data, error } = await movementsControllerListStockTakes({
+    path: { tenantId },
+    query: definedQuery({ warehouseId: options?.warehouseId, cursor: options?.cursor, limit: options?.limit }),
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-5b — one stock take's dashboard (totals, zones, the close's digest). */
+export async function fetchApiGetStockTake(tenantId: string, stockTakeId: string): Promise<StockTakeDetailResponse> {
+  const { data, error } = await movementsControllerGetStockTake({ path: { tenantId, stockTakeId } });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-5b — the take's variances, keyset by bin code (gated: counts.manage or variances.resolve). */
+export async function fetchApiListStockTakeVariances(
+  tenantId: string,
+  stockTakeId: string,
+  options?: { status?: 'open' | 'adjusted' | 'recounted'; cursor?: string; limit?: number },
+): Promise<StockTakeVarianceListResponse> {
+  const { data, error } = await movementsControllerListStockTakeVariances({
+    path: { tenantId, stockTakeId },
+    query: definedQuery({ status: options?.status, cursor: options?.cursor, limit: options?.limit }),
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-5b — recount selected bins of a counting take (`variances.resolve`). */
+export async function fetchApiRecountStockTakeBins(
+  tenantId: string,
+  stockTakeId: string,
+  binIds: readonly string[],
+  idempotencyKey: string,
+): Promise<RecountStockTakeResponse> {
+  const { data, error } = await movementsControllerRecountStockTakeBins({
+    path: { tenantId, stockTakeId },
+    body: { binIds: [...binIds] },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-5b — post and close (`variances.resolve`; the owner when any open variance is over its threshold). */
+export async function fetchApiCloseStockTake(
+  tenantId: string,
+  stockTakeId: string,
+  openVarianceDigest: string,
+  idempotencyKey: string,
+): Promise<CloseStockTakeResponse> {
+  const { data, error } = await movementsControllerCloseStockTake({
+    path: { tenantId, stockTakeId },
+    body: { openVarianceDigest },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/** Story 3-5b — abandon a counting take (`counts.manage`): its pending tasks cancelled, the freeze lifted. */
+export async function fetchApiAbandonStockTake(
+  tenantId: string,
+  stockTakeId: string,
+  note: string | null,
+  idempotencyKey: string,
+): Promise<AbandonStockTakeResponse> {
+  const { data, error } = await movementsControllerAbandonStockTake({
+    path: { tenantId, stockTakeId },
+    body: { note },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data;
+}
+
+/**
+ * Story 3-5b — the take's client report as a Blob (`parseAs: 'blob'`, the
+ * bin-labels pattern). The server's filename is not readable cross-origin;
+ * the caller names the file (`stockTakeReportFilename`).
+ */
+export async function fetchApiStockTakeReport(
+  tenantId: string,
+  stockTakeId: string,
+  options: { format: 'csv' | 'xlsx'; clientId: string | null },
+): Promise<Blob> {
+  const { data, error, response } = await movementsControllerDownloadStockTakeReport({
+    path: { tenantId, stockTakeId },
+    query: { format: options.format, ...(options.clientId === null ? {} : { clientId: options.clientId }) },
+    parseAs: 'blob',
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data as Blob;
 }
 
 /** Story 3-5a — the warehouse's cycle-count schedule (any staff role). */

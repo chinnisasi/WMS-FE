@@ -16,6 +16,9 @@ import { RecentMoves } from '@/components/moves/recent-moves';
 import { ReadFailure, Section } from '@/components/shared/surface';
 import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/warehouses-failure';
 
+/** Story 3-5b — the Moves page's link to `/moves/counts`. */
+export const MOVES_COUNTS_LINK_LABEL = 'Counts and stock takes';
+
 /**
  * Story 3-1 — the Moves page: the move form (for a role holding
  * `stock.move`) and the active warehouse's recent moves (every member reads
@@ -105,6 +108,10 @@ function MovesSessioned() {
       <Section title="Recent moves">
         <RecentMoves key={warehouseId} warehouseId={warehouseId} active={active} />
       </Section>
+      {/* Story 3-5b (PENDING, 3-5a) — the counts surface lives under Moves. */}
+      <Link href="/moves/counts" className="w-fit text-(--primary) underline underline-offset-2">
+        {MOVES_COUNTS_LINK_LABEL}
+      </Link>
     </div>
   );
 }

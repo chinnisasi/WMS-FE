@@ -167,6 +167,8 @@ export const COUNTS_PAGE_TABS = definePageTabs({
   tabs: [
     { id: 'tasks', label: 'Tasks' },
     { id: 'schedule', label: 'Schedule' },
+    // Story 3-5b — wall-to-wall (or zone) counts under a freeze.
+    { id: 'takes', label: 'Stock takes' },
   ],
 });
 export type CountsTab = (typeof COUNTS_PAGE_TABS)['defaultTab'];
