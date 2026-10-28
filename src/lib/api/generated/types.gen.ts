@@ -3881,6 +3881,105 @@ export type OrderRatesResponse = {
     rates: OrderRatesDto;
 };
 
+export type OrderShelfLifeResolvedPartnerDto = {
+    partnerId: string;
+    code: string;
+    /**
+     * The partner display name
+     */
+    name: string;
+};
+
+export type OrderShelfLifeConsigneeDto = {
+    partnerId: string;
+    code: string;
+    /**
+     * The partner display name
+     */
+    name: string;
+    minShelfLifeDays: number | null;
+    minShelfLifePercent: number | null;
+};
+
+export type OrderShelfLifeLineDto = {
+    orderLineId: string;
+    skuId: string;
+    skuCode: string;
+    /**
+     * Base units the line holds (its reservation)
+     */
+    reservedQty: number;
+    /**
+     * The binding minimum remaining shelf life (IST days) a batch needs for this line: the larger of the client minimum and the consignee's effective minimum; null when neither applies, or when the line cannot be judged (judgeable: false)
+     */
+    effectiveMinDays: number | null;
+    /**
+     * The SKU's total shelf life in days (the percent rule's base); null when not set
+     */
+    shelfLifeBaseDays: number | null;
+    /**
+     * False when the consignee has a percent rule and the SKU has no total shelf life — no dated batch can be shown to meet it (set the SKU's shelf life to fix)
+     */
+    judgeable: boolean;
+    /**
+     * Base units on hand in the order's warehouse's pickable bins that meet every rule, if waved today (other orders' claims ignored) — per line, after the earlier lines of the same SKU (in line order) have taken their reserved units
+     */
+    qualifyingOnHand: number;
+    /**
+     * What still qualifies after other open lines' claims are spent in rank order (not qualifyingOnHand minus claims); this order's own lines are not claims. Per line, after the earlier lines of the same SKU
+     */
+    qualifyingUnclaimed: number;
+    /**
+     * Base units the client rule allows but the consignee's rule does not (undated or unattributed stock of a batch-tracked SKU included)
+     */
+    belowConsigneeMinimumOnHand: number;
+    /**
+     * When the line is on an open wave: the units its planned slices name (base units); null otherwise
+     */
+    plannedQty: number | null;
+    /**
+     * When the line is on an open wave: the units it planned as unfulfillable (base units); null otherwise
+     */
+    shortfallQty: number | null;
+    /**
+     * The planner's frozen cause of that shortfall; null when none or no stock at all
+     */
+    shortfallCause: 'consignee-shelf-life' | 'consignee-unjudgeable' | null;
+};
+
+export type OrderShelfLifeDto = {
+    orderId: string;
+    /**
+     * The IST date judged on — the server's today, the date a wave generated now would plan on
+     */
+    judgedOn: string;
+    /**
+     * The order's client's minimum remaining shelf life at dispatch (4-3a); null when none
+     */
+    clientMinShelfLifeDays: number | null;
+    /**
+     * Why the consignee rule did or did not apply: no-gstin (the order names no consignee GSTIN), no-partner (no partner holds that GSTIN), no-consignee-link (the partner has no consignee link to the order's client), no-rule (the link sets no minimum), applied
+     */
+    consigneeResolution: 'no-gstin' | 'no-partner' | 'no-consignee-link' | 'no-rule' | 'applied';
+    /**
+     * The order's consignee GSTIN as stored; null when none
+     */
+    consigneeGstin: string | null;
+    /**
+     * The partner holding that GSTIN (any status) — set for no-consignee-link, no-rule and applied; null otherwise
+     */
+    resolvedPartner: OrderShelfLifeResolvedPartnerDto | null;
+    /**
+     * The consignee whose rule applies; null unless consigneeResolution is applied
+     */
+    consignee: OrderShelfLifeConsigneeDto | null;
+    lines: Array<OrderShelfLifeLineDto>;
+};
+
+export type OrderShelfLifeResponse = {
+    orderShelfLife: OrderShelfLifeDto;
+};
+
 export type OrderEntryDto = {
     id: string;
     tenantId: string;
@@ -4224,7 +4323,7 @@ export type PicklistLineDto = {
      */
     qty: number;
     /**
-     * Uncovered units — non-zero on an unfulfillable slice (nothing pickable was ever found) and on a short one (story 4.4: qty − shortfallQty is what actually moved)
+     * Uncovered units — non-zero on an unfulfillable slice (nothing pickable — or nothing meeting the consignee's shelf-life rule (shortfallCause) — was found) and on a short one (story 4.4: qty − shortfallQty is what actually moved)
      */
     shortfallQty: number;
     /**
@@ -4264,6 +4363,26 @@ export type PicklistLineDto = {
      * Story 4-3a — the minimum remaining shelf life (IST days) this line was planned under (frozen); null when none
      */
     minOutboundShelfLifeDays?: number | null;
+    /**
+     * Story 4-3b — the consignee (partner display name) whose shelf-life rule this line was planned under (frozen); null when none applied
+     */
+    consigneeName?: string | null;
+    /**
+     * Story 4-3b — the consignee's EFFECTIVE minimum remaining shelf life (IST days) this line was planned under (frozen: max of its days rule and its percent of the SKU's total shelf life); null when no consignee rule applied, or when it cannot be judged (a percent rule over a SKU with no total shelf life — consigneeMinShelfLifePercent is then set)
+     */
+    consigneeMinShelfLifeDays?: number | null;
+    /**
+     * Story 4-3b — the consignee's percent-of-total-shelf-life rule the line was planned under (frozen; display); null when none
+     */
+    consigneeMinShelfLifePercent?: number | null;
+    /**
+     * Story 4-3b — the SKU's total shelf life in days the percent rule was converted from at plan (frozen with it); null without a percent rule or a shelf life
+     */
+    consigneeShelfLifeBaseDays?: number | null;
+    /**
+     * Story 4-3b — why an unfulfillable slice was left short: consignee-shelf-life (stock existed, but not enough met the consignee's minimum) or consignee-unjudgeable (a percent rule over a SKU with no total shelf life); null = no pickable stock at all
+     */
+    shortfallCause?: 'consignee-shelf-life' | 'consignee-unjudgeable' | null;
 };
 
 export type PicklistDto = {
@@ -5301,6 +5420,14 @@ export type PickTaskDto = {
      * Story 4-3a — the minimum remaining shelf life (IST days) this line was planned under (frozen); null when none
      */
     minOutboundShelfLifeDays?: number | null;
+    /**
+     * Story 4-3b — the consignee (partner display name) whose shelf-life rule the line was planned under; null when none. Display only — an older server omits it
+     */
+    consigneeName?: string | null;
+    /**
+     * Story 4-3b — the consignee's effective minimum remaining shelf life (IST days) the line was planned under; null when none. Display only
+     */
+    consigneeMinShelfLifeDays?: number | null;
 };
 
 export type CatalogPackTaskDto = {
@@ -10825,6 +10952,14 @@ export type PartnerLinkDto = {
      * The client's own code for the partner
      */
     clientCode: string | null;
+    /**
+     * Story 4-3b — a consignee link's own minimum remaining shelf life for the client's orders, in IST days; null = none. Optional: a stored reply predates it
+     */
+    minShelfLifeDays?: number | null;
+    /**
+     * Story 4-3b — the same minimum as a percent of each SKU's TOTAL shelf life (skus.shelfLifeDays); null = none. Both must hold when both are set. Optional: a stored reply predates it
+     */
+    minShelfLifePercent?: number | null;
 };
 
 export type PartnerDto = {
@@ -10999,6 +11134,17 @@ export type UpdatePartnerLinkDto = {
      * true makes it the client's default vendor; false clears it
      */
     isDefault?: boolean;
+};
+
+export type UpdatePartnerLinkShelfLifeDto = {
+    /**
+     * IST days of remaining shelf life the consignee requires; null for none (required — send null explicitly)
+     */
+    minShelfLifeDays: number | null;
+    /**
+     * Percent of each SKU's total shelf life that must remain; null for none (required — send null explicitly)
+     */
+    minShelfLifePercent: number | null;
 };
 
 export type RateCardLineResponseDto = {
@@ -20337,6 +20483,46 @@ export type OutboundControllerGetOrderRatesResponses = {
 
 export type OutboundControllerGetOrderRatesResponse = OutboundControllerGetOrderRatesResponses[keyof OutboundControllerGetOrderRatesResponses];
 
+export type OutboundControllerGetOrderShelfLifeData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/shelf-life';
+};
+
+export type OutboundControllerGetOrderShelfLifeErrors = {
+    /**
+     * Malformed orderId path parameter (validation-failed — it must be a uuid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No order with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type OutboundControllerGetOrderShelfLifeError = OutboundControllerGetOrderShelfLifeErrors[keyof OutboundControllerGetOrderShelfLifeErrors];
+
+export type OutboundControllerGetOrderShelfLifeResponses = {
+    200: OrderShelfLifeResponse;
+};
+
+export type OutboundControllerGetOrderShelfLifeResponse = OutboundControllerGetOrderShelfLifeResponses[keyof OutboundControllerGetOrderShelfLifeResponses];
+
 export type OutboundControllerGetOrderData = {
     body?: never;
     path: {
@@ -29445,6 +29631,61 @@ export type PartnersControllerUpdatePartnerLinkResponses = {
 };
 
 export type PartnersControllerUpdatePartnerLinkResponse = PartnersControllerUpdatePartnerLinkResponses[keyof PartnersControllerUpdatePartnerLinkResponses];
+
+export type PartnersControllerUpdatePartnerLinkShelfLifeData = {
+    body: UpdatePartnerLinkShelfLifeDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        partnerId: string;
+        linkId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/partners/{partnerId}/links/{linkId}/shelf-life';
+};
+
+export type PartnersControllerUpdatePartnerLinkShelfLifeErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a missing key or a value out of range — days 1–3650, percent 1–100, whole numbers (validation-failed naming the field), or a vendor link (link-role-invalid)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks vendor.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such partner, or no such link on it — another partner's link included (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * a concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PartnersControllerUpdatePartnerLinkShelfLifeError = PartnersControllerUpdatePartnerLinkShelfLifeErrors[keyof PartnersControllerUpdatePartnerLinkShelfLifeErrors];
+
+export type PartnersControllerUpdatePartnerLinkShelfLifeResponses = {
+    200: PartnerResponse;
+};
+
+export type PartnersControllerUpdatePartnerLinkShelfLifeResponse = PartnersControllerUpdatePartnerLinkShelfLifeResponses[keyof PartnersControllerUpdatePartnerLinkShelfLifeResponses];
 
 export type RateCardsControllerInForceData = {
     body?: never;

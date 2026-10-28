@@ -84,6 +84,7 @@ import {
   partnersControllerListPartners,
   partnersControllerUpdatePartner,
   partnersControllerUpdatePartnerLink,
+  partnersControllerUpdatePartnerLinkShelfLife,
   partnersControllerUpdatePartnerStatus,
   inventoryControllerGetBatch,
   inventoryControllerListAdjustmentPendings,
@@ -122,6 +123,7 @@ import {
   outboundControllerGenerateWave,
   outboundControllerDispatchOrder,
   outboundControllerGetOrder,
+  outboundControllerGetOrderShelfLife,
   outboundControllerGetOrderRates,
   outboundControllerGetShipment,
   outboundControllerGetWave,
@@ -662,6 +664,8 @@ import type {
   UpdatePartnerStatusDto,
   CreatePartnerLinkDto,
   UpdatePartnerLinkDto,
+  UpdatePartnerLinkShelfLifeDto,
+  OrderShelfLifeDto,
   WarehouseListResponse,
   WarehouseResponse,
   WaveListResponse,
@@ -3153,6 +3157,28 @@ export async function fetchApiUpdatePartnerLink(
   return data.partner;
 }
 
+/**
+ * Story 4-3b — replaces a CONSIGNEE link's own minimum remaining shelf life
+ * (`vendor.manage`). Both keys always sent (`null` = none); per-draft key.
+ */
+export async function fetchApiUpdatePartnerLinkShelfLife(
+  tenantId: string,
+  partnerId: string,
+  linkId: string,
+  body: UpdatePartnerLinkShelfLifeDto,
+  idempotencyKey: string,
+): Promise<PartnerDto> {
+  const { data, error } = await partnersControllerUpdatePartnerLinkShelfLife({
+    path: { tenantId, partnerId, linkId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.partner;
+}
+
 export async function fetchApiListPurchaseOrders(
   tenantId: string,
   warehouseId: string,
@@ -4062,6 +4088,22 @@ export async function fetchApiGetOrder(
     throw unwrapError(error, 400);
   }
   return data;
+}
+
+/** Story 4-3b — one order's customer shelf life (a staff read). */
+export async function fetchApiGetOrderShelfLife(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<OrderShelfLifeDto> {
+  const { data, error } = await outboundControllerGetOrderShelfLife({
+    path: { tenantId, orderId },
+    signal: options?.signal,
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.orderShelfLife;
 }
 
 /**

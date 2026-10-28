@@ -29,6 +29,8 @@ import {
   fetchApiListPartners,
   fetchApiUpdatePartner,
   fetchApiUpdatePartnerLink,
+  fetchApiUpdatePartnerLinkShelfLife,
+  fetchApiGetOrderShelfLife,
   fetchApiUpdatePartnerStatus,
   fetchApiActivateRateCard,
   fetchApiCancelRateCard,
@@ -2860,6 +2862,22 @@ describe('business partner wrappers (story 1-3)', () => {
     expect(lastRequest!.method).toBe('PATCH');
     expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/p-1/links/l-1`);
     expect(await lastRequest!.json()).toEqual({ active: false });
+    clearSession();
+  });
+
+  test('story 4-3b: the shelf-life PUT sends both keys (null kept) with the key; the order read GETs its path', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { partner: PARTNER });
+    await fetchApiUpdatePartnerLinkShelfLife(SESSION.tenant.id, 'p-1', 'l-1', { minShelfLifeDays: null, minShelfLifePercent: 70 }, PKEY);
+    expect(lastRequest!.method).toBe('PUT');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/p-1/links/l-1/shelf-life`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(PKEY);
+    expect(await lastRequest!.json()).toEqual({ minShelfLifeDays: null, minShelfLifePercent: 70 });
+    const read = { orderId: 'o-1', judgedOn: '2026-10-28', clientMinShelfLifeDays: null, consigneeResolution: 'no-gstin' as const, consigneeGstin: null, resolvedPartner: null, consignee: null, lines: [] };
+    stubFetch(200, { orderShelfLife: read });
+    expect(await fetchApiGetOrderShelfLife(SESSION.tenant.id, 'o-1')).toEqual(read);
+    expect(lastRequest!.method).toBe('GET');
+    expect(new URL(lastRequest!.url).pathname).toBe(`/api/v1/tenants/${SESSION.tenant.id}/outbound/orders/o-1/shelf-life`);
     clearSession();
   });
 

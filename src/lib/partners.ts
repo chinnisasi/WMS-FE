@@ -407,3 +407,70 @@ export function partnerReason(error: unknown, action: 'saved' | 'created' | 'lin
   }
   return UNREACHABLE_REASON;
 }
+
+// ── Story 4-3b — a consignee link's own minimum remaining shelf life ────────
+
+/** The backend's bounds (`CONSIGNEE_MIN_SHELF_LIFE_*`, the PUT DTO's `@Min`/`@Max`). */
+export const MIN_SHELF_LIFE_DAYS = 1;
+export const MAX_SHELF_LIFE_DAYS = 3650;
+export const MIN_SHELF_LIFE_PERCENT = 1;
+export const MAX_SHELF_LIFE_PERCENT = 100;
+
+/** The editor's two inputs → the PUT body. Blank = `null` (sent explicitly); whole numbers in range only. */
+export function parseLinkShelfLife(
+  daysText: string,
+  percentText: string,
+): { body: { minShelfLifeDays: number | null; minShelfLifePercent: number | null }; problem: null } | { body: null; problem: string } {
+  const whole = (text: string, label: string, min: number, max: number): { value: number | null; problem: string | null } => {
+    const trimmed = text.trim();
+    if (trimmed === '') return { value: null, problem: null };
+    if (!/^\d+$/.test(trimmed)) return { value: null, problem: `${label} must be a whole number from ${min} to ${max}, or blank for none.` };
+    const value = Number(trimmed);
+    if (value < min || value > max) return { value: null, problem: `${label} must be from ${min} to ${max}, or blank for none.` };
+    return { value, problem: null };
+  };
+  const days = whole(daysText, 'Days', MIN_SHELF_LIFE_DAYS, MAX_SHELF_LIFE_DAYS);
+  if (days.problem !== null) return { body: null, problem: days.problem };
+  const percent = whole(percentText, 'Percent', MIN_SHELF_LIFE_PERCENT, MAX_SHELF_LIFE_PERCENT);
+  if (percent.problem !== null) return { body: null, problem: percent.problem };
+  return { body: { minShelfLifeDays: days.value, minShelfLifePercent: percent.value }, problem: null };
+}
+
+/** A consignee link's rule as row text ("Shelf life ≥ 120 days and ≥ 70 % of total life"); null when none (or an older server). */
+export function linkShelfLifeSummary(link: Pick<PartnerLink, 'minShelfLifeDays' | 'minShelfLifePercent'>): string | null {
+  const parts: string[] = [];
+  if (link.minShelfLifeDays != null) parts.push(`≥ ${link.minShelfLifeDays} days`);
+  if (link.minShelfLifePercent != null) parts.push(`≥ ${link.minShelfLifePercent} % of total life`);
+  return parts.length === 0 ? null : `Shelf life ${parts.join(' and ')}`;
+}
+
+/** The editor's explanation (decision 9 as amended by A1 and A15). */
+export function linkShelfLifeCopy(clientLabel: string): string {
+  return (
+    `Orders to this consignee for ${clientLabel} are planned only from batches with at least this much life left; both must hold when both are set. ` +
+    'Applies to waves generated after saving. Percent uses each SKU’s total shelf life. ' +
+    'For a batch-tracked SKU, only dated batches that meet the rule ship to this consignee — undated or unattributed stock does not, and a SKU with no total shelf life cannot meet a percent rule. ' +
+    'Judged on the day the order is picked (one day’s grace). If the buyer counts on delivery, add the transit days.'
+  );
+}
+
+/** Decision 9 — a warning, never a block: a consignee with no GSTIN matches no order. */
+export function linkShelfLifeGstinWarning(partner: Pick<PartnerDto, 'gstin'>): string | null {
+  return partner.gstin === null ? 'No order can be matched to this consignee — it has no GSTIN.' : null;
+}
+
+/**
+ * A8 — the partner edit form's warning when the GSTIN changes on a partner
+ * whose consignee link carries a shelf-life rule (orders match by GSTIN).
+ */
+export function gstinChangeShelfLifeWarning(partner: Pick<PartnerDto, 'gstin' | 'links'> | null, nextGstinText: string): string | null {
+  if (partner === null) return null;
+  const hasRule = partner.links.some((link) => link.role === 'consignee' && linkShelfLifeSummary(link) !== null);
+  if (!hasRule) return null;
+  const next = nextGstinText.trim().toUpperCase();
+  const current = partner.gstin ?? '';
+  if (next === current) return null;
+  if (current === '') return 'Orders carrying this GSTIN will start matching this partner’s shelf-life rules.';
+  if (next === '') return 'No order will match this partner’s shelf-life rules without a GSTIN.';
+  return 'Orders are matched by GSTIN — orders carrying the old GSTIN lose this partner’s shelf-life rules.';
+}

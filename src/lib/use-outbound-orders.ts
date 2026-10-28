@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import {
+  ApiProblem,
   fetchApiGetOrder,
+  fetchApiGetOrderShelfLife,
   fetchApiGetRestockPlan,
   fetchApiListOrders,
   fetchApiListSkus,
@@ -11,7 +13,7 @@ import {
 import { CLIENT_PENDING, clientFilterForDrill, type ClientFilter } from '@/lib/active-client';
 import { useClientEpoch } from '@/lib/use-client-epoch';
 import { useKeyedDrill } from '@/lib/use-drill';
-import type { OrderDto, OrderEntryDto, RestockPlanResponse, SkuResponse } from '@/lib/api/generated';
+import type { OrderDto, OrderEntryDto, OrderShelfLifeDto, RestockPlanResponse, SkuResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { CATALOG_CHANGED_EVENT } from '@/lib/catalog';
 import type { OrdersDrill } from '@/lib/drill';
@@ -19,6 +21,7 @@ import { fetchOrdersDrill } from '@/lib/drill-fetch';
 import { fetchAllPages } from '@/lib/fetch-all-pages';
 import { detailReason, readReason } from '@/lib/outbound-orders';
 import { OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
+import { PARTNERS_CHANGED_EVENT } from '@/lib/partners';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
 import { useTenantWarehouses, type TenantWarehouses } from '@/lib/use-tenant-warehouses';
 
@@ -236,6 +239,64 @@ export function useOrderDetail(orderId: string | null): ResourceState<OrderDto> 
     result.tenantId !== tenantId ||
     result.orderId !== orderId;
 
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+}
+
+/**
+ * Story 4-3b — one order's customer shelf life (`GET …/orders/{id}/shelf-life`):
+ * the rules that apply and, per line, how much on-hand stock qualifies if it
+ * were waved today. The `useOrderDetail` shape; refetched on
+ * OUTBOUND_CHANGED_EVENT, PARTNERS_CHANGED_EVENT and CATALOG_CHANGED_EVENT.
+ */
+export function useOrderShelfLife(orderId: string | null): ResourceState<OrderShelfLifeDto | null> & Reloadable {
+  const tenantId = useSyncExternalStore(
+    subscribeSession,
+    () => readSession()?.tenant.id ?? null,
+    () => null,
+  );
+  const [revision, setRevision] = useState(0);
+  const [result, setResult] = useState<{
+    tenantId: string;
+    orderId: string;
+    state: ResourceState<OrderShelfLifeDto | null>;
+  } | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setRevision((r) => r + 1);
+    // A rule edit (partners) or a SKU's total shelf life (catalog) changes the answer too.
+    const events = [OUTBOUND_CHANGED_EVENT, PARTNERS_CHANGED_EVENT, CATALOG_CHANGED_EVENT];
+    for (const event of events) window.addEventListener(event, onChange);
+    return () => {
+      for (const event of events) window.removeEventListener(event, onChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tenantId === null || orderId === null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const read = await fetchApiGetOrderShelfLife(tenantId, orderId);
+        if (!cancelled) setResult({ tenantId, orderId, state: { state: 'ready', data: read } });
+      } catch (error) {
+        if (cancelled) return;
+        // A 404 is an older backend without the route (or an order the detail
+        // read already reports gone): the section simply has nothing to say.
+        if (error instanceof ApiProblem && error.status === 404) {
+          setResult({ tenantId, orderId, state: { state: 'ready', data: null } });
+          return;
+        }
+        setResult({ tenantId, orderId, state: { state: 'failed', reason: detailReason(error) } });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, orderId, revision]);
+
+  const reload = useCallback(() => setRevision((r) => r + 1), []);
+  const stale =
+    orderId === null || tenantId === null || result === null || result.tenantId !== tenantId || result.orderId !== orderId;
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
 }
 
