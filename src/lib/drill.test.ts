@@ -490,6 +490,11 @@ describe('document drills — "View ledger" links land on the ledger filtered to
 });
 
 describe('story 4-7a — the return disposition ledger types', () => {
+  test('return.reversed (story 4-7b) is filterable and labelled', () => {
+    expect(LEDGER_EVENT_TYPES).toContain('return.reversed');
+    expect(ledgerTypeLabel('return.reversed')).toBe('Return reversed');
+  });
+
   test('return.restocked and return.scrapped are filterable and labelled', () => {
     expect(LEDGER_EVENT_TYPES).toContain('return.restocked');
     expect(LEDGER_EVENT_TYPES).toContain('return.scrapped');

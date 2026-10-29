@@ -15,6 +15,7 @@ import {
   portalQuantity,
   portalReturnDecisionState,
   portalReturnOrder,
+  portalReturnOriginText,
   receivedOfLabel,
   type PortalReturnFilter,
 } from '@/lib/portal';
@@ -78,6 +79,12 @@ export function PortalReturns() {
         <div className="flex flex-col">
           <span className="font-mono">{row.code}</span>
           {row.externalReference !== null && <span className="text-xs text-(--muted-foreground)">{row.externalReference}</span>}
+          {/* Story 4-7b — an accepted unannounced return says so, with its parcel reference. */}
+          {portalReturnOriginText(row) !== null && (
+            <span className="text-xs text-(--muted-foreground)" data-testid="portal-return-origin">
+              {portalReturnOriginText(row)}
+            </span>
+          )}
         </div>
       ),
     },

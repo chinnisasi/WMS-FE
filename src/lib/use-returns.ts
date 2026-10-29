@@ -8,7 +8,7 @@ import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
 import { useClientEpoch } from '@/lib/use-client-epoch';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { readReason } from '@/lib/outbound-orders';
-import { RETURNS_CHANGED_EVENT, type ReturnStatus } from '@/lib/returns';
+import { RETURNS_CHANGED_EVENT, type ReturnOrigin, type ReturnStatus, type ReviewStatus } from '@/lib/returns';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
 
 export interface ReturnsPage {
@@ -29,7 +29,11 @@ export function useReturns(
   status: ReturnStatus | null,
   /** Story 1-5a — the screen's active-client filter (`useActiveClient().filter`); pending sends nothing. */
   clientFilter: ClientFilter,
+  /** Story 4-7b — the origin and review filters (SERVER-side); absent sends neither. */
+  review: { readonly origin?: ReturnOrigin; readonly reviewStatus?: ReviewStatus } = {},
 ): ResourceState<ReturnsPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+  const origin = review.origin ?? null;
+  const reviewStatus = review.reviewStatus ?? null;
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -41,7 +45,7 @@ export function useReturns(
   const scope =
     tenantId === null || warehouseId === null || pending
       ? null
-      : `${tenantId}|${warehouseId}|${status ?? 'all'}|${clientId ?? '*'}#${clientEpoch}`;
+      : `${tenantId}|${warehouseId}|${status ?? 'all'}|${origin ?? '*'}|${reviewStatus ?? '*'}|${clientId ?? '*'}#${clientEpoch}`;
   const [requested, setRequested] = useState<{ scope: string; cursor: string | null } | null>(null);
   const activeCursor = requested !== null && requested.scope === scope ? requested.cursor : null;
   const [revision, setRevision] = useState(0);
@@ -65,6 +69,8 @@ export function useReturns(
         const page = await fetchApiListReturns(tenantId, {
           warehouseId,
           ...(status === null ? {} : { status }),
+          ...(origin === null ? {} : { origin }),
+          ...(reviewStatus === null ? {} : { reviewStatus }),
           ...(clientId === null ? {} : { clientId }),
           ...(activeCursor === null ? {} : { cursor: activeCursor }),
         });
@@ -84,7 +90,7 @@ export function useReturns(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, warehouseId, status, clientId, scope, activeCursor, revision]);
+  }, [tenantId, warehouseId, status, origin, reviewStatus, clientId, scope, activeCursor, revision]);
 
   const onCursor = useCallback(
     (cursor: string | null) => {
@@ -102,6 +108,22 @@ export function useReturns(
   const stale = scope === null || result === null || result.scope !== scope || result.requested !== activeCursor;
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), onCursor, reload };
 }
+
+/**
+ * Story 4-7b — the Unannounced tab's list: the warehouse's unannounced
+ * returns still awaiting review, newest first (`origin=blind`,
+ * `reviewStatus=pending`), filtered by the screen's active client like the
+ * Awaiting disposition pill. The `useReturns` loader, so it refetches on
+ * `RETURNS_CHANGED_EVENT` (an accept or a reject).
+ */
+export function usePendingBlindReturns(
+  warehouseId: string | null,
+  clientFilter: ClientFilter,
+): ResourceState<ReturnsPage> & Reloadable & { readonly onCursor: (cursor: string | null) => void } {
+  return useReturns(warehouseId, null, clientFilter, PENDING_BLIND);
+}
+
+const PENDING_BLIND = { origin: 'blind', reviewStatus: 'pending' } as const;
 
 /**
  * Story 13-1 — one order's returnable read, fetched when the create form

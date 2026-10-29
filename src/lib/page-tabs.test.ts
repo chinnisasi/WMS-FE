@@ -136,7 +136,11 @@ describe('page-tabs — the pages', () => {
     expect(RETURNS_PAGE_TABS.tabs.map((t) => [t.id, t.label])).toEqual([
       ['authorizations', 'Authorizations'],
       ['awaiting', 'Awaiting disposition'],
+      // Story 4-7b — the unannounced parcels awaiting review.
+      ['unannounced', 'Unannounced'],
     ]);
+    expect(RETURNS_PAGE_TABS.href('unannounced')).toBe('/returns?tab=unannounced');
+    expect(RETURNS_PAGE_TABS.parse({ tab: 'unannounced' })).toBe('unannounced');
     expect(RETURNS_PAGE_TABS.href('authorizations')).toBe('/returns');
     expect(RETURNS_PAGE_TABS.href('awaiting')).toBe('/returns?tab=awaiting');
     expect(RETURNS_PAGE_TABS.parse({ tab: 'awaiting' })).toBe('awaiting');

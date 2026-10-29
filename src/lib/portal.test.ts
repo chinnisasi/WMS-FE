@@ -23,6 +23,8 @@ import {
   PORTAL_DISPOSITION_OUTCOME_LABEL,
   PORTAL_DISPOSITION_REASON_LABEL,
   PORTAL_RETURN_REASON_LABEL,
+  PORTAL_RETURN_ORIGIN_LABEL,
+  portalReturnOriginText,
   PORTAL_RETURN_STATUS_LABEL,
   portalDispositionSummary,
   portalDispositionText,
@@ -480,6 +482,16 @@ describe('story 4-7a — the portal returns', () => {
     expect(portalReturnFilterQuery('dispositioned')).toBe('dispositioned');
     expect(portalReturnOrder({ orderReference: null })).toBe('—');
     expect(portalReturnOrder({ orderReference: 'SHOP-#1' })).toBe('SHOP-#1');
+  });
+
+  // Story 4-7b — an accepted unannounced return in the portal.
+  test('an unannounced return names its origin and parcel; its reason is labelled; "No order" reads "—"', () => {
+    expect(PORTAL_RETURN_REASON_LABEL.unannounced).toBe('Arrived without a return request');
+    expect(Object.keys(PORTAL_RETURN_ORIGIN_LABEL).sort()).toEqual(['authorized', 'blind']);
+    expect(portalReturnOriginText({ origin: 'authorized', parcelReference: null })).toBeNull();
+    expect(portalReturnOriginText({ origin: 'blind', parcelReference: 'AWB123' })).toBe('Unannounced · parcel AWB123');
+    expect(portalReturnOriginText({ origin: 'blind', parcelReference: null })).toBe('Unannounced');
+    expect(portalReturnOrder({ orderReference: null })).toBe('—');
   });
 });
 

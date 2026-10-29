@@ -311,12 +311,14 @@ import {
   portalControllerStock,
   portalControllerWarehouses,
   putawayControllerListPutawayTasks,
+  returnsControllerAcceptBlind,
   returnsControllerAwaiting,
   returnsControllerCancel,
   returnsControllerCreate,
   returnsControllerDispose,
   returnsControllerGet,
   returnsControllerList,
+  returnsControllerRejectBlind,
   returnsControllerReturnable,
   dockControllerBook,
   dockControllerCancel,
@@ -571,6 +573,8 @@ import type {
   AmendAsnDto,
   CreateReturnAuthorizationDto,
   ReturnableOrderDto,
+  BlindAcceptResultDto,
+  RejectBlindReturnDto,
   ReturnAuthorizationDto,
   ReturnAuthorizationListResponse,
   AwaitingDispositionListResponse,
@@ -6327,6 +6331,10 @@ export async function fetchApiListReturns(
     orderId?: string;
     /** Story 1-5a — the client switcher: one client's rows (filtered server-side); sent only when set. */
     clientId?: string;
+    /** Story 4-7b — only authorized, or only blind (unannounced), RMAs; sent only when set. */
+    origin?: NonNullable<ReturnAuthorizationDto['origin']>;
+    /** Story 4-7b — only unannounced RMAs in one review state (the Unannounced tab reads `pending`); sent only when set. */
+    reviewStatus?: NonNullable<ReturnAuthorizationDto['reviewStatus']>;
     cursor?: string;
     signal?: AbortSignal;
   },
@@ -6339,6 +6347,8 @@ export async function fetchApiListReturns(
       orderId: options?.orderId,
       cursor: options?.cursor,
       clientId: options?.clientId,
+      origin: options?.origin,
+      reviewStatus: options?.reviewStatus,
     }),
     signal: options?.signal,
   });
@@ -6382,6 +6392,49 @@ export async function fetchApiCancelReturn(
   const { data, error } = await returnsControllerCancel({
     path: { tenantId, rmaId },
     body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+// ── Story 4-7b — blind (unannounced) returns: the review ─────────────────────
+
+/**
+ * Accepts a pending unannounced return (`returns.manage`): `orderId` links it
+ * to a dispatched order of its client and warehouse, `null` is the explicit
+ * "No order". Answers the RMA detail plus `unlinkedLines` (RMA line ids no
+ * order line could take). The key is per confirmation.
+ */
+export async function fetchApiAcceptBlindReturn(
+  tenantId: string,
+  rmaId: string,
+  orderId: string | null,
+  idempotencyKey: string,
+): Promise<BlindAcceptResultDto> {
+  const { data, error } = await returnsControllerAcceptBlind({
+    path: { tenantId, rmaId },
+    body: { orderId },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/**
+ * Rejects a pending unannounced return (`returns.manage`): every received
+ * unit is reversed out of the Returns bin. `other` needs a note (≤ 200);
+ * a blank note is absent. The key is per confirmation.
+ */
+export async function fetchApiRejectBlindReturn(
+  tenantId: string,
+  rmaId: string,
+  body: RejectBlindReturnDto,
+  idempotencyKey: string,
+): Promise<ReturnAuthorizationDto> {
+  const { data, error } = await returnsControllerRejectBlind({
+    path: { tenantId, rmaId },
+    body,
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) throw unwrapError(error, 400);

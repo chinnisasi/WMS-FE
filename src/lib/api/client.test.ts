@@ -65,6 +65,8 @@ import {
   fetchApiListGateIns,
   fetchApiUnloadGateIn,
   fetchApiCancelReturn,
+  fetchApiAcceptBlindReturn,
+  fetchApiRejectBlindReturn,
   fetchApiDisposeReturn,
   fetchApiListAwaitingReturns,
   fetchApiPortalReturn,
@@ -2723,6 +2725,49 @@ describe('return authorization wrappers (story 13-1)', () => {
     await expect(fetchApiCreateReturn(SESSION.tenant.id, { orderId: ORDER_ID, lines: [] }, KEY)).rejects.toMatchObject({
       code: 'exceeds-returnable',
       extensions: { orderLineId: LINE_ID, returnableQty: 1 },
+    });
+    clearSession();
+  });
+
+  // Story 4-7b — the Unannounced tab's filters and the review verbs.
+  test('the list sends origin and reviewStatus only when set', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await fetchApiListReturns(SESSION.tenant.id, { warehouseId: WAREHOUSE_ID, origin: 'blind', reviewStatus: 'pending' });
+    const params = new URL(lastRequest!.url).searchParams;
+    expect(params.get('origin')).toBe('blind');
+    expect(params.get('reviewStatus')).toBe('pending');
+    await fetchApiListReturns(SESSION.tenant.id, { warehouseId: WAREHOUSE_ID });
+    expect(new URL(lastRequest!.url).searchParams.has('origin')).toBe(false);
+    expect(new URL(lastRequest!.url).searchParams.has('reviewStatus')).toBe(false);
+    clearSession();
+  });
+
+  test('accept POSTs {orderId} (null is "No order") to the accept verb with the key', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { ...RMA, unlinkedLines: [] });
+    const res = await fetchApiAcceptBlindReturn(SESSION.tenant.id, RMA_ID, ORDER_ID, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/returns/${RMA_ID}/accept`);
+    expect(await lastRequest!.json()).toEqual({ orderId: ORDER_ID });
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(res.unlinkedLines).toEqual([]);
+    await fetchApiAcceptBlindReturn(SESSION.tenant.id, RMA_ID, null, KEY);
+    expect(await lastRequest!.json()).toEqual({ orderId: null });
+    clearSession();
+  });
+
+  test('reject POSTs the reason and note to the reject verb with the key; a 409 carries its members', async () => {
+    writeSession(SESSION);
+    stubFetch(200, RMA);
+    await fetchApiRejectBlindReturn(SESSION.tenant.id, RMA_ID, { reasonCode: 'other', note: 'wrong dock' }, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base}/returns/${RMA_ID}/reject`);
+    expect(await lastRequest!.json()).toEqual({ reasonCode: 'other', note: 'wrong dock' });
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    stubFetch(409, { type: 'x', title: 'Reject above the write-off threshold', status: 409, code: 'reject-above-threshold', detail: 'd', threshold: 10, totalQty: 12 });
+    await expect(fetchApiRejectBlindReturn(SESSION.tenant.id, RMA_ID, { reasonCode: 'mis-scanned' }, KEY)).rejects.toMatchObject({
+      code: 'reject-above-threshold',
+      extensions: { threshold: 10, totalQty: 12 },
     });
     clearSession();
   });

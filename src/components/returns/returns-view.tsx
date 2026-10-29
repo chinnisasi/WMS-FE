@@ -10,7 +10,14 @@ import { readSession, subscribeSession } from '@/lib/auth';
 import { quantityLabel } from '@/lib/format-quantity';
 import {
   AWAITING_DISPOSITION_BADGE,
+  AWAITING_REVIEW_BADGE,
   DISPOSITIONED_BADGE,
+  RETURN_ORIGIN_LABEL,
+  REVERSED_BADGE,
+  isBlindReturn,
+  lineDispositionState,
+  reviewBadge,
+  reviewSummaryText,
   MAX_RETURN_NOTE_LENGTH,
   RETURNS_DISPOSED_EVENT,
   RETURN_STATUS_LABEL,
@@ -35,7 +42,7 @@ import { useOutboundSkus } from '@/lib/use-outbound-orders';
 import { clientFilterKey } from '@/lib/active-client';
 import { useActiveClient } from '@/lib/use-active-client';
 import { RETURNS_PAGE_TABS, type ReturnsTab } from '@/lib/page-tabs';
-import { useAwaitingReturns, useReturns } from '@/lib/use-returns';
+import { useAwaitingReturns, usePendingBlindReturns, useReturns } from '@/lib/use-returns';
 import { useTenantWarehouses } from '@/lib/use-tenant-warehouses';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -58,6 +65,12 @@ import { WarehousesFailure, WarehousesRefreshNote } from '@/components/shared/wa
 import { StatusChip } from '@/components/shared/status-chip';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { AwaitingDispositions } from '@/components/returns/awaiting-dispositions';
+import { BlindReviewQueue } from '@/components/returns/blind-review';
+
+/** Story 4-7b — the tabs a role sees: Unannounced only with `returns.manage` (the review is theirs). */
+export function returnsVisibleTabs(canManage: boolean): readonly ReturnsTab[] {
+  return RETURNS_PAGE_TABS.tabs.map((t) => t.id).filter((id) => canManage || id !== 'unannounced');
+}
 
 const STATUS_OPTIONS: readonly ReturnStatus[] = ['open', 'partially_received', 'received', 'cancelled'];
 
@@ -74,6 +87,11 @@ const STATUS_OPTIONS: readonly ReturnStatus[] = ['open', 'partially_received', '
  * units still in the Returns bin, with a count of the work waiting). A
  * disposition bumps the page's disposition epoch, which joins an expanded
  * RMA detail's refetch deps (A7).
+ *
+ * Story 4-7b — a third tab, Unannounced (`?tab=unannounced`, `returns.manage`
+ * only, with a count of the parcels awaiting review): the review cards of
+ * unannounced parcels received on the handheld with no RMA — Accept (link an
+ * order, or none) or Reject (reverse the booking).
  */
 export function ReturnsView({ initialTab = null }: { initialTab?: ReturnsTab | null } = {}) {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
@@ -148,6 +166,7 @@ function ReturnsSessioned({ initialTab }: { initialTab: ReturnsTab | null }) {
     );
   }
   const warehouse = items.find((w) => w.id === warehouseId);
+  const canManage = roleHasCapability(role, 'returns.manage');
   return (
     <div className="flex flex-col gap-4">
       {warehouses.data.refreshFailed !== null && (
@@ -176,16 +195,39 @@ function ReturnsSessioned({ initialTab }: { initialTab: ReturnsTab | null }) {
         active={tab}
         drilled={false}
         onSelect={selectTab}
-        badge={(id) => (id === 'awaiting' ? <AwaitingCountPill key={warehouseId} warehouseId={warehouseId} /> : null)}
+        visibleTabs={returnsVisibleTabs(canManage)}
+        badge={(id) =>
+          id === 'awaiting' ? (
+            <AwaitingCountPill key={warehouseId} warehouseId={warehouseId} />
+          ) : id === 'unannounced' ? (
+            <UnannouncedCountPill key={warehouseId} warehouseId={warehouseId} />
+          ) : null
+        }
       />
       <PageTabPanel def={RETURNS_PAGE_TABS} active={tab}>
-        {tab === 'awaiting' ? (
+        {tab === 'unannounced' ? (
+          canManage ? (
+            <BlindReviewQueue
+              key={warehouseId}
+              tenantId={tenantId}
+              warehouseId={warehouseId}
+              warehouseLabel={warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`}
+            />
+          ) : (
+            // A deep link to ?tab=unannounced without the capability: a sentence, never the cards.
+            <Section title="Unannounced">
+              <div className="text-(--muted-foreground)" data-testid="unannounced-denied">
+                Your role cannot review unannounced returns.
+              </div>
+            </Section>
+          )
+        ) : tab === 'awaiting' ? (
           <AwaitingDispositions
             key={warehouseId}
             tenantId={tenantId}
             warehouseId={warehouseId}
             warehouseLabel={warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`}
-            canManage={roleHasCapability(role, 'returns.manage')}
+            canManage={canManage}
           />
         ) : (
           <ReturnsList
@@ -193,7 +235,7 @@ function ReturnsSessioned({ initialTab }: { initialTab: ReturnsTab | null }) {
             tenantId={tenantId}
             warehouseId={warehouseId}
             warehouseLabel={warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`}
-            canManage={roleHasCapability(role, 'returns.manage')}
+            canManage={canManage}
             dispositionEpoch={dispositionEpoch}
           />
         )}
@@ -218,6 +260,26 @@ function AwaitingCountPill({ warehouseId }: { warehouseId: string }) {
   return (
     <span
       aria-label={`${count} awaiting`}
+      className="ml-1.5 rounded-full border border-(--warning) bg-(--warning)/10 px-1.5 text-[10px] font-medium text-(--foreground)"
+    >
+      {count}
+    </span>
+  );
+}
+
+/**
+ * Story 4-7b — the Unannounced tab's count: the parcels awaiting review, from
+ * one page — "N+" when more lie beyond it. Warehouse-scoped and client-filtered
+ * like the Awaiting pill; none while loading, failed or empty (never a wrong 0).
+ */
+function UnannouncedCountPill({ warehouseId }: { warehouseId: string }) {
+  const active = useActiveClient();
+  const pending = usePendingBlindReturns(warehouseId, active.filter);
+  if (pending.state !== 'ready' || pending.data.items.length === 0) return null;
+  const count = `${pending.data.items.length}${pending.data.nextCursor === null ? '' : '+'}`;
+  return (
+    <span
+      aria-label={`${count} awaiting review`}
       className="ml-1.5 rounded-full border border-(--warning) bg-(--warning)/10 px-1.5 text-[10px] font-medium text-(--foreground)"
     >
       {count}
@@ -324,9 +386,16 @@ export function ReturnsList({
     {
       key: 'status',
       header: 'Status',
-      render: (rma) => (
-        <StatusChip tone="neutral">{RETURN_STATUS_LABEL[rma.status]}</StatusChip>
-      ),
+      render: (rma) => {
+        // Story 4-7b (A25) — an unannounced return carries its review state as the badge.
+        const review = reviewBadge(rma);
+        return (
+          <div className="flex flex-wrap items-center gap-1">
+            <StatusChip tone="neutral">{RETURN_STATUS_LABEL[rma.status]}</StatusChip>
+            {review !== null && <StatusChip tone={review.tone}>{review.word}</StatusChip>}
+          </div>
+        );
+      },
     },
     { key: 'lines', header: 'Lines', numeric: true, render: (rma) => returnLinesSummary(rma) },
     { key: 'external', header: 'External ref', render: (rma) => rma.externalReference ?? '—' },
@@ -480,6 +549,13 @@ function ReturnDetail({
   }, [tenantId, rma.id, rma.status, receivedTotal, dispositionEpoch]);
   return (
     <div className="flex flex-col gap-1 text-xs">
+      {isBlindReturn(rma) && (
+        // Story 4-7b — the origin badge and where the review stands.
+        <div className="flex flex-wrap items-center gap-2" data-testid="return-review-block">
+          <StatusChip tone="info">{RETURN_ORIGIN_LABEL.blind}</StatusChip>
+          <span className="text-(--muted-foreground)">{reviewSummaryText(rma)}</span>
+        </div>
+      )}
       {rma.status === 'cancelled' && rma.cancelReason !== null && (
         <div className="text-(--muted-foreground)">Cancelled — {rma.cancelReason}</div>
       )}
@@ -488,6 +564,7 @@ function ReturnDetail({
           const sku = skus?.[line.skuId];
           const uom = sku === undefined ? null : { uom: sku.uom, uomPrecision: sku.uomPrecision };
           const split = receipts.state === 'ready' ? lineDispositionSplit(line.id, receipts.receipts) : null;
+          const state = receipts.state === 'ready' ? lineDispositionState(line.id, receipts.receipts) : 'none';
           const splitText = split === null ? null : lineDispositionText(split, uom);
           return (
             <li key={line.id} className="flex flex-col gap-0.5">
@@ -500,12 +577,10 @@ function ReturnDetail({
                 <span className="data text-(--muted-foreground)">
                   {receivedOfAuthorized(line, sku === undefined ? null : { uom: sku.uom, uomPrecision: sku.uomPrecision })}
                 </span>
-                {split !== null &&
-                  (split.undecided ? (
-                    <StatusChip tone="warning">{AWAITING_DISPOSITION_BADGE}</StatusChip>
-                  ) : (
-                    <StatusChip tone="success">{DISPOSITIONED_BADGE}</StatusChip>
-                  ))}
+                {state === 'pending-review' && <StatusChip tone="warning">{AWAITING_REVIEW_BADGE}</StatusChip>}
+                {state === 'reversed' && <StatusChip tone="neutral">{REVERSED_BADGE}</StatusChip>}
+                {state === 'awaiting' && <StatusChip tone="warning">{AWAITING_DISPOSITION_BADGE}</StatusChip>}
+                {state === 'dispositioned' && <StatusChip tone="success">{DISPOSITIONED_BADGE}</StatusChip>}
                 {splitText !== null && <span className="data text-(--muted-foreground)">{splitText}</span>}
               </div>
               {line.serials.length > 0 && (
