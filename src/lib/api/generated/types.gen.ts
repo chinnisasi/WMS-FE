@@ -1590,7 +1590,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind';
     /**
      * The replay fate the server refused with
      */
@@ -1666,7 +1666,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -12848,9 +12848,20 @@ export type PortalReturnRowDto = {
      */
     code: string;
     status: 'open' | 'partially_received' | 'received' | 'cancelled';
-    orderId: string;
+    /**
+     * Story 4-7b — null on an accepted unannounced return linked to no order
+     */
+    orderId: string | null;
     orderReference: string | null;
     externalReference: string | null;
+    /**
+     * Story 4-7b — authorized, or blind (an unannounced parcel — listed once accepted)
+     */
+    origin: 'authorized' | 'blind';
+    /**
+     * Story 4-7b — an unannounced return's scanned AWB or order number
+     */
+    parcelReference: string | null;
     /**
      * ISO-8601 UTC
      */
@@ -12880,7 +12891,7 @@ export type PortalReturnLineDto = {
     /**
      * Why the customer returned it
      */
-    returnReasonCode: 'damaged' | 'defective' | 'wrong-item' | 'not-as-described' | 'changed-mind' | 'other';
+    returnReasonCode: 'damaged' | 'defective' | 'wrong-item' | 'not-as-described' | 'changed-mind' | 'other' | 'unannounced';
     restockedQty: number;
     onHoldQty: number;
     failedInspectionQty: number;
@@ -12909,9 +12920,20 @@ export type PortalReturnDetailResponse = {
      */
     code: string;
     status: 'open' | 'partially_received' | 'received' | 'cancelled';
-    orderId: string;
+    /**
+     * Story 4-7b — null on an accepted unannounced return linked to no order
+     */
+    orderId: string | null;
     orderReference: string | null;
     externalReference: string | null;
+    /**
+     * Story 4-7b — authorized, or blind (an unannounced parcel — listed once accepted)
+     */
+    origin: 'authorized' | 'blind';
+    /**
+     * Story 4-7b — an unannounced return's scanned AWB or order number
+     */
+    parcelReference: string | null;
     /**
      * ISO-8601 UTC
      */
@@ -14150,7 +14172,10 @@ export type ReturnSerialDto = {
 
 export type ReturnAuthorizationLineDto = {
     id: string;
-    orderLineId: string;
+    /**
+     * The order line returned — story 4-7b: null on an unannounced line no accept has linked
+     */
+    orderLineId: string | null;
     skuId: string;
     /**
      * Units authorized for return, in base UoM
@@ -14160,7 +14185,7 @@ export type ReturnAuthorizationLineDto = {
      * Units received against this line so far, in base UoM (story 13-2 records receipts; 0 until then)
      */
     receivedQty: number;
-    reasonCode: 'damaged' | 'defective' | 'wrong-item' | 'not-as-described' | 'changed-mind' | 'other';
+    reasonCode: 'damaged' | 'defective' | 'wrong-item' | 'not-as-described' | 'changed-mind' | 'other' | 'unannounced';
     /**
      * The reason note; null when none was given
      */
@@ -14210,6 +14235,14 @@ export type ReturnReceiptLineViewDto = {
      * Story 4-7a — units that failed a return hold's inspection (now in DAMAGED), base UoM
      */
     failedInspectionQty: number;
+    /**
+     * Story 4-7b — an unannounced return's line: units awaiting review (qty while pending, else 0); absent on an authorized return
+     */
+    pendingReviewQty?: number;
+    /**
+     * Story 4-7b — an unannounced return's line: units reversed at review (qty once rejected, else 0); absent on an authorized return
+     */
+    reversedQty?: number;
 };
 
 export type ReturnReceiptViewDto = {
@@ -14229,6 +14262,18 @@ export type ReturnReceiptViewDto = {
     lines: Array<ReturnReceiptLineViewDto>;
 };
 
+export type RmaRefDto = {
+    id: string;
+    code: string;
+    status: 'open' | 'partially_received' | 'received' | 'cancelled';
+};
+
+export type SameParcelRmaDto = {
+    id: string;
+    code: string;
+    reviewStatus: 'pending' | 'accepted' | 'rejected';
+};
+
 export type ReturnAuthorizationDto = {
     id: string;
     /**
@@ -14236,7 +14281,10 @@ export type ReturnAuthorizationDto = {
      */
     code: string;
     status: 'open' | 'partially_received' | 'received' | 'cancelled';
-    orderId: string;
+    /**
+     * The order returned — story 4-7b: null on an unannounced return not linked to an order
+     */
+    orderId: string | null;
     /**
      * The order's reference at authorization — story 4-1b: its client order number, else its channel reference (external event id); null when it has neither. An RMA created before 4-1b holds the channel reference only
      */
@@ -14254,9 +14302,9 @@ export type ReturnAuthorizationDto = {
      */
     externalReference: string | null;
     /**
-     * When the order was dispatched (ISO-8601 UTC) — recorded at authorization
+     * When the order was dispatched (ISO-8601 UTC) — recorded at authorization; story 4-7b: null exactly when orderId is
      */
-    orderDispatchedAt: string;
+    orderDispatchedAt: string | null;
     /**
      * ISO-8601 UTC creation time (the keyset field)
      */
@@ -14285,6 +14333,167 @@ export type ReturnAuthorizationDto = {
      * Story 13-2 — the receipts against this authorization, oldest first. Present ONLY on GET /returns/{rmaId}; absent on the list and on the create/cancel responses
      */
     receipts?: Array<ReturnReceiptViewDto>;
+    /**
+     * Story 4-7b — authorized (13-1) or blind (an unannounced parcel). Always present on the list and detail reads; absent on a pre-4-7b create/cancel response
+     */
+    origin?: 'authorized' | 'blind';
+    /**
+     * Story 4-7b — a blind return's review; null on an authorized one
+     */
+    reviewStatus?: 'pending' | 'accepted' | 'rejected' | null;
+    /**
+     * Story 4-7b — the scanned AWB or order number of a blind return
+     */
+    parcelReference?: string | null;
+    /**
+     * Story 4-7b — the dispatched order the parcel reference matched (a suggestion only)
+     */
+    suggestedOrderId?: string | null;
+    /**
+     * Story 4-7b — how the reference matched: the carrier AWB or the order reference
+     */
+    matchKind?: 'awb' | 'order-reference' | null;
+    /**
+     * Story 4-7b — the operator chose the client at a barcode several clients share; null on an authorized return
+     */
+    clientPrompted?: boolean | null;
+    /**
+     * Story 4-7b — when the review was decided (ISO-8601 UTC)
+     */
+    reviewedAt?: string | null;
+    /**
+     * Story 4-7b — who decided the review
+     */
+    reviewedBy?: string | null;
+    /**
+     * Story 4-7b — why a blind return was rejected
+     */
+    reviewReasonCode?: 'mis-scanned' | 'not-our-goods' | 'duplicate' | 'other' | null;
+    /**
+     * Story 4-7b — the reject's note
+     */
+    reviewNote?: string | null;
+    /**
+     * Story 4-7b — detail only: the suggested order's open or partially received return authorizations (the card's flag)
+     */
+    openRmasForSuggestedOrder?: Array<RmaRefDto>;
+    /**
+     * Story 4-7b — detail only: other unannounced returns received with the same parcel reference, any review state
+     */
+    sameParcelRmas?: Array<SameParcelRmaDto>;
+};
+
+export type BlindReceiptEntryDto = {
+    /**
+     * The SKU scanned — the parcel's client's (sku-not-of-client otherwise)
+     */
+    skuId: string;
+    /**
+     * Units received, base UoM. A quantity in the SKU's base UoM, at the decimal precision that unit declares (each = 0 places, kg = 3). A value finer than its unit allows is refused, naming the unit and its precision — never silently rounded. A serial entry is exactly 1 unit; a catch-weight entry is exactly 1 case.
+     */
+    qty: number;
+    /**
+     * The inspection grade (13-2)
+     */
+    condition: 'resaleable' | 'opened' | 'damaged' | 'missing-parts';
+    /**
+     * An inspection note — trimmed, blank means absent, at most 200 characters
+     */
+    note?: string | null;
+    /**
+     * Batch-tracked SKUs: an existing batch of the SKU (never created)
+     */
+    batchCode?: string | null;
+    /**
+     * Serial-tracked SKUs: an existing serial of the SKU, out of stock (qty 1)
+     */
+    serialNumber?: string | null;
+    /**
+     * Catch-weight SKUs: the case's weight in whole grams (qty 1), at most 1000000
+     */
+    weightGrams?: number | null;
+};
+
+export type ReceiveBlindReturnDto = {
+    /**
+     * The warehouse receiving the parcel
+     */
+    warehouseId: string;
+    /**
+     * The parcel's client — fixed on the handheld by the first unit's SKU
+     */
+    clientId: string;
+    /**
+     * The operator chose the client at a barcode several clients share (A24)
+     */
+    clientPrompted: boolean;
+    /**
+     * The scanned AWB or order number — trimmed, blank means skipped, at most 64 characters
+     */
+    parcelReference?: string | null;
+    /**
+     * Device time (ISO-8601 UTC, Z-suffixed) — the ledger events' business time
+     */
+    occurredAt: string;
+    /**
+     * 1–150 entries — one parcel is one op; the device receives the rest as another parcel
+     */
+    entries: Array<BlindReceiptEntryDto>;
+};
+
+export type BlindEntryAppliedDto = {
+    /**
+     * The entry's place in the op (0-based)
+     */
+    entryIndex: number;
+    /**
+     * Units booked into RETURNS, base UoM
+     */
+    qty: number;
+};
+
+export type BlindEntryRefusedDto = {
+    /**
+     * The entry's place in the op (0-based)
+     */
+    entryIndex: number;
+    /**
+     * Why it was not booked — the entry is in the review queue (Discard only)
+     */
+    reason: 'not-in-catalog' | 'sku-not-of-client' | 'kit-cannot-hold-stock' | 'qty-precision' | 'missing-capture' | 'unexpected-capture' | 'weight-out-of-range' | 'serial-unknown' | 'serial-blocked' | 'serial-in-stock' | 'serial-duplicate' | 'batch-unknown';
+};
+
+export type BlindReceiptResultDto = {
+    /**
+     * The blind return authorization created; null when every entry was refused
+     */
+    rmaId: string | null;
+    /**
+     * RMA-0001; null when every entry was refused
+     */
+    rmaCode: string | null;
+    /**
+     * The receipt; null when every entry was refused
+     */
+    returnReceiptId: string | null;
+    /**
+     * RRN-0001; null when every entry was refused
+     */
+    code: string | null;
+    /**
+     * The one dispatched order the parcel reference matched; null when none or several did
+     */
+    suggestedOrderId: string | null;
+    matchKind: 'awb' | 'order-reference' | null;
+    applied: Array<BlindEntryAppliedDto>;
+    /**
+     * The refused entries — all of them sit in ONE review-queue row (Discard only)
+     */
+    refused: Array<BlindEntryRefusedDto>;
+    /**
+     * The review row's op id when entries were refused (derived from the key); null otherwise
+     */
+    reviewOpId: string | null;
 };
 
 export type ReturnReceiptEntryDto = {
@@ -14601,6 +14810,137 @@ export type CancelReturnAuthorizationDto = {
      * Why — required, 1–500 characters after trimming
      */
     reason: string;
+};
+
+export type AcceptBlindReturnDto = {
+    /**
+     * The dispatched order to link — the parcel's client and warehouse; null is the explicit "No order"
+     */
+    orderId: string | null;
+};
+
+export type BlindAcceptResultDto = {
+    id: string;
+    /**
+     * The server-allocated code, `RMA-0001`, unique per tenant
+     */
+    code: string;
+    status: 'open' | 'partially_received' | 'received' | 'cancelled';
+    /**
+     * The order returned — story 4-7b: null on an unannounced return not linked to an order
+     */
+    orderId: string | null;
+    /**
+     * The order's reference at authorization — story 4-1b: its client order number, else its channel reference (external event id); null when it has neither. An RMA created before 4-1b holds the channel reference only
+     */
+    orderReference: string | null;
+    /**
+     * The order's warehouse — where the return will be received
+     */
+    warehouseId: string;
+    /**
+     * The order's client
+     */
+    clientId: string;
+    /**
+     * A channel's or customer's RMA number; null when none was given
+     */
+    externalReference: string | null;
+    /**
+     * When the order was dispatched (ISO-8601 UTC) — recorded at authorization; story 4-7b: null exactly when orderId is
+     */
+    orderDispatchedAt: string | null;
+    /**
+     * ISO-8601 UTC creation time (the keyset field)
+     */
+    createdAt: string;
+    /**
+     * Who authorized it
+     */
+    createdBy: string;
+    /**
+     * When it was cancelled (ISO-8601 UTC); null unless cancelled
+     */
+    cancelledAt: string | null;
+    /**
+     * Who cancelled it; null unless cancelled
+     */
+    cancelledBy: string | null;
+    /**
+     * Why it was cancelled; null unless cancelled
+     */
+    cancelReason: string | null;
+    /**
+     * The authorized lines, in the order they were named
+     */
+    lines: Array<ReturnAuthorizationLineDto>;
+    /**
+     * Story 13-2 — the receipts against this authorization, oldest first. Present ONLY on GET /returns/{rmaId}; absent on the list and on the create/cancel responses
+     */
+    receipts?: Array<ReturnReceiptViewDto>;
+    /**
+     * Story 4-7b — authorized (13-1) or blind (an unannounced parcel). Always present on the list and detail reads; absent on a pre-4-7b create/cancel response
+     */
+    origin?: 'authorized' | 'blind';
+    /**
+     * Story 4-7b — a blind return's review; null on an authorized one
+     */
+    reviewStatus?: 'pending' | 'accepted' | 'rejected' | null;
+    /**
+     * Story 4-7b — the scanned AWB or order number of a blind return
+     */
+    parcelReference?: string | null;
+    /**
+     * Story 4-7b — the dispatched order the parcel reference matched (a suggestion only)
+     */
+    suggestedOrderId?: string | null;
+    /**
+     * Story 4-7b — how the reference matched: the carrier AWB or the order reference
+     */
+    matchKind?: 'awb' | 'order-reference' | null;
+    /**
+     * Story 4-7b — the operator chose the client at a barcode several clients share; null on an authorized return
+     */
+    clientPrompted?: boolean | null;
+    /**
+     * Story 4-7b — when the review was decided (ISO-8601 UTC)
+     */
+    reviewedAt?: string | null;
+    /**
+     * Story 4-7b — who decided the review
+     */
+    reviewedBy?: string | null;
+    /**
+     * Story 4-7b — why a blind return was rejected
+     */
+    reviewReasonCode?: 'mis-scanned' | 'not-our-goods' | 'duplicate' | 'other' | null;
+    /**
+     * Story 4-7b — the reject's note
+     */
+    reviewNote?: string | null;
+    /**
+     * Story 4-7b — detail only: the suggested order's open or partially received return authorizations (the card's flag)
+     */
+    openRmasForSuggestedOrder?: Array<RmaRefDto>;
+    /**
+     * Story 4-7b — detail only: other unannounced returns received with the same parcel reference, any review state
+     */
+    sameParcelRmas?: Array<SameParcelRmaDto>;
+    /**
+     * The RMA line ids left unlinked (every line under "No order")
+     */
+    unlinkedLines: Array<string>;
+};
+
+export type RejectBlindReturnDto = {
+    /**
+     * `other` requires a note
+     */
+    reasonCode: 'mis-scanned' | 'not-our-goods' | 'duplicate' | 'other';
+    /**
+     * Required for "other"; trimmed, blank means absent, at most 200 characters
+     */
+    note?: string | null;
 };
 
 export type CreateVendorReturnLineDto = {
@@ -18616,7 +18956,7 @@ export type InventoryControllerListEventsData = {
         /**
          * Story 9-1 — only events of these types (repeatable: `?type=a&type=b`; one value is a one-element list). An unknown type is refused (400 validation-failed naming the known set)
          */
-        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pick.restocked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged' | 'qc.failed' | 'stock.moved' | 'return.restocked' | 'return.scrapped' | 'rtv.dispatched'>;
+        type?: Array<'stock.adjusted' | 'grn.received' | 'qc.held' | 'qc.released' | 'putaway.placed' | 'bin.merged' | 'pick.picked' | 'pick.restocked' | 'pack.packed' | 'dispatch.dispatched' | 'excursion.recorded' | 'transfer.outbound' | 'transfer.inbound' | 'return.received' | 'grn.damaged' | 'qc.failed' | 'stock.moved' | 'return.restocked' | 'return.scrapped' | 'return.reversed' | 'rtv.dispatched'>;
         /**
          * Story 9-1 — only events RECORDED at or after this instant (`recorded_at` — the server stamp, never the device `occurred_at`). ISO-8601 with a zone designator
          */
@@ -33303,6 +33643,14 @@ export type ReturnsControllerListData = {
          */
         orderId?: string;
         /**
+         * Story 4-7b — only authorized, or only blind (unannounced), return authorizations
+         */
+        origin?: 'authorized' | 'blind';
+        /**
+         * Story 4-7b — only unannounced returns in one review state (the Unannounced tab reads pending)
+         */
+        reviewStatus?: 'pending' | 'accepted' | 'rejected';
+        /**
          * Opaque keyset cursor from the previous page
          */
         cursor?: string;
@@ -33389,6 +33737,62 @@ export type ReturnsControllerCreateResponses = {
 };
 
 export type ReturnsControllerCreateResponse = ReturnsControllerCreateResponses[keyof ReturnsControllerCreateResponses];
+
+export type ReturnsControllerReceiveBlindData = {
+    body: ReceiveBlindReturnDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the device token)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/returns/blind-receipts';
+};
+
+export type ReturnsControllerReceiveBlindErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, or an invalid body — no entries or over 150, a malformed id, a non-boolean clientPrompted, a parcel reference over 64 characters, a non-positive qty, an unknown condition, a note over 200 characters, a serial or weight entry whose qty is not 1, both a serial and a weight, or a non-UTC occurredAt (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing/invalid device token, or a bare device credential without badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown or revoked device (device-revoked), or the operator is not a floor role (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The warehouse does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A user zone or bin named RETURNS blocks the system returns bin (returns-bin-conflict), or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReturnsControllerReceiveBlindError = ReturnsControllerReceiveBlindErrors[keyof ReturnsControllerReceiveBlindErrors];
+
+export type ReturnsControllerReceiveBlindResponses = {
+    /**
+     * Recorded: the blind RMA and its receipt (null when every entry was refused), the suggested order, and per entry applied or refused with its reason (the idempotency snapshot)
+     */
+    201: BlindReceiptResultDto;
+};
+
+export type ReturnsControllerReceiveBlindResponse = ReturnsControllerReceiveBlindResponses[keyof ReturnsControllerReceiveBlindResponses];
 
 export type ReturnsControllerReceiveData = {
     body: ReceiveReturnDto;
@@ -33747,6 +34151,120 @@ export type ReturnsControllerCancelResponses = {
 };
 
 export type ReturnsControllerCancelResponse = ReturnsControllerCancelResponses[keyof ReturnsControllerCancelResponses];
+
+export type ReturnsControllerAcceptBlindData = {
+    body: AcceptBlindReturnDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rmaId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/returns/{rmaId}/accept';
+};
+
+export type ReturnsControllerAcceptBlindErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed rmaId or orderId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks returns.manage (role-denied), or a client-portal session (role-denied — operators only)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The return authorization or the order does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The return was authorized, not received unannounced — member origin (rma-not-blind); its review is already decided — member reviewStatus (review-not-pending); the order is another client's (order-client-mismatch), another warehouse's (document-warehouse-mismatch) or not dispatched — member orderStatus (order-not-dispatched); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReturnsControllerAcceptBlindError = ReturnsControllerAcceptBlindErrors[keyof ReturnsControllerAcceptBlindErrors];
+
+export type ReturnsControllerAcceptBlindResponses = {
+    /**
+     * The accepted return and its unlinked lines (the idempotency snapshot)
+     */
+    200: BlindAcceptResultDto;
+};
+
+export type ReturnsControllerAcceptBlindResponse = ReturnsControllerAcceptBlindResponses[keyof ReturnsControllerAcceptBlindResponses];
+
+export type ReturnsControllerRejectBlindData = {
+    body: RejectBlindReturnDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        rmaId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/returns/{rmaId}/reject';
+};
+
+export type ReturnsControllerRejectBlindErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, an unknown reasonCode, "other" without a note, or a note over 200 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), the caller lacks returns.manage (role-denied), or a client-portal session (role-denied — operators only)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * The return authorization does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The return was authorized, not received unannounced — member origin (rma-not-blind); its review is already decided — member reviewStatus (review-not-pending); its units exceed the tenant's write-off threshold — members threshold, totalQty (reject-above-threshold); RETURNS is under a reconcile quarantine (disposition-scope-quarantined); or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ReturnsControllerRejectBlindError = ReturnsControllerRejectBlindErrors[keyof ReturnsControllerRejectBlindErrors];
+
+export type ReturnsControllerRejectBlindResponses = {
+    /**
+     * The rejected return (the idempotency snapshot)
+     */
+    200: ReturnAuthorizationDto;
+};
+
+export type ReturnsControllerRejectBlindResponse = ReturnsControllerRejectBlindResponses[keyof ReturnsControllerRejectBlindResponses];
 
 export type VendorReturnsControllerListData = {
     body?: never;
