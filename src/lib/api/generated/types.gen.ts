@@ -3563,6 +3563,21 @@ export type PackDimensionsDto = {
     heightMm: number;
 };
 
+export type PackCartonDto = {
+    /**
+     * What the operator scanned into THIS carton (per SKU, summed as the top-level scan is). At least one line.
+     */
+    scanned: Array<PackScanLineDto>;
+    /**
+     * Optional carton weight in grams.
+     */
+    weightGrams?: number | null;
+    /**
+     * Optional carton dimensions in millimetres — all three sides together, or the object omitted.
+     */
+    dimensionsMm?: PackDimensionsDto | null;
+};
+
 export type PackOrderDto = {
     /**
      * What the operator scanned into the parcel. May be empty only when the order picked nothing at all (every stop reported an empty bin).
@@ -3576,6 +3591,10 @@ export type PackOrderDto = {
      * Optional parcel dimensions in millimetres — all three sides together, or the object omitted.
      */
     dimensionsMm?: PackDimensionsDto | null;
+    /**
+     * Story 4-5a — optional: the cartons the parcel was packed into, in order (carton 1 first). Per SKU the cartons must add up to `scanned` exactly, a catch-weight case sits in exactly one carton, and the top-level weightGrams and dimensionsMm must then be absent (weigh each carton). Omitted, the pack is one carton holding the whole scan.
+     */
+    cartons?: Array<PackCartonDto>;
 };
 
 export type PackedLineDto = {
@@ -3599,6 +3618,30 @@ export type PackedLineDto = {
      * The pack.packed event this line’s verification was journalled as
      */
     ledgerEventId: string;
+};
+
+export type PackedCartonLineDto = {
+    skuId: string;
+    skuCode: string;
+    /**
+     * Units of this SKU in the carton, in base UoM
+     */
+    qty: number;
+};
+
+export type PackedCartonDto = {
+    seq: number;
+    /**
+     * The carton code printed on its label: the parcel tag + ".{pack}.{carton}"
+     */
+    code: string;
+    weightGrams: number | null;
+    dimensionsMm: PackDimensionsDto | null;
+    /**
+     * Units in the carton, in base UoM (across SKUs — a count, not a measure)
+     */
+    unitCount: number;
+    lines: Array<PackedCartonLineDto>;
 };
 
 export type PackDto = {
@@ -3653,10 +3696,133 @@ export type PackDto = {
      */
     totalUnits: number;
     lines: Array<PackedLineDto>;
+    /**
+     * Story 4-5a — the pack number (1 at pack). Absent only on a replayed response stored before 4-5a — read absent as 1.
+     */
+    packSeq?: number;
+    /**
+     * Story 4-5a — the cartons the parcel was packed into. Absent only on a replayed response stored before 4-5a — read absent as one carton.
+     */
+    cartons?: Array<PackedCartonDto>;
 };
 
 export type PackResponse = {
     pack: PackDto;
+};
+
+export type RecartonOrderDto = {
+    /**
+     * The new split, carton 1 first: per SKU it must hold exactly what was packed (and every catch-weight case, each in one carton).
+     */
+    cartons: Array<PackCartonDto>;
+    /**
+     * Why the order is re-packed (1–200 characters)
+     */
+    reason: string;
+};
+
+export type UomTotalDto = {
+    uom: string;
+    /**
+     * Base units of this UoM
+     */
+    qty: number;
+};
+
+export type PackCartonLineViewDto = {
+    skuId: string;
+    skuCode: string;
+    skuName: string;
+    /**
+     * The SKU’s base UoM
+     */
+    uom: string;
+    /**
+     * Units of this SKU in the carton, in base UoM
+     */
+    qty: number;
+    /**
+     * Catch weight — the cases in this carton, sorted; null otherwise
+     */
+    handlingUnitIds: Array<string> | null;
+};
+
+export type PackCartonViewDto = {
+    seq: number;
+    /**
+     * The carton code on its label: the parcel tag + ".{pack}.{carton}"
+     */
+    code: string;
+    weightGrams: number | null;
+    dimensionsMm: PackDimensionsDto | null;
+    /**
+     * SKUs in the carton
+     */
+    lineCount: number;
+    /**
+     * Per-UoM totals — never a cross-UoM unit total
+     */
+    totals: Array<UomTotalDto>;
+    lines: Array<PackCartonLineViewDto>;
+};
+
+export type PackViewDto = {
+    packSeq: number;
+    status: 'live' | 'superseded' | 'cancelled';
+    /**
+     * True for an order packed before cartons were recorded (one virtual carton)
+     */
+    legacy: boolean;
+    /**
+     * False when the documents print the live parties ("Party details are current, not as at packing")
+     */
+    partiesFrozen: boolean;
+    cartonCount: number;
+    /**
+     * Σ carton weights when every carton is weighed, else null
+     */
+    grossWeightGrams: number | null;
+    /**
+     * ISO-8601 UTC — the physical pack (a re-carton keeps it)
+     */
+    packedAt: string;
+    packedBy: string;
+    cartons: Array<PackCartonViewDto>;
+};
+
+export type RecartonResponse = {
+    /**
+     * The live pack after the re-carton
+     */
+    pack: PackViewDto;
+    /**
+     * True when the split was the live one — nothing was written
+     */
+    unchanged: boolean;
+    /**
+     * True when a client label’s verification was cleared — re-verify the client label on the new boxes
+     */
+    clientLabelReverify: boolean;
+};
+
+export type PackHistoryDto = {
+    packSeq: number;
+    status: 'live' | 'superseded' | 'cancelled';
+    cartonCount: number;
+    endedAt: string | null;
+    endedBy: string | null;
+    endReason: string | null;
+};
+
+export type OrderCartonsResponse = {
+    /**
+     * The live pack, else the latest (a cancelled order shows its cancelled pack)
+     */
+    pack: PackViewDto;
+    /**
+     * Every pack of the order, newest first
+     */
+    history: Array<PackHistoryDto>;
 };
 
 export type DispatchOrderDto = {
@@ -4654,6 +4820,17 @@ export type PickResponse = {
     pick: PickDto;
 };
 
+export type DevicePackCartonDto = {
+    /**
+     * What the operator scanned into THIS carton (per SKU, summed as the top-level scan is). At least one line.
+     */
+    scanned: Array<PackScanLineDto>;
+    /**
+     * Optional carton weight in grams.
+     */
+    weightGrams?: number | null;
+};
+
 export type DevicePackDto = {
     /**
      * What the operator scanned into the parcel. May be empty only when the order picked nothing at all (every stop reported an empty bin).
@@ -4667,6 +4844,10 @@ export type DevicePackDto = {
      * The fully-picked order being packed
      */
     orderId: string;
+    /**
+     * Story 4-5a — optional: the cartons the parcel was packed into, in order (carton 1 first). Per SKU the cartons must add up to `scanned` exactly, a catch-weight case sits in exactly one carton, and the top-level weightGrams and dimensionsMm must then be absent (weigh each carton). Omitted, the pack is one carton holding the whole scan. The device never measures boxes, so a carton carries no dimensionsMm.
+     */
+    cartons?: Array<DevicePackCartonDto>;
 };
 
 export type WaveEntryDto = {
@@ -13468,6 +13649,29 @@ export type PortalFileDto = {
     urlExpiresAt: string | null;
 };
 
+export type PortalCartonTotalDto = {
+    uom: string;
+    /**
+     * Base units of this UoM in the carton
+     */
+    qty: number;
+};
+
+export type PortalCartonDto = {
+    /**
+     * Carton number, 1..N
+     */
+    seq: number;
+    /**
+     * Grams, when weighed
+     */
+    weightGrams: number | null;
+    /**
+     * Units per UoM — never a cross-UoM total (A36)
+     */
+    totals: Array<PortalCartonTotalDto>;
+};
+
 export type PortalOrderShippingResponse = {
     /**
      * The client may record a label or AWB now (Upload / Replace / Send AWB): the order is open and has no live shipment, or a client-arranged one not yet handed over
@@ -13487,6 +13691,14 @@ export type PortalOrderShippingResponse = {
     label: PortalFileDto | null;
     documents: Array<PortalFileDto>;
     handoverSheet: Array<PortalFileDto>;
+    /**
+     * Story 4-5a — the cartons of the pack, once packed (null before)
+     */
+    cartons: Array<PortalCartonDto> | null;
+    /**
+     * Story 4-5a — the packing slip can be downloaded (packed or dispatched)
+     */
+    packingSlipAvailable: boolean;
 };
 
 export type PortalShipmentViewDto = {
@@ -22078,6 +22290,235 @@ export type OutboundControllerPackOrderResponses = {
 };
 
 export type OutboundControllerPackOrderResponse = OutboundControllerPackOrderResponses[keyof OutboundControllerPackOrderResponses];
+
+export type OutboundControllerGetOrderCartonsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/cartons';
+};
+
+export type OutboundControllerGetOrderCartonsErrors = {
+    /**
+     * Malformed path parameter (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order has never been packed (order-not-packed, naming its status)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type OutboundControllerGetOrderCartonsError = OutboundControllerGetOrderCartonsErrors[keyof OutboundControllerGetOrderCartonsErrors];
+
+export type OutboundControllerGetOrderCartonsResponses = {
+    200: OrderCartonsResponse;
+};
+
+export type OutboundControllerGetOrderCartonsResponse = OutboundControllerGetOrderCartonsResponses[keyof OutboundControllerGetOrderCartonsResponses];
+
+export type OutboundControllerRecartonOrderData = {
+    body: RecartonOrderDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/cartons';
+};
+
+export type OutboundControllerRecartonOrderErrors = {
+    /**
+     * Missing or malformed Idempotency-Key or path parameter, a malformed carton (an empty carton, a fractional each, a case in two cartons, a measurement out of bounds), or a missing reason (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks pack.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order, or a carton’s SKU, does not exist in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not packed or has left (order-not-packed, naming its status); a carrier label covers it (shipment-labelled-by-carrier — cancel and re-pack); the order is on its 99th pack (recarton-limit); or a concurrent idempotent request (conflict). Nothing is written
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The new cartons do not hold exactly what was packed (carton-contents-mismatch, `skus[{skuCode, packed, cartoned}]`); or an idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerRecartonOrderError = OutboundControllerRecartonOrderErrors[keyof OutboundControllerRecartonOrderErrors];
+
+export type OutboundControllerRecartonOrderResponses = {
+    /**
+     * The split sent is the live one — nothing written, the key stored (unchanged: true)
+     */
+    200: RecartonResponse;
+    /**
+     * The live pack after the re-carton (a replay re-serves it)
+     */
+    201: RecartonResponse;
+};
+
+export type OutboundControllerRecartonOrderResponse = OutboundControllerRecartonOrderResponses[keyof OutboundControllerRecartonOrderResponses];
+
+export type OutboundControllerPackingSlipData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: {
+        /**
+         * The file format (the slip defaults to pdf, the carton labels to zpl)
+         */
+        format?: 'pdf' | 'zpl';
+        /**
+         * a4 (PDF only) or label (4×6 per carton); the slip defaults to a4, the carton labels to label
+         */
+        layout?: 'a4' | 'label';
+        /**
+         * Comma-separated carton numbers, unique, 1–200 (default every carton)
+         */
+        cartons?: string;
+    };
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/packing-slip';
+};
+
+export type OutboundControllerPackingSlipErrors = {
+    /**
+     * A malformed orderId, format, layout or cartons list (a zero, a duplicate, above 200), or zpl with the a4 layout (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order does not exist in this tenant, or a listed carton number is above the pack’s count (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is neither packed nor dispatched (order-not-packed, naming its status)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * More than 1000 labels in one print (too-many-labels, naming the cartons to ask for)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type OutboundControllerPackingSlipError = OutboundControllerPackingSlipErrors[keyof OutboundControllerPackingSlipErrors];
+
+export type OutboundControllerPackingSlipResponses = {
+    /**
+     * The slip: a PDF, or ZPL as `text/plain; charset=us-ascii`
+     */
+    200: Blob | File;
+};
+
+export type OutboundControllerPackingSlipResponse = OutboundControllerPackingSlipResponses[keyof OutboundControllerPackingSlipResponses];
+
+export type OutboundControllerCartonLabelsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: {
+        /**
+         * The file format (the slip defaults to pdf, the carton labels to zpl)
+         */
+        format?: 'pdf' | 'zpl';
+        /**
+         * a4 (PDF only) or label (4×6 per carton); the slip defaults to a4, the carton labels to label
+         */
+        layout?: 'a4' | 'label';
+        /**
+         * Comma-separated carton numbers, unique, 1–200 (default every carton)
+         */
+        cartons?: string;
+    };
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/carton-labels';
+};
+
+export type OutboundControllerCartonLabelsErrors = {
+    /**
+     * A malformed orderId, format, layout or cartons list, or zpl with the a4 layout (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied) — checked before anything it sent
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Order does not exist in this tenant, or a listed carton number is above the pack’s count (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not ready to dispatch (order-not-packed, naming its status)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type OutboundControllerCartonLabelsError = OutboundControllerCartonLabelsErrors[keyof OutboundControllerCartonLabelsErrors];
+
+export type OutboundControllerCartonLabelsResponses = {
+    /**
+     * The labels: ZPL as `text/plain; charset=us-ascii`, or a PDF
+     */
+    200: Blob | File;
+};
+
+export type OutboundControllerCartonLabelsResponse = OutboundControllerCartonLabelsResponses[keyof OutboundControllerCartonLabelsResponses];
 
 export type OutboundControllerDispatchOrderData = {
     body?: DispatchOrderDto;
@@ -34528,6 +34969,49 @@ export type PortalControllerOrderShippingResponses = {
 };
 
 export type PortalControllerOrderShippingResponse = PortalControllerOrderShippingResponses[keyof PortalControllerOrderShippingResponses];
+
+export type PortalControllerOrderPackingSlipData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders/{orderId}/packing-slip';
+};
+
+export type PortalControllerOrderPackingSlipErrors = {
+    /**
+     * Malformed orderId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No packed order of this client — unknown, another client's, or not packed yet (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerOrderPackingSlipError = PortalControllerOrderPackingSlipErrors[keyof PortalControllerOrderPackingSlipErrors];
+
+export type PortalControllerOrderPackingSlipResponses = {
+    /**
+     * The PDF
+     */
+    200: Blob | File;
+};
+
+export type PortalControllerOrderPackingSlipResponse = PortalControllerOrderPackingSlipResponses[keyof PortalControllerOrderPackingSlipResponses];
 
 export type PortalControllerUploadClientLabelData = {
     body: {
