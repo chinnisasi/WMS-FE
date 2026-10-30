@@ -27,6 +27,8 @@ import {
   mismatchedOrderIds,
   parcelTagFilename,
   parseHandoverDraft,
+  pruneStaleCartonCodes,
+  staleCartonsDroppedNote,
   parseLabelDraft,
   parsePackageCount,
   parseShippingReason,
@@ -432,6 +434,38 @@ describe('cartons at the handover builder', () => {
     draft = tickCarton(draft, ORDER, `${TAG}.2.1`);
     const parsed = parseHandoverDraft(draft, 'w-1', [candidate()], Date.now());
     expect(parsed.body!.parcels[0]).toEqual({ orderId: ORDER, cartonCodes: [`${TAG}.2.1`, `${TAG}.2.3`] } as never);
+  });
+
+  test('a typed parcel count that is not a stored pack’s carton count is refused with the server’s words; the confirm counts the stored cartons', () => {
+    const base = { ...emptyHandoverDraft('c-1'), courierName: 'Delhivery', pickupPersonName: 'Ravi' };
+    const typed = (count: string) => ({ ...base, rows: { [ORDER]: { ...EMPTY_ROW, selected: true, packageCount: count } } });
+    expect(parseHandoverDraft(typed('2'), 'w-1', [candidate()], Date.now())).toEqual({
+      body: null,
+      problem: 'Order SO-1 is packed in 3 cartons — the parcel count reads 2.',
+    });
+    expect(parseHandoverDraft(typed('3'), 'w-1', [candidate()], Date.now()).body!.parcels[0]).toEqual({ orderId: ORDER, packageCount: 3 });
+    // A virtual pack (no packSeq) keeps 4-4a's behaviour: any count goes.
+    expect(parseHandoverDraft(typed('2'), 'w-1', [candidate({ packSeq: undefined, cartonCount: undefined })], Date.now()).problem).toBeNull();
+    let draft: HandoverDraft = typed('2');
+    draft = tickCarton(draft, ORDER, `${TAG}.2.1`);
+    expect(handoverCartonConfirms(draft, [candidate()])).toEqual(['SO-1: 1 of 3 cartons scanned — hand over all 3?']);
+  });
+
+  test('a refresh drops carton scans of a pack that is no longer live, naming the order', () => {
+    let draft = emptyHandoverDraft('c-1');
+    draft = tickCarton(draft, ORDER, `${TAG}.1.1`);
+    draft = tickCarton(draft, ORDER, `${TAG}.1.2`);
+    expect(pruneStaleCartonCodes(draft, [candidate({ packSeq: 1 })]).dropped).toEqual([]);
+    const after = pruneStaleCartonCodes(draft, [candidate({ packSeq: 2 })]);
+    expect(rowOf(after.draft, ORDER).cartonCodes).toEqual([]);
+    expect(after.dropped).toEqual(['SO-1']);
+    expect(staleCartonsDroppedNote(after.dropped)).toContain('SO-1: re-packed');
+    expect(staleCartonsDroppedNote([])).toBeNull();
+  });
+
+  test('an ambiguous carton keeps its code for the row picked', () => {
+    const twin = { ...candidate(), orderId: 'twin' } as never;
+    expect(matchCartonScan(`${TAG}.2.1`, [candidate(), twin])).toEqual({ kind: 'ambiguous', orderIds: [ORDER, 'twin'], code: `${TAG}.2.1` });
   });
 
   test('the two carton refusals have words', () => {

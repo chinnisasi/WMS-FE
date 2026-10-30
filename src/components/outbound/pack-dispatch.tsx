@@ -1034,7 +1034,8 @@ function CartonsFieldset({
             type="radio"
             name="cartons-mode"
             checked={grid !== null}
-            disabled={!splittable || skus.length === 0}
+            // Offered only once the SKUs are known — before that a catch-weight SKU looks plain.
+            disabled={skuMap === null || !splittable || skus.length === 0}
             onChange={() => onGrid(splitGrid(skus))}
           />
           Split into cartons

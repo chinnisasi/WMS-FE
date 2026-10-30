@@ -203,7 +203,19 @@ describe('the bodies', () => {
 
   test('AC7: no grid, or one carton, is today’s exact payload', () => {
     expect(buildPackBody(bench, null)).toEqual({ body: bench, problem: null });
-    expect(JSON.stringify(buildPackBody(bench, removeCarton(splitGrid([A, B]), 1)).body)).toBe(JSON.stringify(bench));
+    // Split, Remove carton 2, weigh the one left: its weight is the top-level one.
+    const one = setCartonMeasure(removeCarton(splitGrid([A, B]), 1), 0, 'weightKg', '0.9');
+    expect(JSON.stringify(buildPackBody({ scanned: bench.scanned }, one).body)).toBe(JSON.stringify(bench));
+    const measured = setCartonMeasure(setCartonMeasure(setCartonMeasure(one, 0, 'lengthCm', '40'), 0, 'widthCm', '30'), 0, 'heightCm', '20');
+    expect(buildPackBody({ scanned: bench.scanned }, measured).body).toEqual({
+      ...bench,
+      dimensionsMm: { lengthMm: 400, widthMm: 300, heightMm: 200 },
+    });
+  });
+
+  test('a one-carton grid with a bad weight is refused in words', () => {
+    const bad = setCartonMeasure(removeCarton(splitGrid([A, B]), 1), 0, 'weightKg', '0.0001');
+    expect(buildPackBody({ scanned: bench.scanned }, bad)).toEqual({ body: null, problem: expect.stringContaining('Carton 1: Weight') });
   });
 
   test('more than one carton: the scanned total, the cartons, no top-level weight', () => {

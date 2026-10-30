@@ -495,6 +495,42 @@ describe('the handover builder (A20, A49)', () => {
     expect((posted[0]!.body as { parcels: unknown[] }).parcels).toEqual([{ orderId: ORDER_A, cartonCodes: ['O8F90000000000001.2.2', 'O8F90000000000001.2.3'] }]);
   });
 
+  test('story 4-5a — a carton of a courier-label order asks for its AWB next, and the next AWB attaches to that row', async () => {
+    writeSession(session('operator'));
+    candidates = candidateRows().map((c, i) =>
+      i === 1 ? { ...c, packSeq: 1, cartonCount: 2, shipment: { kind: 'courier-label', awb: '555000111', courierName: 'Delhivery', packageCount: 2, labelVerified: false } } : c,
+    );
+    view = render(
+      <HandoverBuilder tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} initialClientId={CLIENT_A} initialOrderId={null} onClose={() => {}} onCreated={() => {}} />,
+    );
+    await settle();
+    const root = byTestId(view.container, 'handover-builder')!;
+    await scan(root, 'O8F90000000000002.1.1');
+    expect(byTestId(root, 'handover-scan-note')?.textContent).toBe('SO-2 — carton 1 (1/2) ticked — now scan the courier’s AWB on this parcel.');
+    expect(root.textContent).toContain('Scan the courier’s AWB for SO-2');
+    await scan(root, '555000111');
+    const row = root.querySelector(`[data-order-id="${ORDER_B}"]`)!;
+    expect((row.querySelectorAll('input')[1] as HTMLInputElement).value).toBe('555000111');
+    expect(byTestId(root, 'handover-carton-tally')?.textContent).toBe('Cartons 1/2');
+  });
+
+  test('story 4-5a — an ambiguous carton scan is ticked on the row the user picks', async () => {
+    writeSession(session('operator'));
+    candidates = candidateRows().map((c) => ({ ...c, parcelTagCode: 'O8F90000000000001', packSeq: 1, cartonCount: 2 }));
+    view = render(
+      <HandoverBuilder tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} initialClientId={CLIENT_A} initialOrderId={null} onClose={() => {}} onCreated={() => {}} />,
+    );
+    await settle();
+    const root = byTestId(view.container, 'handover-builder')!;
+    await scan(root, 'O8F90000000000001.1.2');
+    expect(byTestId(root, 'handover-scan-note')?.textContent).toBe('This carton matches two parcels — tick the right one below.');
+    const second = root.querySelector(`[data-order-id="${ORDER_B}"]`)!;
+    await click(second.querySelector('input[type="checkbox"]')!);
+    expect((second.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(true);
+    expect(byTestId(second as HTMLElement, 'handover-carton-tally')?.textContent).toBe('Cartons 1/2');
+    expect(byTestId(root, 'handover-scan-note')?.textContent).toContain('SO-2 — carton 2 (1/2) ticked');
+  });
+
   test('a missing pickup person sends nothing', async () => {
     const root = await openBuilder();
     await scan(root, '123456789012');
@@ -751,6 +787,17 @@ describe('story 4-5a — the Shipping panel once packed (A26, A40)', () => {
     await click(byTestId(panel, 'carton-labels-zpl')!);
     const read = requests.find((r) => r.pathname.endsWith('/carton-labels'));
     expect(read?.search).toBe('?format=zpl&layout=label');
+  });
+
+  test('an accepted order’s Shipping panel still offers the parcel tag, not carton labels', async () => {
+    writeSession(session('operator'));
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    await expand('SO-2');
+    const panel = byTestId(view.container, 'shipping-panel')!;
+    expect(byTestId(panel, 'parcel-tag-zpl')).not.toBeNull();
+    expect(byTestId(panel, 'parcel-tag-pdf')).not.toBeNull();
+    expect(byTestId(panel, 'carton-labels-zpl')).toBeNull();
   });
 
   test('one carton and a one-page label: no warning; without labels.execute no carton-label print', async () => {

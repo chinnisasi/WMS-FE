@@ -22,10 +22,12 @@ import {
   MAX_HANDOVER_PARCELS,
   mismatchedOrderIds,
   parseHandoverDraft,
+  pruneStaleCartonCodes,
   rowOf,
   rupees,
   SHIPMENT_KIND_WORD,
   shippingReason,
+  staleCartonsDroppedNote,
   tickCarton,
   type HandoverDraft,
   type HandoverRowDraft,
@@ -85,16 +87,20 @@ export function HandoverBuilder({
     const base = emptyHandoverDraft(initialClientId ?? '');
     return initialOrderId === null ? base : { ...base, rows: { [initialOrderId]: { ...EMPTY_ROW, selected: true } } };
   });
+  const candidates = useHandoverCandidates(warehouseId, ownDraft.clientId === '' ? null : ownDraft.clientId);
+  const items: readonly HandoverCandidateDto[] = candidates.state === 'ready' ? candidates.data.items : [];
+  // A37 — a refresh that shows an order re-packed drops its stale carton scans
+  // (derived at render against the current list, never a reset effect — guide §1.5).
+  const pruned = pruneStaleCartonCodes(ownDraft, items);
+  const staleNote = staleCartonsDroppedNote(pruned.dropped);
   // FE14 — a requested order joins the draft ticked (derived at render, never a reset effect — guide §1.5).
   const draft: HandoverDraft = {
-    ...ownDraft,
+    ...pruned.draft,
     rows: {
-      ...Object.fromEntries(requestedOrderIds.filter((id) => !(id in ownDraft.rows)).map((id) => [id, { ...EMPTY_ROW, selected: true }])),
-      ...ownDraft.rows,
+      ...Object.fromEntries(requestedOrderIds.filter((id) => !(id in pruned.draft.rows)).map((id) => [id, { ...EMPTY_ROW, selected: true }])),
+      ...pruned.draft.rows,
     },
   };
-  const candidates = useHandoverCandidates(warehouseId, draft.clientId === '' ? null : draft.clientId);
-  const items: readonly HandoverCandidateDto[] = candidates.state === 'ready' ? candidates.data.items : [];
   const truncated = candidates.state === 'ready' && candidates.data.truncated;
   const [scan, setScan] = useState('');
   const [scanNote, setScanNote] = useState<{ tone: 'accepted' | 'warning' | 'rejected'; text: string } | null>(null);
@@ -102,6 +108,8 @@ export function HandoverBuilder({
   // FE13 — a row that left the list (a reload) no longer awaits its AWB.
   const awaitingAwbFor = awaitingRaw !== null && items.some((c) => c.orderId === awaitingRaw) ? awaitingRaw : null;
   const [ambiguous, setAmbiguous] = useState<readonly string[] | null>(null);
+  // A carton scan that matched two rows: its code waits for the row the user picks.
+  const [pendingCarton, setPendingCarton] = useState<string | null>(null);
   const [bound, setBound] = useState<{ key: string; body: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -124,7 +132,11 @@ export function HandoverBuilder({
   }
 
   function editRow(orderId: string, patch: Partial<HandoverRowDraft>) {
-    setDraft((current) => ({ ...current, rows: { ...current.rows, [orderId]: { ...(current.rows[orderId] ?? rowOf(draft, orderId)), ...patch } } }));
+    // Writes go over the pruned rows, so a stale carton scan never comes back.
+    setDraft((current) => {
+      const base = pruneStaleCartonCodes(current, items).draft;
+      return { ...base, rows: { ...base.rows, [orderId]: { ...(base.rows[orderId] ?? rowOf(draft, orderId)), ...patch } } };
+    });
     setRefused((current) => {
       if (!current.has(orderId)) return current;
       const next = new Map(current);
@@ -140,6 +152,7 @@ export function HandoverBuilder({
     setDraft((current) => ({ ...current, clientId, rows: {} }));
     setAwaitingAwbFor(null);
     setAmbiguous(null);
+    setPendingCarton(null);
     setScanNote(null);
     setRefused(new Map());
     setForeign([]);
@@ -155,25 +168,16 @@ export function HandoverBuilder({
     if (carton !== null) {
       setScan('');
       setAmbiguous(null);
+      setPendingCarton(null);
       if (carton.kind === 'unknown') {
         setScanNote({ tone: 'warning', text: carton.problem });
       } else if (carton.kind === 'ambiguous') {
         setAmbiguous(carton.orderIds);
+        setPendingCarton(carton.code);
         setScanNote({ tone: 'warning', text: 'This carton matches two parcels — tick the right one below.' });
       } else {
-        const before = rowOf(draft, carton.orderId);
-        const ticked = tickCarton({ ...draft, rows: { ...draft.rows, [carton.orderId]: before } }, carton.orderId, carton.code);
-        editRow(carton.orderId, { selected: true, cartonCodes: ticked.rows[carton.orderId]?.cartonCodes ?? [] });
         const candidate = items.find((c) => c.orderId === carton.orderId);
-        const tally = candidate === undefined ? null : cartonTally(ticked.rows[carton.orderId]!, candidate);
-        const lead = `${labelOf(carton.orderId)} — carton ${carton.seq}${tally === null ? '' : ` (${tally})`}`;
-        if (carton.needsAwb && before.awb === '') {
-          setAwaitingAwbFor(carton.orderId);
-          setScanNote({ tone: 'warning', text: `${lead} ticked — now scan the courier’s AWB on this parcel.` });
-        } else {
-          setAwaitingAwbFor(null);
-          setScanNote({ tone: 'accepted', text: `${lead} ticked.` });
-        }
+        tickScannedCarton(carton.orderId, carton.code, carton.needsAwb, candidate);
       }
       scanRef.current?.focus();
       return;
@@ -181,6 +185,7 @@ export function HandoverBuilder({
     const result = matchScan(scan, items, awaitingAwbFor);
     setScan('');
     setAmbiguous(null);
+    setPendingCarton(null);
     if (result.kind === 'unknown') {
       // FE12 — with a truncated list the parcel may be past the oldest 500.
       setScanNote({
@@ -206,6 +211,36 @@ export function HandoverBuilder({
       }
     }
     scanRef.current?.focus();
+  }
+
+  /** Tick a scanned carton on its row; a row still needing the courier's AWB asks for it next. */
+  function tickScannedCarton(orderId: string, code: string, needsAwb: boolean, candidate: HandoverCandidateDto | undefined) {
+    const before = rowOf(draft, orderId);
+    const ticked = tickCarton({ ...draft, rows: { ...draft.rows, [orderId]: before } }, orderId, code);
+    editRow(orderId, { selected: true, cartonCodes: ticked.rows[orderId]?.cartonCodes ?? [] });
+    const tally = candidate === undefined ? null : cartonTally(ticked.rows[orderId]!, candidate);
+    const seq = code.split('.').pop();
+    const lead = `${labelOf(orderId)} — carton ${seq}${tally === null ? '' : ` (${tally})`}`;
+    if (needsAwb && before.awb === '') {
+      setAwaitingAwbFor(orderId);
+      setScanNote({ tone: 'warning', text: `${lead} ticked — now scan the courier’s AWB on this parcel.` });
+    } else {
+      setAwaitingAwbFor(null);
+      setScanNote({ tone: 'accepted', text: `${lead} ticked.` });
+    }
+  }
+
+  /** The row picked after an ambiguous carton scan receives that carton. */
+  function onTick(candidate: HandoverCandidateDto, checked: boolean) {
+    if (checked && pendingCarton !== null && ambiguous?.includes(candidate.orderId)) {
+      const needsAwb =
+        candidate.shipment === null || candidate.shipment.kind === 'courier-label' || (candidate.shipment.kind === 'client-label' && !candidate.shipment.labelVerified);
+      setAmbiguous(null);
+      setPendingCarton(null);
+      tickScannedCarton(candidate.orderId, pendingCarton, needsAwb, candidate);
+      return;
+    }
+    editRow(candidate.orderId, { selected: checked });
   }
 
   async function onConfirm(event: React.FormEvent) {
@@ -356,6 +391,11 @@ export function HandoverBuilder({
                   data-testid="handover-scan"
                 />
               </label>
+              {staleNote !== null && (
+                <div role="status" className="text-(--warning)" data-testid="handover-stale-cartons">
+                  {staleNote}
+                </div>
+              )}
               {scanNote !== null && (
                 <div role="status" className={scanNote.tone === 'accepted' ? 'text-(--accent)' : 'text-(--warning)'} data-testid="handover-scan-note">
                   {scanNote.text}
@@ -383,7 +423,7 @@ export function HandoverBuilder({
                       <input
                         type="checkbox"
                         checked={row.selected}
-                        onChange={(e) => editRow(candidate.orderId, { selected: e.target.checked })}
+                        onChange={(e) => onTick(candidate, e.target.checked)}
                         aria-label={`Hand over ${candidate.orderLabel}`}
                       />
                       <span className="font-mono">{candidate.orderLabel}</span>

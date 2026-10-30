@@ -582,7 +582,8 @@ export type ScanMatch =
 /** Story 4-5a (A21) — a carton label scan: tick carton `seq` of that order, or say why not. */
 export type CartonScanMatch =
   | { readonly kind: 'carton'; readonly orderId: string; readonly code: string; readonly seq: number; readonly needsAwb: boolean }
-  | { readonly kind: 'ambiguous'; readonly orderIds: readonly string[] }
+  /** Two candidates share the tag prefix: `code` is kept so the row the user picks gets the carton. */
+  | { readonly kind: 'ambiguous'; readonly orderIds: readonly string[]; readonly code: string }
   | { readonly kind: 'unknown'; readonly problem: string };
 
 /** Story 4-5a — the carton facts a candidate carries (the candidates read's optional `packSeq` / `cartonCount`). */
@@ -649,7 +650,7 @@ export function matchCartonScan(
   const code = `${carton.parcelTag}.${carton.packSeq}.${carton.seq}`;
   const hits = candidates.filter((c) => c.parcelTagCode.toUpperCase() === carton.parcelTag);
   if (hits.length === 0) return { kind: 'unknown', problem: 'This carton is not a parcel awaiting pickup for this client — refresh, or check the label.' };
-  if (hits.length > 1) return { kind: 'ambiguous', orderIds: hits.map((h) => h.orderId) };
+  if (hits.length > 1) return { kind: 'ambiguous', orderIds: hits.map((h) => h.orderId), code };
   const hit = hits[0]!;
   const livePack = hit.packSeq ?? 1;
   const count = hit.cartonCount ?? 1;
@@ -668,6 +669,48 @@ export function tickCarton(draft: HandoverDraft, orderId: string, code: string):
   const codes = row.cartonCodes ?? [];
   const next = codes.includes(canonical) ? codes : [...codes, canonical];
   return { ...draft, rows: { ...draft.rows, [orderId]: { ...row, selected: true, cartonCodes: next } } };
+}
+
+/**
+ * A candidates refresh (A37): a row's scanned carton codes of a pack that is
+ * no longer the order's live pack (re-packed since the scan) are dropped —
+ * those labels are stale. `dropped` names the orders, for a note.
+ */
+export function pruneStaleCartonCodes(
+  draft: HandoverDraft,
+  candidates: readonly (Pick<HandoverCandidateDto, 'orderId' | 'orderLabel'> & CartonFacts)[],
+): { readonly draft: HandoverDraft; readonly dropped: readonly string[] } {
+  const dropped: string[] = [];
+  let rows: Record<string, HandoverRowDraft> | null = null;
+  for (const candidate of candidates) {
+    const row = draft.rows[candidate.orderId];
+    const codes = row?.cartonCodes ?? [];
+    if (row === undefined || codes.length === 0) continue;
+    const livePack = candidate.packSeq ?? 1;
+    const kept = codes.filter((c) => parseCartonCode(c)?.packSeq === livePack);
+    if (kept.length === codes.length) continue;
+    rows ??= { ...draft.rows };
+    rows[candidate.orderId] = { ...row, cartonCodes: kept };
+    dropped.push(candidate.orderLabel);
+  }
+  return rows === null ? { draft, dropped } : { draft: { ...draft, rows }, dropped };
+}
+
+/** The note a refresh shows when it dropped stale carton scans. */
+export function staleCartonsDroppedNote(dropped: readonly string[]): string | null {
+  if (dropped.length === 0) return null;
+  return `${dropped.join(', ')}: re-packed since its cartons were scanned — the old carton scans were dropped; scan the new labels.`;
+}
+
+/** The server's `package-count-mismatch` words (A37), refused before sending: only for a stored pack (the candidate carries `packSeq`). */
+export function packageCountMismatch(
+  candidate: Pick<HandoverCandidateDto, 'orderLabel'> & CartonFacts,
+  typed: number | undefined,
+): string | null {
+  if (typed === undefined || candidate.packSeq === null || candidate.packSeq === undefined) return null;
+  const count = candidate.cartonCount;
+  if (count === null || count === undefined || typed === count) return null;
+  return `Order ${candidate.orderLabel} is packed in ${count} carton${count === 1 ? '' : 's'} — the parcel count reads ${typed}.`;
 }
 
 /** "2/3" — the cartons scanned of the order's count; null when the order carries no carton facts and none were scanned. */
@@ -700,7 +743,9 @@ export function handoverCartonConfirms(
     const codes = row.cartonCodes ?? [];
     if (codes.length === 0) continue;
     const typed = parsePackageCount(row.packageCount).value;
-    const count = typed ?? candidate.cartonCount ?? codes.length;
+    // A stored pack's carton count is the truth (a typed count that differs is refused before this); else the typed count.
+    const stored = candidate.packSeq !== null && candidate.packSeq !== undefined && candidate.cartonCount !== null && candidate.cartonCount !== undefined;
+    const count = stored ? candidate.cartonCount! : (typed ?? candidate.cartonCount ?? codes.length);
     if (codes.length < count) out.push(`${candidate.orderLabel}: ${codes.length} of ${count} cartons scanned — hand over all ${count}?`);
     const cod = (candidate.codAmountPaise ?? 0) > 0;
     if (cod && !codes.some((c) => parseCartonCode(c)?.seq === 1)) {
@@ -751,7 +796,7 @@ export type ParsedHandoverDraft = { readonly body: CreateHandoverDto; readonly p
 export function parseHandoverDraft(
   draft: HandoverDraft,
   warehouseId: string,
-  candidates: readonly Pick<HandoverCandidateDto, 'orderId' | 'orderLabel'>[],
+  candidates: readonly (Pick<HandoverCandidateDto, 'orderId' | 'orderLabel'> & CartonFacts)[],
   nowMs: number,
 ): ParsedHandoverDraft {
   const fail = (problem: string): ParsedHandoverDraft => ({ body: null, problem });
@@ -801,6 +846,8 @@ export function parseHandoverDraft(
     }
     const count = parsePackageCount(row.packageCount);
     if (count.problem !== null) return fail(`${candidate.orderLabel}: ${count.problem}`);
+    const mismatch = packageCountMismatch(candidate, count.value);
+    if (mismatch !== null) return fail(mismatch);
     if (count.value !== undefined) parcel.packageCount = count.value;
     const weight = parseWeightGrams(row.weightGrams);
     if (weight.problem !== null) return fail(`${candidate.orderLabel}: ${weight.problem}`);

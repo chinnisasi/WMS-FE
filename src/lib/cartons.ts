@@ -404,9 +404,23 @@ export function buildPackBody(
   oneCarton: { readonly scanned: PackBody['scanned']; readonly weightGrams?: number; readonly dimensionsMm?: CartonDimensions },
   grid: CartonGrid | null,
 ): { readonly body: PackBody; readonly problem: null } | { readonly body: null; readonly problem: string } {
-  if (grid === null || grid.cartons.length <= 1) return { body: { ...oneCarton, scanned: [...oneCarton.scanned] }, problem: null };
+  if (grid === null) return { body: { ...oneCarton, scanned: [...oneCarton.scanned] }, problem: null };
   const parsed = parseCartonGrid(grid, 'pack');
   if (parsed.problem !== null) return { body: null, problem: parsed.problem };
+  if (parsed.cartons.length === 1) {
+    // A grid left with one carton (split, then the others removed) is today's
+    // payload: that carton's weight and dimensions travel as the top-level
+    // ones — the bench's own measurements fieldset is hidden while splitting.
+    const only = parsed.cartons[0]!;
+    return {
+      body: {
+        scanned: [...oneCarton.scanned],
+        ...(only.weightGrams === undefined ? {} : { weightGrams: only.weightGrams }),
+        ...(only.dimensionsMm === undefined ? {} : { dimensionsMm: only.dimensionsMm }),
+      },
+      problem: null,
+    };
+  }
   return { body: { scanned: [...oneCarton.scanned], cartons: parsed.cartons }, problem: null };
 }
 

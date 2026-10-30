@@ -297,6 +297,22 @@ describe('the pack bench’s cartons (A26)', () => {
     });
   });
 
+  test('split, remove carton 2, weigh the one left: the POST carries its weight as today’s top-level weight', async () => {
+    view = await mount('operator');
+    await expand(view, 'order-1');
+    await chooseSplit(view);
+    const remove = view.container.querySelector('button[aria-label="Remove carton 2"]');
+    if (!(remove instanceof HTMLButtonElement)) throw new Error('No Remove carton 2');
+    await act(async () => {
+      remove.click();
+    });
+    await settle();
+    await typeInto(labelled(view, 'Carton 1 Weight (kg)'), '1.25');
+    await press(view, 'Pack this order');
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]!.body).toEqual({ scanned: [{ skuId: 'sku-1', qty: 10 }, { skuId: 'sku-2', qty: 4 }], weightGrams: 1250 });
+  });
+
   test('a split that does not add up is refused in words and sends nothing', async () => {
     view = await mount('operator');
     await expand(view, 'order-1');
