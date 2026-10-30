@@ -948,7 +948,9 @@ describe('Goods receipts — the GRN details drawer (story 2-9a)', () => {
   });
 
   test('"Details of GRN-0001" opens it and writes ?grn=; Close removes the parameter; the Recorded column reads IST', async () => {
-    window.history.replaceState(null, '', '/inbound?tab=grns');
+    // An earlier suite may leave happy-dom at about:blank, where replaceState
+    // cannot write a path — set a real URL first (the dock-schedule precedent).
+    (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost/inbound?tab=grns');
     view = render(<InboundCards initialTab="grns" />);
     await settle();
     expect(rows()[0]!.join(' ')).toContain('18 Oct 2026, 10:30');
