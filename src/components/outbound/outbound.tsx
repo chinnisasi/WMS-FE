@@ -16,6 +16,7 @@ import {
 
 import { OutboundOrders } from '@/components/outbound/outbound-orders';
 import { OutboundWaves } from '@/components/outbound/outbound-waves';
+import { HandoversCard } from '@/components/outbound/handovers-card';
 import { OutboundPackDispatch } from '@/components/outbound/pack-dispatch';
 import { Section, selectClass } from '@/components/outbound/shell';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
@@ -197,6 +198,15 @@ function OutboundSessioned({
         {tab === 'pack' && (
           <OutboundPackDispatch
             key={`pack-${warehouseId}`}
+            tenantId={tenantId}
+            warehouseId={warehouseId}
+            warehouseLabel={warehouseLabel}
+            role={role}
+          />
+        )}
+        {tab === 'handovers' && (
+          <HandoversCard
+            key={`handovers-${warehouseId}`}
             tenantId={tenantId}
             warehouseId={warehouseId}
             warehouseLabel={warehouseLabel}
