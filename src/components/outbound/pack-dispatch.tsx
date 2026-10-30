@@ -5,17 +5,17 @@ import { BackorderChip, OrderFieldChips } from '@/components/shared/order-chips'
 import Link from 'next/link';
 import { findOrderHref } from '@/lib/palette';
 import { manifestCodLabel, orderTypeLabel, paymentLine } from '@/lib/order-fields';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   fetchApiCreateManifest,
   fetchApiDispatchOrder,
-  fetchApiGetShipment,
   fetchApiLabelOrder,
   fetchApiPackOrder,
 } from '@/lib/api/client';
 import type {
   DispatchDto,
+  HandoverResponse,
   ManifestDto,
   OrderEntryDto,
   OrderLineDto,
@@ -24,7 +24,7 @@ import type {
   SkuResponse,
 } from '@/lib/api/generated';
 import { quantityInputLabel, quantityLabel, sharedQuantityUom } from '@/lib/format-quantity';
-import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
+import { notifyOutboundChanged } from '@/lib/outbound';
 import {
   canLabelOrder,
   connectionOptionLabel,
@@ -61,11 +61,13 @@ import {
   type PackScanDraftLine,
   type PipelineStatus,
 } from '@/lib/outbound-pack-dispatch';
-import { filterPage, lineQuantityLabel, orderStatusLabel, pageFilterCount, readReason } from '@/lib/outbound-orders';
+import { filterPage, lineQuantityLabel, orderStatusLabel, pageFilterCount } from '@/lib/outbound-orders';
 import { orderLabel, shortOrderId } from '@/lib/orders';
 import { useCarrierConnections, useManifests, useOrderRates, useOrderShipment } from '@/lib/use-outbound-labels';
 import { useOrderDetail, useOutboundSkus } from '@/lib/use-outbound-orders';
 import { usePipelineOrders } from '@/lib/use-outbound-pack-dispatch';
+import { dispatchesByHandover, handoverOutcome, shippingCell } from '@/lib/shipping';
+import { useOrderShipments } from '@/lib/use-shipping';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -88,6 +90,8 @@ import {
 import { StatusChip } from '@/components/shared/status-chip';
 import { orderStatusTone } from '@/lib/status-tone';
 import { CancelOrderDialog, PutBackSection, type CancelTarget } from '@/components/outbound/cancel-order-dialog';
+import { HandoverBuilder } from '@/components/outbound/handover-builder';
+import { ShippingPanel } from '@/components/outbound/shipping-panel';
 
 /**
  * The Outbound pack & dispatch pipeline (story 4-2d) — the web consumer of
@@ -188,6 +192,28 @@ function PackDispatchTable({
   const loaded = orders.state === 'ready' ? orders.data.items : [];
   const pipeline = loaded.filter((order) => isPipelineStatus(order.status));
   const rows = filterPage(pipeline, statusFilter);
+  // Story 4-4a — the live shipment of each open order on the page: the
+  // Shipping cell, and (its labelled carrier rows) the manifest builder.
+  const openOrderIds = pipeline
+    .filter((order) => order.status === 'accepted' || order.status === 'ready_to_dispatch')
+    .map((order) => order.id);
+  const shipments = useOrderShipments(tenantId, openOrderIds);
+  // Story 4-4a (A20) — the handover builder, opened from a row's "Hand over".
+  const [handover, setHandover] = useState<{ clientId: string | null; orderId: string; more: readonly string[] } | null>(null);
+  // FE14 — Hand over on another row while the builder is open: joins the open draft for the same client, else says why not.
+  const [handoverNote, setHandoverNote] = useState<string | null>(null);
+  function requestHandover(orderId: string, clientId: string | null) {
+    if (handover === null) {
+      setHandoverNote(null);
+      setHandover({ orderId, clientId, more: [] });
+    } else if (handover.clientId === clientId) {
+      setHandoverNote(null);
+      if (orderId !== handover.orderId && !handover.more.includes(orderId)) setHandover({ ...handover, more: [...handover.more, orderId] });
+    } else {
+      setHandoverNote('The handover builder is open for another client — confirm or discard it, then hand this order over.');
+    }
+  }
+  const [handedOver, setHandedOver] = useState<HandoverResponse | null>(null);
 
   const columns: readonly DataTableColumn<OrderEntryDto>[] = [
     {
@@ -234,6 +260,34 @@ function PackDispatchTable({
       render: (order) => <OrderFieldChips order={order} todayIst={todayIst} />,
     },
     {
+      // Story 4-4a (A20) — who carries the parcel: word first, tone second.
+      key: 'shipping',
+      header: 'Shipping',
+      render: (order) => {
+        if (order.status !== 'accepted' && order.status !== 'ready_to_dispatch') return null;
+        // FB3 — a failed read says so, with a Retry; never an endless "…".
+        const failure = shipments.state === 'ready' ? shipments.failures.get(order.id) : undefined;
+        if (failure !== undefined) {
+          return (
+            <span className="flex items-center gap-1 text-xs" data-testid="shipping-cell-failed" title={failure}>
+              <StatusChip tone="danger">Not loaded</StatusChip>
+              <button type="button" className={rowButtonClass} onClick={shipments.reload}>
+                Retry
+              </button>
+            </span>
+          );
+        }
+        const cell = shipments.state === 'ready' ? shippingCell(shipments.data.get(order.id)) : null;
+        return cell === null ? (
+          <span className="text-xs text-(--muted-foreground)">…</span>
+        ) : (
+          <span data-testid="shipping-cell">
+            <StatusChip tone={cell.tone}>{cell.word}</StatusChip>
+          </span>
+        );
+      },
+    },
+    {
       key: 'createdAt',
       header: 'Created',
       render: (order) => (
@@ -268,6 +322,26 @@ function PackDispatchTable({
         </span>
       </div>
 
+      {handedOver !== null && <FeedbackBanner tone="accepted" {...handoverOutcome(handedOver)} />}
+      {handoverNote !== null && <FeedbackBanner tone="warning" word="Builder open for another client" reason={handoverNote} />}
+      {handover !== null && (
+        <HandoverBuilder
+          tenantId={tenantId}
+          warehouseId={warehouseId}
+          initialClientId={handover.clientId}
+          initialOrderId={handover.orderId}
+          requestedOrderIds={handover.more}
+          onClose={() => {
+            setHandover(null);
+            setHandoverNote(null);
+          }}
+          onCreated={(response) => {
+            setHandover(null);
+            setHandedOver(response);
+          }}
+        />
+      )}
+
       {cancelTarget !== null && (
         <CancelOrderDialog
           key={cancelTarget.id}
@@ -294,6 +368,8 @@ function PackDispatchTable({
                 canPack={canPack}
                 canDispatch={canDispatch}
                 canLabel={canLabel}
+                canCancel={canCancel}
+                onHandOver={canDispatch ? requestHandover : undefined}
                 // One dialog at a time; the button stays mounted so focus can return to it on close.
                 onCancel={canCancel ? (target) => setCancelTarget((open) => open ?? target) : undefined}
               />
@@ -311,6 +387,7 @@ function PackDispatchTable({
         tenantId={tenantId}
         warehouseId={warehouseId}
         pageOrders={pipeline}
+        shipments={shipments}
         canLabel={canLabel}
         active={active}
       />
@@ -342,17 +419,27 @@ function PackDispatchPanel({
   canPack,
   canDispatch,
   canLabel,
+  canCancel = false,
   onCancel,
+  onHandOver,
 }: {
   tenantId: string;
   orderId: string;
   canPack: boolean;
   canDispatch: boolean;
   canLabel: boolean;
+  /** Story 4-4a — `orders.manage`: remove a shipping document. */
+  canCancel?: boolean;
   /** Story 4-2b — opens the Cancel dialog; absent without `orders.manage` (hidden, never disabled). */
   onCancel?: (target: CancelTarget) => void;
+  /** Story 4-4a — opens the handover builder on this order; absent without `dispatch.execute`. */
+  onHandOver?: (orderId: string, clientId: string | null) => void;
 }) {
   const detail = useOrderDetail(orderId);
+  // Story 4-4a (A13, A20) — a live client-arranged shipment is dispatched only by a handover.
+  const shipmentRead = useOrderShipment(orderId);
+  const viaHandover =
+    shipmentRead.state === 'ready' && shipmentRead.data !== null && dispatchesByHandover(shipmentRead.data.shipment);
   // The SKU map only decorates: it names each line's SKU code and unit, and a
   // line falls back to its raw `skuId` and the unit-agnostic quantity copy
   // when its SKU cannot be resolved — the pack flow is never blocked on it.
@@ -455,6 +542,19 @@ function PackDispatchPanel({
         </div>
       )}
 
+      {(status === 'accepted' || status === 'ready_to_dispatch' || status === 'dispatched') && (
+        <ShippingPanel
+          tenantId={tenantId}
+          orderId={orderId}
+          orderLabel={orderLabel(order)}
+          status={status}
+          canLabel={canLabel}
+          canPack={canPack}
+          canDispatch={canDispatch}
+          canRemove={canCancel}
+        />
+      )}
+
       {status === 'accepted' ? (
         canPack ? (
           <PackBench
@@ -473,8 +573,31 @@ function PackDispatchPanel({
           <ReadOnlyLines lines={order.lines} skuMap={skuMap} />
           {status === 'ready_to_dispatch' && (
             <>
-              <LabelSection tenantId={tenantId} orderId={orderId} canLabel={canLabel} />
-              {canDispatch ? (
+              {/* FB5 — a failed shipment read is shown, never the carrier path (a Dispatch button on a client-arranged order). */}
+              {shipmentRead.state === 'failed' && (
+                <ReadFailure word="Shipment unavailable" reason={shipmentRead.reason} onRetry={shipmentRead.reload} />
+              )}
+              {shipmentRead.state === 'ready' && !viaHandover && <LabelSection tenantId={tenantId} orderId={orderId} canLabel={canLabel} />}
+              {shipmentRead.state !== 'ready' ? null : viaHandover ? (
+                // The 4.6c Dispatch button gives way to Hand over (A20).
+                onHandOver !== undefined ? (
+                  <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="hand-over-row">
+                    <button
+                      type="button"
+                      className={primaryClass}
+                      onClick={() => onHandOver(order.id, order.clientId ?? null)}
+                      data-testid="open-hand-over"
+                    >
+                      Hand over
+                    </button>
+                    <span className="text-(--muted-foreground)">
+                      The client arranged this courier — the handover dispatches it.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-xs text-(--muted-foreground)">Packed and waiting for the client&apos;s courier.</div>
+                )
+              ) : canDispatch ? (
                 <DispatchSection
                   tenantId={tenantId}
                   orderId={orderId}
@@ -1246,6 +1369,7 @@ function ManifestSection({
   tenantId,
   warehouseId,
   pageOrders,
+  shipments,
   canLabel,
   active,
 }: {
@@ -1253,6 +1377,8 @@ function ManifestSection({
   warehouseId: string;
   /** The page's pipeline rows (unfiltered by the status control). */
   pageOrders: readonly OrderEntryDto[];
+  /** Story 4-4a — the page's live shipments (one read, shared with the Shipping cell). */
+  shipments: ReturnType<typeof useOrderShipments>;
   canLabel: boolean;
   /** Story 1-5a — filters the manifests list only; the builder is all clients. */
   active: ActiveClientState;
@@ -1261,7 +1387,7 @@ function ManifestSection({
   const readyOrderIds = pageOrders
     .filter((order) => canLabelOrder(order.status))
     .map((order) => order.id);
-  const labelled = useLabelledShipments(tenantId, readyOrderIds);
+  const labelled = carrierLabelled(shipments, readyOrderIds);
   // Narrowed once: every closure below reads the ready arm's list, and an
   // empty page reads as none to manifest.
   const labelledShipments = labelled.state === 'ready' ? labelled.data : [];
@@ -1465,7 +1591,7 @@ function ManifestSection({
 
 /** The distinct connection groups among labelled shipments, as picker options. */
 function connectionGroups(
-  shipments: readonly ShipmentDto[],
+  shipments: readonly CarrierShipment[],
 ): readonly (readonly [string, string])[] {
   const seen = new Map<string, string>();
   for (const shipment of shipments) {
@@ -1477,75 +1603,32 @@ function connectionGroups(
 }
 
 /**
- * The labelled shipments of the given orders, page-scoped: a per-order
- * shipment read per `ready_to_dispatch` order on the page (there is no
- * list-shipments route). A 404 — the order has no label yet — reads as null
- * and contributes nothing; a real failure fails the WHOLE arm with a Retry,
- * because a builder built from a partially-read page would silently omit
- * shipments from a terminal closure.
+ * The labelled CARRIER shipments of the page's ready orders (story 4.6c's
+ * builder input), from the page's one shipments read. A client-arranged
+ * shipment never manifests (4-4a: the handover closes it), and a row without
+ * a connection cannot be grouped.
  */
-function useLabelledShipments(
-  tenantId: string,
-  orderIds: readonly string[],
-): ({ state: 'loading' } | { state: 'ready'; data: readonly ShipmentDto[] } | { state: 'failed'; reason: string }) & {
+function carrierLabelled(
+  shipments: ReturnType<typeof useOrderShipments>,
+  readyOrderIds: readonly string[],
+): ({ state: 'loading' } | { state: 'ready'; data: readonly CarrierShipment[] } | { state: 'failed'; reason: string }) & {
   reload: () => void;
 } {
-  const [revision, setRevision] = useState(0);
-  const [result, setResult] = useState<{
-    orderKey: string;
-    state:
-      | { state: 'ready'; data: readonly ShipmentDto[] }
-      | { state: 'failed'; reason: string };
-  } | null>(null);
-  const orderKey = orderIds.join(',');
-
-  useEffect(() => {
-    const onChange = () => setRevision((r) => r + 1);
-    window.addEventListener(OUTBOUND_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(OUTBOUND_CHANGED_EVENT, onChange);
-  }, []);
-
-  useEffect(() => {
-    if (orderIds.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      const settled = await Promise.allSettled(
-        orderIds.map(async (orderId) => {
-          const response = await fetchApiGetShipment(tenantId, orderId);
-          return response === null ? null : response.shipment;
-        }),
-      );
-      if (cancelled) return;
-      const failures = settled.filter(
-        (entry): entry is PromiseRejectedResult => entry.status === 'rejected',
-      );
-      if (failures.length > 0) {
-        setResult({
-          orderKey,
-          state: { state: 'failed', reason: readReason(failures[0]!.reason, 'the labelled shipments') },
-        });
-        return;
-      }
-      const labelled = settled
-        .flatMap((entry) => (entry.status === 'fulfilled' && entry.value !== null ? [entry.value] : []))
-        .filter((shipment) => shipment.status === 'labelled');
-      setResult({ orderKey, state: { state: 'ready', data: labelled } });
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // `orderIds` enters through `orderKey` (its joined form) — the array's
-    // identity churns every render of the table, and a refetch per render is
-    // the churn the key exists to prevent.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId, orderKey, revision]);
-
-  const reload = useCallback(() => setRevision((r) => r + 1), []);
-  if (orderIds.length === 0) {
-    return { state: 'ready', data: [], reload };
-  }
-  if (result === null || result.orderKey !== orderKey) {
-    return { state: 'loading', reload };
-  }
-  return { ...result.state, reload };
+  if (shipments.state !== 'ready') return shipments;
+  // FB4 — only the READY orders' reads matter here: a failed read of an accepted order never fails the builder.
+  const failed = readyOrderIds.find((orderId) => shipments.failures.has(orderId));
+  if (failed !== undefined) return { state: 'failed', reason: shipments.failures.get(failed)!, reload: shipments.reload };
+  const data = readyOrderIds.flatMap((orderId) => {
+    const shipment = shipments.data.get(orderId) ?? null;
+    return shipment !== null &&
+      shipment.status === 'labelled' &&
+      (shipment.kind ?? 'carrier') === 'carrier' &&
+      shipment.carrierConnectionId !== null
+      ? [shipment as CarrierShipment]
+      : [];
+  });
+  return { state: 'ready', data, reload: shipments.reload };
 }
+
+/** A carrier shipment: its connection is set (4-4a made the column nullable for client-arranged rows). */
+type CarrierShipment = ShipmentDto & { readonly carrierConnectionId: string };

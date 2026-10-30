@@ -12,6 +12,7 @@ import {
   clientEmailsReadReason,
   contactEmailBadge,
   contactEmailEventsBody,
+  clientEmailKindWord,
   contactEmailsLabel,
   isClientEmailProblem,
   istInstantLabel,
@@ -107,18 +108,27 @@ describe('client emails — the log (story 5-2b)', () => {
   });
 
   test('banners: mail off, client emails off, then each capped kind', () => {
-    const on = { mailEnabled: true, clientMailEnabled: true, capReachedToday: { receipt: false, dispatch: false } };
+    const on = { mailEnabled: true, clientMailEnabled: true, capReachedToday: { receipt: false, dispatch: false, shipmentDocument: false } };
     expect(clientEmailBanners(on)).toEqual([]);
-    const words = clientEmailBanners({ mailEnabled: false, clientMailEnabled: false, capReachedToday: { receipt: true, dispatch: true } }).map((b) => b.word);
+    const words = clientEmailBanners({ mailEnabled: false, clientMailEnabled: false, capReachedToday: { receipt: true, dispatch: true, shipmentDocument: false } }).map((b) => b.word);
     expect(words).toEqual([
       'Mail is off on this server',
       'Client emails are off on this server',
       'Daily limit of 500 reached — later receipts today were not emailed',
       'Daily limit of 500 reached — later dispatches today were not emailed',
     ]);
-    expect(clientEmailBanners({ ...on, capReachedToday: { receipt: false, dispatch: true } }).map((b) => b.word)).toEqual([
+    expect(clientEmailBanners({ ...on, capReachedToday: { receipt: false, dispatch: true, shipmentDocument: false } }).map((b) => b.word)).toEqual([
       'Daily limit of 500 reached — later dispatches today were not emailed',
     ]);
+    // Story 4-4a (D5) — the third kind's own cap.
+    const docs = clientEmailBanners({ ...on, capReachedToday: { receipt: false, dispatch: false, shipmentDocument: true } });
+    expect(docs.map((b) => b.word)).toEqual(['Daily limit of 500 reached — later shipping documents today were not emailed']);
+    expect(docs[0]!.reason).toContain('shipping document emails');
+  });
+
+  test('story 4-4a — the shipping documents event and kind have words', () => {
+    expect(contactEmailsLabel(['shipment.documents', 'receipt.recorded'])).toBe('Emails: receipts, shipping documents');
+    expect(clientEmailKindWord('shipment-document')).toBe('Shipping document');
   });
 
   test('polling: only while a row is queued, for at most 60 s from the first queued read', () => {

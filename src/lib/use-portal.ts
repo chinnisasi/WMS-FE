@@ -14,6 +14,7 @@ import {
   fetchApiPortalInvoiceNotes,
   fetchApiPortalInvoices,
   fetchApiPortalOrder,
+  fetchApiPortalOrderShipping,
   fetchApiPortalOrders,
   fetchApiPortalPurchaseOrder,
   fetchApiPortalPurchaseOrders,
@@ -28,6 +29,7 @@ import {
   ApiProblem,
 } from '@/lib/api/client';
 import type {
+  PortalOrderShippingResponse,
   PortalAsnDetailResponse,
   PortalAsnRowDto,
   PortalGoodsReceiptDetailDto,
@@ -228,6 +230,11 @@ export function usePortalOrders(status: PortalOrderRowDto['status'] | null, refe
 
 export function usePortalOrder(orderId: string | null): ResourceState<PortalOrderDetailResponse> & Reloadable {
   return usePortalDetail(orderId, 'This order', fetchApiPortalOrder);
+}
+
+/** Story 4-4a (A17) — one order's Shipping section; `refresh()` re-reads quietly (an expired link, an upload). */
+export function usePortalOrderShipping(orderId: string | null) {
+  return usePortalDetail<PortalOrderShippingResponse>(orderId, 'This order’s shipping', fetchApiPortalOrderShipping);
 }
 
 export function usePortalAsns() {

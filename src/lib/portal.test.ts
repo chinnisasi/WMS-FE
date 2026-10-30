@@ -47,6 +47,7 @@ import {
   portalOrderReason,
   type PortalOrderDraft,
 } from './portal';
+import { portalFileLine, portalShippingLine, portalShippingReason, portalShippingStatus } from './portal';
 import { asnExpected, atLeastCount, orderTimeline, portalDateTime, portalNavCurrent, PORTAL_HOME } from './portal';
 
 describe('portal routing (story 21-7)', () => {
@@ -530,5 +531,58 @@ describe('portal backorders (story 4-2c)', () => {
     expect(portalLineShipped({ qty: 10, shippedQty: 7 })).toBe('7 of 10 shipped');
     expect(portalLineShipped({ qty: 10, shippedQty: null })).toBeNull();
     expect(portalLineShipped({ qty: 10 })).toBeNull();
+  });
+});
+
+describe('story 4-4a — the order Shipping section', () => {
+  test('the status mirrors wms-be portalShippingStatus (A44, as built)', () => {
+    const client = (verified: boolean) => ({ kind: 'client-label', status: 'labelled', labelVerified: verified });
+    expect(portalShippingStatus('cancelled', client(true), false)).toBe('cancelled');
+    expect(portalShippingStatus('accepted', null, false)).toBe('no-label-yet');
+    expect(portalShippingStatus('accepted', client(true), false)).toBe('label-received');
+    expect(portalShippingStatus('ready_to_dispatch', client(false), false)).toBe('label-received');
+    expect(portalShippingStatus('ready_to_dispatch', client(true), false)).toBe('ready-for-pickup');
+    expect(portalShippingStatus('accepted', { kind: 'courier-label', status: 'labelled', labelVerified: false }, false)).toBe('awb-received');
+    expect(portalShippingStatus('ready_to_dispatch', { kind: 'carrier', status: 'labelled', labelVerified: false }, false)).toBe('awb-received');
+    expect(portalShippingStatus('dispatched', { kind: 'client-label', status: 'handed_over', labelVerified: true }, true)).toBe('handed-over');
+    expect(portalShippingStatus('dispatched', { kind: 'carrier', status: 'manifested', labelVerified: false }, true)).toBe('shipped');
+    expect(portalShippingStatus('dispatched', null, true)).toBe('shipped');
+    expect(portalShippingStatus('dispatched', null, false)).toBe('shipped-no-courier-record');
+  });
+
+  test('the status line names the courier, AWB and IST time once handed over', () => {
+    expect(portalShippingLine({ status: 'handed-over', courierName: 'Delhivery', awb: '123456789012', handedOverAt: '2026-10-30T10:35:00.000Z' })).toBe(
+      'Handed over to Delhivery — AWB 123456789012, 30 Oct 2026, 16:05 IST',
+    );
+    expect(portalShippingLine({ status: 'label-received', courierName: 'Delhivery', awb: '123456789012', handedOverAt: null })).toBe(
+      'Label received — Delhivery AWB 123456789012',
+    );
+    expect(portalShippingLine({ status: 'no-label-yet', courierName: null, awb: null, handedOverAt: null })).toBe(
+      'No label yet — upload one, send the AWB, or your courier brings it',
+    );
+  });
+
+  test('file lines and refusals in client words', () => {
+    expect(portalFileLine({ kind: 'eway-bill', fileName: 'SO-1-eway-bill-1.pdf', pageCount: 2, uploadedByYou: true })).toBe(
+      'E-way bill · SO-1-eway-bill-1.pdf · 2 pages · uploaded by you',
+    );
+    expect(portalFileLine({ kind: 'signed-sheet', fileName: 'HO-0001-sheet-1.jpg', pageCount: null, uploadedByYou: false })).toBe(
+      'Signed handover sheet · HO-0001-sheet-1.jpg',
+    );
+    expect(portalShippingReason(new ApiProblem('shipment-exists', 409, 'x', 'y', { kind: 'carrier' }), 'label')).toContain('already booked a courier');
+    expect(portalShippingReason(new ApiProblem('shipment-exists', 409, 'x', 'y', { kind: 'client-label' }), 'label')).toContain('Replace');
+    expect(portalShippingReason(new ApiProblem('not-found', 404), 'awb')).toContain('may not belong to your company');
+    expect(portalShippingReason(new ApiProblem('pdf-unreadable', 422), 'label')).toContain('Remove the password');
+  });
+});
+
+describe('story 4-4a review — FB10 portal refusals are client words, never the server detail', () => {
+  test('every portal code has its own sentence; an unknown code a generic one', () => {
+    const codes = ['shipment-exists', 'shipment-handed-over', 'awb-in-use', 'order-not-open', 'document-limit', 'attachment-type-unsupported', 'attachment-too-large', 'pdf-unreadable', 'pdf-too-many-pages', 'file-storage-unavailable', 'conflict', 'validation-failed', 'idempotency-key-reuse', 'brand-new'];
+    for (const code of codes) {
+      const words = portalShippingReason(new ApiProblem(code, 409, 'SERVER DETAIL on order SO-7 holder'), 'awb');
+      expect(words).not.toContain('SERVER DETAIL');
+      expect(words.startsWith('Your AWB was not sent')).toBe(true);
+    }
   });
 });

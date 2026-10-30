@@ -490,6 +490,12 @@ describe('refusal mappers', () => {
     );
   });
 
+  test('4-4a: dispatch-via-handover is worded, never verbatim', () => {
+    expect(dispatchReason(new ApiProblem('dispatch-via-handover', 409, 'server prose', 'Dispatch via handover'))).toBe(
+      'The client arranged this courier — hand the parcel over to the courier (Hand over); the handover dispatches it.',
+    );
+  });
+
   test('3-7a: order-holds-recalled-batch names the lots and recalls and the two ways out — never verbatim', () => {
     const refusal = new ApiProblem('order-holds-recalled-batch', 409, 'server prose', 'Order holds a recalled batch', {
       batchCodes: ['LOT-A', 'LOT-B'],

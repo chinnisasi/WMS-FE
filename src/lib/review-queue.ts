@@ -624,6 +624,10 @@ export function rejectedOpGuidance(
 ): readonly string[] {
   // Story 4-7a — a refused handheld restock: Discard only; the web records it to match the floor.
   if (entry.opType === 'return.restock') return [returnRestockGuidance(binCode)];
+  // Story 4-4a (A19, A32) — client-arranged shipping on the handheld: Discard only.
+  if (entry.opType === 'shipment.verify-label') return [verifyLabelGuidance(entry)];
+  if (entry.opType === 'handover.create') return handoverGuidance(entry);
+  if (entry.opType === 'handover-photo.stage') return [HANDOVER_PHOTO_GUIDANCE];
   // Story 2-8b — a refused handheld RTV pick: Discard only; the pick moved nothing.
   if (entry.opType === 'rtv.pick') return [rtvPickGuidance(entry.problemCode)];
   // Story 4-7c — a refused handheld RTC pick: Discard only; the pick moved nothing.
@@ -888,6 +892,9 @@ export function rejectedOpSummary(
   if (entry.opType === 'return.restock') return returnRestockSummary(entry, skuCode);
   if (entry.opType === 'rtv.pick') return rtvPickSummary(entry);
   if (entry.opType === 'rtc.pick') return rtcPickSummary(entry);
+  if (entry.opType === 'shipment.verify-label') return verifyLabelSummary(entry);
+  if (entry.opType === 'handover.create') return handoverSummary(entry);
+  if (entry.opType === 'handover-photo.stage') return handoverPhotoSummary(entry);
   if (entry.opType === 'return.receive_blind') return blindReceiveSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
@@ -1605,4 +1612,164 @@ export function rtcPickSummary(entry: Pick<RejectedOpResponse, 'payload' | 'prob
   if (typeof occurredAt === 'string' && !Number.isNaN(Date.parse(occurredAt))) parts.push(`at ${istDateTimeLabel(occurredAt)} IST`);
   const problem = RTC_PICK_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
   return { heading: `${rtc} — pick not recorded`, lines: [`${parts.join(' · ')} — ${problem}`] };
+}
+
+// ── story 4-4a: client-arranged shipping on the handheld (A19, A29, A32) ─────
+
+function payloadString(payload: Record<string, unknown>, key: string): string | null {
+  const value = payload[key];
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function orderWords(orderId: string | null): string {
+  return orderId === null ? 'the order' : `order …${shortIdTail(orderId)}`;
+}
+
+/** Why the bench verify was refused, in words (its whole-op `problemCode`); an unknown code reads as itself. */
+export const VERIFY_LABEL_PROBLEM_WORDS: Readonly<Record<string, string>> = {
+  'label-mismatch': 'the scanned label is not this order’s',
+  'no-client-label': 'the order has no client label any more (voided, or replaced by an AWB)',
+  'order-not-open': 'the order was dispatched or cancelled first',
+  'not-found': 'the order no longer exists',
+  'role-denied': 'the operator may not pack',
+  'idempotency-key-reuse': 'the same scan was sent twice with different values',
+};
+
+/** A refused bench verify: re-print and re-scan, then Discard (A19). */
+export function verifyLabelGuidance(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): string {
+  const order = orderWords(payloadString(entry.payload, 'orderId'));
+  if (entry.problemCode === 'order-not-open') return `Nothing to do for ${order} — it left or was cancelled before the scan arrived. Discard this row.`;
+  return `Re-print the client label for ${order} on the web (Outbound → Pack & Dispatch) and scan it again — or let the handover scan it. Then discard this row.`;
+}
+
+function verifyLabelSummary(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): { heading: string; lines: readonly string[] } {
+  const scanned = payloadString(entry.payload, 'scannedCode');
+  const method = payloadString(entry.payload, 'method');
+  const problem = VERIFY_LABEL_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  const read = scanned === null ? 'A scan' : `${method === 'typed' ? 'Typed' : 'Scanned'} …${scanned.slice(-4)}`;
+  return { heading: 'Client label not verified', lines: [`${orderWords(payloadString(entry.payload, 'orderId'))}: ${read} — ${problem}`] };
+}
+
+/** A32 — a refused parcel has physically left: the guidance names the consequence by code. */
+export const HANDOVER_CANCELLED_GUIDANCE =
+  'This parcel left with the courier, but the order was cancelled — its units were put back in stock. Count the bins and adjust, then re-create the order and hand it over, or recover the parcel from the courier.';
+export const HANDOVER_RECALLED_GUIDANCE = 'A recalled lot left with the courier — tell the recall owner; recover the parcel.';
+export const HANDOVER_OTHER_GUIDANCE = 'Fix the cause and hand it over on the web with the same courier and time (Outbound → Handovers).';
+export const HANDOVER_WHOLE_OP_GUIDANCE =
+  'Nothing in this handover was recorded. Hand the parcels over on the web with the same courier and time (Outbound → Handovers), then discard this row.';
+/** A29 — the photos of a refused handover stay staged while the row is open. */
+export const HANDOVER_PHOTOS_KEPT_NOTE =
+  'The signed-sheet photos are kept while this row is open — upload the signed sheet on the web handover, then discard this row.';
+
+/** The parcel words of a handover review row's refusals. */
+export const HANDOVER_REFUSAL_WORDS: Readonly<Record<string, string>> = {
+  'order-not-found': 'the order no longer exists',
+  'warehouse-mismatch': 'the order is in another warehouse',
+  'order-not-ready': 'not packed, or cancelled',
+  'order-already-dispatched': 'already dispatched',
+  'shipment-not-client-arranged': 'a carrier label — it goes on a manifest',
+  'label-not-verified': 'the client label was not verified',
+  'awb-mismatch': 'the scanned AWB is not the client’s label',
+  'awb-required': 'no AWB was scanned',
+  'awb-in-use': 'the AWB is on another open order',
+  'order-holds-recalled-batch': 'it holds a recalled lot',
+};
+
+function handoverRefusalsOf(payload: Record<string, unknown>): { orderId: string | null; code: string; orderStatus: string | null }[] {
+  const refusals = Array.isArray(payload['refusals']) ? (payload['refusals'] as unknown[]) : [];
+  return refusals.flatMap((refusal) => {
+    if (typeof refusal !== 'object' || refusal === null) return [];
+    const r = refusal as Record<string, unknown>;
+    return typeof r['code'] === 'string'
+      ? [{ orderId: typeof r['orderId'] === 'string' ? r['orderId'] : null, code: r['code'], orderStatus: typeof r['orderStatus'] === 'string' ? r['orderStatus'] : null }]
+      : [];
+  });
+}
+
+function photoRefCount(payload: Record<string, unknown>): number {
+  return Array.isArray(payload['photoRefs']) ? payload['photoRefs'].length : 0;
+}
+
+/**
+ * A handover review row (A32): per refused parcel, its consequence — a
+ * cancelled order's units were restocked, a recalled lot left — else the
+ * web remedy; a whole-op refusal says nothing was recorded. Photos kept (A29).
+ */
+export function handoverGuidance(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): readonly string[] {
+  const refusals = handoverRefusalsOf(entry.payload);
+  const out: string[] = [];
+  if (refusals.length === 0) out.push(HANDOVER_WHOLE_OP_GUIDANCE);
+  else {
+    // FB11 — the restocked-units consequence is a CANCELLED order's only (its refusal names the status);
+    // an order merely not packed yet gets the plain web remedy.
+    const cancelled = (r: { code: string; orderStatus: string | null }) => r.code === 'order-not-ready' && r.orderStatus === 'cancelled';
+    if (refusals.some(cancelled)) out.push(HANDOVER_CANCELLED_GUIDANCE);
+    if (refusals.some((r) => r.code === 'order-holds-recalled-batch')) out.push(HANDOVER_RECALLED_GUIDANCE);
+    if (refusals.some((r) => !cancelled(r) && r.code !== 'order-holds-recalled-batch')) out.push(HANDOVER_OTHER_GUIDANCE);
+  }
+  if (photoRefCount(entry.payload) > 0) out.push(HANDOVER_PHOTOS_KEPT_NOTE);
+  return out;
+}
+
+const HANDOVER_WHOLE_OP_WORDS: Readonly<Record<string, string>> = {
+  'handover-client-mismatch': 'parcels of another client were in it',
+  'client-departed': 'the client has left the warehouse',
+  'validation-failed': 'the handover was malformed',
+  'not-found': 'the warehouse or client no longer exists',
+  'role-denied': 'the operator may not dispatch',
+  'idempotency-key-reuse': 'the same handover was sent twice with different values',
+};
+
+function handoverSummary(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): { heading: string; lines: readonly string[] } {
+  const payload = entry.payload;
+  const courier = typeof payload['courier'] === 'object' && payload['courier'] !== null ? (payload['courier'] as Record<string, unknown>) : {};
+  const courierName = typeof courier['courierName'] === 'string' ? courier['courierName'] : 'the courier';
+  const parcels = Array.isArray(payload['parcels']) ? (payload['parcels'] as unknown[]) : [];
+  const refusals = handoverRefusalsOf(payload);
+  const photos = photoRefCount(payload);
+  const photoLine = photos === 0 ? [] : [`${photos} signed-sheet ${photos === 1 ? 'photo' : 'photos'} kept`];
+  if (refusals.length > 0) {
+    return {
+      heading: `${refusals.length} ${refusals.length === 1 ? 'parcel' : 'parcels'} left with ${courierName} but not handed over`,
+      lines: [
+        ...refusals.map((r) => `${orderWords(r.orderId)} — ${HANDOVER_REFUSAL_WORDS[r.code] ?? r.code}`),
+        ...photoLine,
+      ],
+    };
+  }
+  const why = HANDOVER_WHOLE_OP_WORDS[entry.problemCode] ?? entry.problemCode;
+  return {
+    heading: `Handover to ${courierName} not recorded`,
+    lines: [
+      `${parcels.length} ${parcels.length === 1 ? 'parcel' : 'parcels'} — ${why}`,
+      ...parcels.flatMap((parcel) => {
+        if (typeof parcel !== 'object' || parcel === null) return [];
+        const p = parcel as Record<string, unknown>;
+        const orderId = typeof p['orderId'] === 'string' ? p['orderId'] : null;
+        const awb = typeof p['awb'] === 'string' && p['awb'] !== '' ? ` · AWB ${p['awb']}` : '';
+        return [`${orderWords(orderId)}${awb}`];
+      }),
+      ...photoLine,
+    ],
+  };
+}
+
+/** A refused signed-sheet photo (2-5a's photo table): the handover itself is unaffected. */
+export const HANDOVER_PHOTO_GUIDANCE =
+  'The handover is not affected. Upload the signed sheet on the web (Outbound → Handovers → the handover), then discard this row.';
+
+function handoverPhotoSummary(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): { heading: string; lines: readonly string[] } {
+  const ref = payloadString(entry.payload, 'ref');
+  const problem = RECEIPT_PHOTO_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return { heading: 'Signed-sheet photo not uploaded', lines: [`${ref === null ? 'Photo' : `Photo …${ref.slice(-8)}`} — ${problem}`] };
+}
+
+/** FA29 — the kept signed-sheet photos of a `handover.create` row, with their presigned links (null when unsigned). */
+export const HANDOVER_PHOTO_LINK_WORD = 'Download the signed sheet to attach it to the web handover';
+
+export function handoverReviewPhotos(
+  entry: Pick<RejectedOpResponse, 'opType'> & { readonly photos?: RejectedOpResponse['photos'] },
+): readonly { readonly ref: string; readonly url: string | null; readonly urlExpiresAt: string | null }[] {
+  if (entry.opType !== 'handover.create' || entry.photos === undefined) return [];
+  return entry.photos;
 }

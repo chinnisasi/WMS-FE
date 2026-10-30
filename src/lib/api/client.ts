@@ -343,6 +343,23 @@ import {
   dockControllerReschedule,
   dockControllerUpdateDoor,
   dockControllerWindow,
+  portalControllerAdviseAwb,
+  portalControllerOrderShipping,
+  portalControllerUploadClientLabel,
+  portalControllerUploadOrderDocument,
+  shippingControllerHandOver,
+  shippingControllerHandover,
+  shippingControllerHandoverCandidates,
+  shippingControllerHandovers,
+  shippingControllerOrderShipping,
+  shippingControllerParcelTag,
+  shippingControllerRecordAwbAdvice,
+  shippingControllerRecordClientLabel,
+  shippingControllerRemoveShippingFile,
+  shippingControllerUploadHandoverSheet,
+  shippingControllerUploadOrderDocument,
+  shippingControllerVerifyLabel,
+  shippingControllerVoidShipment,
 } from './generated/sdk.gen';
 import {
   accessTokenExpired,
@@ -704,6 +721,22 @@ import type {
   ZoneResponse,
   PutawayTaskListResponse,
   InventoryControllerListEventsData,
+  ClientShipmentResponse,
+  CreateHandoverDto,
+  HandoverCandidatesResponse,
+  HandoverDetailResponse,
+  HandoverResponse,
+  HandoversResponse,
+  OrderShippingResponse,
+  PortalAwbAdviceDto,
+  PortalControllerUploadOrderDocumentData,
+  PortalOrderShippingResponse,
+  PortalShipmentResponse,
+  RecordAwbAdviceDto,
+  ShippingControllerUploadOrderDocumentData,
+  ShippingFileResponse,
+  VerifyLabelDto,
+  VerifyLabelResponse,
 } from './generated/types.gen';
 
 /**
@@ -7130,5 +7163,301 @@ export async function fetchApiCancelDockAppointment(
     headers: { 'Idempotency-Key': idempotencyKey },
   });
   if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Client-arranged shipping (story 4-4a)                               */
+/* ------------------------------------------------------------------ */
+
+/** Story 4-4a — the client label's multipart fields, as the route takes them (strings). */
+export interface ClientLabelUpload {
+  readonly file: File;
+  readonly awb: string;
+  readonly courierName?: string;
+  readonly transporterId?: string;
+  readonly packageCount?: number;
+  readonly replace?: boolean;
+}
+
+function clientLabelBody(upload: ClientLabelUpload) {
+  return {
+    file: upload.file,
+    awb: upload.awb,
+    ...(upload.courierName === undefined ? {} : { courierName: upload.courierName }),
+    ...(upload.transporterId === undefined ? {} : { transporterId: upload.transporterId }),
+    ...(upload.packageCount === undefined ? {} : { packageCount: String(upload.packageCount) }),
+    ...(upload.replace === true ? { replace: 'true' as const } : {}),
+  };
+}
+
+/**
+ * Story 4-4a (A8) — staff record the client's label PDF and its AWB for an
+ * order (`labels.execute`). Multipart; the key is the prepared upload's intent
+ * (the 2-5a rule: a retry posts the same file and fields under the same key).
+ */
+export async function fetchApiRecordClientLabel(
+  tenantId: string,
+  orderId: string,
+  upload: ClientLabelUpload,
+  idempotencyKey: string,
+): Promise<ClientShipmentResponse> {
+  const { data, error, response } = await shippingControllerRecordClientLabel({
+    path: { tenantId, orderId },
+    body: clientLabelBody(upload),
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A9) — staff pre-advise the AWB of a courier-label order (`labels.execute`). */
+export async function fetchApiRecordAwbAdvice(
+  tenantId: string,
+  orderId: string,
+  body: RecordAwbAdviceDto,
+  idempotencyKey: string,
+): Promise<ClientShipmentResponse> {
+  const { data, error, response } = await shippingControllerRecordAwbAdvice({
+    path: { tenantId, orderId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A10) — void the order's live client-arranged shipment with a reason (`labels.execute`). */
+export async function fetchApiVoidClientShipment(
+  tenantId: string,
+  orderId: string,
+  reason: string,
+  idempotencyKey: string,
+): Promise<ClientShipmentResponse> {
+  const { data, error, response } = await shippingControllerVoidShipment({
+    path: { tenantId, orderId },
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A11) — verify the printed client label by its scanned (or typed) AWB (`pack.execute`). */
+export async function fetchApiVerifyClientLabel(
+  tenantId: string,
+  orderId: string,
+  body: VerifyLabelDto,
+  idempotencyKey: string,
+): Promise<VerifyLabelResponse> {
+  const { data, error, response } = await shippingControllerVerifyLabel({
+    path: { tenantId, orderId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A16) — one order's shipping: the live shipment, history, label, documents, handover. */
+export async function fetchApiOrderShipping(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<OrderShippingResponse> {
+  const { data, error, response } = await shippingControllerOrderShipping({ path: { tenantId, orderId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/**
+ * Story 4-4a (A16) — the order's 4×2 parcel tag as ZPL or PDF, fetched with
+ * the bearer header (`parseAs: 'blob'`, the bin-labels pattern); the caller
+ * names the file (`parcelTagFilename`).
+ */
+export async function fetchApiParcelTag(tenantId: string, orderId: string, format: 'zpl' | 'pdf'): Promise<Blob> {
+  const { data, error, response } = await shippingControllerParcelTag({
+    path: { tenantId, orderId },
+    query: { format },
+    parseAs: 'blob',
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data as Blob;
+}
+
+/** Story 4-4a (A14) — attach a shipping document (invoice, challan, e-way bill, POD, other) to an order (`dispatch.execute`). */
+export async function fetchApiUploadOrderDocument(
+  tenantId: string,
+  orderId: string,
+  file: File,
+  kind: ShippingControllerUploadOrderDocumentData['body']['kind'],
+  idempotencyKey: string,
+): Promise<ShippingFileResponse> {
+  const { data, error, response } = await shippingControllerUploadOrderDocument({
+    path: { tenantId, orderId },
+    body: { file, kind },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A14) — attach one page of the signed handover sheet (`dispatch.execute`). */
+export async function fetchApiUploadHandoverSheet(
+  tenantId: string,
+  handoverId: string,
+  file: File,
+  idempotencyKey: string,
+): Promise<ShippingFileResponse> {
+  const { data, error, response } = await shippingControllerUploadHandoverSheet({
+    path: { tenantId, handoverId },
+    body: { file },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A14) — remove a shipping document or sheet page with a reason (`orders.manage`). */
+export async function fetchApiRemoveShippingFile(
+  tenantId: string,
+  attachmentId: string,
+  reason: string,
+  idempotencyKey: string,
+): Promise<ShippingFileResponse> {
+  const { data, error, response } = await shippingControllerRemoveShippingFile({
+    path: { tenantId, attachmentId },
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A12) — the courier handover: one courier, one client, one pickup; it dispatches every order it carries. */
+export async function fetchApiCreateHandover(
+  tenantId: string,
+  body: CreateHandoverDto,
+  idempotencyKey: string,
+): Promise<HandoverResponse> {
+  const { data, error, response } = await shippingControllerHandOver({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A16) — one handover's detail: the frozen parties, the parcels, the sheet. */
+export async function fetchApiHandover(
+  tenantId: string,
+  handoverId: string,
+  options?: { signal?: AbortSignal },
+): Promise<HandoverDetailResponse> {
+  const { data, error, response } = await shippingControllerHandover({ path: { tenantId, handoverId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A16) — one page of a client's packed orders awaiting a courier, oldest first. */
+export async function fetchApiHandoverCandidates(
+  tenantId: string,
+  warehouseId: string,
+  clientId: string,
+  options?: { cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<HandoverCandidatesResponse> {
+  const { data, error, response } = await shippingControllerHandoverCandidates({
+    path: { tenantId, warehouseId },
+    query: {
+      clientId,
+      ...(options?.cursor === undefined ? {} : { cursor: options.cursor }),
+      ...(options?.limit === undefined ? {} : { limit: String(options.limit) }),
+    },
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A16) — one warehouse's handovers, newest first; `from` / `to` are IST dates. */
+export async function fetchApiListHandovers(
+  tenantId: string,
+  warehouseId: string,
+  options?: { clientId?: string; from?: string; to?: string; cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<HandoversResponse> {
+  const { data, error, response } = await shippingControllerHandovers({
+    path: { tenantId, warehouseId },
+    query: definedQuery({
+      clientId: options?.clientId,
+      from: options?.from,
+      to: options?.to,
+      cursor: options?.cursor,
+      limit: options?.limit === undefined ? undefined : String(options.limit),
+    }),
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-4a (A17) — the client's view of one of its orders' shipping (portal). */
+export async function fetchApiPortalOrderShipping(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalOrderShippingResponse> {
+  const { data, error } = await portalControllerOrderShipping({ path: { tenantId, orderId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 4-4a (A8) — the client uploads its own label PDF with the AWB and courier (portal; no transporter). */
+export async function fetchApiPortalUploadClientLabel(
+  tenantId: string,
+  orderId: string,
+  upload: Omit<ClientLabelUpload, 'transporterId' | 'courierName'> & { courierName: string },
+  idempotencyKey: string,
+): Promise<PortalShipmentResponse> {
+  const body = clientLabelBody(upload);
+  const { data, error } = await portalControllerUploadClientLabel({
+    path: { tenantId, orderId },
+    body: { ...body, courierName: upload.courierName },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 4-4a (A9) — the client pre-advises the AWB; the courier brings its own labels (portal). */
+export async function fetchApiPortalAdviseAwb(
+  tenantId: string,
+  orderId: string,
+  body: PortalAwbAdviceDto,
+  idempotencyKey: string,
+): Promise<PortalShipmentResponse> {
+  const { data, error } = await portalControllerAdviseAwb({
+    path: { tenantId, orderId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 4-4a (A14) — the client uploads an invoice, challan, e-way bill or other document (portal; never a POD). */
+export async function fetchApiPortalUploadOrderDocument(
+  tenantId: string,
+  orderId: string,
+  file: File,
+  kind: PortalControllerUploadOrderDocumentData['body']['kind'],
+  idempotencyKey: string,
+): Promise<ShippingFileResponse> {
+  const { data, error } = await portalControllerUploadOrderDocument({
+    path: { tenantId, orderId },
+    body: { file, kind },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw portalError(error);
   return data;
 }

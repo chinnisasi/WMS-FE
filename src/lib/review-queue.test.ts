@@ -4,6 +4,9 @@ import { ApiProblem } from '@/lib/api/client';
 import type { CountVarianceEntryResponseDto } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from './outbound-orders';
 import {
+  HANDOVER_CANCELLED_GUIDANCE,
+  HANDOVER_OTHER_GUIDANCE,
+  handoverReviewPhotos,
   RETURN_RESTOCK_PROBLEM_WORDS,
   returnRestockGuidance,
   RECEIPT_PHOTO_GUIDANCE,
@@ -1140,5 +1143,82 @@ describe('pickBinBlockedGuidance (story 3-3b, A3)', () => {
   test('every other row reads nothing', () => {
     expect(pickBinBlockedGuidance({ opType: 'pick.record', problemCode: 'pick-unresolvable' }, 'A-01')).toBeNull();
     expect(pickBinBlockedGuidance({ opType: 'stock.move', problemCode: 'bin-blocked' }, 'A-01')).toBeNull();
+  });
+});
+
+describe('story 4-4a — the handheld shipping review rows (A19, A29, A32)', () => {
+  const ORDER = '01a18ba8-4743-79dd-8fe5-145b99902272';
+
+  test('a refused bench verify: re-print and re-scan; a late one says nothing to do', () => {
+    const entry = { opType: 'shipment.verify-label' as const, problemCode: 'label-mismatch', payload: { orderId: ORDER, scannedCode: '999944104410', method: 'scan' } };
+    expect(rejectedOpGuidance(entry)[0]).toContain('Re-print the client label for order …99902272');
+    expect(rejectedOpSummary(entry)).toEqual({
+      heading: 'Client label not verified',
+      lines: ['order …99902272: Scanned …4410 — the scanned label is not this order’s'],
+    });
+    expect(rejectedOpGuidance({ ...entry, problemCode: 'order-not-open' })[0]).toContain('Nothing to do');
+  });
+
+  test('a partly refused handover names each parcel and its consequence; the photos are kept', () => {
+    const entry = {
+      opType: 'handover.create' as const,
+      problemCode: 'handover-parcels-refused',
+      payload: {
+        courier: { courierName: 'Delhivery' },
+        parcels: [{ orderId: ORDER }],
+        photoRefs: ['01JD0000000000000000000000', '01JD0000000000000000000001'],
+        refusals: [
+          { orderId: ORDER, code: 'order-not-ready', detail: 'x', orderStatus: 'cancelled' },
+          { orderId: 'other-order-0000000000000001', code: 'awb-required', detail: 'y' },
+        ],
+      },
+    };
+    const guidance = rejectedOpGuidance(entry);
+    expect(guidance[0]).toContain('its units were put back in stock');
+    expect(guidance).toContain('Fix the cause and hand it over on the web with the same courier and time (Outbound → Handovers).');
+    expect(guidance.at(-1)).toContain('photos are kept');
+    expect(rejectedOpSummary(entry)).toEqual({
+      heading: '2 parcels left with Delhivery but not handed over',
+      lines: ['order …99902272 — not packed, or cancelled', 'order …00000001 — no AWB was scanned', '2 signed-sheet photos kept'],
+    });
+    const recalled = { ...entry, payload: { ...entry.payload, photoRefs: [], refusals: [{ orderId: ORDER, code: 'order-holds-recalled-batch' }] } };
+    expect(rejectedOpGuidance(recalled)).toEqual(['A recalled lot left with the courier — tell the recall owner; recover the parcel.']);
+  });
+
+  test('a whole-op refused handover lists its parcels', () => {
+    const entry = { opType: 'handover.create' as const, problemCode: 'handover-client-mismatch', payload: { courier: { courierName: 'Delhivery' }, parcels: [{ orderId: ORDER, awb: '77001' }] } };
+    expect(rejectedOpGuidance(entry)[0]).toContain('Nothing in this handover was recorded');
+    expect(rejectedOpSummary(entry)).toEqual({
+      heading: 'Handover to Delhivery not recorded',
+      lines: ['1 parcel — parcels of another client were in it', 'order …99902272 · AWB 77001'],
+    });
+  });
+
+  test('a refused sheet photo', () => {
+    const entry = { opType: 'handover-photo.stage' as const, problemCode: 'attachment-too-large', payload: { ref: '01JD00000000000000ABCDEFGH' } };
+    expect(rejectedOpGuidance(entry)[0]).toContain('The handover is not affected');
+    expect(rejectedOpSummary(entry)).toEqual({ heading: 'Signed-sheet photo not uploaded', lines: ['Photo …ABCDEFGH — larger than 10 MB'] });
+  });
+});
+
+describe('story 4-4a review — FB11 the not-ready consequence by order status; FA29 the photo links', () => {
+  const ORDER = '01a18ba8-4743-79dd-8fe5-145b99902272';
+  const row = (orderStatus: string | undefined) => ({
+    opType: 'handover.create' as const,
+    problemCode: 'handover-parcels-refused',
+    payload: { courier: { courierName: 'D' }, parcels: [{ orderId: ORDER }], refusals: [{ orderId: ORDER, code: 'order-not-ready', ...(orderStatus === undefined ? {} : { orderStatus }) }] },
+  });
+
+  test('a cancelled order gets the restocked consequence; an accepted (unpacked) one the web remedy', () => {
+    expect(rejectedOpGuidance(row('cancelled'))).toEqual([HANDOVER_CANCELLED_GUIDANCE]);
+    expect(rejectedOpGuidance(row('accepted'))).toEqual([HANDOVER_OTHER_GUIDANCE]);
+    expect(rejectedOpGuidance(row(undefined))).toEqual([HANDOVER_OTHER_GUIDANCE]);
+  });
+
+  test('the kept photos are listed only on a handover row', () => {
+    const photos = [{ ref: 'R1', url: 'https://files/x', urlExpiresAt: null }];
+    expect(handoverReviewPhotos({ opType: 'handover.create', photos })).toEqual(photos);
+    expect(handoverReviewPhotos({ opType: 'handover.create' })).toEqual([]);
+    expect(handoverReviewPhotos({ opType: 'pack.execute', photos })).toEqual([]);
   });
 });

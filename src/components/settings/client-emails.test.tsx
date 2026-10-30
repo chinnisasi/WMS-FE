@@ -119,7 +119,7 @@ let view: Rendered | undefined;
 
 beforeEach(() => {
   requests = [];
-  log = { items: [EMAIL], nextCursor: null, mailEnabled: true, clientMailEnabled: true, capReachedToday: { receipt: false, dispatch: false } };
+  log = { items: [EMAIL], nextCursor: null, mailEnabled: true, clientMailEnabled: true, capReachedToday: { receipt: false, dispatch: false, shipmentDocument: false } };
   contactRows = [];
   patchFailure = null;
   emailsFail = false;
@@ -225,7 +225,7 @@ describe('the Emails panel (story 5-2b)', () => {
   });
 
   test('the banners: mail off, client emails off, and the dispatch limit', async () => {
-    log = { ...log, mailEnabled: false, clientMailEnabled: false, capReachedToday: { receipt: false, dispatch: true } };
+    log = { ...log, mailEnabled: false, clientMailEnabled: false, capReachedToday: { receipt: false, dispatch: true, shipmentDocument: false } };
     const container = await openEmails('operator');
     const banners = container.querySelector('[aria-label="Email warnings"]')!.textContent ?? '';
     expect(banners).toContain('Mail is off on this server');
