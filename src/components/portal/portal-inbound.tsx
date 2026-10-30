@@ -20,11 +20,14 @@ import {
   GRN_NOT_FROZEN_NOTE,
   GRN_UNAVAILABLE,
   grnDocumentFilename,
+  grnDocumentKindLabel,
   grnExpiryLabel,
   grnPartyLines,
   grnPortalExcessLabel,
   grnPortalQcLabel,
+  grnSealLabel,
   grnSerialsLabel,
+  grnTotalsLabels,
   isMalformedGrnParam,
   parseGrnParam,
   writeGrnParam,
@@ -38,10 +41,12 @@ import {
   parsePortalAsnCreate,
   PO_STATUS_LABEL,
   PORTAL_NO_SKUS_MESSAGE,
+  PORTAL_SESSION_EXPIRED,
   PORTAL_SKUS_TOO_MANY_MESSAGE,
   portalAsnReason,
   portalDate,
   portalQuantity,
+  portalReadReason,
   portalSkuOption,
   portalWarehouseOptions,
   receivedOfLabel,
@@ -512,7 +517,11 @@ function portalLineCondition(line: PortalGoodsReceiptLineDto): string {
 }
 
 function ReceiptLines({ grnId }: { grnId: string }) {
-  const grn = usePortalGoodsReceipt(grnId);
+  return <ReceiptLinesView grn={usePortalGoodsReceipt(grnId)} />;
+}
+
+/** One receipt's header and lines from a read the CALLER holds (the deep link reads once and passes it here). */
+function ReceiptLinesView({ grn }: { grn: ReturnType<typeof usePortalGoodsReceipt> }) {
   // A28 — one refresher per receipt; it reads the newest `refresh` at call time.
   const [refresher] = useState(() => createUrlRefresher(grn.refresh));
   useEffect(() => refresher.bind(grn.refresh), [refresher, grn.refresh]);
@@ -588,13 +597,16 @@ function ReceiptHeader({ grn }: { grn: PortalGoodsReceiptDetailDto }) {
   const [busy, setBusy] = useState<'pdf' | 'csv' | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const download = async (format: 'pdf' | 'csv') => {
-    if (tenantId === null) return;
+    if (tenantId === null) {
+      setRefused(PORTAL_SESSION_EXPIRED);
+      return;
+    }
     setBusy(format);
     setRefused(null);
     try {
       downloadBlob(grnDocumentFilename(grn.code, format), await fetchApiPortalGoodsReceiptFile(tenantId, grn.id, format));
     } catch (error) {
-      setRefused(error instanceof Error && error.message !== '' ? error.message : 'The file could not be downloaded — retry.');
+      setRefused(portalReadReason(error, 'The GRN file'));
     } finally {
       setBusy(null);
     }
@@ -639,18 +651,22 @@ function ReceiptHeader({ grn }: { grn: PortalGoodsReceiptDetailDto }) {
         <div className="text-xs">
           <span className="font-medium">Arrival</span> — as recorded on gate-in {arrival.gateInCode}
           {arrival.vehicleNo !== null ? ` · vehicle ${arrival.vehicleNo}` : ''}
+          {arrival.containerNo !== null ? ` · container ${arrival.containerNo}` : ''}
           {arrival.transporterName !== null ? ` · ${arrival.transporterName}` : ''}
-          {` · seal ${arrival.sealStatus}`} · gated in {istDateTimeLabel(arrival.gatedInAt)} IST
+          {arrival.lrNumber !== null ? ` · LR/AWB ${arrival.lrNumber}` : ''}
+          {` · seal ${grnSealLabel(arrival.sealStatus)}`}
+          {arrival.sealNumber !== null ? ` ${arrival.sealNumber}` : ''} · gated in {istDateTimeLabel(arrival.gatedInAt)} IST
           {arrival.documents.map((document, index) => (
             <div key={index} className="data">
-              {document.kind} {document.number} dated {document.date}
+              {grnDocumentKindLabel(document.kind)} {document.number} dated {document.date}
+              {document.ewayBillNo !== null ? ` · e-way bill ${document.ewayBillNo}` : ''}
             </div>
           ))}
           {arrival.documentsOmitted && <div className="text-(--muted-foreground)">{GRN_DOCUMENTS_OMITTED_NOTE}</div>}
         </div>
       )}
       <div className="data text-xs text-(--muted-foreground)">
-        {grn.totals.byUom.map((group) => `${group.uom}: good ${group.goodQty}, damaged ${group.damagedQty}, short ${group.shortQty}`).join(' · ')}
+        {grnTotalsLabels(grn.totals.byUom, grn.lines).join(' — ')}
       </div>
     </div>
   );
@@ -674,8 +690,9 @@ function ReceiptLineFacts({ line }: { line: PortalGoodsReceiptLineDto }) {
 /** Story 2-9a (A18) — `?grn=<id>`: one receipt's detail, read by id; unknown or malformed → inline "not available". */
 function ReceiptDeepLink({ raw, onClose }: { raw: string; onClose: () => void }) {
   const grnId = parseGrnParam(raw);
+  // ONE read: the panel's title and its lines share it.
   const grn = usePortalGoodsReceipt(grnId);
-  const unavailable = isMalformedGrnParam(raw) || (grn.state === 'failed' && /could not be found|not found|not available/i.test(grn.reason));
+  const unavailable = isMalformedGrnParam(raw) || (grn.state === 'failed' && grn.notFound);
   return (
     <Section
       title={grn.state === 'ready' ? `Receipt ${grn.data.code}` : 'Receipt'}
@@ -694,7 +711,7 @@ function ReceiptDeepLink({ raw, onClose }: { raw: string; onClose: () => void })
             </button>
           </div>
         ) : grnId === null ? null : (
-          <ReceiptLines grnId={grnId} />
+          <ReceiptLinesView grn={grn} />
         )}
       </div>
     </Section>

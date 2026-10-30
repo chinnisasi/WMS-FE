@@ -25,6 +25,7 @@ import {
   fetchApiPortalReturns,
   fetchApiPortalService,
   fetchApiPortalStock,
+  ApiProblem,
 } from '@/lib/api/client';
 import type {
   PortalAsnDetailResponse,
@@ -148,10 +149,11 @@ function usePortalDetail<T>(
   subject: string,
   fetchOne: (tenantId: string, id: string) => Promise<T>,
   reason: (error: unknown) => string = (error) => portalReadReason(error, subject),
-): ResourceState<T> & Reloadable & { refresh: () => Promise<void> } {
+): ResourceState<T> & Reloadable & { refresh: () => Promise<void>; notFound: boolean } {
   const tenantId = useTenantId();
   const [revision, setRevision] = useState(0);
-  const [result, setResult] = useState<{ tenantId: string; id: string; state: ResourceState<T> } | null>(null);
+  // Story 2-9a — `notFound` is decided on the problem CODE (never on the reason's words).
+  const [result, setResult] = useState<{ tenantId: string; id: string; state: ResourceState<T>; notFound?: boolean } | null>(null);
   // Story 2-5a — every fetch takes a sequence number and only the newest may
   // land (guide §1.3): `refresh()` runs from an event handler, with no
   // effect cleanup to cancel it.
@@ -166,7 +168,9 @@ function usePortalDetail<T>(
         const data = await fetchOne(tenantId, id);
         if (!cancelled && mine === seq.current) setResult({ tenantId, id, state: { state: 'ready', data } });
       } catch (error) {
-        if (!cancelled && mine === seq.current) setResult({ tenantId, id, state: { state: 'failed', reason: reason(error) } });
+        if (!cancelled && mine === seq.current) {
+          setResult({ tenantId, id, state: { state: 'failed', reason: reason(error) }, notFound: error instanceof ApiProblem && error.code === 'not-found' });
+        }
       }
     })();
     return () => {
@@ -196,7 +200,7 @@ function usePortalDetail<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, id]);
   const stale = tenantId === null || id === null || result === null || result.tenantId !== tenantId || result.id !== id;
-  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload, refresh };
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload, refresh, notFound: !stale && result.notFound === true };
 }
 
 const cursorOption = (cursor: string | null) => (cursor === null ? {} : { cursor });

@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   grnDocumentFilename,
+  grnDocumentKindLabel,
+  grnSealLabel,
+  grnTotalsLabels,
   grnExcessLabel,
   grnExpiryLabel,
   grnPartyLines,
@@ -61,5 +64,17 @@ describe('grn-document', () => {
     expect(parseGrnParam(['a', 'b'])).toBeNull();
     expect(isMalformedGrnParam('nope')).toBe(true);
     expect(isMalformedGrnParam(null)).toBe(false);
+  });
+
+  test('document kinds and seal statuses in words; totals at each UoM precision (no float noise)', () => {
+    expect(grnDocumentKindLabel('bill_of_entry')).toBe('Bill of entry');
+    expect(grnDocumentKindLabel('other')).toBe('other');
+    expect(grnSealLabel('none')).toBe('none (unsealed)');
+    expect(
+      grnTotalsLabels(
+        [{ uom: 'kg', goodQty: 0.1 + 0.2, damagedQty: 0, shortQty: 12.5 }, { uom: 'each', goodQty: 4, damagedQty: 1, shortQty: 0 }],
+        [{ uom: 'kg', uomPrecision: 3 }, { uom: 'each', uomPrecision: 0 }],
+      ),
+    ).toEqual(['kg: good 0.300 · damaged 0.000 · short 12.500', 'each: good 4 · damaged 1 · short 0']);
   });
 });

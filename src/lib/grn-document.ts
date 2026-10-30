@@ -5,6 +5,43 @@
  * (`grn-document.layout.ts`); these are the web's copy of them.
  */
 
+/** A gate-in document's kind in words (the server's `GATE_IN_DOCUMENT_KINDS`; the PDF prints the same). */
+export const GRN_DOCUMENT_KIND_LABEL: Readonly<Record<string, string>> = {
+  invoice: 'Invoice',
+  challan: 'Delivery challan',
+  bill_of_entry: 'Bill of entry',
+};
+
+/** A seal status in words (the server's `SEAL_STATUSES`; the PDF prints the same). */
+export const GRN_SEAL_LABEL: Readonly<Record<string, string>> = {
+  intact: 'intact',
+  broken: 'broken',
+  none: 'none (unsealed)',
+};
+
+export function grnDocumentKindLabel(kind: string): string {
+  return GRN_DOCUMENT_KIND_LABEL[kind] ?? kind;
+}
+
+export function grnSealLabel(status: string): string {
+  return GRN_SEAL_LABEL[status] ?? status;
+}
+
+/**
+ * The totals per UoM in words — each formatted at the precision of that UoM's
+ * lines (never a raw float): `good 12.500 · damaged 0.000 · short 0.000 kg`.
+ */
+export function grnTotalsLabels(
+  byUom: readonly { readonly uom: string; readonly goodQty: number; readonly damagedQty: number; readonly shortQty: number }[],
+  lines: readonly { readonly uom: string; readonly uomPrecision: number }[],
+): string[] {
+  const precision = new Map(lines.map((line) => [line.uom, line.uomPrecision]));
+  return byUom.map((group) => {
+    const q = (value: number) => grnQuantity(value, precision.get(group.uom) ?? 3);
+    return `${group.uom}: good ${q(group.goodQty)} · damaged ${q(group.damagedQty)} · short ${q(group.shortQty)}`;
+  });
+}
+
 /** The parts of a party block (the server's `GrnPartyDto`). */
 export interface GrnPartyLike {
   readonly code: string;
@@ -149,7 +186,7 @@ export function parseGrnParam(raw: string | string[] | null | undefined): string
   return UUID_RE.test(raw) ? raw.toLowerCase() : null;
 }
 
-/** `?grn=` is a well-formed but unusable value (shown inline as "not available"), distinct from absent. */
+/** `?grn=` is present but NOT a well-formed uuid (shown inline as "not available") — distinct from absent, which is false. */
 export function isMalformedGrnParam(raw: string | string[] | null | undefined): boolean {
   return raw !== null && raw !== undefined && parseGrnParam(raw) === null;
 }

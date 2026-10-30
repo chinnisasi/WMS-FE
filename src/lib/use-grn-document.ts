@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiGoodsReceiptDocument } from '@/lib/api/client';
+import { ApiProblem, fetchApiGoodsReceiptDocument } from '@/lib/api/client';
 import type { GoodsReceiptDocumentDto } from '@/lib/api/generated';
 import { INBOUND_CHANGED_EVENT } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -15,7 +15,7 @@ import type { Reloadable, ResourceState } from '@/lib/resource-state';
  * filtered at render, `cancelled` in the cleanup, an inbound change
  * refetching quietly). `null` reads nothing.
  */
-export function useGoodsReceiptDocument(grnId: string | null): ResourceState<GoodsReceiptDocumentDto> & Reloadable {
+export function useGoodsReceiptDocument(grnId: string | null): ResourceState<GoodsReceiptDocumentDto> & Reloadable & { notFound: boolean } {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -27,6 +27,7 @@ export function useGoodsReceiptDocument(grnId: string | null): ResourceState<Goo
     grnId: string;
     revision: number;
     state: ResourceState<GoodsReceiptDocumentDto>;
+    notFound?: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -43,7 +44,20 @@ export function useGoodsReceiptDocument(grnId: string | null): ResourceState<Goo
         const data = await fetchApiGoodsReceiptDocument(tenantId, grnId);
         if (!cancelled) setResult({ tenantId, grnId, revision, state: { state: 'ready', data } });
       } catch (error) {
-        if (!cancelled) setResult({ tenantId, grnId, revision, state: { state: 'failed', reason: readReason(error, 'the goods receipt') } });
+        if (cancelled) return;
+        const failed = {
+          tenantId,
+          grnId,
+          revision,
+          state: { state: 'failed', reason: readReason(error, 'the goods receipt') } as const,
+          // Decided on the problem CODE, never on the reason's words.
+          notFound: error instanceof ApiProblem && error.code === 'not-found',
+        };
+        // A failed QUIET refetch (an inbound change) keeps the last-good
+        // document; Retry (`reload`) clears first, so its failure shows.
+        setResult((previous) =>
+          previous !== null && previous.tenantId === tenantId && previous.grnId === grnId && previous.state.state === 'ready' ? previous : failed,
+        );
       }
     })();
     return () => {
@@ -51,13 +65,12 @@ export function useGoodsReceiptDocument(grnId: string | null): ResourceState<Goo
     };
   }, [tenantId, grnId, revision]);
 
-  // Story 2-5a — an inbound change refetches QUIETLY (the last-good lines
-  // stay until the answer lands: a photo added in the photos dialog must not
-  // blank the expanded row behind it); Retry (`reload`) clears first.
+  // An inbound change refetches QUIETLY (the last-good document stays until
+  // the answer lands, and stays on a failure); Retry (`reload`) clears first.
   const reload = useCallback(() => {
     setResult(null);
     setRevision((r) => r + 1);
   }, []);
   const stale = tenantId === null || grnId === null || result === null || result.tenantId !== tenantId || result.grnId !== grnId;
-  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload, notFound: !stale && result.notFound === true };
 }

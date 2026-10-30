@@ -13,13 +13,17 @@ import {
   GRN_NOT_FROZEN_NOTE,
   GRN_UNAVAILABLE,
   grnDocumentFilename,
+  grnDocumentKindLabel,
   grnExcessLabel,
   grnExpiryLabel,
   grnPartyLines,
   grnQcLabel,
   grnQuantity,
+  grnSealLabel,
   grnSerialsLabel,
+  grnTotalsLabels,
 } from '@/lib/grn-document';
+import { SESSION_EXPIRED_REASON } from '@/lib/invoice-records';
 import { readReason } from '@/lib/outbound-orders';
 import { useGoodsReceiptDocument } from '@/lib/use-grn-document';
 
@@ -44,7 +48,7 @@ export function GrnDetailDrawer({ grnId, onClose }: { grnId: string; onClose: ()
     <DetailDrawer title={title} subtitle={doc.state === 'ready' ? doc.data.document.label : undefined} onClose={onClose} testId="grn-detail-drawer">
       {doc.state === 'loading' && <div className="text-(--muted-foreground)">Loading the receipt…</div>}
       {doc.state === 'failed' &&
-        (/could not be found/.test(doc.reason) ? (
+        (doc.notFound ? (
           <FeedbackBanner tone="rejected" word={GRN_UNAVAILABLE} reason="It may belong to another tenant, or the link is wrong." />
         ) : (
           <ReadFailure word="Receipt not loaded" reason={doc.reason} onRetry={doc.reload} />
@@ -63,7 +67,10 @@ function GrnDocumentBody({ doc }: { doc: GoodsReceiptDocumentDto }) {
   const [busy, setBusy] = useState<'pdf' | 'csv' | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const download = async (format: 'pdf' | 'csv') => {
-    if (tenantId === null) return;
+    if (tenantId === null) {
+      setRefused(SESSION_EXPIRED_REASON);
+      return;
+    }
     setBusy(format);
     setRefused(null);
     try {
@@ -122,7 +129,7 @@ function GrnDocumentBody({ doc }: { doc: GoodsReceiptDocumentDto }) {
             <div>{[arrival.transporterName && `Transporter ${arrival.transporterName}`, arrival.lrNumber && `LR/AWB ${arrival.lrNumber}`].filter(Boolean).join(' · ')}</div>
           )}
           <div>
-            Seal {arrival.sealStatus}
+            Seal {grnSealLabel(arrival.sealStatus)}
             {arrival.sealNumber !== null ? ` ${arrival.sealNumber}` : ''}
             {arrival.dockDoor !== null ? ` · Dock door ${arrival.dockDoor}` : ''}
           </div>
@@ -133,7 +140,7 @@ function GrnDocumentBody({ doc }: { doc: GoodsReceiptDocumentDto }) {
           </div>
           {arrival.documents.map((document, index) => (
             <div key={index} className="data">
-              {document.kind} {document.number} dated {document.date}
+              {grnDocumentKindLabel(document.kind)} {document.number} dated {document.date}
               {document.ewayBillNo !== null ? ` · e-way bill ${document.ewayBillNo}` : ''}
             </div>
           ))}
@@ -194,9 +201,9 @@ function GrnDocumentBody({ doc }: { doc: GoodsReceiptDocumentDto }) {
       <section className="flex flex-col gap-0.5" aria-label="Totals">
         <h3 className="font-medium">Totals</h3>
         <div>Lines: {doc.totals.lineCount}</div>
-        {doc.totals.byUom.map((group) => (
-          <div key={group.uom} className="data">
-            {group.uom}: good {group.goodQty} · damaged {group.damagedQty} · short {group.shortQty}
+        {grnTotalsLabels(doc.totals.byUom, doc.lines).map((text) => (
+          <div key={text} className="data">
+            {text}
           </div>
         ))}
       </section>

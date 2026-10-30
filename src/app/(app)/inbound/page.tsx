@@ -15,7 +15,8 @@ export const metadata = { title: 'Inbound' };
  * holds tab narrows it to one receipt's holds; it joins the key too. Story 2-3b —
  * the Dock schedule's `view` / `date` / `open` / `cancelled` (plain parameters
  * beside `?tab=dock`) parse here and join the key on that tab only. Story 2-9a —
- * `?grn=<id>` opens the GRN details drawer (read by id, on any tab).
+ * `?grn=<id>` opens the GRN details drawer (read by id, on any tab); it joins
+ * the key, so a navigation to another `?grn=` reopens on it.
  */
 export default async function InboundPage({
   searchParams,
@@ -34,7 +35,7 @@ export default async function InboundPage({
     <div className="flex flex-col gap-6">
       <PageHeader title="Inbound" description="Dock appointments, purchase orders, shipment notices, gate-ins and receipts — from the dock to a putaway bin." />
       {drill === 'unsupported' && <UnsupportedDrillNotice />}
-      <InboundCards key={`${drillKey(drill)}|${tab ?? 'default'}|${qcGrnId ?? ''}|${dockKey}`} drill={drill} initialTab={tab} qcGrnId={qcGrnId} dock={dock} grnDetailId={grnDetailId} />
+      <InboundCards key={`${drillKey(drill)}|${tab ?? 'default'}|${qcGrnId ?? ''}|${dockKey}|${grnDetailId ?? ''}`} drill={drill} initialTab={tab} qcGrnId={qcGrnId} dock={dock} grnDetailId={grnDetailId} />
     </div>
   );
 }

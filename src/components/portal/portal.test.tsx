@@ -1708,9 +1708,12 @@ describe('Inbound — the GRN document in the portal (story 2-9a)', () => {
     await settle();
     const panel = view.container.querySelector('[data-testid="receipt-deep-link"]')!;
     expect(panel).not.toBeNull();
-    expect(requests).toContain(`GET /api/v1/tenants/${TENANT_ID}/portal/inbound/goods-receipts/${GRN_ID}`);
+    // ONE detail read: the panel's title and its lines share it.
+    expect(requests.filter((r) => r === `GET /api/v1/tenants/${TENANT_ID}/portal/inbound/goods-receipts/${GRN_ID}`)).toHaveLength(1);
     const text = panel.textContent ?? '';
     expect(text).toContain('PO PO-7');
+    expect(text).toContain('Invoice INV-1 dated 2026-10-12');
+    expect(text).toContain('kg: good 12.500');
     expect(text).toContain('Fabrics Co');
     expect(text).toContain('Party details are current, not as at receipt');
     expect(text).toContain('INV-1');
@@ -1720,6 +1723,47 @@ describe('Inbound — the GRN document in the portal (story 2-9a)', () => {
     expect(buttonNamed(panel as HTMLElement, 'Download GRN (PDF)')).toBeDefined();
     expect(buttonNamed(panel as HTMLElement, 'Export lines (CSV)')).toBeDefined();
     expect(requests.every((r) => !r.includes('/receiving/'))).toBe(true);
+  });
+
+  test('the downloads: PDF and CSV read the portal file route with their format, save under the GRN name; a refusal shows inline and the buttons re-enable', async () => {
+    writeSession(PORTAL_SESSION);
+    window.history.replaceState(null, '', `/portal/inbound?grn=${GRN_ID}`);
+    routes = { [`/portal/inbound/goods-receipts/${GRN_ID}`]: [200, detail] };
+    const downloads: string[] = [];
+    const realClick = HTMLAnchorElement.prototype.click;
+    const realCreate = URL.createObjectURL;
+    const realRevoke = URL.revokeObjectURL;
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    };
+    URL.createObjectURL = () => 'blob:test';
+    URL.revokeObjectURL = () => undefined;
+    try {
+      view = render(<PortalInbound />);
+      await settle();
+      const panel = view.container.querySelector('[data-testid="receipt-deep-link"]') as HTMLElement;
+      routes[`/portal/inbound/goods-receipts/${GRN_ID}/document/file`] = [200, { pdf: true }];
+      click(buttonNamed(panel, 'Download GRN (PDF)'));
+      await settle();
+      click(buttonNamed(panel, 'Export lines (CSV)'));
+      await settle();
+      const fileUrls = urls.filter((u) => u.includes('/document/file'));
+      expect(fileUrls).toEqual([
+        `/api/v1/tenants/${TENANT_ID}/portal/inbound/goods-receipts/${GRN_ID}/document/file?format=pdf`,
+        `/api/v1/tenants/${TENANT_ID}/portal/inbound/goods-receipts/${GRN_ID}/document/file?format=csv`,
+      ]);
+      expect(downloads).toEqual(['GRN-0099.pdf', 'GRN-0099-lines.csv']);
+      routes[`/portal/inbound/goods-receipts/${GRN_ID}/document/file`] = [404, { code: 'not-found', status: 404, title: 'Not found' }];
+      click(buttonNamed(panel, 'Download GRN (PDF)'));
+      await settle();
+      expect(panel.textContent).toContain('The GRN file could not be found');
+      expect(buttonNamed(panel, 'Download GRN (PDF)').disabled).toBe(false);
+      expect(downloads).toHaveLength(2);
+    } finally {
+      HTMLAnchorElement.prototype.click = realClick;
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    }
   });
 
   test('A18: an unknown id (404) or a malformed one reads "This receipt is not available", with a way back to the list', async () => {

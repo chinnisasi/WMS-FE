@@ -4,6 +4,7 @@ import { act } from 'react';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
+import { notifyInboundChanged } from '../../lib/asns';
 import { GrnDetailDrawer } from './grn-detail-drawer';
 
 /**
@@ -49,9 +50,32 @@ const DOC = {
   totals: { lineCount: 1, byUom: [{ uom: 'each', goodQty: 120, damagedQty: 3, shortQty: 2 }] },
 };
 
+/** A second fixture: an arrival, no vendor (an ASN), a kg line (totals at the UoM's precision). */
+const ASN_DOC = {
+  ...DOC,
+  parties: { ...DOC.parties, vendor: null, supplierNote: 'As announced by the client — ASN A-77' },
+  document: { kind: 'asn', code: 'A-77', blindReasonCode: null, blindReasonLabel: null, label: 'ASN A-77' },
+  arrival: {
+    gateInCode: 'GI-9', vehicleNo: 'KA01AB1234', containerNo: 'MSCU1234567', transporterName: 'Swift', lrNumber: 'LR-5', sealStatus: 'none', sealNumber: null,
+    dockDoor: 'D1', gatedInAt: '2026-10-30T04:00:00.000Z', unloadStartedAt: null, unloadEndedAt: null,
+    documents: [{ kind: 'bill_of_entry', number: 'BOE-3', date: '2026-10-29', ewayBillNo: '123456789012' }], documentsOmitted: true,
+  },
+  lines: [{ ...DOC.lines[0], uom: 'kg', uomPrecision: 3, goodQty: 12.5, damagedQty: 0, shortQty: 0, excess: { pendingQty: 0, approvedQty: 0, rejectedQty: 0 } }],
+  totals: { lineCount: 1, byUom: [{ uom: 'kg', goodQty: 12.5, damagedQty: 0, shortQty: 0 }] },
+};
+
 let view: Rendered | undefined;
 let requests: string[] = [];
 let reply: [number, unknown] = [200, DOC];
+/** Every file request: its path and `format`. */
+let files: { path: string; format: string | null }[] = [];
+/** The file route's answer. */
+let fileReply: [number, unknown] = [200, 'PDFBYTES'];
+/** Filenames handed to the browser (the download anchor). */
+let downloads: string[] = [];
+const realClick = HTMLAnchorElement.prototype.click;
+const realCreate = URL.createObjectURL;
+const realRevoke = URL.revokeObjectURL;
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 8; i++) {
@@ -65,14 +89,32 @@ beforeEach(() => {
   requests = [];
   reply = [200, DOC];
   writeSession(SESSION);
+  files = [];
+  fileReply = [200, 'PDFBYTES'];
+  downloads = [];
+  HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+    downloads.push(this.download);
+  };
+  URL.createObjectURL = () => 'blob:test';
+  URL.revokeObjectURL = () => undefined;
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
-    requests.push(new URL(request.url).pathname);
+    const url = new URL(request.url);
+    requests.push(url.pathname);
+    if (url.pathname.endsWith('/document/file')) {
+      files.push({ path: url.pathname, format: url.searchParams.get('format') });
+      return fileReply[0] === 200
+        ? new Response(String(fileReply[1]), { status: 200, headers: { 'content-type': 'application/pdf' } })
+        : new Response(JSON.stringify(fileReply[1]), { status: fileReply[0], headers: { 'content-type': 'application/problem+json' } });
+    }
     return new Response(JSON.stringify(reply[1]), { status: reply[0], headers: { 'content-type': 'application/json' } });
   }) as unknown as typeof fetch);
 });
 
 afterEach(() => {
+  HTMLAnchorElement.prototype.click = realClick;
+  URL.createObjectURL = realCreate;
+  URL.revokeObjectURL = realRevoke;
   view?.unmount();
   view = undefined;
   clearSession();
@@ -102,5 +144,71 @@ describe('GrnDetailDrawer (story 2-9a)', () => {
     view = render(<GrnDetailDrawer grnId={GRN} onClose={() => undefined} />);
     await settle();
     expect(view.container.textContent).toContain('This receipt is not available.');
+  });
+
+  const button = (label: string) => [...view!.container.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement;
+  const click = async (element: Element) => {
+    await act(async () => {
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+  };
+
+  test('downloads: PDF and CSV request the file route with their format and save under the server’s name; buttons re-enable', async () => {
+    view = render(<GrnDetailDrawer grnId={GRN} onClose={() => undefined} />);
+    await settle();
+    await click(button('Download GRN (PDF)'));
+    await click(button('Export lines (CSV)'));
+    expect(files).toEqual([
+      { path: `/api/v1/tenants/${T}/receiving/goods-receipts/${GRN}/document/file`, format: 'pdf' },
+      { path: `/api/v1/tenants/${T}/receiving/goods-receipts/${GRN}/document/file`, format: 'csv' },
+    ]);
+    expect(downloads).toEqual(['GRN-0042.pdf', 'GRN-0042-lines.csv']);
+    expect(button('Download GRN (PDF)').disabled).toBe(false);
+  });
+
+  test('a refused download (4xx) shows the banner inline and the buttons re-enable', async () => {
+    fileReply = [404, { code: 'not-found', status: 404, title: 'Goods receipt not found' }];
+    view = render(<GrnDetailDrawer grnId={GRN} onClose={() => undefined} />);
+    await settle();
+    await click(button('Download GRN (PDF)'));
+    expect(view.container.textContent).toContain('Download failed');
+    expect(downloads).toEqual([]);
+    expect(button('Download GRN (PDF)').disabled).toBe(false);
+  });
+
+  test('an arrival, no vendor (the supplier note), labelled kinds and seal, totals at the UoM precision', async () => {
+    reply = [200, ASN_DOC];
+    view = render(<GrnDetailDrawer grnId={GRN} onClose={() => undefined} />);
+    await settle();
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('As announced by the client — ASN A-77');
+    expect(text).toContain('Arrival — as recorded on gate-in GI-9');
+    expect(text).toContain('Container MSCU1234567');
+    expect(text).toContain('LR/AWB LR-5');
+    expect(text).toContain('Seal none (unsealed)');
+    expect(text).toContain('Bill of entry BOE-3 dated 2026-10-29 · e-way bill 123456789012');
+    expect(text).toContain('Other documents of this vehicle are not shown.');
+    expect(text).toContain('kg: good 12.500 · damaged 0.000 · short 0.000');
+    expect(text).not.toContain('bill_of_entry');
+  });
+
+  test('a 5xx shows Retry, which re-reads; a failed quiet refetch (inbound change) keeps the loaded document', async () => {
+    reply = [503, { code: 'unavailable', status: 503, title: 'Down' }];
+    view = render(<GrnDetailDrawer grnId={GRN} onClose={() => undefined} />);
+    await settle();
+    expect(view.container.textContent).toContain('Receipt not loaded');
+    reply = [200, DOC];
+    await click(button('Retry'));
+    expect(view.container.textContent).toContain('Goods receipt GRN-0042');
+    reply = [503, { code: 'unavailable', status: 503, title: 'Down' }];
+    const before = requests.length;
+    await act(async () => {
+      notifyInboundChanged();
+    });
+    await settle();
+    expect(requests.length).toBeGreaterThan(before);
+    expect(view.container.textContent).toContain('Goods receipt GRN-0042');
+    expect(view.container.textContent).not.toContain('Receipt not loaded');
   });
 });
