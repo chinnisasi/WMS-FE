@@ -5054,9 +5054,13 @@ export type HandoverParcelDto = {
      */
     packageCount?: number | null;
     /**
-     * Weight in grams, 1–1,000,000 (default: the last pack measurement)
+     * Weight in grams, 1–1,000,000 (default: the live pack’s gross when ≤ 1,000,000 g, else the last pack measurement)
      */
     weightGrams?: number | null;
+    /**
+     * Story 4-5a (A21) — the carton labels scanned onto the pickup (≤ 200; trimmed and upper-cased; an empty list is absent; unique by carton). A code that is not one of this order’s live cartons refuses the parcel (carton-not-current)
+     */
+    cartonCodes?: Array<string>;
 };
 
 export type CreateHandoverDto = {
@@ -5123,7 +5127,7 @@ export type HandoverParcelResultDto = {
 
 export type HandoverRefusedParcelDto = {
     orderId: string;
-    code: 'order-not-found' | 'warehouse-mismatch' | 'order-not-ready' | 'order-already-dispatched' | 'shipment-not-client-arranged' | 'label-not-verified' | 'awb-mismatch' | 'awb-required' | 'awb-in-use' | 'order-holds-recalled-batch';
+    code: 'order-not-found' | 'warehouse-mismatch' | 'order-not-ready' | 'order-already-dispatched' | 'shipment-not-client-arranged' | 'label-not-verified' | 'awb-mismatch' | 'awb-required' | 'awb-in-use' | 'order-holds-recalled-batch' | 'package-count-mismatch' | 'carton-not-current';
     detail: string;
     /**
      * The order’s status as read under its lock (e.g. cancelled vs accepted for order-not-ready); absent when the order was not found
@@ -5147,6 +5151,29 @@ export type HandoverResponse = {
     rejectedOpId: string | null;
 };
 
+export type HandoverDetailCartonsDto = {
+    /**
+     * The live pack’s cartons (1 for an order packed before cartons were recorded)
+     */
+    cartonCount: number;
+    /**
+     * Cartons scanned onto this pickup (recorded on the carton)
+     */
+    scanned: number;
+    /**
+     * Packed before cartons were recorded: "1 carton (packed before cartons were recorded)"
+     */
+    legacy: boolean;
+    /**
+     * A44 — a COD order whose cartons were scanned: false when carton 1 (the COD label) was not; null when not judged
+     */
+    codCartonScanned: boolean | null;
+    /**
+     * A37 — the handheld scanned a superseded pack’s label (accepted, not recorded): reprint the labels
+     */
+    staleCartonLabels: boolean;
+};
+
 export type HandoverDetailParcelDto = {
     orderId: string;
     orderLabel: string;
@@ -5157,6 +5184,10 @@ export type HandoverDetailParcelDto = {
     weightGrams: number | null;
     codAmountPaise: number | null;
     destinationCity: string | null;
+    /**
+     * Story 4-5a (A21, A34, A37, A44) — the order’s cartons at this handover
+     */
+    cartons: HandoverDetailCartonsDto;
 };
 
 export type HandoverDetailDto = {
@@ -5228,6 +5259,18 @@ export type HandoverCandidateDto = {
     codAmountPaise: number | null;
     packedAt: string | null;
     shipment: HandoverCandidateShipmentDto | null;
+    /**
+     * Story 4-5a (A21) — the live pack’s number; absent for an order packed before cartons were recorded (one carton, pack 1)
+     */
+    packSeq?: number;
+    /**
+     * Story 4-5a (A21) — the live pack’s carton count; absent as packSeq
+     */
+    cartonCount?: number;
+    /**
+     * Story 4-5a (A33) — the handover’s weight default: the live pack’s gross when ≤ 1,000,000 g (null above it), else the last pack measurement
+     */
+    defaultWeightGrams?: number | null;
 };
 
 export type HandoverCandidatesResponse = {
@@ -6494,6 +6537,18 @@ export type CatalogDispatchParcelDto = {
      */
     parcelTagCode: string;
     status: 'accepted' | 'ready_to_dispatch';
+    /**
+     * Story 4-5a (D6, additive): the live pack’s number — a carton label of a lower pack is stale. Absent for an order packed before cartons were recorded (pack 1, one carton) and from an older server
+     */
+    packSeq?: number;
+    /**
+     * Story 4-5a (D6, additive): the live pack’s carton count; absent as packSeq
+     */
+    cartonCount?: number;
+    /**
+     * Story 4-5a (A44, additive): the COD amount in paise (carton 1 carries the COD label); absent when prepaid
+     */
+    codAmountPaise?: number;
     shipment: CatalogDispatchParcelShipmentDto | null;
 };
 
@@ -6596,6 +6651,10 @@ export type CatalogSnapshotResponse = {
      * Story 4-4a (additive): true when dispatchParcels was capped at 2000 — hand over newer parcels on the web, or refresh later
      */
     dispatchParcelsTruncated: boolean;
+    /**
+     * Story 4-5a (A32, additive): true when this server records cartons on a pack — the handheld offers New carton only then. Absent from an older server (which would drop `cartons` from a synced pack): one carton only
+     */
+    packCartons?: boolean;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -37561,6 +37620,78 @@ export type VendorReturnsControllerGetResponses = {
 
 export type VendorReturnsControllerGetResponse = VendorReturnsControllerGetResponses[keyof VendorReturnsControllerGetResponses];
 
+export type VendorReturnsControllerPackageLabelsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        vendorReturnId: string;
+    };
+    query?: {
+        /**
+         * zpl (default; 4×6 at 203 dpi) or pdf
+         */
+        format?: 'zpl' | 'pdf';
+        /**
+         * label (default; one 4×6 per package) or a4 (two per landscape sheet — PDF only)
+         */
+        layout?: 'label' | 'a4';
+        /**
+         * Packages, 1–9,999: required before dispatch; after it defaults to the dispatched count, and a different one is 409 package-count-mismatch
+         */
+        count?: string;
+        /**
+         * The first package to print (default 1)
+         */
+        from?: string;
+        /**
+         * The last package to print (default count); one print is at most 1,000 labels
+         */
+        to?: string;
+    };
+    url: '/tenants/{tenantId}/vendor-returns/{vendorReturnId}/package-labels';
+};
+
+export type VendorReturnsControllerPackageLabelsErrors = {
+    /**
+     * A malformed id, format, layout, count, from or to; zpl with the a4 layout; no count before dispatch (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied) — checked before anything it sent
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such return to vendor in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Not picked or dispatched (rtv-not-picked); a count other than the dispatched one (package-count-mismatch); the vendor has no address of the consignee kind (consignee-address-missing)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * More than 1,000 labels in one print (too-many-labels — ask for a from/to range)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type VendorReturnsControllerPackageLabelsError = VendorReturnsControllerPackageLabelsErrors[keyof VendorReturnsControllerPackageLabelsErrors];
+
+export type VendorReturnsControllerPackageLabelsResponses = {
+    /**
+     * The labels: ZPL as `text/plain; charset=us-ascii`, or a PDF
+     */
+    200: Blob | File;
+};
+
+export type VendorReturnsControllerPackageLabelsResponse = VendorReturnsControllerPackageLabelsResponses[keyof VendorReturnsControllerPackageLabelsResponses];
+
 export type VendorReturnsControllerPickData = {
     body: PickVendorReturnDto;
     headers: {
@@ -37920,6 +38051,78 @@ export type ClientReturnsControllerGetResponses = {
 };
 
 export type ClientReturnsControllerGetResponse = ClientReturnsControllerGetResponses[keyof ClientReturnsControllerGetResponses];
+
+export type ClientReturnsControllerPackageLabelsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientReturnId: string;
+    };
+    query?: {
+        /**
+         * zpl (default; 4×6 at 203 dpi) or pdf
+         */
+        format?: 'zpl' | 'pdf';
+        /**
+         * label (default; one 4×6 per package) or a4 (two per landscape sheet — PDF only)
+         */
+        layout?: 'label' | 'a4';
+        /**
+         * Packages, 1–9,999: required before dispatch; after it defaults to the dispatched count, and a different one is 409 package-count-mismatch
+         */
+        count?: string;
+        /**
+         * The first package to print (default 1)
+         */
+        from?: string;
+        /**
+         * The last package to print (default count); one print is at most 1,000 labels
+         */
+        to?: string;
+    };
+    url: '/tenants/{tenantId}/client-returns/{clientReturnId}/package-labels';
+};
+
+export type ClientReturnsControllerPackageLabelsErrors = {
+    /**
+     * A malformed id, format, layout, count, from or to; zpl with the a4 layout; no count before dispatch (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied) — checked before anything it sent
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such return to client in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * Not picked or dispatched (rtc-not-picked); a count other than the dispatched one (package-count-mismatch)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * More than 1,000 labels in one print (too-many-labels — ask for a from/to range)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientReturnsControllerPackageLabelsError = ClientReturnsControllerPackageLabelsErrors[keyof ClientReturnsControllerPackageLabelsErrors];
+
+export type ClientReturnsControllerPackageLabelsResponses = {
+    /**
+     * The labels: ZPL as `text/plain; charset=us-ascii`, or a PDF
+     */
+    200: Blob | File;
+};
+
+export type ClientReturnsControllerPackageLabelsResponse = ClientReturnsControllerPackageLabelsResponses[keyof ClientReturnsControllerPackageLabelsResponses];
 
 export type ClientReturnsControllerPickData = {
     body: PickClientReturnDto;
