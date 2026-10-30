@@ -12,8 +12,9 @@ import {
   fetchApiRemoveFreightOrder,
   fetchApiReorderFreightStops,
   fetchApiUploadFreightSheet,
+  ApiProblem,
 } from '@/lib/api/client';
-import type { FreightConsignmentViewDto, FreightLoadViewDto } from '@/lib/api/generated';
+import type { FreightConsignmentViewDto, FreightLoadViewDto, FreightScanResponse } from '@/lib/api/generated';
 import { istDateTimeLabel } from '@/lib/audit-exports';
 import { cartonCode } from '@/lib/carton-code';
 import { COMPLIANCE_EXCEPTION_WORD, gateChip } from '@/lib/consignment';
@@ -49,8 +50,15 @@ import {
   plannedConsignments,
   scanOutcome,
   staleScansNote,
+  NO_LOCAL_SCANS,
+  applyLocalScans,
+  loadedCodesOf,
+  loadingOrder,
+  recordLocalScan,
+  type LocalScans,
   type LrDraft,
 } from '@/lib/freight';
+import { parsePackageScan } from '@/lib/freight-primitives';
 import { FREIGHT_TERMS } from '@/lib/freight-primitives';
 import { notifyOutboundChanged } from '@/lib/outbound';
 import { parcelTagCode } from '@/lib/parcel-tag';
@@ -83,6 +91,9 @@ type Panel =
 
 const NONE: Panel = { kind: 'none' };
 
+/** The re-read after web scans waits for loading to pause this long. */
+const SCAN_REFRESH_PAUSE_MS = 2_000;
+
 /**
  * Story 4-9a (A30) — one load in a detail drawer (`?open=<loadId>`, UI-PATTERNS
  * §3.6): the header facts, the actions (print the loading sheet — a plan
@@ -98,6 +109,7 @@ export function FreightLoadDetail({
   loadId,
   canDispatch,
   canManage,
+  onBusy,
   onClose,
 }: {
   tenantId: string;
@@ -105,11 +117,39 @@ export function FreightLoadDetail({
   loadId: string;
   canDispatch: boolean;
   canManage: boolean;
+  /** Reports a write in flight to the owner, so nothing outside replaces this drawer meanwhile (guide §2.4). */
+  onBusy?: (busy: boolean) => void;
   onClose: () => void;
 }) {
   const read = useFreightLoad(loadId);
   const [panel, setPanel] = useState<Panel>(NONE);
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    onBusy?.(busy);
+  }, [busy, onBusy]);
+  // The web's scans since the last read, keyed to the view they apply over (guide §1.5): a re-read drops them.
+  const [scans, setScans] = useState<{ base: FreightLoadViewDto | null; local: LocalScans }>({ base: null, local: NO_LOCAL_SCANS });
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      // Leaving with a re-read still owed: the list and other readers catch up now.
+      if (refreshTimer.current !== null) {
+        clearTimeout(refreshTimer.current);
+        notifyOutboundChanged();
+      }
+    },
+    [],
+  );
+  const readView = read.state === 'ready' ? read.data : null;
+  const onScanned = (response: FreightScanResponse) => {
+    setScans((prev) => ({ base: readView, local: recordLocalScan(prev.base === readView ? prev.local : NO_LOCAL_SCANS, response) }));
+    // One re-read once loading pauses, not one per scan.
+    if (refreshTimer.current !== null) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null;
+      notifyOutboundChanged();
+    }, SCAN_REFRESH_PAUSE_MS);
+  };
   const [banner, setBanner] = useState<{ tone: 'accepted' | 'rejected' | 'warning'; word: string; reason: string } | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -124,7 +164,7 @@ export function FreightLoadDetail({
       </DetailDrawer>
     );
   }
-  const load = read.data;
+  const load = scans.base === read.data ? applyLocalScans(read.data, scans.local) : read.data;
 
   if (panel.kind === 'edit') {
     return (
@@ -291,6 +331,8 @@ export function FreightLoadDetail({
       )}
       {panel.kind === 'stops' && (
         <ReorderStops
+          // Keyed on the planned set: a members change re-read reseeds the order (never a stale list).
+          key={planned.map((c) => c.orderId).join(',')}
           tenantId={tenantId}
           load={load}
           onBusy={setBusy}
@@ -310,7 +352,7 @@ export function FreightLoadDetail({
         />
       )}
 
-      {canDispatch && isOpen && panel.kind === 'none' && <ScanField tenantId={tenantId} load={load} />}
+      {canDispatch && isOpen && panel.kind === 'none' && <ScanField tenantId={tenantId} load={load} onScanned={onScanned} />}
 
       <div className="flex flex-col gap-1">
         <div className="font-medium">Consignments</div>
@@ -330,6 +372,8 @@ export function FreightLoadDetail({
               canManage={canManage}
               idle={!busy && panel.kind === 'none'}
               onBusy={setBusy}
+              onScanned={onScanned}
+              onStale={() => void read.refresh()}
               done={done}
               rejected={rejected}
             />
@@ -378,6 +422,8 @@ function ConsignmentRow({
   canManage,
   idle,
   onBusy,
+  onScanned,
+  onStale,
   done,
   rejected,
 }: {
@@ -392,6 +438,8 @@ function ConsignmentRow({
   canManage: boolean;
   idle: boolean;
   onBusy: (busy: boolean) => void;
+  onScanned: (response: FreightScanResponse) => void;
+  onStale: () => void;
   done: (outcome: { word: string; reason: string } | null) => void;
   rejected: (reason: string, error?: unknown) => void;
 }) {
@@ -457,7 +505,7 @@ function ConsignmentRow({
         )}
       </div>
       {panel.kind === 'lr' && panel.consignmentId === c.id && (
-        <LrForm tenantId={tenantId} consignment={c} onBusy={onBusy} onDone={() => done({ word: 'LR saved', reason: `${c.orderLabel}.` })} onClose={() => setPanel(NONE)} />
+        <LrForm tenantId={tenantId} consignment={c} onBusy={onBusy} onStale={onStale} onDone={() => done({ word: 'LR saved', reason: `${c.orderLabel}.` })} onClose={() => setPanel(NONE)} />
       )}
       {panel.kind === 'delivery' && panel.consignmentId === c.id && (
         <FreightDeliveryDialog
@@ -471,18 +519,33 @@ function ConsignmentRow({
       {panel.kind === 'remove' && panel.orderId === c.orderId && (
         <RemoveOrder load={load} consignment={c} onDone={() => done({ word: `${c.orderLabel} removed`, reason: 'It is back on the dock — hand it over, dispatch it or plan it again.' })} onRejected={rejected} onClose={() => setPanel(NONE)} />
       )}
-      {expanded && <PackageList tenantId={tenantId} load={load} consignment={c} canLoad={canDispatch && planned} />}
+      {expanded && <PackageList tenantId={tenantId} load={load} consignment={c} canLoad={canDispatch && planned && idle} onBusy={onBusy} onScanned={onScanned} />}
     </li>
   );
 }
 
-/** The expanded row (A30): each package of the live pack with a Load tick (and Unload with a reason). */
-function PackageList({ tenantId, load, consignment, canLoad }: { tenantId: string; load: FreightLoadViewDto; consignment: FreightConsignmentViewDto; canLoad: boolean }) {
+/** The expanded row (A30): each package of the live pack with its loaded state, Load, and Unload with a reason. */
+function PackageList({
+  tenantId,
+  load,
+  consignment,
+  canLoad,
+  onBusy,
+  onScanned,
+}: {
+  tenantId: string;
+  load: FreightLoadViewDto;
+  consignment: FreightConsignmentViewDto;
+  canLoad: boolean;
+  onBusy: (busy: boolean) => void;
+  onScanned: (response: FreightScanResponse) => void;
+}) {
   const cartons = useOrderCartons(tenantId, consignment.packages.packed ? consignment.orderId : null);
   if (!consignment.packages.packed) return <div className="text-(--muted-foreground)">Not packed yet — pack it, print its labels, then load.</div>;
   if (cartons.state === 'loading') return <div className="text-(--muted-foreground)">Loading the packages…</div>;
   if (cartons.state === 'failed') return <ReadFailure word="Packages unavailable" reason={cartons.reason} onRetry={cartons.reload} />;
   const pack = cartons.data?.pack ?? null;
+  const loadedCodes = loadedCodesOf(consignment);
   // A virtual pack (4-5a A9) is one package: the bare parcel tag resolves to `.{packSeq}.1`.
   const codes =
     pack === null || pack.cartons.length === 0
@@ -494,15 +557,45 @@ function PackageList({ tenantId, load, consignment, canLoad }: { tenantId: strin
   return (
     <ul className="ml-4 flex flex-col gap-1" data-testid="freight-packages">
       {codes.map((entry) => (
-        <PackageTick key={entry.code} tenantId={tenantId} loadId={load.id} code={entry.code} label={entry.label} canLoad={canLoad} />
+        <PackageTick
+          key={entry.code}
+          tenantId={tenantId}
+          loadId={load.id}
+          code={entry.code}
+          label={entry.label}
+          loaded={loadedCodes === null ? null : loadedCodes.has(entry.code)}
+          canLoad={canLoad}
+          onBusy={onBusy}
+          onScanned={onScanned}
+        />
       ))}
     </ul>
   );
 }
 
-function PackageTick({ tenantId, loadId, code, label, canLoad }: { tenantId: string; loadId: string; code: string; label: string; canLoad: boolean }) {
+function PackageTick({
+  tenantId,
+  loadId,
+  code,
+  label,
+  loaded,
+  canLoad,
+  onBusy,
+  onScanned,
+}: {
+  tenantId: string;
+  loadId: string;
+  code: string;
+  label: string;
+  /** From the view's `loadedCodes`; null when an older API does not say. */
+  loaded: boolean | null;
+  canLoad: boolean;
+  onBusy: (busy: boolean) => void;
+  onScanned: (response: FreightScanResponse) => void;
+}) {
   const [unloading, setUnloading] = useState(false);
   const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState<{ tone: 'accepted' | 'rejected' | 'warning'; text: string } | null>(null);
   const inFlight = useRef(false);
   const keyRef = useRef<{ key: string; body: string } | null>(null);
@@ -520,6 +613,8 @@ function PackageTick({ tenantId, loadId, code, label, canLoad }: { tenantId: str
     }
     keyRef.current = bindFreightKey(keyRef.current, body, ulid);
     inFlight.current = true;
+    setBusy(true);
+    onBusy(true);
     try {
       const response = await fetchApiRecordFreightScan(tenantId, loadId, body, keyRef.current.key);
       keyRef.current = null;
@@ -527,38 +622,44 @@ function PackageTick({ tenantId, loadId, code, label, canLoad }: { tenantId: str
       setAnswer({ tone: outcome.tone, text: `${outcome.word} — ${outcome.reason}` });
       setUnloading(false);
       setReason('');
-      notifyOutboundChanged();
+      onScanned(response);
     } catch (error) {
       setAnswer({ tone: 'rejected', text: freightReason(error, 'scan') });
     } finally {
       inFlight.current = false;
+      setBusy(false);
+      onBusy(false);
     }
   }
 
   return (
-    <li className="flex flex-wrap items-center gap-2">
+    <li className="flex flex-wrap items-center gap-2" data-testid={`package-${code}`}>
       <span className="font-mono">{code}</span>
       <span className="text-(--muted-foreground)">{label}</span>
+      {loaded !== null && <StatusChip tone={loaded ? 'success' : 'neutral'}>{loaded ? 'Loaded' : 'Not loaded'}</StatusChip>}
       {canLoad && (
         <>
-          <button type="button" className={rowButtonClass} onClick={() => void send('load')} data-testid={`load-${code}`}>
-            Load
-          </button>
-          {!unloading ? (
-            <button type="button" className={rowButtonClass} onClick={() => setUnloading(true)}>
-              Unload…
+          {loaded !== true && (
+            <button type="button" className={rowButtonClass} disabled={busy} onClick={() => void send('load')} data-testid={`load-${code}`}>
+              Load
             </button>
-          ) : (
-            <span className="flex items-center gap-1">
-              <input aria-label={`Why unload ${code}`} className={`${inputClass} py-1`} maxLength={FREIGHT_LIMITS.reason} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason" />
-              <button type="button" className={rowButtonClass} onClick={() => void send('unload')}>
-                Unload
-              </button>
-              <button type="button" className={rowButtonClass} onClick={() => setUnloading(false)}>
-                Keep
-              </button>
-            </span>
           )}
+          {loaded !== false &&
+            (!unloading ? (
+              <button type="button" className={rowButtonClass} disabled={busy} onClick={() => setUnloading(true)}>
+                Unload…
+              </button>
+            ) : (
+              <span className="flex items-center gap-1">
+                <input aria-label={`Why unload ${code}`} className={`${inputClass} py-1`} maxLength={FREIGHT_LIMITS.reason} value={reason} disabled={busy} onChange={(e) => setReason(e.target.value)} placeholder="Reason" />
+                <button type="button" className={rowButtonClass} disabled={busy} onClick={() => void send('unload')}>
+                  Unload
+                </button>
+                <button type="button" className={rowButtonClass} disabled={busy} onClick={() => setUnloading(false)}>
+                  Keep
+                </button>
+              </span>
+            ))}
         </>
       )}
       {answer !== null && (
@@ -572,30 +673,66 @@ function PackageTick({ tenantId, loadId, code, label, canLoad }: { tenantId: str
 
 /**
  * The web scan field (A13, `surface: web`): a keyboard-wedge scan loads one
- * package; the field clears and keeps focus after every scan (guide §2.7).
- * One key per scan (each scan is its own intent; the server's
- * already-loaded no-op makes a duplicate harmless).
+ * package. Codes are queued — a scan arriving while one is in flight is kept
+ * and sent next, never dropped or joined to the next text — and the field
+ * clears and keeps focus after every Enter (guide §2.7). Each code is judged
+ * locally first (`parsePackageScan`): an unreadable code or the bare parcel
+ * tag of a multi-package order is refused here with no request. One key per
+ * scan (each scan is its own intent; the server's already-loaded no-op makes
+ * a duplicate harmless).
  */
-function ScanField({ tenantId, load }: { tenantId: string; load: FreightLoadViewDto }) {
+function ScanField({ tenantId, load, onScanned }: { tenantId: string; load: FreightLoadViewDto; onScanned: (response: FreightScanResponse) => void }) {
   const [value, setValue] = useState('');
   const [answer, setAnswer] = useState<{ tone: 'accepted' | 'rejected' | 'warning'; word: string; reason: string } | null>(null);
-  const inFlight = useRef(false);
+  const queue = useRef<string[]>([]);
+  const draining = useRef(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const planned = plannedConsignments(load);
   const labels = new Map(load.consignments.map((c) => [c.orderId, c.orderLabel]));
+  const byTag = new Map(planned.map((c) => [parcelTagCode(c.orderId), c]));
 
-  async function submit() {
-    const code = value.trim().toUpperCase();
-    if (code === '' || inFlight.current) return;
-    inFlight.current = true;
-    setValue('');
+  async function one(raw: string) {
+    const code = raw.trim().toUpperCase();
+    const parsed = parsePackageScan(code, (tag) => {
+      const c = byTag.get(tag);
+      return c === undefined ? undefined : { packSeq: 1, packageCount: c.packages.total };
+    });
+    if (parsed.kind === 'invalid') {
+      setAnswer({ tone: 'rejected', word: `${code} not loaded`, reason: 'This is not a package label. Scan the carton or pallet label.' });
+      return;
+    }
+    if (parsed.kind === 'ambiguous') {
+      const c = byTag.get(parsed.parcelTag);
+      setAnswer({
+        tone: 'rejected',
+        word: `${code} not loaded`,
+        reason: `This is ${c?.orderLabel ?? 'the order'}’s parcel tag and it has ${parsed.packageCount} packages. Scan each carton or pallet label.`,
+      });
+      return;
+    }
+    // A full package code goes canonical; a bare tag goes as scanned (the server resolves its live pack).
+    const packageCode = parsed.kind === 'package' && parsed.parcelTag !== code ? parsed.code : code;
     try {
-      const response = await fetchApiRecordFreightScan(tenantId, load.id, { packageCode: code, action: 'load' }, ulid());
+      const response = await fetchApiRecordFreightScan(tenantId, load.id, { packageCode, action: 'load' }, ulid());
       setAnswer(scanOutcome(response, labels.get(response.scan.orderId) ?? null));
-      notifyOutboundChanged();
+      onScanned(response);
     } catch (error) {
       setAnswer({ tone: 'rejected', word: `${code} not loaded`, reason: freightReason(error, 'scan') });
+    }
+  }
+
+  async function submit() {
+    const code = value.trim();
+    setValue('');
+    inputRef.current?.focus();
+    if (code === '') return;
+    queue.current.push(code);
+    if (draining.current) return;
+    draining.current = true;
+    try {
+      while (queue.current.length > 0) await one(queue.current.shift()!);
     } finally {
-      inFlight.current = false;
+      draining.current = false;
       inputRef.current?.focus();
     }
   }
@@ -747,6 +884,7 @@ function AddOrders({
   onClose: () => void;
 }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [labels, setLabels] = useState<ReadonlyMap<string, string>>(new Map());
   const [problem, setProblem] = useState<string | null>(null);
   const [refused, setRefused] = useState<ReadonlyMap<string, string>>(new Map());
   const [busy, setBusy] = useState(false);
@@ -782,11 +920,13 @@ function AddOrders({
         warehouseId={warehouseId}
         initialClientId={null}
         selected={selected}
-        onChange={(next) => {
+        onChange={(next, nextLabels) => {
           setSelected(next);
+          setLabels(nextLabels);
           setRefused(new Map());
           setProblem(null);
         }}
+        refused={refused}
         capacityKg={load.vehicle.capacityKg}
         disabled={busy}
         maxSelectable={FREIGHT_LIMITS.consignments - live}
@@ -795,7 +935,7 @@ function AddOrders({
         <ul className="text-xs" role="alert">
           {[...refused].map(([orderId, word]) => (
             <li key={orderId}>
-              Order …{orderId.slice(-8)}: {word}
+              {labels.get(orderId) ?? `Order …${orderId.slice(-8)}`}: {word}
             </li>
           ))}
         </ul>
@@ -859,7 +999,7 @@ function ReorderStops({
 
   return (
     <div className="flex flex-col gap-2 rounded-sm border border-(--border) p-2 text-xs">
-      <div className="text-(--muted-foreground)">Delivery order — stop 1 is the first drop. The truck is loaded from the last stop first.</div>
+      <div className="text-(--muted-foreground)">Delivery order — stop 1 is the first drop.</div>
       <ol className="flex flex-col gap-1">
         {order.map((o, index) => (
           <li key={o.orderId} className="flex items-center gap-2">
@@ -876,6 +1016,9 @@ function ReorderStops({
           </li>
         ))}
       </ol>
+      <div className="text-(--muted-foreground)" data-testid="loading-order">
+        Load from the bottom up — last stop first: {loadingOrder(order.map((o, index) => ({ ...o, stopSeq: index + 1 }))).map((o) => o.label).join(', ')}
+      </div>
       {problem !== null && <FeedbackBanner tone="rejected" word="Stops not saved" reason={problem} />}
       <div className="flex gap-2">
         <button type="button" className={primaryClass} disabled={busy} onClick={() => void save()}>
@@ -894,12 +1037,15 @@ function LrForm({
   tenantId,
   consignment,
   onBusy,
+  onStale,
   onDone,
   onClose,
 }: {
   tenantId: string;
   consignment: FreightConsignmentViewDto;
   onBusy: (busy: boolean) => void;
+  /** The world moved (the truck left meanwhile): re-read, so `dispatched` — and the reason field — follow the fresh consignment. */
+  onStale: () => void;
   onDone: () => void;
   onClose: () => void;
 }) {
@@ -928,6 +1074,7 @@ function LrForm({
       onDone();
     } catch (error) {
       setProblem(freightReason(error, 'lr'));
+      if (freightRefusalReloads(error) || (error instanceof ApiProblem && error.code === 'validation-failed')) onStale();
     } finally {
       inFlight.current = false;
       setBusy(false);

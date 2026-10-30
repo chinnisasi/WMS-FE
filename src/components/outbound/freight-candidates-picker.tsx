@@ -33,11 +33,15 @@ export function FreightCandidatesPicker({
   capacityKg,
   disabled = false,
   maxSelectable = FREIGHT_LIMITS.consignments,
+  refused,
 }: {
   warehouseId: string;
   initialClientId: string | null;
   selected: ReadonlySet<string>;
-  onChange: (next: ReadonlySet<string>) => void;
+  /** The selection and every selected order's label (a refusal names the order, even one a filter hides). */
+  onChange: (next: ReadonlySet<string>, labels: ReadonlyMap<string, string>) => void;
+  /** An all-or-nothing refusal's words by order — the row is marked. */
+  refused?: ReadonlyMap<string, string>;
   capacityKg: number | null;
   disabled?: boolean;
   /** How many more orders this load can take (100 less its live consignments). */
@@ -48,14 +52,28 @@ export function FreightCandidatesPicker({
   const [applied, setApplied] = useState<FreightCandidateFilters>(draft);
   const candidates = useFreightCandidates(warehouseId, applied);
   const items = candidates.state === 'ready' ? candidates.data.items : [];
-  const totals = selectionTotals(items, selected, capacityKg);
+  // The facts of every selected row, kept when a filter hides it: the totals and the capacity count every selection sent.
+  const [picked, setPicked] = useState<ReadonlyMap<string, FreightCandidateDto>>(new Map());
+  const facts = new Map<string, FreightCandidateDto>(picked);
+  for (const row of items) facts.set(row.orderId, row);
+  const totals = selectionTotals([...facts.values()], selected, capacityKg);
 
   function toggle(row: FreightCandidateDto) {
     const next = new Set(selected);
-    if (next.has(row.orderId)) next.delete(row.orderId);
-    else if (next.size < maxSelectable) next.add(row.orderId);
-    onChange(next);
+    const nextPicked = new Map(picked);
+    if (next.has(row.orderId)) {
+      next.delete(row.orderId);
+      nextPicked.delete(row.orderId);
+    } else if (next.size < maxSelectable) {
+      next.add(row.orderId);
+      nextPicked.set(row.orderId, row);
+    }
+    setPicked(nextPicked);
+    const labels = new Map<string, string>();
+    for (const id of next) labels.set(id, nextPicked.get(id)?.orderLabel ?? facts.get(id)?.orderLabel ?? id);
+    onChange(next, labels);
   }
+  const hiddenSelected = [...selected].filter((id) => !items.some((row) => row.orderId === id)).length;
 
   return (
     <fieldset className="flex flex-col gap-2" disabled={disabled} data-testid="freight-candidates">
@@ -107,6 +125,11 @@ export function FreightCandidatesPicker({
           </>
         )}
       </div>
+      {hiddenSelected > 0 && (
+        <div className="text-xs text-(--muted-foreground)">
+          {hiddenSelected} selected order{hiddenSelected === 1 ? '' : 's'} hidden by the filters — still in the totals and sent.
+        </div>
+      )}
       {candidates.state === 'failed' && <ReadFailure word="Orders unavailable" reason={candidates.reason} onRetry={candidates.reload} />}
       {candidates.state === 'loading' && <div className="text-xs text-(--muted-foreground)">Loading the orders…</div>}
       {candidates.state === 'ready' && candidates.data.truncated && (
@@ -138,6 +161,11 @@ export function FreightCandidatesPicker({
                   {note !== null && (
                     <span>
                       <StatusChip tone="warning">{note}</StatusChip>
+                    </span>
+                  )}
+                  {refused?.get(row.orderId) !== undefined && (
+                    <span role="alert" className="text-(--destructive)" data-testid="candidate-refusal">
+                      {refused.get(row.orderId)}
                     </span>
                   )}
                 </div>

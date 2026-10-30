@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { fetchApiCreateFreightLoad, fetchApiUpdateFreightLoad } from '@/lib/api/client';
 import type { FreightLoadViewDto } from '@/lib/api/generated';
@@ -42,6 +42,7 @@ export function FreightLoadDrawer({
   tenantId,
   warehouseId,
   load,
+  onBusy,
   onClose,
   onSaved,
 }: {
@@ -49,6 +50,8 @@ export function FreightLoadDrawer({
   tenantId: string;
   warehouseId: string;
   load: FreightLoadViewDto | null;
+  /** Reports a write in flight to the owner, so nothing outside replaces this drawer meanwhile. */
+  onBusy?: (busy: boolean) => void;
   onClose: () => void;
   onSaved: (load: FreightLoadViewDto) => void;
 }) {
@@ -58,11 +61,16 @@ export function FreightLoadDrawer({
   const doors = useDockDoors(warehouseId);
   const [draft, setDraft] = useState<FreightHeaderDraft>(() => (load === null ? EMPTY_FREIGHT_HEADER : headerDraftOf(load, isoToIstLocal)));
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [labels, setLabels] = useState<ReadonlyMap<string, string>>(new Map());
   const [problem, setProblem] = useState<string | null>(null);
   const [refused, setRefused] = useState<ReadonlyMap<string, string>>(new Map());
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const keyRef = useRef<{ key: string; body: string } | null>(null);
+
+  useEffect(() => {
+    onBusy?.(busy);
+  }, [busy, onBusy]);
 
   const edit = (patch: Partial<FreightHeaderDraft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -143,6 +151,13 @@ export function FreightLoadDrawer({
                         {partner.name}
                       </option>
                     ))}
+                    {/* The load's own transporter when it is no longer an active option (inactive): shown, not silently re-picked. */}
+                    {load !== null &&
+                      load.transporter.partnerId !== null &&
+                      draft.transporterId === load.transporter.partnerId &&
+                      !transporters.data.some((p) => p.id === load.transporter.partnerId) && (
+                        <option value={load.transporter.partnerId}>{load.transporter.name} (not active)</option>
+                      )}
                   </select>
                 )}
               </>
@@ -226,11 +241,13 @@ export function FreightLoadDrawer({
           warehouseId={warehouseId}
           initialClientId={typeof active.filter === 'string' ? active.filter : null}
           selected={selected}
-          onChange={(next) => {
+          onChange={(next, nextLabels) => {
             setSelected(next);
+            setLabels(nextLabels);
             setRefused(new Map());
             setProblem(null);
           }}
+          refused={refused}
           capacityKg={capacity}
           disabled={busy}
         />
@@ -239,7 +256,7 @@ export function FreightLoadDrawer({
         <ul className="flex flex-col gap-0.5 text-xs" role="alert" data-testid="freight-add-refusals">
           {[...refused].map(([orderId, word]) => (
             <li key={orderId}>
-              Order …{orderId.slice(-8)}: {word}
+              {labels.get(orderId) ?? `Order …${orderId.slice(-8)}`}: {word}
             </li>
           ))}
         </ul>

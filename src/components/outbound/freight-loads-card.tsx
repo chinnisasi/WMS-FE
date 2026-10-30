@@ -1,5 +1,6 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 
 import type { FreightLoadListRowDto } from '@/lib/api/generated';
@@ -39,13 +40,16 @@ function writeOpen(loadId: string | null): void {
   window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
 }
 
-/** The live `?open=` on mount (a link from Pack & Dispatch or the order detail opens the load). */
-function readOpen(): string | null {
-  if (typeof window === 'undefined') return null;
-  const params = new URLSearchParams(window.location.search);
-  if (params.get('tab') !== 'freight') return null;
+/** `?open=` of the Freight tab, when it is a load id. */
+function openOf(params: { get(name: string): string | null } | null): string | null {
+  if (params === null || params.get('tab') !== 'freight') return null;
   const open = params.get('open');
   return open !== null && /^[0-9a-f-]{36}$/i.test(open) ? open : null;
+}
+
+/** The live URL on mount (outside the App Router `useSearchParams` is null — tests, a plain render). */
+function readOpen(): string | null {
+  return typeof window === 'undefined' ? null : openOf(new URLSearchParams(window.location.search));
 }
 
 const EMPTY_WORDS: Readonly<Record<FreightLoadsListView, string>> = {
@@ -69,12 +73,25 @@ export function FreightLoadsCard({ tenantId, warehouseId, warehouseLabel, role }
   const active = useActiveClient();
   const [view, setView] = useState<FreightLoadsListView>('open');
   const loads = useFreightLoads(warehouseId, view, active.filter);
-  const [openId, setOpenId] = useState<string | null>(() => readOpen());
+  // A soft navigation (Pack & Dispatch's "Open load") changes `?open=` without a remount: follow it at render (guide §1.5).
+  const urlOpen = openOf(useSearchParams());
+  const [seenUrlOpen, setSeenUrlOpen] = useState<string | null>(urlOpen);
+  const [openId, setOpenId] = useState<string | null>(() => urlOpen ?? readOpen());
   const [creating, setCreating] = useState(false);
+  // A child drawer with a write in flight: nothing here may replace it (guide §2.4).
+  const [childBusy, setChildBusy] = useState(false);
+  if (urlOpen !== seenUrlOpen) {
+    setSeenUrlOpen(urlOpen);
+    if (urlOpen !== null && !childBusy) {
+      setOpenId(urlOpen);
+      setCreating(false);
+    }
+  }
   const [banner, setBanner] = useState<{ word: string; reason: string } | null>(null);
   const [pageEpoch, setPageEpoch] = useState(0);
 
   function open(loadId: string | null) {
+    if (childBusy) return;
     setOpenId(loadId);
     writeOpen(loadId);
     if (loadId !== null) setCreating(false);
@@ -143,10 +160,11 @@ export function FreightLoadsCard({ tenantId, warehouseId, warehouseLabel, role }
       {canDispatch && (
         <div>
           <button type="button" className={primaryClass} onClick={() => {
+              if (childBusy) return;
               open(null);
               setCreating(true);
             }}
-            disabled={creating}
+            disabled={creating || childBusy}
             data-testid="new-freight-load">
             New load
           </button>
@@ -159,8 +177,10 @@ export function FreightLoadsCard({ tenantId, warehouseId, warehouseLabel, role }
           tenantId={tenantId}
           warehouseId={warehouseId}
           load={null}
+          onBusy={setChildBusy}
           onClose={() => setCreating(false)}
           onSaved={(saved) => {
+            setChildBusy(false);
             setCreating(false);
             setBanner({ word: `${saved.code} created`, reason: `${saved.consignments.length} order${saved.consignments.length === 1 ? '' : 's'} on the load.` });
             setView('open');
@@ -171,7 +191,7 @@ export function FreightLoadsCard({ tenantId, warehouseId, warehouseLabel, role }
         />
       )}
       {openId !== null && (
-        <FreightLoadDetail key={openId} tenantId={tenantId} warehouseId={warehouseId} loadId={openId} canDispatch={canDispatch} canManage={canManage} onClose={() => open(null)} />
+        <FreightLoadDetail key={openId} tenantId={tenantId} warehouseId={warehouseId} loadId={openId} canDispatch={canDispatch} canManage={canManage} onBusy={setChildBusy} onClose={() => open(null)} />
       )}
       <div role="tablist" aria-label="Freight views" className="flex flex-wrap gap-2">
         {FREIGHT_VIEWS.map((id) => (

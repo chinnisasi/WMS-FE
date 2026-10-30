@@ -209,6 +209,52 @@ export function loadedCodesOf(consignment: Pick<FreightConsignmentViewDto, 'load
   return consignment.loadedCodes === undefined ? null : new Set(consignment.loadedCodes);
 }
 
+/**
+ * The web's scans since the load was last read: each answer's progress and
+ * its package's state, applied over the view until the debounced re-read
+ * lands (one re-read per pause, not per scan).
+ */
+export interface LocalScans {
+  /** consignmentId → loaded count, from the latest answer. */
+  readonly progress: ReadonlyMap<string, number>;
+  /** orderId → package code → its state after the answer. */
+  readonly codes: ReadonlyMap<string, ReadonlyMap<string, 'loaded' | 'unloaded'>>;
+}
+
+export const NO_LOCAL_SCANS: LocalScans = { progress: new Map(), codes: new Map() };
+
+export function recordLocalScan(prev: LocalScans, response: Pick<FreightScanResponse, 'scan' | 'progress'>): LocalScans {
+  const progress = new Map(prev.progress);
+  progress.set(response.progress.consignmentId, response.progress.loaded);
+  const codes = new Map(prev.codes);
+  const ofOrder = new Map(codes.get(response.scan.orderId) ?? []);
+  ofOrder.set(response.scan.packageCode, response.scan.status);
+  codes.set(response.scan.orderId, ofOrder);
+  return { progress, codes };
+}
+
+export function applyLocalScans(load: FreightLoadViewDto, local: LocalScans): FreightLoadViewDto {
+  if (local.progress.size === 0 && local.codes.size === 0) return load;
+  let delta = 0;
+  const consignments = load.consignments.map((c) => {
+    const loaded = local.progress.get(c.id);
+    const changes = local.codes.get(c.orderId);
+    if (loaded === undefined && changes === undefined) return c;
+    if (loaded !== undefined) delta += loaded - c.packages.loaded;
+    let loadedCodes = c.loadedCodes;
+    if (changes !== undefined && loadedCodes !== undefined) {
+      const set = new Set(loadedCodes);
+      for (const [code, state] of changes) {
+        if (state === 'loaded') set.add(code);
+        else set.delete(code);
+      }
+      loadedCodes = [...set].sort();
+    }
+    return { ...c, packages: { ...c.packages, loaded: loaded ?? c.packages.loaded }, ...(loadedCodes === undefined ? {} : { loadedCodes }) };
+  });
+  return { ...load, consignments, totals: { ...load.totals, loaded: load.totals.loaded + delta } };
+}
+
 /** The planned consignments of a load, in stop order. */
 export function plannedConsignments(load: Pick<FreightLoadViewDto, 'consignments'>): FreightConsignmentViewDto[] {
   return load.consignments.filter((c) => c.status === 'planned').sort((a, b) => a.stopSeq - b.stopSeq);

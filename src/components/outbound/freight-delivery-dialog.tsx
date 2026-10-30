@@ -141,7 +141,13 @@ export function FreightDeliveryDialog({
         <div className="flex flex-wrap gap-3 text-xs">
           {DELIVERY_OUTCOMES.map((o) => (
             <label key={o} className="flex items-center gap-1">
-              <input type="radio" name={`outcome-${consignment.id}`} checked={draft.outcome === o} onChange={() => edit({ outcome: o })} />
+              <input
+                type="radio"
+                name={`outcome-${consignment.id}`}
+                checked={draft.outcome === o}
+                // A clean delivery has no counts: the hidden fields are cleared, never sent stale.
+                onChange={() => edit(o === 'delivered' ? { outcome: o, short: '', damaged: '' } : { outcome: o })}
+              />
               {DELIVERY_OUTCOME_WORD[o]}
             </label>
           ))}
@@ -188,7 +194,15 @@ export function FreightDeliveryDialog({
         <button type="submit" className={primaryClass} disabled={busy} data-testid="confirm-delivery">
           {busy ? 'Saving…' : recorded ? 'Retry the POD upload' : amending ? 'Amend delivery' : 'Record delivery'}
         </button>
-        <button type="button" className={buttonClass} disabled={busy} onClick={onClose}>
+        <button
+          type="button"
+          className={buttonClass}
+          disabled={busy}
+          onClick={() =>
+            // The delivery committed though the POD did not: closing still refreshes the load.
+            recorded ? onDone({ word: 'Delivery recorded', reason: `${consignment.orderLabel} — the POD is not attached; upload it from the order’s Shipping panel.` }) : onClose()
+          }
+        >
           {recorded ? 'Close' : 'Discard'}
         </button>
       </div>

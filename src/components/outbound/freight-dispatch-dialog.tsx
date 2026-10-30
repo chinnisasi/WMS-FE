@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 
-import { fetchApiDispatchFreightLoad } from '@/lib/api/client';
+import { ApiProblem, fetchApiDispatchFreightLoad } from '@/lib/api/client';
 import type { FreightLoadViewDto } from '@/lib/api/generated';
 import { gateChip } from '@/lib/consignment';
 import type { ConsignmentGateState } from '@/lib/consignment-gate';
@@ -19,6 +19,7 @@ import {
   loadedWords,
   loadingState,
   membersChanged,
+  partBOrders,
   parseDispatchDraft,
   plannedConsignments,
   rebaseDispatchDraft,
@@ -67,6 +68,7 @@ export function FreightDispatchDialog({
   const [problem, setProblem] = useState<string | null>(null);
   const [refused, setRefused] = useState<ReadonlyMap<string, FreightOrderRefusal>>(new Map());
   const [busy, setBusy] = useState(false);
+  const [partBBills, setPartBBills] = useState<readonly { readonly orderId: string; readonly ewayBillNumber: string }[]>([]);
   const inFlight = useRef(false);
   const keyRef = useRef<{ key: string; body: string } | null>(null);
 
@@ -111,9 +113,19 @@ export function FreightDispatchDialog({
       keyRef.current = null;
       onDone(dispatchOutcome(response));
     } catch (error) {
-      setRefused(freightOrderRefusals(error));
+      const perOrder = freightOrderRefusals(error);
+      setRefused(perOrder);
       setProblem(freightReason(error, 'dispatch'));
-      if (membersChanged(error)) {
+      // The server's own judgement of Part B and capacity: the checkbox shows, its bills listed from the refusal.
+      const bills = partBOrders(error);
+      if (bills.length > 0) {
+        setPartBBills(bills);
+        setDraft((d) => ({ ...d, partBForced: true }));
+      }
+      if (error instanceof ApiProblem && error.code === 'load-over-capacity') setDraft((d) => ({ ...d, capacityForced: true }));
+      // A refused order (packages not loaded, the gate) or a members change: re-read and rebase, so the row shows what moved
+      // (the "Send with n unscanned" tick appears for a row the view thought full).
+      if (membersChanged(error) || perOrder.size > 0) {
         const fresh = await refresh();
         if (fresh !== null) {
           setBase(fresh);
@@ -128,7 +140,16 @@ export function FreightDispatchDialog({
   }
 
   const planned = plannedConsignments(base);
-  const ewayOrders = planned.filter((c) => c.eway.number !== null);
+  // Part B and capacity over the orders being SENT (the server's rule), or forced by its refusal.
+  const sending = planned.filter((c) => draft.rows[c.orderId]?.decision === 'dispatch');
+  const ewayOrders = sending.filter((c) => c.eway.number !== null);
+  const labelOf = new Map(planned.map((c) => [c.orderId, c.orderLabel]));
+  const billsShown =
+    partBBills.length > 0 ? partBBills.map((b) => `${labelOf.get(b.orderId) ?? `…${b.orderId.slice(-8)}`} EWB ${b.ewayBillNumber}`) : ewayOrders.map((c) => `${c.orderLabel} EWB ${c.eway.number}`);
+  const partBShown = ewayOrders.length > 0 || draft.partBForced === true;
+  const sentGrams = sending.reduce<number | null>((sum, c) => (sum === null || c.weightGrams === null ? null : sum + c.weightGrams), 0);
+  const overCapacityShown =
+    draft.capacityForced === true || (sentGrams !== null && base.vehicle.capacityKg !== null && sentGrams > base.vehicle.capacityKg * 1000);
 
   return (
     <form
@@ -209,16 +230,16 @@ export function FreightDispatchDialog({
           </div>
           {sealProblem !== null && <span className="text-xs text-(--destructive)">{sealProblem}</span>}
         </div>
-        {base.partB.required && (
+        {partBShown && (
           <label className="flex items-start gap-2 text-xs" data-testid="part-b">
             <input type="checkbox" checked={draft.ewayPartBConfirmed} onChange={(e) => edit({ ewayPartBConfirmed: e.target.checked })} />
             <span>
               I updated Part B of these e-way bills with this vehicle on the e-way portal:{' '}
-              {ewayOrders.length === 0 ? 'the orders’ e-way bills' : ewayOrders.map((c) => `${c.orderLabel} EWB ${c.eway.number}`).join(', ')}.
+              {billsShown.length === 0 ? 'the orders’ e-way bills' : billsShown.join(', ')}.
             </span>
           </label>
         )}
-        {base.totals.overCapacity && (
+        {overCapacityShown && (
           <label className="flex items-start gap-2 text-xs">
             <input type="checkbox" checked={draft.overCapacityAcknowledged} onChange={(e) => edit({ overCapacityAcknowledged: e.target.checked })} />
             <span>The truck is over its stated capacity — send it anyway (recorded on the sheet).</span>
