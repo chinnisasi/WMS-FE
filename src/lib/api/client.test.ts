@@ -3863,3 +3863,87 @@ describe('story 4-6a — the consignment wrappers', () => {
     clearSession();
   });
 });
+
+describe('story 4-9a — the freight wrappers', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const LOAD = '0198f7a2-1b3c-7d4e-8f90-00000000a001';
+  const CONS = '0198f7a2-1b3c-7d4e-8f90-00000000c001';
+  const ORDER = '0198f7a2-1b3c-7d4e-8f90-000000000001';
+  const W = '0198f7a2-1b3c-7d4e-8f90-99aabbccddee';
+  const C = '0198f7a2-1b3c-7d4e-8f90-cccccccccccc';
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}`;
+  const path = () => new URL(lastRequest!.url).pathname;
+
+  test('the reads: loads (query only when set), candidates, detail, the two PDFs as blobs, the portal note', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null, truncated: false });
+    await shipping.fetchApiListFreightLoads(SESSION.tenant.id, W);
+    expect(path()).toBe(`${base()}/warehouses/${W}/outbound/freight-loads`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await shipping.fetchApiListFreightLoads(SESSION.tenant.id, W, { view: 'pod-pending', clientId: C, cursor: 'K', limit: 50 });
+    const q = new URL(lastRequest!.url).searchParams;
+    expect([q.get('view'), q.get('clientId'), q.get('cursor'), q.get('limit')]).toEqual(['pod-pending', C, 'K', '50']);
+    await shipping.fetchApiFreightCandidates(SESSION.tenant.id, W, { status: 'all', pincode: '560001' });
+    expect(path()).toBe(`${base()}/warehouses/${W}/outbound/freight-candidates`);
+    expect(new URL(lastRequest!.url).search).toBe('?pincode=560001&status=all');
+    await shipping.fetchApiFreightLoad(SESSION.tenant.id, LOAD);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    stubFetch(200, '%PDF');
+    await shipping.fetchApiFreightLoadingSheet(SESSION.tenant.id, LOAD);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}/loading-sheet`);
+    expect(new URL(lastRequest!.url).search).toBe('?format=pdf');
+    await shipping.fetchApiFreightNote(SESSION.tenant.id, CONS);
+    expect(path()).toBe(`${base()}/outbound/freight-consignments/${CONS}/note`);
+    await shipping.fetchApiPortalFreightNote(SESSION.tenant.id, ORDER);
+    expect(path()).toBe(`${base()}/portal/orders/${ORDER}/freight-note`);
+    clearSession();
+  });
+
+  test('every write POSTs its body under its key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, {});
+    const header = { mode: 'ltl' as const, transporter: { name: 'VRL' } };
+    await shipping.fetchApiCreateFreightLoad(SESSION.tenant.id, W, { ...header, orderIds: [ORDER] }, KEY);
+    expect(path()).toBe(`${base()}/warehouses/${W}/outbound/freight-loads`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ ...header, orderIds: [ORDER] });
+    await shipping.fetchApiUpdateFreightLoad(SESSION.tenant.id, LOAD, header, KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}`);
+    await shipping.fetchApiAddFreightOrders(SESSION.tenant.id, LOAD, [ORDER], KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}/orders`);
+    expect(await lastRequest!.json()).toEqual({ orderIds: [ORDER] });
+    await shipping.fetchApiRemoveFreightOrder(SESSION.tenant.id, LOAD, ORDER, 'Not ready', KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}/orders/${ORDER}/remove`);
+    expect(await lastRequest!.json()).toEqual({ reason: 'Not ready' });
+    await shipping.fetchApiReorderFreightStops(SESSION.tenant.id, LOAD, [ORDER], KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}/stops`);
+    await shipping.fetchApiRecordFreightScan(SESSION.tenant.id, LOAD, { packageCode: 'O8FE5145B99902272.1.1', action: 'load' }, KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}/scans`);
+    expect(await lastRequest!.json()).toEqual({ packageCode: 'O8FE5145B99902272.1.1', action: 'load' });
+    const dispatch = { vehicleNumber: 'KA01AB1234', driverName: 'Ravi', seals: ['S-991'], consignments: [{ orderId: ORDER, decision: 'dispatch' as const }] };
+    await shipping.fetchApiDispatchFreightLoad(SESSION.tenant.id, LOAD, dispatch, KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}/dispatch`);
+    expect(await lastRequest!.json()).toEqual(dispatch);
+    await shipping.fetchApiCancelFreightLoad(SESSION.tenant.id, LOAD, 'Truck did not come', KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}/cancel`);
+    await shipping.fetchApiUploadFreightSheet(SESSION.tenant.id, LOAD, new File(['%PDF'], 's.pdf', { type: 'application/pdf' }), KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-loads/${LOAD}/sheet`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    await shipping.fetchApiRecordFreightLr(SESSION.tenant.id, CONS, { lrNumber: '4410' }, KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-consignments/${CONS}/lr`);
+    await shipping.fetchApiRecordFreightDelivery(SESSION.tenant.id, CONS, { outcome: 'delivered', deliveredAt: '2026-11-02T05:50:00.000Z' }, KEY);
+    expect(path()).toBe(`${base()}/outbound/freight-consignments/${CONS}/delivery`);
+    expect(await lastRequest!.json()).toEqual({ outcome: 'delivered', deliveredAt: '2026-11-02T05:50:00.000Z' });
+    clearSession();
+  });
+
+  test('a departure refusal keeps its per-order extensions', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { type: 'about:blank', title: 'x', status: 409, code: 'freight-orders-refused', orders: [{ orderId: ORDER, code: 'packages-not-loaded' }] });
+    await expect(
+      shipping.fetchApiDispatchFreightLoad(SESSION.tenant.id, LOAD, { vehicleNumber: 'KA01AB1234', driverName: 'R', consignments: [{ orderId: ORDER, decision: 'dispatch' }] }, KEY),
+    ).rejects.toMatchObject({ code: 'freight-orders-refused', extensions: { orders: [{ orderId: ORDER, code: 'packages-not-loaded' }] } });
+    clearSession();
+  });
+});

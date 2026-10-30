@@ -368,6 +368,23 @@ import {
   shippingControllerHandover,
   shippingControllerHandoverCandidates,
   shippingControllerHandovers,
+  freightControllerListLoads,
+  freightControllerCreateLoad,
+  freightControllerCandidates,
+  freightControllerRemoveOrder,
+  freightControllerAddOrders,
+  freightControllerReorderStops,
+  freightControllerRecordScan,
+  freightControllerDispatchLoad,
+  freightControllerCancelLoad,
+  freightControllerUploadSheet,
+  freightControllerLoadingSheet,
+  freightControllerLoadDetail,
+  freightControllerUpdateLoad,
+  freightControllerRecordLr,
+  freightControllerRecordDelivery,
+  freightControllerFreightNote,
+  portalControllerOrderFreightNote,
   shippingControllerOrderShipping,
   shippingControllerParcelTag,
   shippingControllerRecordAwbAdvice,
@@ -747,6 +764,20 @@ import type {
   HandoverDetailResponse,
   HandoverResponse,
   HandoversResponse,
+  CreateFreightLoadDto,
+  UpdateFreightLoadDto,
+  FreightLoadResponse,
+  FreightLoadViewDto,
+  FreightLoadsResponse,
+  FreightCandidatesResponse,
+  FreightScanResponse,
+  DispatchFreightLoadDto,
+  FreightDispatchResponse,
+  RecordFreightLrDto,
+  RecordFreightDeliveryDto,
+  FreightConsignmentResponse,
+  FreightControllerListLoadsData,
+  FreightControllerCandidatesData,
   OrderShippingResponse,
   OrderConsignmentResponse,
   ConsignmentRecordResponse,
@@ -7743,4 +7774,248 @@ export async function fetchApiPortalConsignmentsNeeded(
   const { data, error } = await portalControllerConsignmentsNeeded({ path: { tenantId }, signal: options?.signal });
   if (error || !data) throw portalError(error);
   return data;
+}
+
+// ── story 4-9a: B2B freight dispatch (A9–A18, A20–A22) ─────────────────────
+
+export type FreightLoadsView = NonNullable<NonNullable<FreightControllerListLoadsData['query']>['view']>;
+export type FreightCandidatesStatus = NonNullable<NonNullable<FreightControllerCandidatesData['query']>['status']>;
+
+/** A20 — one warehouse's freight loads by view, newest first; `from` / `to` are IST dates. Query keys only when set. */
+export async function fetchApiListFreightLoads(
+  tenantId: string,
+  warehouseId: string,
+  options?: { view?: FreightLoadsView; clientId?: string; from?: string; to?: string; cursor?: string; limit?: number; signal?: AbortSignal },
+): Promise<FreightLoadsResponse> {
+  const { data, error, response } = await freightControllerListLoads({
+    path: { tenantId, warehouseId },
+    query: definedQuery({
+      view: options?.view,
+      clientId: options?.clientId,
+      from: options?.from,
+      to: options?.to,
+      cursor: options?.cursor,
+      limit: options?.limit === undefined ? undefined : String(options.limit),
+    }),
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A20 — one page of the warehouse's orders that may go on a truck (packed first; `truncated` past 2,000 scanned). */
+export async function fetchApiFreightCandidates(
+  tenantId: string,
+  warehouseId: string,
+  options?: {
+    clientId?: string;
+    state?: string;
+    city?: string;
+    pincode?: string;
+    status?: FreightCandidatesStatus;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  },
+): Promise<FreightCandidatesResponse> {
+  const { data, error, response } = await freightControllerCandidates({
+    path: { tenantId, warehouseId },
+    query: definedQuery({
+      clientId: options?.clientId,
+      state: options?.state,
+      city: options?.city,
+      pincode: options?.pincode,
+      status: options?.status,
+      cursor: options?.cursor,
+      limit: options?.limit === undefined ? undefined : String(options.limit),
+    }),
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A21 — one load's detail (`FreightLoadView`; as built the read answers the view itself, not `{load}`). */
+export async function fetchApiFreightLoad(tenantId: string, loadId: string, options?: { signal?: AbortSignal }): Promise<FreightLoadViewDto> {
+  const { data, error, response } = await freightControllerLoadDetail({ path: { tenantId, loadId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A9 — create a load (optionally with its first orders) (`dispatch.execute`). */
+export async function fetchApiCreateFreightLoad(
+  tenantId: string,
+  warehouseId: string,
+  body: CreateFreightLoadDto,
+  idempotencyKey: string,
+): Promise<FreightLoadResponse> {
+  const { data, error, response } = await freightControllerCreateLoad({
+    path: { tenantId, warehouseId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A9 — replace an open load's header (`dispatch.execute`). */
+export async function fetchApiUpdateFreightLoad(
+  tenantId: string,
+  loadId: string,
+  body: UpdateFreightLoadDto,
+  idempotencyKey: string,
+): Promise<FreightLoadResponse> {
+  const { data, error, response } = await freightControllerUpdateLoad({
+    path: { tenantId, loadId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A10 — add orders to an open load, all or nothing (`dispatch.execute`). */
+export async function fetchApiAddFreightOrders(tenantId: string, loadId: string, orderIds: readonly string[], idempotencyKey: string): Promise<FreightLoadResponse> {
+  const { data, error, response } = await freightControllerAddOrders({
+    path: { tenantId, loadId },
+    body: { orderIds: [...orderIds] },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A11 — remove one planned order from an open load, with a reason (`dispatch.execute`). */
+export async function fetchApiRemoveFreightOrder(
+  tenantId: string,
+  loadId: string,
+  orderId: string,
+  reason: string,
+  idempotencyKey: string,
+): Promise<FreightLoadResponse> {
+  const { data, error, response } = await freightControllerRemoveOrder({
+    path: { tenantId, loadId, orderId },
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A12 — the full planned set in delivery order (`dispatch.execute`). */
+export async function fetchApiReorderFreightStops(tenantId: string, loadId: string, orderIds: readonly string[], idempotencyKey: string): Promise<FreightLoadResponse> {
+  const { data, error, response } = await freightControllerReorderStops({
+    path: { tenantId, loadId },
+    body: { orderIds: [...orderIds] },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A13 — one package loaded (or unloaded, with a reason) on the web (`dispatch.execute`). */
+export async function fetchApiRecordFreightScan(
+  tenantId: string,
+  loadId: string,
+  body: { packageCode: string; action: 'load' | 'unload'; reason?: string },
+  idempotencyKey: string,
+): Promise<FreightScanResponse> {
+  const { data, error, response } = await freightControllerRecordScan({
+    path: { tenantId, loadId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A14 — the truck leaves: every order sent is dispatched (web: all or nothing) (`dispatch.execute`). */
+export async function fetchApiDispatchFreightLoad(
+  tenantId: string,
+  loadId: string,
+  body: DispatchFreightLoadDto,
+  idempotencyKey: string,
+): Promise<FreightDispatchResponse> {
+  const { data, error, response } = await freightControllerDispatchLoad({
+    path: { tenantId, loadId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A15 — cancel an open load with a reason; its orders are untouched (`dispatch.execute`). */
+export async function fetchApiCancelFreightLoad(tenantId: string, loadId: string, reason: string, idempotencyKey: string): Promise<FreightLoadResponse> {
+  const { data, error, response } = await freightControllerCancelLoad({
+    path: { tenantId, loadId },
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A18 — attach one page of the signed loading sheet (`dispatch.execute`). */
+export async function fetchApiUploadFreightSheet(tenantId: string, loadId: string, file: File, idempotencyKey: string): Promise<ShippingFileResponse> {
+  const { data, error, response } = await freightControllerUploadSheet({
+    path: { tenantId, loadId },
+    body: { file },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A25 — the loading sheet as an A4 PDF (the plan while open, the final sheet after departure). */
+export async function fetchApiFreightLoadingSheet(tenantId: string, loadId: string): Promise<Blob> {
+  const { data, error, response } = await freightControllerLoadingSheet({ path: { tenantId, loadId }, query: { format: 'pdf' }, parseAs: 'blob' });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data as unknown as Blob;
+}
+
+/** A26 — one consignment's freight note (the POD form) as an A4 PDF, the staff copy. */
+export async function fetchApiFreightNote(tenantId: string, consignmentId: string): Promise<Blob> {
+  const { data, error, response } = await freightControllerFreightNote({ path: { tenantId, consignmentId }, query: { format: 'pdf' }, parseAs: 'blob' });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data as unknown as Blob;
+}
+
+/** A16 — record or change a consignment's LR (a reason after departure) (`dispatch.execute`). */
+export async function fetchApiRecordFreightLr(
+  tenantId: string,
+  consignmentId: string,
+  body: RecordFreightLrDto,
+  idempotencyKey: string,
+): Promise<FreightConsignmentResponse> {
+  const { data, error, response } = await freightControllerRecordLr({
+    path: { tenantId, consignmentId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A17 — record a consignment's delivery (an amendment needs `orders.manage` and a reason). */
+export async function fetchApiRecordFreightDelivery(
+  tenantId: string,
+  consignmentId: string,
+  body: RecordFreightDeliveryDto,
+  idempotencyKey: string,
+): Promise<FreightConsignmentResponse> {
+  const { data, error, response } = await freightControllerRecordDelivery({
+    path: { tenantId, consignmentId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** A22 — the client's freight note of one of its dispatched truck orders (portal). Another client's, or none, is a 404. */
+export async function fetchApiPortalFreightNote(tenantId: string, orderId: string): Promise<Blob> {
+  const { data, error } = await portalControllerOrderFreightNote({ path: { tenantId, orderId }, parseAs: 'blob' });
+  if (error || !data) throw portalError(error);
+  return data as Blob;
 }
