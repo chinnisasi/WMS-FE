@@ -13,6 +13,7 @@ import {
   EMPTY_ROW,
   handoverRefusals,
   matchScan,
+  normalizeAwb,
   MAX_HANDOVER_CANDIDATES,
   MAX_HANDOVER_PARCELS,
   mismatchedOrderIds,
@@ -129,7 +130,8 @@ export function HandoverBuilder({
       setAwaitingAwbFor(null);
       setScanNote({ tone: 'accepted', text: `${labelOf(result.orderId)} — AWB ${result.awb} recorded.` });
     } else {
-      editRow(result.orderId, { selected: true });
+      // An AWB scanned off the parcel is sent with it: it verifies a client label at handover (A12, `handover-scan`).
+      editRow(result.orderId, result.by === 'awb' ? { selected: true, awb: normalizeAwb(scan) } : { selected: true });
       if (result.needsAwb && rowOf(draft, result.orderId).awb === '') {
         setAwaitingAwbFor(result.orderId);
         setScanNote({ tone: 'warning', text: `${labelOf(result.orderId)} ticked — now scan the courier’s AWB on this parcel.` });

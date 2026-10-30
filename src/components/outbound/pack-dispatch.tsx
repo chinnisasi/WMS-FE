@@ -24,7 +24,7 @@ import type {
   SkuResponse,
 } from '@/lib/api/generated';
 import { quantityInputLabel, quantityLabel, sharedQuantityUom } from '@/lib/format-quantity';
-import { notifyOutboundChanged, OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
+import { notifyOutboundChanged } from '@/lib/outbound';
 import {
   canLabelOrder,
   connectionOptionLabel,

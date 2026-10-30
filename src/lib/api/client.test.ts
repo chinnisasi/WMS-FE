@@ -209,6 +209,7 @@ import {
   fetchApiListVendorReturns,
   fetchApiReturnableDamaged,
 } from './client';
+import * as shipping from './client';
 import { SESSION_STORAGE_KEY, writeSession, clearSession, PORTAL_SUSPENDED_EVENT } from '../auth';
 import type { StoredSession } from '../auth';
 
@@ -3677,6 +3678,104 @@ describe('dock wrappers (story 2-3b)', () => {
     expect(error).toBeInstanceOf(ApiProblem);
     expect((error as ApiProblem).code).toBe('dock-slot-taken');
     expect((error as ApiProblem).extensions['clash']).toEqual({ code: 'DA-0001' });
+    clearSession();
+  });
+});
+
+describe('client-arranged shipping wrappers (story 4-4a)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const ORDER = '0198f7a2-1b3c-7d4e-8f90-000000000001';
+  const W = '0198f7a2-1b3c-7d4e-8f90-99aabbccddee';
+  const C = '0198f7a2-1b3c-7d4e-8f90-cccccccccccc';
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}`;
+  const pdf = () => new File(['%PDF-1.7'], 'label.pdf', { type: 'application/pdf' });
+
+  test('the staff client label POSTs multipart with the fields as strings under its key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { shipment: { id: 's-1' } });
+    await shipping.fetchApiRecordClientLabel(SESSION.tenant.id, ORDER, { file: pdf(), awb: '123456789012', courierName: 'Delhivery', packageCount: 2, replace: true }, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/shipment/client-label`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    const form = await lastRequest!.formData();
+    expect(form.get('awb')).toBe('123456789012');
+    expect(form.get('courierName')).toBe('Delhivery');
+    expect(form.get('packageCount')).toBe('2');
+    expect(form.get('replace')).toBe('true');
+    expect(form.get('transporterId')).toBeNull();
+    clearSession();
+  });
+
+  test('the AWB advice, void, verify, document, sheet, remove and handover POST under their keys', async () => {
+    writeSession(SESSION);
+    stubFetch(201, {});
+    await shipping.fetchApiRecordAwbAdvice(SESSION.tenant.id, ORDER, { awb: '77001', courierName: 'Delhivery' }, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/shipment/awb`);
+    expect(await lastRequest!.json()).toEqual({ awb: '77001', courierName: 'Delhivery' });
+    await shipping.fetchApiVoidClientShipment(SESSION.tenant.id, ORDER, 'Wrong AWB', KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/shipment/void`);
+    expect(await lastRequest!.json()).toEqual({ reason: 'Wrong AWB' });
+    await shipping.fetchApiVerifyClientLabel(SESSION.tenant.id, ORDER, { scannedCode: '77001', method: 'typed' }, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/shipment/verify`);
+    await shipping.fetchApiUploadOrderDocument(SESSION.tenant.id, ORDER, pdf(), 'pod', KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/documents`);
+    expect((await lastRequest!.formData()).get('kind')).toBe('pod');
+    await shipping.fetchApiUploadHandoverSheet(SESSION.tenant.id, 'ho-1', pdf(), KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/handovers/ho-1/sheet`);
+    await shipping.fetchApiRemoveShippingFile(SESSION.tenant.id, 'att-1', 'Duplicate', KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/shipping-files/att-1/remove`);
+    const body = { warehouseId: W, clientId: C, courier: { courierName: 'D' }, pickupPersonName: 'R', parcels: [{ orderId: ORDER }] };
+    await shipping.fetchApiCreateHandover(SESSION.tenant.id, body, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/handovers`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    clearSession();
+  });
+
+  test('a handover refusal keeps its extensions (the per-parcel codes)', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { type: 'about:blank', title: 'x', status: 409, code: 'handover-parcels-refused', parcels: [{ orderId: ORDER, code: 'awb-required' }] });
+    await expect(
+      shipping.fetchApiCreateHandover(SESSION.tenant.id, { warehouseId: W, clientId: C, courier: { courierName: 'D' }, pickupPersonName: 'R', parcels: [{ orderId: ORDER }] }, KEY),
+    ).rejects.toMatchObject({ code: 'handover-parcels-refused', extensions: { parcels: [{ orderId: ORDER, code: 'awb-required' }] } });
+    clearSession();
+  });
+
+  test('the reads: shipping, candidates (clientId always, cursor after), handovers (query only when set), the parcel tag as a blob', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { items: [], nextCursor: null });
+    await shipping.fetchApiHandoverCandidates(SESSION.tenant.id, W, C);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/warehouses/${W}/outbound/handover-candidates`);
+    expect(new URL(lastRequest!.url).search).toBe(`?clientId=${C}`);
+    await shipping.fetchApiHandoverCandidates(SESSION.tenant.id, W, C, { cursor: 'C2', limit: 200 });
+    expect(new URL(lastRequest!.url).searchParams.get('cursor')).toBe('C2');
+    await shipping.fetchApiListHandovers(SESSION.tenant.id, W);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await shipping.fetchApiListHandovers(SESSION.tenant.id, W, { clientId: C });
+    expect(new URL(lastRequest!.url).search).toBe(`?clientId=${C}`);
+    await shipping.fetchApiOrderShipping(SESSION.tenant.id, ORDER);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/shipping`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    stubFetch(200, 'ZPL');
+    await shipping.fetchApiParcelTag(SESSION.tenant.id, ORDER, 'zpl');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/parcel-tag`);
+    expect(new URL(lastRequest!.url).search).toBe('?format=zpl');
+    clearSession();
+  });
+
+  test('the portal routes', async () => {
+    writeSession(SESSION);
+    stubFetch(201, {});
+    await shipping.fetchApiPortalAdviseAwb(SESSION.tenant.id, ORDER, { awb: '77001', courierName: 'Delhivery' }, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/orders/${ORDER}/shipment/awb`);
+    await shipping.fetchApiPortalUploadClientLabel(SESSION.tenant.id, ORDER, { file: pdf(), awb: '77001', courierName: 'Delhivery' }, KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/orders/${ORDER}/shipment/client-label`);
+    const form = await lastRequest!.formData();
+    expect([...form.keys()].sort()).toEqual(['awb', 'courierName', 'file']);
+    await shipping.fetchApiPortalUploadOrderDocument(SESSION.tenant.id, ORDER, pdf(), 'eway-bill', KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/orders/${ORDER}/documents`);
+    stubFetch(200, {});
+    await shipping.fetchApiPortalOrderShipping(SESSION.tenant.id, ORDER);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/orders/${ORDER}/shipping`);
     clearSession();
   });
 });
