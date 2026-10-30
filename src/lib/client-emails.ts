@@ -21,7 +21,7 @@ export type ClientEmailStatus = ClientEmailLogItemDto['status'];
 export type ClientEmailKind = ClientEmailLogItemDto['kind'];
 
 /** The events in the backend's vocabulary order — a body sends them in this order. */
-export const CLIENT_EMAIL_EVENTS = ['receipt.recorded', 'order.dispatched'] as const satisfies readonly ClientEmailEvent[];
+export const CLIENT_EMAIL_EVENTS = ['receipt.recorded', 'order.dispatched', 'shipment.documents'] as const satisfies readonly ClientEmailEvent[];
 
 /** The most emails of one kind a client is sent per IST day (A5) — the D2C guard until the daily digest. */
 export const CLIENT_EMAIL_DAILY_CAP = 500;
@@ -30,12 +30,15 @@ export const CLIENT_EMAIL_DAILY_CAP = 500;
 export const CLIENT_EMAIL_EVENT_LABEL: Readonly<Record<ClientEmailEvent, string>> = {
   'receipt.recorded': 'Goods received (each GRN)',
   'order.dispatched': 'Dispatched (each order)',
+  // Story 4-4a (A4) — the third box.
+  'shipment.documents': 'Shipping documents (signed handover sheet, invoice, e-way bill, POD)',
 };
 
 /** The hint beside each checkbox. The dispatch one promises no digest (B14). */
 export const CLIENT_EMAIL_EVENT_HINT: Readonly<Record<ClientEmailEvent, string>> = {
   'receipt.recorded': 'One email per goods receipt, with its lines and quantities.',
   'order.dispatched': `Each order is one email per contact. A daily limit of ${CLIENT_EMAIL_DAILY_CAP} applies.`,
+  'shipment.documents': `Each document the warehouse attaches is one email with the file, and each signed-sheet page its own. A daily limit of ${CLIENT_EMAIL_DAILY_CAP} applies.`,
 };
 
 /** The fieldset's lead line. */
@@ -47,6 +50,7 @@ export const SELF_CLIENT_EMAILS_NOTE = 'Your own company gets no client emails �
 const EVENT_SHORT: Readonly<Record<ClientEmailEvent, string>> = {
   'receipt.recorded': 'receipts',
   'order.dispatched': 'dispatches',
+  'shipment.documents': 'shipping documents',
 };
 
 /** The contact row's line, `Emails: receipts, dispatches` — null when it opted into none. */
@@ -138,6 +142,7 @@ export function clientEmailStatusTone(email: Pick<ClientEmailLogItemDto, 'status
 const KIND_WORD: Readonly<Record<ClientEmailKind, string>> = {
   receipt: 'Goods received',
   dispatch: 'Dispatched',
+  'shipment-document': 'Shipping document',
 };
 
 /** The log row's kind, `Goods received` / `Dispatched`. */
@@ -183,12 +188,14 @@ export function clientEmailBanners(log: Pick<ClientEmailLogResponse, 'mailEnable
       reason: 'Receipts and dispatches are not emailed to client contacts until an administrator switches them on. Opt-ins can still be edited.',
     });
   }
-  const capped: [ClientEmailKind, string][] = [
-    ['receipt', 'receipts'],
-    ['dispatch', 'dispatches'],
+  // Story 4-4a (D5) — the third kind; its cap flag is `shipmentDocument`.
+  const capped: [string, keyof ClientEmailLogResponse['capReachedToday'], string][] = [
+    ['receipt', 'receipt', 'receipts'],
+    ['dispatch', 'dispatch', 'dispatches'],
+    ['shipping-document', 'shipmentDocument', 'shipping documents'],
   ];
-  for (const [kind, plural] of capped) {
-    if (log.capReachedToday[kind]) {
+  for (const [kind, flag, plural] of capped) {
+    if (log.capReachedToday[flag]) {
       banners.push({
         word: `Daily limit of ${CLIENT_EMAIL_DAILY_CAP} reached — later ${plural} today were not emailed`,
         reason: `The limit counts this client’s ${kind} emails since midnight IST, and resets at the next midnight.`,

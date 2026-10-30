@@ -33,6 +33,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   // Story 3-7a — a batch recall (opened, lots added, closed, a report downloaded).
   batch_recall: 'Batch recall',
   bin: 'Bin',
+  // Story 4-4a — the courier handover.
+  courier_handover: 'Courier handover',
   // Story 3-1 — a bin-to-bin move (`stock.moved`).
   bin_move: 'Bin move',
   carrier_connection: 'Carrier connection',
