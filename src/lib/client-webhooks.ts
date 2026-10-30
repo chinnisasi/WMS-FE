@@ -14,18 +14,21 @@ export type WebhookEndpointStatus = WebhookEndpointDto['status'];
 export type WebhookDisabledReason = NonNullable<WebhookEndpointDto['disabledReason']>;
 export type WebhookDeliveryStatus = WebhookDeliveryDto['status'];
 
-export const WEBHOOK_EVENT_TYPES = ['receipt.recorded', 'order.dispatched'] as const satisfies readonly WebhookEventType[];
+export const WEBHOOK_EVENT_TYPES = ['receipt.recorded', 'order.dispatched', 'order.delivered'] as const satisfies readonly WebhookEventType[];
 
 /** What each event means to the client, in words. */
 export const WEBHOOK_EVENT_LABEL: Readonly<Record<WebhookEventType, string>> = {
   'receipt.recorded': 'Goods received',
   'order.dispatched': 'Order dispatched',
+  // Story 4-9a (A28).
+  'order.delivered': 'Order delivered',
 };
 
 /** The one-line explanation beside each checkbox. */
 export const WEBHOOK_EVENT_HINT: Readonly<Record<WebhookEventType, string>> = {
   'receipt.recorded': 'Each goods receipt (GRN) of this client, with its lines and quantities.',
   'order.dispatched': 'Each dispatched order of this client, with the carrier, the tracking number and what shipped.',
+  'order.delivered': 'Each recorded delivery of a truck consignment of this client — delivered, with exceptions or refused; an amendment is sent again with a higher deliverySeq (the highest wins).',
 };
 
 export const MAX_WEBHOOK_ENDPOINTS = 5;

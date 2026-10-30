@@ -941,6 +941,12 @@ export const PORTAL_SHIPPING_STATUS_LABEL: Readonly<Record<PortalShippingStatus,
   'handed-over': 'Handed over',
   shipped: 'Shipped',
   'shipped-no-courier-record': 'Shipped — no courier details recorded',
+  // Story 4-9a (A22, D18) — an order on a truck.
+  'freight-planned': 'Booked on a truck',
+  'freight-dispatched': 'Left by truck',
+  delivered: 'Delivered',
+  'delivered-with-exceptions': 'Delivered with exceptions',
+  'delivery-refused': 'Refused by the consignee',
 };
 
 export const PORTAL_SHIPPING_STATUS_TONE: Readonly<Record<PortalShippingStatus, 'neutral' | 'success' | 'warning' | 'info'>> = {
@@ -952,6 +958,11 @@ export const PORTAL_SHIPPING_STATUS_TONE: Readonly<Record<PortalShippingStatus, 
   'handed-over': 'success',
   shipped: 'success',
   'shipped-no-courier-record': 'success',
+  'freight-planned': 'info',
+  'freight-dispatched': 'success',
+  delivered: 'success',
+  'delivered-with-exceptions': 'warning',
+  'delivery-refused': 'warning',
 };
 
 /**
@@ -965,8 +976,17 @@ export function portalShippingStatus(
   orderStatus: string,
   live: { readonly kind: string; readonly status: string; readonly labelVerified: boolean } | null,
   hasDispatchRecord: boolean,
+  /** Story 4-9a (D18) — the order's live freight consignment, judged first; absent or null when none. */
+  freight: { readonly status: string; readonly deliveryOutcome: string | null } | null = null,
 ): PortalShippingStatus {
   if (orderStatus === 'cancelled') return 'cancelled';
+  if (freight !== null && freight.status === 'planned' && (orderStatus === 'accepted' || orderStatus === 'ready_to_dispatch')) return 'freight-planned';
+  if (freight !== null && freight.status === 'dispatched' && orderStatus === 'dispatched') {
+    if (freight.deliveryOutcome === 'delivered') return 'delivered';
+    if (freight.deliveryOutcome === 'delivered-with-exceptions') return 'delivered-with-exceptions';
+    if (freight.deliveryOutcome === 'refused') return 'delivery-refused';
+    return 'freight-dispatched';
+  }
   if (orderStatus === 'dispatched') {
     if (live === null) return hasDispatchRecord ? 'shipped' : 'shipped-no-courier-record';
     if (live.status === 'handed_over') return 'handed-over';

@@ -89,10 +89,13 @@ export const DOC_KIND_WORD: Readonly<Record<DocKind, string>> = {
   'eway-bill': 'E-way bill',
   pod: 'Proof of delivery',
   other: 'Other document',
+  // Story 4-9a (A5) — a scanned lorry receipt (a read-side kind; the staff upload route does not take it as built).
+  lr: 'Lorry receipt (LR)',
 };
 
 /** The kinds staff may upload (all), and the portal's (never `pod` — the warehouse's record of delivery). */
-export const STAFF_DOC_KINDS: readonly DocKind[] = ['invoice', 'challan', 'eway-bill', 'pod', 'other'];
+export type StaffUploadDocKind = Exclude<DocKind, 'lr'>;
+export const STAFF_DOC_KINDS: readonly StaffUploadDocKind[] = ['invoice', 'challan', 'eway-bill', 'pod', 'other'];
 export const PORTAL_DOC_KINDS = ['invoice', 'challan', 'eway-bill', 'other'] as const satisfies readonly DocKind[];
 
 /** A shipment the client arranged (a client label or a courier label) — dispatched only by a handover. */
@@ -324,6 +327,8 @@ export const HANDOVER_REFUSAL_WORD: Readonly<Record<HandoverRefusalCode, string>
   'order-holds-recalled-batch': 'Holds a recalled lot — it cannot ship',
   'package-count-mismatch': 'The parcel count is not the order’s carton count',
   'carton-not-current': 'An old or foreign carton label — reprint this order’s labels',
+  // Story 4-9a (A19, D5) — after carton-not-current, before the brand's documents.
+  'order-on-freight-load': 'On a truck — it leaves with the freight load, or remove it from the load first',
   // Story 4-6a (A14, D4) — the brand's documents, appended last (classified last).
   ...CONSIGNMENT_REFUSAL_WORD,
 };

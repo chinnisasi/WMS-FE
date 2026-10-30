@@ -58,6 +58,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   eway_gstin_setting: 'E-way GSTIN setting',
   eway_state_threshold: 'E-way threshold',
   expiry_alert_policy: 'Expiry policy',
+  // Story 4-9a — a freight load (created, updated, orders added or removed, stops reordered, packages loaded or unloaded, dispatched, cancelled, signed sheet attached).
+  freight_load: 'Freight load',
   // Story 2-3a — one inbound vehicle visit (recorded, amended, unloaded, gated out).
   gate_in: 'Gate-in',
   goods_receipt: 'GRN',

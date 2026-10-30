@@ -132,11 +132,17 @@ describe('client emails — the log (story 5-2b)', () => {
     expect(clientEmailKindWord('shipment-document')).toBe('Shipping document');
   });
 
-  test('story 4-6a (A20) — the fourth box: documents needed, last in vocabulary order', () => {
-    expect(CLIENT_EMAIL_EVENTS.at(-1)).toBe('consignment.documents-needed');
+  test('story 4-6a (A20) — the fourth box: documents needed, after shipping documents', () => {
+    expect(CLIENT_EMAIL_EVENTS.at(-2)).toBe('consignment.documents-needed');
     expect(CLIENT_EMAIL_EVENT_LABEL['consignment.documents-needed']).toBe('Documents needed (a packed order is waiting for your invoice or e-way bill)');
     expect(contactEmailsLabel(['consignment.documents-needed', 'order.dispatched'])).toBe('Emails: dispatches, documents needed');
     expect(contactEmailEventsBody(['consignment.documents-needed', 'receipt.recorded'], false)).toEqual({ emailEvents: ['receipt.recorded', 'consignment.documents-needed'] });
+  });
+
+  test('story 4-9a (A27) — the fifth box: deliveries, last in vocabulary order', () => {
+    expect(CLIENT_EMAIL_EVENTS.at(-1)).toBe('delivery.recorded');
+    expect(CLIENT_EMAIL_EVENT_LABEL['delivery.recorded']).toBe('Deliveries (a truck consignment delivered, delivered with exceptions or refused)');
+    expect(contactEmailsLabel(['delivery.recorded', 'order.dispatched'])).toBe('Emails: dispatches, deliveries');
   });
 
   test('polling: only while a row is queued, for at most 60 s from the first queued read', () => {

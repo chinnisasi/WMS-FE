@@ -551,6 +551,21 @@ describe('story 4-4a — the order Shipping section', () => {
     expect(portalShippingStatus('dispatched', null, false)).toBe('shipped-no-courier-record');
   });
 
+  test('story 4-9a (D18) — a freight consignment is judged first, mirroring wms-be', () => {
+    const planned = { status: 'planned', deliveryOutcome: null };
+    const left = (deliveryOutcome: string | null) => ({ status: 'dispatched', deliveryOutcome });
+    expect(portalShippingStatus('cancelled', null, false, planned)).toBe('cancelled');
+    expect(portalShippingStatus('accepted', null, false, planned)).toBe('freight-planned');
+    expect(portalShippingStatus('ready_to_dispatch', null, false, planned)).toBe('freight-planned');
+    expect(portalShippingStatus('dispatched', null, true, left(null))).toBe('freight-dispatched');
+    expect(portalShippingStatus('dispatched', null, true, left('delivered'))).toBe('delivered');
+    expect(portalShippingStatus('dispatched', null, true, left('delivered-with-exceptions'))).toBe('delivered-with-exceptions');
+    expect(portalShippingStatus('dispatched', null, true, left('refused'))).toBe('delivery-refused');
+    // A planned row on a dispatched order (an old api task) falls through to the courier rules.
+    expect(portalShippingStatus('dispatched', null, true, planned)).toBe('shipped');
+    expect(portalShippingStatus('accepted', null, false, null)).toBe('no-label-yet');
+  });
+
   test('the status line names the courier, AWB and IST time once handed over', () => {
     expect(portalShippingLine({ status: 'handed-over', courierName: 'Delhivery', awb: '123456789012', handedOverAt: '2026-10-30T10:35:00.000Z' })).toBe(
       'Handed over to Delhivery — AWB 123456789012, 30 Oct 2026, 16:05 IST',

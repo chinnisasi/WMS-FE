@@ -33,7 +33,7 @@ import {
   STAFF_DOC_KINDS,
   SHIPMENT_STATUS_WORD,
   verifiedLine,
-  type DocKind,
+  type StaffUploadDocKind,
 } from '@/lib/shipping';
 import { useTransporterOptions } from '@/lib/use-gate-ins';
 import { useOrderShipping } from '@/lib/use-shipping';
@@ -734,8 +734,8 @@ function RemoveFile({ tenantId, file, onClose }: { tenantId: string; file: FileV
 
 /** Upload document (A14): a kind and a file; the key per prepared file and kind. */
 function DocumentUpload({ tenantId, orderId, dispatched, onAction }: { tenantId: string; orderId: string; dispatched: boolean; onAction: () => void }) {
-  const [kind, setKind] = useState<DocKind>(dispatched ? 'pod' : 'invoice');
-  const [prepared, setPrepared] = useState<{ file: File; key: string; kind: DocKind } | null>(null);
+  const [kind, setKind] = useState<StaffUploadDocKind>(dispatched ? 'pod' : 'invoice');
+  const [prepared, setPrepared] = useState<{ file: File; key: string; kind: StaffUploadDocKind } | null>(null);
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -801,7 +801,7 @@ function DocumentUpload({ tenantId, orderId, dispatched, onAction }: { tenantId:
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <label className="flex flex-col gap-1">
           <span className={labelClass}>Document</span>
-          <select className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as DocKind)}>
+          <select className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as StaffUploadDocKind)}>
             {STAFF_DOC_KINDS.map((k) => (
               <option key={k} value={k}>
                 {DOC_KIND_WORD[k]}

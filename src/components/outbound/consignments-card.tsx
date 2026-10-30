@@ -108,11 +108,19 @@ export function ConsignmentsCard({ warehouseId, warehouseLabel, role }: Outbound
   const exceptionColumns: readonly DataTableColumn<ExceptionRow>[] = [
     { key: 'order', header: 'Order', render: (row) => toggle(row.id, row.orderLabel) },
     { key: 'client', header: 'Client', render: (row) => row.clientCode },
-    { key: 'handover', header: 'Handover', render: (row) => <span className="font-mono text-xs">{row.handoverCode ?? '—'}</span> },
+    {
+      key: 'handover',
+      header: 'Handover / truck',
+      // Story 4-9a (A20) — a truck consignment's row names its load instead of a handover.
+      render: (row) => <span className="font-mono text-xs">{row.freight?.loadCode ?? row.handoverCode ?? '—'}</span>,
+    },
     {
       key: 'left',
       header: 'Left (IST)',
-      render: (row) => (row.handedOverAt === null ? '—' : <time dateTime={row.handedOverAt}>{istDateTimeLabel(row.handedOverAt)}</time>),
+      render: (row) => {
+        const left = row.freight?.dispatchedAt ?? row.handedOverAt;
+        return left === null ? '—' : <time dateTime={left}>{istDateTimeLabel(left)}</time>;
+      },
     },
     {
       key: 'flag',
@@ -174,7 +182,7 @@ export function ConsignmentsCard({ warehouseId, warehouseLabel, role }: Outbound
         <DataTable<ExceptionRow>
           key={`exceptions-${String(active.filter)}`}
           columns={exceptionColumns}
-          rows={data === null ? [] : data.exceptions.map((row) => ({ ...row, id: row.shipmentId }))}
+          rows={data === null ? [] : data.exceptions.map((row) => ({ ...row, id: row.shipmentId ?? row.freight?.consignmentId ?? row.orderId }))}
           renderExpanded={(row) => (expandedId === row.id ? <WorklistOrderPanel orderId={row.orderId} clientCode={row.clientCode} defaultOpen={false} /> : null)}
           emptyMessage={<EmptyState kind="cleared">No parcel left without the brand’s documents.</EmptyState>}
           loading={worklist.state === 'loading' ? 'Loading the parcels that left without documents…' : undefined}

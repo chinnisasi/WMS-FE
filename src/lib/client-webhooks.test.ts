@@ -71,7 +71,7 @@ describe('client webhooks copy (story 5-2a)', () => {
   test('the draft: the save-time URL rules, at least one event, the attestation on create', () => {
     const base = { ...emptyEndpointFields(), url: 'https://hooks.acme.in/wms', attested: true };
     expect(parseEndpointDraft(base, 'create')).toEqual({
-      body: { url: 'https://hooks.acme.in/wms', description: null, eventTypes: ['receipt.recorded', 'order.dispatched'] },
+      body: { url: 'https://hooks.acme.in/wms', description: null, eventTypes: ['receipt.recorded', 'order.dispatched', 'order.delivered'] },
       problem: null,
     });
     const problem = (fields: Partial<typeof base>, mode: 'create' | 'edit' = 'create') => parseEndpointDraft({ ...base, ...fields }, mode).problem;
