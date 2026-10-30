@@ -1657,6 +1657,15 @@ export type SyncReportResponse = {
     rows: Array<SyncReportRowAckResponse>;
 };
 
+export type RejectedOpPhotoDto = {
+    /**
+     * The photo ULID
+     */
+    ref: string;
+    url: string | null;
+    urlExpiresAt: string | null;
+};
+
 export type RejectedOpResponse = {
     id: string;
     tenantId: string;
@@ -1696,6 +1705,10 @@ export type RejectedOpResponse = {
      * Story 13-2 — the decisions this row's op type admits (the per-type rule; a return.receive row is ['discard'] only). Always present on the list; absent only on a resolve response stored before 13-2
      */
     decisions?: Array<'apply' | 'recount' | 'discard'>;
+    /**
+     * Story 4-4a — a handover.create row’s sheet photos still staged or attached, each with a short-lived link (null when unsigned). Absent on other rows
+     */
+    photos?: Array<RejectedOpPhotoDto>;
 };
 
 export type RejectedOpListResponse = {
@@ -4931,6 +4944,10 @@ export type HandoverRefusedParcelDto = {
     orderId: string;
     code: 'order-not-found' | 'warehouse-mismatch' | 'order-not-ready' | 'order-already-dispatched' | 'shipment-not-client-arranged' | 'label-not-verified' | 'awb-mismatch' | 'awb-required' | 'awb-in-use' | 'order-holds-recalled-batch';
     detail: string;
+    /**
+     * The order’s status as read under its lock (e.g. cancelled vs accepted for order-not-ready); absent when the order was not found
+     */
+    orderStatus?: string;
 };
 
 export type HandoverResponse = {
@@ -13452,6 +13469,10 @@ export type PortalFileDto = {
 };
 
 export type PortalOrderShippingResponse = {
+    /**
+     * The client may record a label or AWB now (Upload / Replace / Send AWB): the order is open and has no live shipment, or a client-arranged one not yet handed over
+     */
+    canRecord: boolean;
     status: 'cancelled' | 'no-label-yet' | 'label-received' | 'awb-received' | 'ready-for-pickup' | 'handed-over' | 'shipped' | 'shipped-no-courier-record';
     courierName: string | null;
     awb: string | null;
