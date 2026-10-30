@@ -44,6 +44,8 @@ import {
   splitGrid,
   type CartonGrid,
   type CartonSku,
+  setInnerCount,
+  setPackageType,
 } from './cartons';
 
 const EA = { uom: 'EA', uomPrecision: 0 };
@@ -389,5 +391,56 @@ describe('gridMatchesScan (4-5a A26 — a stale split is never sent)', () => {
     const grid = splitGrid(skus);
     expect(gridMatchesScan(grid, [{ skuId: 'a', qty: 9 }, { skuId: 'b', qty: 4 }])).toBe(false);
     expect(gridMatchesScan(grid, [{ skuId: 'a', qty: 10 }, { skuId: 'b', qty: 4 }, { skuId: 'c', qty: 1 }])).toBe(false);
+  });
+});
+
+describe('story 4-9a — pallets in the grid (A4, A19, A47)', () => {
+  test('a pallet carries its type and inner count; a carton body is 4-5a’s', () => {
+    let grid = setPackageType(twoCartons(), 0, 'pallet');
+    grid = setInnerCount(grid, 0, '40');
+    grid = setCartonMeasure(grid, 0, 'weightKg', '1250');
+    const parsed = parseCartonGrid(grid, 'pack');
+    expect(parsed.problem).toBeNull();
+    expect(parsed.cartons![0]).toEqual({ scanned: [{ skuId: 'sku-a', qty: 6 }], weightGrams: 1_250_000, type: 'pallet', innerCount: 40 });
+    expect(parsed.cartons![1]).toEqual({ scanned: [{ skuId: 'sku-a', qty: 4 }, { skuId: 'sku-b', qty: 4 }], weightGrams: 2800 });
+  });
+
+  test('the bounds: a carton 1,000 kg, a pallet 3,000 kg, the inner count 1–9,999', () => {
+    const carton = setCartonMeasure(twoCartons(), 0, 'weightKg', '1200');
+    expect(parseCartonGrid(carton, 'pack').problem).toBe('Carton 1: Weight is at most 1,000 kg.');
+    const pallet = setCartonMeasure(setPackageType(twoCartons(), 0, 'pallet'), 0, 'weightKg', '3100');
+    expect(parseCartonGrid(pallet, 'pack').problem).toBe('Pallet 1: Weight is at most 3,000 kg for a pallet.');
+    const inner = setInnerCount(setPackageType(twoCartons(), 0, 'pallet'), 0, '0');
+    expect(parseCartonGrid(inner, 'pack').problem).toContain('Pallet 1: the cartons on it');
+  });
+
+  test('the pack refuses a gross over 200,000,000 g before sending (A47)', () => {
+    let heavy = setPackageType(setPackageType(twoCartons(), 0, 'pallet'), 1, 'pallet');
+    heavy = setCartonMeasure(setCartonMeasure(heavy, 0, 'weightKg', '3000'), 1, 'weightKg', '3000');
+    expect(parseCartonGrid(heavy, 'pack').problem).toBeNull();
+    // 67 pallets × 3,000 kg passes 200,000 kg: built from one SKU split one unit each.
+    const many: CartonSku = { skuId: 'sku-m', skuCode: 'M', uom: EA, packedQty: 67, catchWeight: false };
+    let big = splitGrid([many]);
+    big = setCartonQty(big, 0, 'sku-m', '1');
+    for (let i = 1; i < 67; i += 1) {
+      if (i >= big.cartons.length) big = addCarton(big);
+      big = setCartonQty(big, i, 'sku-m', '1');
+    }
+    for (let i = 0; i < 67; i += 1) big = setCartonMeasure(setPackageType(big, i, 'pallet'), i, 'weightKg', '3000');
+    expect(parseCartonGrid(big, 'pack').problem).toBe('The packages weigh more than 2,00,000 kg together — check the weights.');
+  });
+
+  test('back to a carton drops the inner count; one pallet stays a package list', () => {
+    const back = setPackageType(setInnerCount(setPackageType(twoCartons(), 0, 'pallet'), 0, '9'), 0, 'carton');
+    expect(back.cartons[0]).not.toHaveProperty('type');
+    expect(back.cartons[0]).not.toHaveProperty('innerCount');
+    const one = setPackageType(removeCarton(splitGrid([A, B]), 1), 0, 'pallet');
+    const { body } = buildPackBody({ scanned: [{ skuId: 'sku-a', qty: 10 }, { skuId: 'sku-b', qty: 4 }] }, one);
+    expect(body!.cartons).toEqual([{ scanned: [{ skuId: 'sku-a', qty: 10 }, { skuId: 'sku-b', qty: 4 }], type: 'pallet' }]);
+  });
+
+  test('a live pallet prefills the re-carton grid', () => {
+    const grid = gridFromLivePack([A], [{ weightGrams: 900_000, dimensionsMm: null, lines: [{ skuId: 'sku-a', qty: 10 }], type: 'pallet', innerCount: 12 }]);
+    expect(grid.cartons[0]).toMatchObject({ type: 'pallet', innerCount: '12', weightKg: '900' });
   });
 });

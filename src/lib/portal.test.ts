@@ -50,6 +50,7 @@ import {
 import { portalFileLine, portalShippingLine, portalShippingReason, portalShippingStatus } from './portal';
 import { asnExpected, atLeastCount, orderTimeline, portalDateTime, portalNavCurrent, PORTAL_HOME } from './portal';
 import { portalCartonsSummary } from './portal';
+import { portalFreightLine, portalFreightPackages, portalOrderFreightCell } from './portal';
 
 describe('portal routing (story 21-7)', () => {
   test('sign-in sends a client user to the portal and staff to Settings', () => {
@@ -551,6 +552,21 @@ describe('story 4-4a — the order Shipping section', () => {
     expect(portalShippingStatus('dispatched', null, false)).toBe('shipped-no-courier-record');
   });
 
+  test('story 4-9a (D18) — a freight consignment is judged first, mirroring wms-be', () => {
+    const planned = { status: 'planned', deliveryOutcome: null };
+    const left = (deliveryOutcome: string | null) => ({ status: 'dispatched', deliveryOutcome });
+    expect(portalShippingStatus('cancelled', null, false, planned)).toBe('cancelled');
+    expect(portalShippingStatus('accepted', null, false, planned)).toBe('freight-planned');
+    expect(portalShippingStatus('ready_to_dispatch', null, false, planned)).toBe('freight-planned');
+    expect(portalShippingStatus('dispatched', null, true, left(null))).toBe('freight-dispatched');
+    expect(portalShippingStatus('dispatched', null, true, left('delivered'))).toBe('delivered');
+    expect(portalShippingStatus('dispatched', null, true, left('delivered-with-exceptions'))).toBe('delivered-with-exceptions');
+    expect(portalShippingStatus('dispatched', null, true, left('refused'))).toBe('delivery-refused');
+    // A planned row on a dispatched order (an old api task) falls through to the courier rules.
+    expect(portalShippingStatus('dispatched', null, true, planned)).toBe('shipped');
+    expect(portalShippingStatus('accepted', null, false, null)).toBe('no-label-yet');
+  });
+
   test('the status line names the courier, AWB and IST time once handed over', () => {
     expect(portalShippingLine({ status: 'handed-over', courierName: 'Delhivery', awb: '123456789012', handedOverAt: '2026-10-30T10:35:00.000Z' })).toBe(
       'Handed over to Delhivery — AWB 123456789012, 30 Oct 2026, 16:05 IST',
@@ -593,5 +609,42 @@ describe('story 4-5a — the portal cartons summary', () => {
     expect(portalCartonsSummary([{ seq: 1, weightGrams: 450, totals: [] }])).toBe('1 carton · 450 g');
     expect(portalCartonsSummary([{ seq: 1, weightGrams: 3200, totals: [] }, { seq: 2, weightGrams: 2800, totals: [] }])).toBe('2 cartons · 6 kg');
     expect(portalCartonsSummary([{ seq: 1, weightGrams: null, totals: [] }])).toBe('1 carton');
+  });
+});
+
+describe('story 4-9a — the portal Truck block (A22, A31)', () => {
+  const left = {
+    status: 'dispatched' as const,
+    consignmentRef: 'LD-0007/03',
+    transporterName: 'VRL Logistics',
+    vehicleNumber: 'KA01AB1234',
+    lrNumber: '4410',
+    packageCount: 17,
+    palletCount: 15,
+    weightGrams: 9_840_000,
+    dispatchedAt: '2026-10-30T10:35:00.000Z',
+  };
+
+  test('the status line in client words', () => {
+    expect(portalFreightLine({ status: 'planned' })).toBe('Booked on a truck');
+    expect(portalFreightLine(left)).toBe('Left by truck on 30 Oct 2026, 16:05 IST — VRL Logistics, LR 4410, vehicle KA01AB1234');
+    expect(portalFreightLine({ ...left, status: 'delivered', deliveredAt: '2026-11-02T05:50:00.000Z', receiverName: 'A. Kumar' })).toBe(
+      'Delivered on 2 Nov 2026, 11:20 IST — received by A. Kumar',
+    );
+    expect(portalFreightLine({ ...left, status: 'delivered-with-exceptions', damagedPackageCount: 1, deliveryNote: 'pallet 4 crushed corner' })).toBe(
+      'Delivered with exceptions — 1 package damaged: ‘pallet 4 crushed corner’',
+    );
+    expect(portalFreightLine({ ...left, status: 'refused', deliveryNote: 'wrong item' })).toBe('Refused by the consignee — ‘wrong item’');
+  });
+
+  test('the packages line, the list cell, the timeline step', () => {
+    expect(portalFreightPackages(left)).toBe('15 pallets, 2 cartons — 9,840 kg');
+    expect(portalFreightPackages({ status: 'planned' } as never)).toBeNull();
+    expect(portalOrderFreightCell({ lrNumber: '4410', transporterName: 'VRL', deliveredAt: null, outcome: null })).toEqual({ text: 'LR 4410', delivered: null });
+    expect(portalOrderFreightCell({ lrNumber: null, transporterName: 'VRL', deliveredAt: 'x', outcome: 'delivered' })).toEqual({ text: 'By truck — VRL', delivered: 'Delivered' });
+    expect(portalOrderFreightCell(undefined)).toBeNull();
+    const steps = orderTimeline({ status: 'dispatched', createdAt: '2026-10-28T04:30:00.000Z' }, { lrNumber: '4410', transporterName: 'VRL', deliveredAt: '2026-11-02T05:50:00.000Z', outcome: 'delivered' });
+    expect(steps.at(-1)).toEqual({ label: 'Delivered', state: 'done', time: '2 Nov 2026, 11:20 IST' });
+    expect(orderTimeline({ status: 'dispatched', createdAt: '2026-10-28T04:30:00.000Z' })).toHaveLength(4);
   });
 });

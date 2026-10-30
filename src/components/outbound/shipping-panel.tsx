@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import {
@@ -12,7 +13,8 @@ import {
   fetchApiVerifyClientLabel,
   fetchApiVoidClientShipment,
 } from '@/lib/api/client';
-import type { ClientShipmentViewDto, FileViewDto } from '@/lib/api/generated';
+import type { ClientShipmentViewDto, FileViewDto, OrderFreightBlockDto } from '@/lib/api/generated';
+import { FREIGHT_TERMS_WORD, LOAD_EXCEPTION_WORD, deliveryLine, orderFreightLine } from '@/lib/freight';
 import type { OrderStatus } from '@/lib/outbound-orders';
 import { istDateTimeLabel } from '@/lib/audit-exports';
 import { downloadBlob } from '@/lib/csv';
@@ -33,7 +35,7 @@ import {
   STAFF_DOC_KINDS,
   SHIPMENT_STATUS_WORD,
   verifiedLine,
-  type DocKind,
+  type StaffUploadDocKind,
 } from '@/lib/shipping';
 import { useTransporterOptions } from '@/lib/use-gate-ins';
 import { useOrderShipping } from '@/lib/use-shipping';
@@ -94,15 +96,23 @@ export function ShippingPanel({
   const open = status === 'accepted' || status === 'ready_to_dispatch';
   const clientArranged = live !== null && live.kind !== 'carrier';
   const liveOpen = clientArranged && live.status === 'labelled';
+  // Story 4-9a (A19) — an order on an open load takes no courier or client label.
+  const onTruck = data.freight != null && data.freight.status === 'planned';
+  const byTruck = data.freight != null && data.freight.status !== 'removed';
 
   return (
     <section aria-label="Shipping" className="flex flex-col gap-2 rounded-sm border border-(--border) p-3 text-xs" data-testid="shipping-panel">
       <div className="font-medium">Shipping</div>
 
+      {/* Story 4-9a (A20, A52) — the order's live truck consignment. */}
+      {byTruck && <FreightBlock freight={data.freight!} />}
+
       {live === null ? (
-        <div className="text-(--muted-foreground)" data-testid="shipping-none">
-          No courier record yet{open ? ' — the client can upload its label or send the AWB in the portal, or record it here.' : '.'}
-        </div>
+        byTruck ? null : (
+          <div className="text-(--muted-foreground)" data-testid="shipping-none">
+            No courier record yet{open ? ' — the client can upload its label or send the AWB in the portal, or record it here.' : '.'}
+          </div>
+        )
       ) : (
         <LiveShipment shipment={live} />
       )}
@@ -130,7 +140,7 @@ export function ShippingPanel({
         <CartonLabelButtons tenantId={tenantId} orderId={orderId} orderLabel={orderLabel} />
       )}
 
-      {canLabel && open && (live === null || liveOpen) && data.storageEnabled !== false && (
+      {canLabel && open && !onTruck && (live === null || liveOpen) && data.storageEnabled !== false && (
         <ShipmentForms tenantId={tenantId} orderId={orderId} replacing={liveOpen ? live : null} onAction={clearNotice} />
       )}
 
@@ -734,8 +744,8 @@ function RemoveFile({ tenantId, file, onClose }: { tenantId: string; file: FileV
 
 /** Upload document (A14): a kind and a file; the key per prepared file and kind. */
 function DocumentUpload({ tenantId, orderId, dispatched, onAction }: { tenantId: string; orderId: string; dispatched: boolean; onAction: () => void }) {
-  const [kind, setKind] = useState<DocKind>(dispatched ? 'pod' : 'invoice');
-  const [prepared, setPrepared] = useState<{ file: File; key: string; kind: DocKind } | null>(null);
+  const [kind, setKind] = useState<StaffUploadDocKind>(dispatched ? 'pod' : 'invoice');
+  const [prepared, setPrepared] = useState<{ file: File; key: string; kind: StaffUploadDocKind } | null>(null);
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -801,7 +811,7 @@ function DocumentUpload({ tenantId, orderId, dispatched, onAction }: { tenantId:
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <label className="flex flex-col gap-1">
           <span className={labelClass}>Document</span>
-          <select className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as DocKind)}>
+          <select className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as StaffUploadDocKind)}>
             {STAFF_DOC_KINDS.map((k) => (
               <option key={k} value={k}>
                 {DOC_KIND_WORD[k]}
@@ -823,3 +833,31 @@ function DocumentUpload({ tenantId, orderId, dispatched, onAction }: { tenantId:
   );
 }
 
+/** Story 4-9a (A20) — the freight block: the truck, the LR, the packages, the delivery; "Open load" links the Freight tab. */
+function FreightBlock({ freight }: { freight: OrderFreightBlockDto }) {
+  return (
+    <div className="flex flex-col gap-1 rounded-sm border border-(--border) bg-(--muted) p-2" data-testid="shipping-freight">
+      <span>{orderFreightLine(freight)}</span>
+      {freight.packageCount !== null && (
+        <span>
+          {freight.loadedPackageCount ?? 0} of {freight.packageCount} packages scanned onto the truck
+          {freight.loadException !== null && ` — ${(LOAD_EXCEPTION_WORD as Readonly<Record<string, string>>)[freight.loadException] ?? freight.loadException}`}
+        </span>
+      )}
+      {(freight.lrDate !== null || freight.freightTerms !== null) && (
+        <span>
+          {[
+            freight.lrDate === null ? null : `LR date ${freight.lrDate}`,
+            freight.freightTerms === null ? null : `Freight ${(FREIGHT_TERMS_WORD as Readonly<Record<string, string>>)[freight.freightTerms] ?? freight.freightTerms}`,
+          ]
+            .filter((part): part is string => part !== null)
+            .join(' · ')}
+        </span>
+      )}
+      {freight.delivery !== null && <span data-testid="shipping-freight-delivery">{deliveryLine(freight.delivery)}</span>}
+      <Link href={`/outbound?tab=freight&open=${freight.loadId}`} className="text-(--primary) underline underline-offset-2">
+        Open load {freight.loadCode}
+      </Link>
+    </div>
+  );
+}

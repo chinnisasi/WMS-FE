@@ -231,7 +231,7 @@ describe('the Webhooks panel (story 5-2a)', () => {
     });
     await settle();
     const post = requests.find((r) => r.method === 'POST' && r.pathname.endsWith('/webhook-endpoints'))!;
-    expect(post.body).toEqual({ url: 'https://hooks.acme.in/wms', description: null, eventTypes: ['receipt.recorded', 'order.dispatched'] });
+    expect(post.body).toEqual({ url: 'https://hooks.acme.in/wms', description: null, eventTypes: ['receipt.recorded', 'order.dispatched', 'order.delivered'] });
     expect(post.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     const secret = container.querySelector('input[aria-label="Signing secret"]') as HTMLInputElement;
     expect(secret.value).toBe('whsec_TOPSECRETbase64valueAAAAAAAAAAAAAAAAAAAAAA=');

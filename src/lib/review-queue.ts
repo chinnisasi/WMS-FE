@@ -628,6 +628,10 @@ export function rejectedOpGuidance(
   if (entry.opType === 'shipment.verify-label') return [verifyLabelGuidance(entry)];
   if (entry.opType === 'handover.create') return handoverGuidance(entry);
   if (entry.opType === 'handover-photo.stage') return [HANDOVER_PHOTO_GUIDANCE];
+  // Story 4-9a (A29) — the truck on the handheld: Discard only.
+  if (entry.opType === 'freight.load-scan') return [freightScanGuidance(entry)];
+  if (entry.opType === 'freight.dispatch') return freightDispatchGuidance(entry);
+  if (entry.opType === 'freight-photo.stage') return [FREIGHT_PHOTO_GUIDANCE];
   // Story 2-8b — a refused handheld RTV pick: Discard only; the pick moved nothing.
   if (entry.opType === 'rtv.pick') return [rtvPickGuidance(entry.problemCode)];
   // Story 4-7c — a refused handheld RTC pick: Discard only; the pick moved nothing.
@@ -895,6 +899,9 @@ export function rejectedOpSummary(
   if (entry.opType === 'shipment.verify-label') return verifyLabelSummary(entry);
   if (entry.opType === 'handover.create') return handoverSummary(entry);
   if (entry.opType === 'handover-photo.stage') return handoverPhotoSummary(entry);
+  if (entry.opType === 'freight.load-scan') return freightScanSummary(entry);
+  if (entry.opType === 'freight.dispatch') return freightDispatchSummary(entry);
+  if (entry.opType === 'freight-photo.stage') return freightPhotoSummary(entry);
   if (entry.opType === 'return.receive_blind') return blindReceiveSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
@@ -1673,6 +1680,15 @@ export const HANDOVER_REFUSAL_WORDS: Readonly<Record<string, string>> = {
   'awb-required': 'no AWB was scanned',
   'awb-in-use': 'the AWB is on another open order',
   'order-holds-recalled-batch': 'it holds a recalled lot',
+  // Story 4-5a — the carton codes.
+  'package-count-mismatch': 'the parcel count is not the order’s carton count',
+  'carton-not-current': 'an old carton label — the order was re-packed',
+  // Story 4-9a (D5) — the order is on a truck.
+  'order-on-freight-load': 'it is on a freight load — it leaves with the truck',
+  // Story 4-6a — the brand's documents.
+  'consignment-documents-missing': 'the brand’s invoice was not recorded',
+  'eway-bill-required': 'the e-way bill was not recorded',
+  'eway-bill-expired': 'the e-way bill had expired',
 };
 
 function handoverRefusalsOf(payload: Record<string, unknown>): { orderId: string | null; code: string; orderStatus: string | null }[] {
@@ -1772,4 +1788,113 @@ export function handoverReviewPhotos(
 ): readonly { readonly ref: string; readonly url: string | null; readonly urlExpiresAt: string | null }[] {
   if (entry.opType !== 'handover.create' || entry.photos === undefined) return [];
   return entry.photos;
+}
+
+// ── story 4-9a: the truck on the handheld (A29, A32, A41, A43, A50) ─────────
+
+/** Why a handheld package scan was refused, in words (the server's 409/422 codes). */
+export const FREIGHT_SCAN_PROBLEM_WORDS: Readonly<Record<string, string>> = {
+  'package-not-on-load': 'it belongs to no order on this truck',
+  'carton-not-current': 'an old label — the order was re-packed',
+  'package-code-invalid': 'not a package label',
+  'package-code-ambiguous': 'the order’s parcel tag — it has several packages',
+  'order-not-packed': 'the order is not packed yet',
+  'consignment-removed': 'the order was taken off the truck',
+  'load-dispatched': 'the truck had already left',
+  'load-cancelled': 'the load was cancelled',
+  'warehouse-mismatch': 'the load is in another warehouse',
+  'not-found': 'the load no longer exists',
+  'role-denied': 'the operator may not load trucks',
+  'idempotency-key-reuse': 'the same scan was sent twice with different values',
+};
+
+function freightLoadWords(payload: Record<string, unknown>): string {
+  const code = payloadString(payload, 'loadCode');
+  if (code !== null) return code;
+  const id = payloadString(payload, 'loadId');
+  return id === null ? 'the load' : `load …${id.slice(-8)}`;
+}
+
+/** A refused handheld scan (A43): name the package and the load, and what to check. */
+export function freightScanGuidance(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): string {
+  const code = payloadString(entry.payload, 'packageCode') ?? 'This package';
+  const why = FREIGHT_SCAN_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return `${code} was not loaded on ${freightLoadWords(entry.payload)} — ${why}. Check where that package is, then discard this row.`;
+}
+
+function freightScanSummary(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): { heading: string; lines: readonly string[] } {
+  const code = payloadString(entry.payload, 'packageCode') ?? 'A package';
+  const action = payloadString(entry.payload, 'action');
+  const why = FREIGHT_SCAN_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return { heading: action === 'unload' ? 'Package not unloaded' : 'Package not loaded', lines: [`${code} — ${why}`] };
+}
+
+/** The per-order words of a departure review row's refusals. */
+export const FREIGHT_DISPATCH_REFUSAL_WORDS: Readonly<Record<string, string>> = {
+  'consignment-removed': 'it had been taken off the truck',
+  'order-not-ready': 'not packed, or cancelled',
+  'order-already-dispatched': 'already dispatched',
+  'client-departed': 'the client has left the warehouse',
+  'order-holds-recalled-batch': 'it holds a recalled lot',
+};
+
+/** A41, A50 — every refused order physically left on the truck; the row says so and what to do. */
+export const FREIGHT_DISPATCH_LEFT_GUIDANCE =
+  'These orders left on the truck but were not dispatched — they were taken off the load. Fix each cause, then dispatch, hand over or plan each order on the web (Outbound → Freight), or recover the goods from the transporter.';
+export const FREIGHT_DISPATCH_RECALLED_GUIDANCE = 'A recalled lot left on the truck — tell the recall owner; recover it from the transporter.';
+export const FREIGHT_DISPATCH_WHOLE_OP_GUIDANCE =
+  'Nothing in this departure was recorded. Record it on the web with the same vehicle and time (Outbound → Freight → the load → Dispatch), then discard this row.';
+export const FREIGHT_PHOTOS_KEPT_NOTE =
+  'The handheld photographed the signed loading sheet — upload the signed sheet from the load on the web (Outbound → Freight → the load), then discard this row.';
+
+export function freightDispatchGuidance(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): readonly string[] {
+  const refusals = handoverRefusalsOf(entry.payload);
+  const out: string[] = [];
+  if (refusals.length === 0) out.push(FREIGHT_DISPATCH_WHOLE_OP_GUIDANCE);
+  else {
+    out.push(FREIGHT_DISPATCH_LEFT_GUIDANCE);
+    if (refusals.some((r) => r.code === 'order-holds-recalled-batch')) out.push(FREIGHT_DISPATCH_RECALLED_GUIDANCE);
+  }
+  if (photoRefCount(entry.payload) > 0) out.push(FREIGHT_PHOTOS_KEPT_NOTE);
+  return out;
+}
+
+const FREIGHT_DISPATCH_WHOLE_OP_WORDS: Readonly<Record<string, string>> = {
+  'load-dispatched': 'the truck was already dispatched',
+  'load-cancelled': 'the load was cancelled',
+  'validation-failed': 'the departure was malformed',
+  'not-found': 'the load no longer exists',
+  'role-denied': 'the operator may not dispatch',
+  'warehouse-mismatch': 'the load is in another warehouse',
+  'idempotency-key-reuse': 'the same departure was sent twice with different values',
+};
+
+function freightDispatchSummary(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): { heading: string; lines: readonly string[] } {
+  const payload = entry.payload;
+  const load = freightLoadWords(payload);
+  const vehicle = payloadString(payload, 'vehicleNumber');
+  const refusals = handoverRefusalsOf(payload);
+  const photos = photoRefCount(payload);
+  const photoLine = photos === 0 ? [] : [`${photos} loading-sheet ${photos === 1 ? 'photo' : 'photos'} taken on the handheld`];
+  if (refusals.length > 0) {
+    return {
+      heading: `${refusals.length} ${refusals.length === 1 ? 'order' : 'orders'} left on ${load}${vehicle === null ? '' : ` (${vehicle})`} but not dispatched`,
+      lines: [...refusals.map((r) => `${orderWords(r.orderId)} — ${FREIGHT_DISPATCH_REFUSAL_WORDS[r.code] ?? r.code}`), ...photoLine],
+    };
+  }
+  const consignments = Array.isArray(payload['consignments']) ? payload['consignments'].length : 0;
+  const why = FREIGHT_DISPATCH_WHOLE_OP_WORDS[entry.problemCode] ?? entry.problemCode;
+  return {
+    heading: `Departure of ${load} not recorded`,
+    lines: [`${consignments} ${consignments === 1 ? 'order' : 'orders'}${vehicle === null ? '' : `, vehicle ${vehicle}`} — ${why}`, ...photoLine],
+  };
+}
+
+export const FREIGHT_PHOTO_GUIDANCE =
+  'The departure is not affected. Upload the signed loading sheet on the web (Outbound → Freight → the load), then discard this row.';
+
+function freightPhotoSummary(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): { heading: string; lines: readonly string[] } {
+  const ref = payloadString(entry.payload, 'ref');
+  const problem = RECEIPT_PHOTO_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return { heading: 'Loading-sheet photo not uploaded', lines: [`${ref === null ? 'Photo' : `Photo …${ref.slice(-8)}`} — ${problem}`] };
 }

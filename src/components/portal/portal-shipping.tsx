@@ -32,6 +32,7 @@ import { usePortalOrderShipping, usePortalPackingSlipDownload, usePortalTenantId
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ReadFailure, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
 import { StatusChip } from '@/components/shared/status-chip';
+import { PortalFreight } from '@/components/portal/portal-freight';
 
 type PortalDocKind = (typeof PORTAL_DOC_KINDS)[number];
 
@@ -72,10 +73,13 @@ export function PortalShipping({ orderId, orderLabel, canWrite }: { orderId: str
   return (
     <section aria-label="Shipping" className="flex flex-col gap-2 text-xs" data-testid="portal-shipping">
       <h4 className="text-sm font-medium">Shipping</h4>
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusChip tone={PORTAL_SHIPPING_STATUS_TONE[data.status]}>{portalShippingLine(data)}</StatusChip>
-        {data.packageCount !== null && <span className="data">{data.packageCount} {data.packageCount === 1 ? 'parcel' : 'parcels'}</span>}
-      </div>
+      {/* Story 4-9a — a truck order's status and packages are the Truck block's, shown once. */}
+      {data.freight == null && (
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusChip tone={PORTAL_SHIPPING_STATUS_TONE[data.status]}>{portalShippingLine(data)}</StatusChip>
+          {data.packageCount !== null && <span className="data">{data.packageCount} {data.packageCount === 1 ? 'parcel' : 'parcels'}</span>}
+        </div>
+      )}
       {(data.handoverCode !== null || data.vehicleNumber !== null || data.pickupPersonName !== null) && (
         <div className="text-(--muted-foreground)" data-testid="portal-shipping-handover">
           {[
@@ -88,6 +92,8 @@ export function PortalShipping({ orderId, orderLabel, canWrite }: { orderId: str
         </div>
       )}
       {notice !== null && <FeedbackBanner tone="accepted" word={notice.word} reason={notice.reason} />}
+      {/* Story 4-9a (A31) — the order's truck. */}
+      {data.freight != null && <PortalFreight orderId={orderId} orderLabel={orderLabel} freight={data.freight} />}
 
       {/* Story 4-5a (A28) — the cartons and the packing slip. */}
       {/* An API from before 4-5a omits both keys: read absent as none. */}

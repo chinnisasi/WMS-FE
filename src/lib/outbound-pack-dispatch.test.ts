@@ -496,6 +496,12 @@ describe('refusal mappers', () => {
     );
   });
 
+  test('4-9a: dispatch-via-freight is worded, never verbatim', () => {
+    expect(dispatchReason(new ApiProblem('dispatch-via-freight', 409, 'server prose', 'Dispatch via freight'))).toBe(
+      'This order is on a truck — it leaves with the freight load, or remove it from the load first.',
+    );
+  });
+
   test('3-7a: order-holds-recalled-batch names the lots and recalls and the two ways out — never verbatim', () => {
     const refusal = new ApiProblem('order-holds-recalled-batch', 409, 'server prose', 'Order holds a recalled batch', {
       batchCodes: ['LOT-A', 'LOT-B'],

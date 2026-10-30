@@ -44,6 +44,7 @@ import {
   webhookReason,
   type EndpointFields,
   type WebhookDeliveryStatus,
+  type WebhookEventType,
 } from '@/lib/client-webhooks';
 import { ulid } from '@/lib/ulid';
 import { useClientWebhooks } from '@/lib/use-client-webhooks';
@@ -457,7 +458,7 @@ function EndpointForm({
   onDirtyChange: (dirty: boolean) => void;
   onCancel: () => void;
   save: (
-    body: { url: string; description: string | null; eventTypes: ('receipt.recorded' | 'order.dispatched')[] },
+    body: { url: string; description: string | null; eventTypes: WebhookEventType[] },
     idempotencyKey: string,
     tenantId: string,
   ) => Promise<WebhookEndpointResponse>;

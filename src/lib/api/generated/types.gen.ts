@@ -1590,7 +1590,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind' | 'rtc.pick' | 'shipment.verify-label' | 'handover.create' | 'handover-photo.stage';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind' | 'rtc.pick' | 'shipment.verify-label' | 'handover.create' | 'handover-photo.stage' | 'freight.load-scan' | 'freight.dispatch' | 'freight-photo.stage';
     /**
      * The replay fate the server refused with
      */
@@ -1675,7 +1675,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind' | 'rtc.pick' | 'shipment.verify-label' | 'handover.create' | 'handover-photo.stage';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind' | 'rtc.pick' | 'shipment.verify-label' | 'handover.create' | 'handover-photo.stage' | 'freight.load-scan' | 'freight.dispatch' | 'freight-photo.stage';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -3569,9 +3569,17 @@ export type PackCartonDto = {
      */
     scanned: Array<PackScanLineDto>;
     /**
-     * Optional carton weight in grams.
+     * Optional package weight in grams: a carton at most 1,000,000, a pallet at most 3,000,000 (story 4-9a).
      */
     weightGrams?: number | null;
+    /**
+     * Story 4-9a — the package type: `carton` (the default when absent) or `pallet` (labelled "PALLET n/N").
+     */
+    type?: 'carton' | 'pallet' | null;
+    /**
+     * Story 4-9a — a pallet only: the cartons on it ("said to contain n cartons").
+     */
+    innerCount?: number | null;
     /**
      * Optional carton dimensions in millimetres — all three sides together, or the object omitted.
      */
@@ -3642,6 +3650,14 @@ export type PackedCartonDto = {
      */
     unitCount: number;
     lines: Array<PackedCartonLineDto>;
+    /**
+     * Story 4-9a — present only on a pallet; absent is a carton.
+     */
+    type?: 'carton' | 'pallet';
+    /**
+     * Story 4-9a — a pallet's inner carton count.
+     */
+    innerCount?: number | null;
 };
 
 export type PackDto = {
@@ -3775,6 +3791,14 @@ export type PackCartonViewDto = {
      * SKUs in the carton
      */
     lineCount: number;
+    /**
+     * Story 4-9a — present only on a pallet; absent is a carton.
+     */
+    type?: 'carton' | 'pallet';
+    /**
+     * Story 4-9a — a pallet's inner carton count.
+     */
+    innerCount?: number | null;
     /**
      * Per-UoM totals — never a cross-UoM unit total
      */
@@ -4207,6 +4231,12 @@ export type OrderShelfLifeResponse = {
     orderShelfLife: OrderShelfLifeDto;
 };
 
+export type OrderEntryFreightDto = {
+    loadId: string;
+    loadCode: string;
+    stopSeq: number;
+};
+
 export type OrderEntryDto = {
     id: string;
     tenantId: string;
@@ -4271,6 +4301,10 @@ export type OrderEntryDto = {
      * Story 4-6a — the consignment gate today (the brand's tax document and e-way bill): the Docs cell. Optional
      */
     consignmentState?: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
+    /**
+     * Story 4-9a (A30) — the truck the order is planned on (its load and stop), null when none: the Shipping cell reads "On truck LD-0007 (stop 3)". The list rows only; optional
+     */
+    freight?: OrderEntryFreightDto | null;
 };
 
 export type OrderListResponse = {
@@ -4846,9 +4880,17 @@ export type DevicePackCartonDto = {
      */
     scanned: Array<PackScanLineDto>;
     /**
-     * Optional carton weight in grams.
+     * Optional package weight in grams: a carton at most 1,000,000, a pallet at most 3,000,000 (story 4-9a).
      */
     weightGrams?: number | null;
+    /**
+     * Story 4-9a — the package type: `carton` (the default when absent) or `pallet` (labelled "PALLET n/N").
+     */
+    type?: 'carton' | 'pallet' | null;
+    /**
+     * Story 4-9a — a pallet only: the cartons on it ("said to contain n cartons").
+     */
+    innerCount?: number | null;
 };
 
 export type DevicePackDto = {
@@ -4978,8 +5020,8 @@ export type VerifyLabelResponse = {
 
 export type FileViewDto = {
     id: string;
-    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet';
-    docKind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | null;
+    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet' | 'loading-sheet';
+    docKind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | 'lr' | null;
     /**
      * The server-built name (never the uploader’s)
      */
@@ -5008,6 +5050,35 @@ export type OrderShippingHandoverDto = {
     sheet: Array<FileViewDto>;
 };
 
+export type OrderFreightDeliveryDto = {
+    outcome: 'delivered' | 'delivered-with-exceptions' | 'refused';
+    deliveredAt: string;
+    receiverName: string | null;
+    short: number | null;
+    damaged: number | null;
+    note: string | null;
+    deliverySeq: number;
+};
+
+export type OrderFreightBlockDto = {
+    consignmentId: string;
+    loadId: string;
+    loadCode: string;
+    consignmentRef: string;
+    status: 'planned' | 'removed' | 'dispatched';
+    stopSeq: number;
+    lrNumber: string | null;
+    lrDate: string | null;
+    freightTerms: string | null;
+    transporterName: string;
+    vehicleNumber: string | null;
+    dispatchedAt: string | null;
+    packageCount: number | null;
+    loadedPackageCount: number | null;
+    loadException: string | null;
+    delivery: OrderFreightDeliveryDto | null;
+};
+
 export type OrderShippingResponse = {
     shipment: ClientShipmentViewDto | null;
     /**
@@ -5022,12 +5093,16 @@ export type OrderShippingResponse = {
      */
     parcelTagCode: string;
     storageEnabled: boolean;
+    /**
+     * Story 4-9a (A20) — the order’s live freight consignment (its truck, LR and delivery); null when none
+     */
+    freight?: OrderFreightBlockDto | null;
 };
 
 export type ShippingFileSnapshotDto = {
     id: string;
-    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet';
-    docKind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | null;
+    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet' | 'loading-sheet';
+    docKind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | 'lr' | null;
     contentType: string | null;
     byteSize: number | null;
     pageCount: number | null;
@@ -5151,7 +5226,7 @@ export type HandoverParcelResultDto = {
 
 export type HandoverRefusedParcelDto = {
     orderId: string;
-    code: 'order-not-found' | 'warehouse-mismatch' | 'order-not-ready' | 'order-already-dispatched' | 'shipment-not-client-arranged' | 'label-not-verified' | 'awb-mismatch' | 'awb-required' | 'awb-in-use' | 'order-holds-recalled-batch' | 'package-count-mismatch' | 'carton-not-current' | 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired';
+    code: 'order-not-found' | 'warehouse-mismatch' | 'order-not-ready' | 'order-already-dispatched' | 'shipment-not-client-arranged' | 'label-not-verified' | 'awb-mismatch' | 'awb-required' | 'awb-in-use' | 'order-holds-recalled-batch' | 'package-count-mismatch' | 'carton-not-current' | 'order-on-freight-load' | 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired';
     detail: string;
     /**
      * The order’s status as read under its lock (e.g. cancelled vs accepted for order-not-ready); absent when the order was not found
@@ -5365,6 +5440,522 @@ export type HandoverListItemDto = {
 export type HandoversResponse = {
     items: Array<HandoverListItemDto>;
     nextCursor: string | null;
+};
+
+export type FreightTransporterDto = {
+    /**
+     * A transporter partner (frozen at departure)
+     */
+    transporterId?: string | null;
+    /**
+     * Or the typed name (1–100) — exactly one of the two
+     */
+    name?: string | null;
+};
+
+export type CreateFreightLoadDto = {
+    mode: 'ftl' | 'ltl';
+    transporter: FreightTransporterDto;
+    vehicleType?: 'tempo' | 'lcv' | 'mcv' | 'hcv' | 'trailer' | 'container-20' | 'container-40' | 'other' | null;
+    /**
+     * Spaces, dots and hyphens stripped, upper-cased; 4–15 letters or digits
+     */
+    vehicleNumber?: string | null;
+    /**
+     * 1–11 letters or digits
+     */
+    containerNumber?: string | null;
+    /**
+     * Kilograms, 1–60,000
+     */
+    vehicleCapacityKg?: number | null;
+    /**
+     * 1–80 characters
+     */
+    driverName?: string | null;
+    /**
+     * 7–15 digits, optionally with a leading +
+     */
+    driverPhone?: string | null;
+    /**
+     * Upper-cased, spaces and hyphens stripped; 6–20 letters or digits
+     */
+    driverLicenceNumber?: string | null;
+    /**
+     * 1–20 letters, digits or hyphens (2-3b’s door code, or typed)
+     */
+    dockDoor?: string | null;
+    /**
+     * When the truck reported, within the last 7 days
+     */
+    vehicleReportedAt?: string | null;
+    /**
+     * 1–500 characters
+     */
+    note?: string | null;
+    /**
+     * The orders to plan on it (≤ 100) — all-or-nothing (409 freight-orders-refused)
+     */
+    orderIds?: Array<string>;
+};
+
+export type FreightTransporterViewDto = {
+    partnerId: string | null;
+    name: string;
+    /**
+     * TransporterSnapshotV1 (a partner), frozen at departure
+     */
+    snapshot: {
+        [key: string]: unknown;
+    } | null;
+};
+
+export type FreightVehicleViewDto = {
+    type: 'tempo' | 'lcv' | 'mcv' | 'hcv' | 'trailer' | 'container-20' | 'container-40' | 'other' | null;
+    number: string | null;
+    containerNumber: string | null;
+    capacityKg: number | null;
+    reportedAt: string | null;
+};
+
+export type FreightDriverViewDto = {
+    name: string | null;
+    /**
+     * Unmasked for a dispatch.execute holder, else masked
+     */
+    phone: string | null;
+    /**
+     * The same rule as the phone
+     */
+    licenceNumber: string | null;
+};
+
+export type FreightPartBDto = {
+    required: boolean;
+    confirmedAt: string | null;
+    confirmedBy: string | null;
+};
+
+export type FreightTotalsDto = {
+    consignments: number;
+    packages: number;
+    loaded: number;
+    pallets: number;
+    grossWeightGrams: number | null;
+    weightKnown: boolean;
+    overCapacity: boolean;
+};
+
+export type FreightConsigneeDto = {
+    name: string | null;
+    city: string | null;
+    state: string | null;
+    pincode: string | null;
+};
+
+export type FreightLrDto = {
+    number: string | null;
+    date: string | null;
+    terms: 'paid' | 'to-pay' | 'tbb' | null;
+};
+
+export type FreightPackagesDto = {
+    total: number;
+    pallets: number;
+    loaded: number;
+    /**
+     * Scans of a superseded pack (re-packed after loading started — scan the new labels)
+     */
+    staleScans: number;
+    packed: boolean;
+};
+
+export type FreightGateDto = {
+    state: string;
+    blocking: boolean;
+};
+
+export type FreightEwayDto = {
+    number: string | null;
+    validUntil: string | null;
+};
+
+export type FreightInvoiceDto = {
+    type: string;
+    number: string;
+    date: string;
+};
+
+export type FreightDeliveryDto = {
+    outcome: 'delivered' | 'delivered-with-exceptions' | 'refused';
+    deliveredAt: string;
+    receiverName: string | null;
+    short: number | null;
+    damaged: number | null;
+    note: string | null;
+    deliverySeq: number;
+    recordedAt: string | null;
+    recordedBy: string | null;
+};
+
+export type FreightConsignmentViewDto = {
+    id: string;
+    orderId: string;
+    orderLabel: string;
+    orderStatus: string;
+    clientId: string;
+    clientCode: string;
+    stopSeq: number;
+    /**
+     * LD-0007/03
+     */
+    consignmentRef: string;
+    status: 'planned' | 'removed' | 'dispatched';
+    consignee: FreightConsigneeDto;
+    lr: FreightLrDto;
+    packages: FreightPackagesDto;
+    /**
+     * The live loaded package codes, sorted (≤ 200; empty once dispatched) — the expanded row’s per-package Load tick
+     */
+    loadedCodes?: Array<string>;
+    weightGrams: number | null;
+    /**
+     * 4-6a’s gate before departure; absent when not judged
+     */
+    gate?: FreightGateDto;
+    eway: FreightEwayDto;
+    invoice: FreightInvoiceDto | null;
+    loadException: 'packages-unscanned' | 'not-on-device-list' | null;
+    complianceException: 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired' | null;
+    dispatchedAt: string | null;
+    delivery: FreightDeliveryDto | null;
+};
+
+export type FreightRemovedDto = {
+    orderId: string;
+    orderLabel: string;
+    reason: string;
+    removedAt: string;
+};
+
+export type FreightCancelDto = {
+    at: string;
+    by: string;
+    reason: string;
+};
+
+export type FreightLoadViewDto = {
+    id: string;
+    code: string;
+    status: 'open' | 'dispatched' | 'cancelled';
+    mode: 'ftl' | 'ltl';
+    warehouseId: string;
+    transporter: FreightTransporterViewDto;
+    vehicle: FreightVehicleViewDto;
+    driver: FreightDriverViewDto;
+    dockDoor: string | null;
+    seals: Array<string>;
+    note: string | null;
+    loadingStartedAt: string | null;
+    dispatchedAt: string | null;
+    dispatchedBy: string | null;
+    dispatchSource: 'web' | 'handheld' | null;
+    partB: FreightPartBDto;
+    capacityExceeded: boolean;
+    totals: FreightTotalsDto;
+    consignments: Array<FreightConsignmentViewDto>;
+    removed: Array<FreightRemovedDto>;
+    /**
+     * The signed loading-sheet pages (a command’s answer carries no link)
+     */
+    sheet: Array<FileViewDto>;
+    cancel: FreightCancelDto | null;
+    createdBy: string;
+    createdAt: string;
+};
+
+export type FreightLoadResponse = {
+    load: FreightLoadViewDto;
+};
+
+export type FreightLoadedTotalDto = {
+    loaded: number;
+    total: number;
+};
+
+export type FreightLoadListRowDto = {
+    id: string;
+    code: string;
+    status: 'open' | 'dispatched' | 'cancelled';
+    mode: 'ftl' | 'ltl';
+    transporterName: string;
+    vehicleNumber: string | null;
+    dockDoor: string | null;
+    consignmentCount: number;
+    /**
+     * At most 5
+     */
+    clientCodes: Array<string>;
+    clientMore: number;
+    packages: FreightLoadedTotalDto;
+    palletCount: number;
+    grossWeightGrams: number | null;
+    capacityKg: number | null;
+    dispatchedAt: string | null;
+    deliveredCount: number;
+    createdAt: string;
+};
+
+export type FreightLoadsResponse = {
+    items: Array<FreightLoadListRowDto>;
+    nextCursor: string | null;
+};
+
+export type FreightCandidatePackagesDto = {
+    cartons: number;
+    pallets: number;
+    packed: boolean;
+};
+
+export type FreightCandidateDto = {
+    orderId: string;
+    orderLabel: string;
+    clientId: string;
+    clientCode: string;
+    status: 'accepted' | 'ready_to_dispatch';
+    consignee: FreightConsigneeDto;
+    packages: FreightCandidatePackagesDto;
+    grossWeightGrams: number | null;
+    consignment?: FreightGateDto;
+};
+
+export type FreightCandidatesResponse = {
+    items: Array<FreightCandidateDto>;
+    nextCursor: string | null;
+    /**
+     * More than 2,000 orders matched — narrow the filters
+     */
+    truncated: boolean;
+};
+
+export type FreightReasonDto = {
+    /**
+     * 1–200 characters
+     */
+    reason: string;
+};
+
+export type FreightOrderIdsDto = {
+    orderIds: Array<string>;
+};
+
+export type FreightScanDto = {
+    /**
+     * The package label scanned (carton or pallet code), or a one-package order’s parcel tag
+     */
+    packageCode: string;
+    action: 'load' | 'unload';
+    /**
+     * The handheld’s scan time (required on the device; 400 on the web)
+     */
+    occurredAt?: string | null;
+    /**
+     * Required for an unload (1–200)
+     */
+    reason?: string | null;
+    /**
+     * A55 — the device’s warehouse (from its snapshot; required on the device)
+     */
+    warehouseId?: string | null;
+};
+
+export type FreightScanViewDto = {
+    packageCode: string;
+    orderId: string;
+    status: 'loaded' | 'unloaded';
+};
+
+export type FreightProgressDto = {
+    consignmentId: string;
+    loaded: number;
+    total: number;
+};
+
+export type FreightScanResponse = {
+    scan: FreightScanViewDto;
+    /**
+     * A scan of a package already loaded (another device, or a re-scan): a no-op
+     */
+    alreadyLoaded: boolean;
+    progress: FreightProgressDto;
+};
+
+export type FreightDispatchConsignmentDto = {
+    orderId: string;
+    decision: 'dispatch' | 'leave';
+    lrNumber?: string | null;
+    lrDate?: string | null;
+    freightTerms?: 'paid' | 'to-pay' | 'tbb' | null;
+    /**
+     * Web: send it with packages unscanned (recorded as a load exception)
+     */
+    unscannedAcknowledged?: boolean | null;
+};
+
+export type DispatchFreightLoadDto = {
+    vehicleNumber: string;
+    vehicleType?: 'tempo' | 'lcv' | 'mcv' | 'hcv' | 'trailer' | 'container-20' | 'container-40' | 'other' | null;
+    containerNumber?: string | null;
+    driverName: string;
+    driverPhone?: string | null;
+    driverLicenceNumber?: string | null;
+    /**
+     * ≤ 5 seal numbers, unique
+     */
+    seals?: Array<string>;
+    /**
+     * Web: when the truck left (default now; up to 7 days back, never before its loading)
+     */
+    departedAt?: string | null;
+    /**
+     * Device: when the truck left (required on the device)
+     */
+    occurredAt?: string | null;
+    /**
+     * A55 — the device’s warehouse (required on the device)
+     */
+    warehouseId?: string | null;
+    /**
+     * The e-way bills were updated with this vehicle (Part B)
+     */
+    ewayPartBConfirmed?: boolean | null;
+    /**
+     * A66 — web: send it over the stated capacity
+     */
+    overCapacityAcknowledged?: boolean | null;
+    consignments: Array<FreightDispatchConsignmentDto>;
+    /**
+     * Device: the signed loading-sheet photos (≤ 10 ULIDs)
+     */
+    photoRefs?: Array<string>;
+    note?: string | null;
+};
+
+export type FreightDispatchedEntryDto = {
+    orderId: string;
+    consignmentId: string;
+    lrNumber: string | null;
+    loadException: 'packages-unscanned' | 'not-on-device-list' | null;
+    complianceException: 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired' | null;
+    followOnOrderId: string | null;
+};
+
+export type FreightLeftEntryDto = {
+    orderId: string;
+    reason: string;
+};
+
+export type FreightRefusedEntryDto = {
+    orderId: string;
+    code: 'consignment-removed' | 'order-not-ready' | 'order-already-dispatched' | 'client-departed' | 'packages-not-loaded' | 'order-holds-recalled-batch' | 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired' | 'order-not-found' | 'warehouse-mismatch' | 'order-not-open' | 'order-on-freight-load' | 'order-has-courier-shipment';
+    detail: string;
+};
+
+export type FreightDispatchResponse = {
+    load: FreightLoadViewDto;
+    dispatched: Array<FreightDispatchedEntryDto>;
+    left: Array<FreightLeftEntryDto>;
+    /**
+     * Device only: the orders that left but were not dispatched (one review row)
+     */
+    refused: Array<FreightRefusedEntryDto>;
+    rejectedOpId: string | null;
+};
+
+export type UpdateFreightLoadDto = {
+    mode: 'ftl' | 'ltl';
+    transporter: FreightTransporterDto;
+    vehicleType?: 'tempo' | 'lcv' | 'mcv' | 'hcv' | 'trailer' | 'container-20' | 'container-40' | 'other' | null;
+    /**
+     * Spaces, dots and hyphens stripped, upper-cased; 4–15 letters or digits
+     */
+    vehicleNumber?: string | null;
+    /**
+     * 1–11 letters or digits
+     */
+    containerNumber?: string | null;
+    /**
+     * Kilograms, 1–60,000
+     */
+    vehicleCapacityKg?: number | null;
+    /**
+     * 1–80 characters
+     */
+    driverName?: string | null;
+    /**
+     * 7–15 digits, optionally with a leading +
+     */
+    driverPhone?: string | null;
+    /**
+     * Upper-cased, spaces and hyphens stripped; 6–20 letters or digits
+     */
+    driverLicenceNumber?: string | null;
+    /**
+     * 1–20 letters, digits or hyphens (2-3b’s door code, or typed)
+     */
+    dockDoor?: string | null;
+    /**
+     * When the truck reported, within the last 7 days
+     */
+    vehicleReportedAt?: string | null;
+    /**
+     * 1–500 characters
+     */
+    note?: string | null;
+};
+
+export type RecordFreightLrDto = {
+    lrNumber: string;
+    lrDate?: string | null;
+    freightTerms?: 'paid' | 'to-pay' | 'tbb' | null;
+    /**
+     * Required to change the LR after departure
+     */
+    reason?: string | null;
+};
+
+export type FreightConsignmentSnapshotDto = {
+    id: string;
+    orderId: string;
+    loadId: string;
+    status: 'planned' | 'removed' | 'dispatched';
+    consignmentRef: string;
+    lr: FreightLrDto;
+    delivery: FreightDeliveryDto | null;
+};
+
+export type FreightConsignmentResponse = {
+    consignment: FreightConsignmentSnapshotDto;
+    /**
+     * Present (true) on the unchanged no-op (200)
+     */
+    unchanged?: boolean;
+};
+
+export type RecordFreightDeliveryDto = {
+    outcome: 'delivered' | 'delivered-with-exceptions' | 'refused';
+    deliveredAt: string;
+    receiverName?: string | null;
+    shortPackageCount?: number | null;
+    damagedPackageCount?: number | null;
+    /**
+     * Required with exceptions or a refusal (1–500)
+     */
+    note?: string | null;
+    /**
+     * Required to amend a recorded delivery (orders.manage)
+     */
+    reason?: string | null;
 };
 
 export type WithdrawConsignmentDto = {
@@ -5615,12 +6206,22 @@ export type ConsignmentWorklistRowDto = {
     packedAt: string | null;
 };
 
+export type ConsignmentExceptionFreightDto = {
+    consignmentId: string;
+    loadId: string;
+    loadCode: string;
+    dispatchedAt: string;
+};
+
 export type ConsignmentExceptionRowDto = {
     orderId: string;
     orderLabel: string;
     clientId: string;
     clientCode: string;
-    shipmentId: string;
+    /**
+     * The flagged handover shipment; null on a truck consignment’s row (4-9a)
+     */
+    shipmentId: string | null;
     handoverId: string | null;
     handoverCode: string | null;
     handedOverAt: string | null;
@@ -5629,6 +6230,10 @@ export type ConsignmentExceptionRowDto = {
      * Re-judged on the handover day
      */
     state: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
+    /**
+     * Story 4-9a (A20) — a truck consignment that left without the documents; absent on a handover row
+     */
+    freight?: ConsignmentExceptionFreightDto;
 };
 
 export type ConsignmentWorklistResponse = {
@@ -6914,6 +7519,47 @@ export type CatalogDispatchParcelDto = {
     consignment?: CatalogDispatchParcelConsignmentDto;
 };
 
+export type CatalogFreightConsignmentDto = {
+    consignmentId: string;
+    orderId: string;
+    clientId: string;
+    orderLabel: string;
+    /**
+     * The order’s parcel tag (O + 16 hex) — the prefix of every package code
+     */
+    parcelTagCode: string;
+    /**
+     * The live pack’s number (1 for a pack recorded before 4-5a); null when not packed
+     */
+    packSeq: number | null;
+    /**
+     * Packages in the live pack; null when not packed
+     */
+    packageCount: number | null;
+    palletCount: number;
+    stopSeq: number;
+    lrNumber: string | null;
+    /**
+     * 4-6a’s verdict today; absent when the national threshold is missing
+     */
+    consignment?: CatalogDispatchParcelConsignmentDto;
+};
+
+export type CatalogFreightLoadDto = {
+    loadId: string;
+    code: string;
+    mode: 'ftl' | 'ltl';
+    transporterName: string;
+    vehicleNumber: string | null;
+    driverName: string | null;
+    dockDoor: string | null;
+    consignments: Array<CatalogFreightConsignmentDto>;
+    /**
+     * The package codes loaded so far (live scans)
+     */
+    loadedCodes: Array<string>;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -7017,6 +7663,14 @@ export type CatalogSnapshotResponse = {
      * Story 4-5a (A32, additive): true when this server records cartons on a pack — the handheld offers New carton only then. Absent from an older server (which would drop `cartons` from a synced pack): one carton only
      */
     packCartons?: boolean;
+    /**
+     * Story 4-9a (A23, A56, additive): the warehouse's open freight loads, newest first, at most 50 — the Truck loading task: each load's planned consignments (parcel tag, live pack number and package count, its 4-6a consignment verdict) and the package codes already loaded. An older server omits it (the device reads it as empty)
+     */
+    freightLoads?: Array<CatalogFreightLoadDto>;
+    /**
+     * Story 4-9a (A56, additive): true when more than 50 loads are open or the loaded codes would pass 20,000 — load the others from the web
+     */
+    freightLoadsTruncated?: boolean;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -11585,7 +12239,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'courier_handover' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'courier_handover' | 'freight_load' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -11612,7 +12266,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'courier_handover' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'courier_handover' | 'freight_load' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -11996,7 +12650,7 @@ export type ClientContactListItemDto = {
     /**
      * Story 5-2b — the client emails this contact receives, in vocabulary order; empty = none
      */
-    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed'>;
+    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed' | 'delivery.recorded'>;
     /**
      * The latest receipt or dispatch email to this address for this client; null when none
      */
@@ -12030,7 +12684,7 @@ export type CreateClientContactDto = {
     /**
      * Story 5-2b — the client emails this contact receives: receipt.recorded (each GRN), order.dispatched (each order), and (story 4-4a) shipment.documents (each shipping document and signed handover sheet). Omitted = none. No event twice; refused on the warehouse’s own (self) client
      */
-    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed'>;
+    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed' | 'delivery.recorded'>;
 };
 
 export type ClientContactDto = {
@@ -12061,7 +12715,7 @@ export type ClientContactDto = {
     /**
      * Story 5-2b — the client emails this contact receives, in vocabulary order; empty = none
      */
-    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed'>;
+    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed' | 'delivery.recorded'>;
 };
 
 export type ClientContactResponse = {
@@ -12086,7 +12740,7 @@ export type UpdateClientContactDto = {
     /**
      * Story 5-2b — omitted = unchanged; [] = none. Dropping an event cancels its still-queued emails to this contact
      */
-    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed'>;
+    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed' | 'delivery.recorded'>;
 };
 
 export type UpdateClientEmailSettingsDto = {
@@ -12160,7 +12814,7 @@ export type WebhookEndpointListEntryDto = {
     clientId: string;
     url: string;
     description: string | null;
-    eventTypes: Array<'receipt.recorded' | 'order.dispatched'>;
+    eventTypes: Array<'receipt.recorded' | 'order.dispatched' | 'order.delivered'>;
     status: 'active' | 'disabled' | 'deleted';
     /**
      * `manual` — by staff; `failing` — ten final failures over 24 h (deliveries held); `gone` — the receiver answered 410; `client-departed`
@@ -12213,7 +12867,7 @@ export type CreateWebhookEndpointDto = {
     /**
      * The event types it receives — at least one, none twice
      */
-    eventTypes: Array<'receipt.recorded' | 'order.dispatched'>;
+    eventTypes: Array<'receipt.recorded' | 'order.dispatched' | 'order.delivered'>;
 };
 
 export type WebhookEndpointDto = {
@@ -12221,7 +12875,7 @@ export type WebhookEndpointDto = {
     clientId: string;
     url: string;
     description: string | null;
-    eventTypes: Array<'receipt.recorded' | 'order.dispatched'>;
+    eventTypes: Array<'receipt.recorded' | 'order.dispatched' | 'order.delivered'>;
     status: 'active' | 'disabled' | 'deleted';
     /**
      * `manual` — by staff; `failing` — ten final failures over 24 h (deliveries held); `gone` — the receiver answered 410; `client-departed`
@@ -12273,7 +12927,7 @@ export type UpdateWebhookEndpointDto = {
     /**
      * Narrowing fails the dropped types’ pending and held deliveries (`unsubscribed`)
      */
-    eventTypes?: Array<'receipt.recorded' | 'order.dispatched'>;
+    eventTypes?: Array<'receipt.recorded' | 'order.dispatched' | 'order.delivered'>;
     /**
      * `disabled` — by staff (its pending and held deliveries fail); `active` — re-enable (counters cleared)
      */
@@ -12315,9 +12969,9 @@ export type WebhookDeliveryDto = {
      * The webhook event id — the `webhook-id` header and the body’s `id`
      */
     eventId: string;
-    eventType: 'receipt.recorded' | 'order.dispatched';
+    eventType: 'receipt.recorded' | 'order.dispatched' | 'order.delivered';
     /**
-     * The receipt (GRN) id or the order id
+     * The receipt (GRN) id, the order id, or (order.delivered) an id derived from the consignment id and its deliverySeq — stable per recorded version, stored on no row (the body’s orderId names the order)
      */
     subjectId: string;
     status: 'pending' | 'sending' | 'held' | 'succeeded' | 'failed';
@@ -12375,9 +13029,9 @@ export type WebhookDeliveryDetailDto = {
      * The webhook event id — the `webhook-id` header and the body’s `id`
      */
     eventId: string;
-    eventType: 'receipt.recorded' | 'order.dispatched';
+    eventType: 'receipt.recorded' | 'order.dispatched' | 'order.delivered';
     /**
-     * The receipt (GRN) id or the order id
+     * The receipt (GRN) id, the order id, or (order.delivered) an id derived from the consignment id and its deliverySeq — stable per recorded version, stored on no row (the body’s orderId names the order)
      */
     subjectId: string;
     status: 'pending' | 'sending' | 'held' | 'succeeded' | 'failed';
@@ -13755,6 +14409,13 @@ export type PortalStockPageResponse = {
     nextCursor: string | null;
 };
 
+export type PortalOrderFreightDto = {
+    lrNumber: string | null;
+    transporterName: string;
+    deliveredAt: string | null;
+    outcome: 'delivered' | 'delivered-with-exceptions' | 'refused' | null;
+};
+
 export type PortalOrderRowDto = {
     id: string;
     status: 'accepted' | 'ready_to_dispatch' | 'dispatched' | 'cancelled';
@@ -13816,6 +14477,10 @@ export type PortalOrderRowDto = {
      * Story 4-4a — the courier of the order’s live shipment; absent when it has none
      */
     courierName?: string;
+    /**
+     * Story 4-9a (A22) — the truck it left on: its LR, transporter and delivery; absent when none
+     */
+    freight?: PortalOrderFreightDto;
 };
 
 export type PortalOrderPageResponse = {
@@ -14072,6 +14737,10 @@ export type PortalOrderDetailResponse = {
      * Story 4-4a — the courier of the order’s live shipment; absent when it has none
      */
     courierName?: string;
+    /**
+     * Story 4-9a (A22) — the truck it left on: its LR, transporter and delivery; absent when none
+     */
+    freight?: PortalOrderFreightDto;
     lines: Array<PortalOrderLineDto>;
 };
 
@@ -14113,12 +14782,41 @@ export type PortalCartonDto = {
     totals: Array<PortalCartonTotalDto>;
 };
 
+export type PortalFreightBlockDto = {
+    status: 'planned' | 'dispatched' | 'delivered' | 'delivered-with-exceptions' | 'refused';
+    consignmentRef?: string;
+    transporterName?: string;
+    vehicleNumber?: string;
+    containerNumber?: string | null;
+    /**
+     * FTL only
+     */
+    seals?: Array<string> | null;
+    driverName?: string;
+    lrNumber?: string | null;
+    lrDate?: string | null;
+    freightTerms?: string | null;
+    packageCount?: number;
+    palletCount?: number;
+    weightGrams?: number | null;
+    dispatchedAt?: string;
+    deliveredAt?: string | null;
+    receiverName?: string | null;
+    shortPackageCount?: number | null;
+    damagedPackageCount?: number | null;
+    deliveryNote?: string | null;
+    /**
+     * The freight note downloads
+     */
+    noteAvailable?: boolean;
+};
+
 export type PortalOrderShippingResponse = {
     /**
      * The client may record a label or AWB now (Upload / Replace / Send AWB): the order is open and has no live shipment, or a client-arranged one not yet handed over
      */
     canRecord: boolean;
-    status: 'cancelled' | 'no-label-yet' | 'label-received' | 'awb-received' | 'ready-for-pickup' | 'handed-over' | 'shipped' | 'shipped-no-courier-record';
+    status: 'cancelled' | 'no-label-yet' | 'label-received' | 'awb-received' | 'ready-for-pickup' | 'handed-over' | 'shipped' | 'shipped-no-courier-record' | 'freight-planned' | 'freight-dispatched' | 'delivered' | 'delivered-with-exceptions' | 'delivery-refused';
     courierName: string | null;
     awb: string | null;
     packageCount: number | null;
@@ -14140,6 +14838,10 @@ export type PortalOrderShippingResponse = {
      * Story 4-5a — the packing slip can be downloaded (packed or dispatched)
      */
     packingSlipAvailable: boolean;
+    /**
+     * Story 4-9a (A22) — the order’s truck: only its status while planned; null when none
+     */
+    freight?: PortalFreightBlockDto | null;
 };
 
 export type PortalConsignmentNeededRowDto = {
@@ -24540,7 +25242,7 @@ export type ShippingControllerParcelTagResponse = ShippingControllerParcelTagRes
 export type ShippingControllerUploadOrderDocumentData = {
     body: {
         file: Blob | File;
-        kind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other';
+        kind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | 'lr';
     };
     headers: {
         /**
@@ -24907,6 +25609,835 @@ export type ShippingControllerHandoversResponses = {
 };
 
 export type ShippingControllerHandoversResponse = ShippingControllerHandoversResponses[keyof ShippingControllerHandoversResponses];
+
+export type FreightControllerListLoadsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        view?: 'open' | 'dispatched' | 'pod-pending' | 'delivery-exceptions' | 'cancelled';
+        /**
+         * Loads holding a live consignment of this client
+         */
+        clientId?: string;
+        /**
+         * IST date, inclusive
+         */
+        from?: string;
+        /**
+         * IST date, inclusive
+         */
+        to?: string;
+        cursor?: string;
+        /**
+         * 1–100 (default 50)
+         */
+        limit?: string;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/freight-loads';
+};
+
+export type FreightControllerListLoadsErrors = {
+    /**
+     * A malformed filter or cursor (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Unknown warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type FreightControllerListLoadsError = FreightControllerListLoadsErrors[keyof FreightControllerListLoadsErrors];
+
+export type FreightControllerListLoadsResponses = {
+    200: FreightLoadsResponse;
+};
+
+export type FreightControllerListLoadsResponse = FreightControllerListLoadsResponses[keyof FreightControllerListLoadsResponses];
+
+export type FreightControllerCreateLoadData = {
+    body: CreateFreightLoadDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/freight-loads';
+};
+
+export type FreightControllerCreateLoadErrors = {
+    /**
+     * A malformed field (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Role lacks dispatch.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown warehouse or transporter (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * freight-orders-refused (orders[{orderId, code}]), load-full, partner-not-transporter, transporter-inactive
+     */
+    409: ProblemDetailsDto;
+    /**
+     * idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerCreateLoadError = FreightControllerCreateLoadErrors[keyof FreightControllerCreateLoadErrors];
+
+export type FreightControllerCreateLoadResponses = {
+    201: FreightLoadResponse;
+};
+
+export type FreightControllerCreateLoadResponse = FreightControllerCreateLoadResponses[keyof FreightControllerCreateLoadResponses];
+
+export type FreightControllerCandidatesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        clientId?: string;
+        state?: string;
+        city?: string;
+        pincode?: string;
+        status?: 'packed' | 'accepted' | 'all';
+        cursor?: string;
+        /**
+         * 1–500 (default 200)
+         */
+        limit?: string;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/freight-candidates';
+};
+
+export type FreightControllerCandidatesErrors = {
+    /**
+     * A malformed filter or cursor (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Unknown warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type FreightControllerCandidatesError = FreightControllerCandidatesErrors[keyof FreightControllerCandidatesErrors];
+
+export type FreightControllerCandidatesResponses = {
+    200: FreightCandidatesResponse;
+};
+
+export type FreightControllerCandidatesResponse = FreightControllerCandidatesResponses[keyof FreightControllerCandidatesResponses];
+
+export type FreightControllerStageFreightPhotoData = {
+    body: {
+        capturedAt: string;
+        file: Blob | File;
+    };
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+        /**
+         * The capturing operator’s user id
+         */
+        'x-op-operator': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-photos';
+};
+
+export type FreightControllerStageFreightPhotoErrors = {
+    /**
+     * Missing or malformed key, x-op-operator, capturedAt or file (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * The ref is stored with different bytes or another purpose (attachment-ref-conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a JPEG, PNG or WebP (attachment-type-unsupported)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * attachment-too-large, attachment-content-invalid, idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+    /**
+     * 200 photos waiting on this device (attachment-staging-limit)
+     */
+    429: ProblemDetailsDto;
+    /**
+     * file-storage-unavailable, file-storage-failed, file-storage-busy
+     */
+    503: ProblemDetailsDto;
+};
+
+export type FreightControllerStageFreightPhotoError = FreightControllerStageFreightPhotoErrors[keyof FreightControllerStageFreightPhotoErrors];
+
+export type FreightControllerStageFreightPhotoResponses = {
+    201: StagedPhotoResponse;
+};
+
+export type FreightControllerStageFreightPhotoResponse = FreightControllerStageFreightPhotoResponses[keyof FreightControllerStageFreightPhotoResponses];
+
+export type FreightControllerRemoveOrderData = {
+    body: FreightReasonDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}/orders/{orderId}/remove';
+};
+
+export type FreightControllerRemoveOrderErrors = {
+    /**
+     * No reason (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * role-denied
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown load, or the order is not planned on it (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * load-not-open
+     */
+    409: ProblemDetailsDto;
+    /**
+     * idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerRemoveOrderError = FreightControllerRemoveOrderErrors[keyof FreightControllerRemoveOrderErrors];
+
+export type FreightControllerRemoveOrderResponses = {
+    200: FreightLoadResponse;
+};
+
+export type FreightControllerRemoveOrderResponse = FreightControllerRemoveOrderResponses[keyof FreightControllerRemoveOrderResponses];
+
+export type FreightControllerAddOrdersData = {
+    body: FreightOrderIdsDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}/orders';
+};
+
+export type FreightControllerAddOrdersErrors = {
+    /**
+     * A malformed or duplicate order id (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * role-denied
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown load (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * load-not-open, load-full, freight-orders-refused (order-not-found, warehouse-mismatch, order-not-open, order-on-freight-load, order-has-courier-shipment)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerAddOrdersError = FreightControllerAddOrdersErrors[keyof FreightControllerAddOrdersErrors];
+
+export type FreightControllerAddOrdersResponses = {
+    200: FreightLoadResponse;
+};
+
+export type FreightControllerAddOrdersResponse = FreightControllerAddOrdersResponses[keyof FreightControllerAddOrdersResponses];
+
+export type FreightControllerReorderStopsData = {
+    body: FreightOrderIdsDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}/stops';
+};
+
+export type FreightControllerReorderStopsErrors = {
+    /**
+     * role-denied
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown load (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * load-not-open, freight-members-changed (extensions.orderIds)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerReorderStopsError = FreightControllerReorderStopsErrors[keyof FreightControllerReorderStopsErrors];
+
+export type FreightControllerReorderStopsResponses = {
+    200: FreightLoadResponse;
+};
+
+export type FreightControllerReorderStopsResponse = FreightControllerReorderStopsResponses[keyof FreightControllerReorderStopsResponses];
+
+export type FreightControllerRecordScanData = {
+    body: FreightScanDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}/scans';
+};
+
+export type FreightControllerRecordScanErrors = {
+    /**
+     * A blank code, an unknown action, no unload reason, occurredAt on the web (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token, or a device token without a badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * role-denied
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown load (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * load-dispatched, load-cancelled, package-not-on-load (extensions.loadCode), carton-not-current, order-not-packed, consignment-removed, warehouse-mismatch
+     */
+    409: ProblemDetailsDto;
+    /**
+     * package-code-invalid, package-code-ambiguous, idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerRecordScanError = FreightControllerRecordScanErrors[keyof FreightControllerRecordScanErrors];
+
+export type FreightControllerRecordScanResponses = {
+    /**
+     * The package was already loaded on this load (alreadyLoaded: true) — a no-op that stores the key; its replay answers 200 too
+     */
+    200: FreightScanResponse;
+    201: FreightScanResponse;
+};
+
+export type FreightControllerRecordScanResponse = FreightControllerRecordScanResponses[keyof FreightControllerRecordScanResponses];
+
+export type FreightControllerDispatchLoadData = {
+    body: DispatchFreightLoadDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}/dispatch';
+};
+
+export type FreightControllerDispatchLoadErrors = {
+    /**
+     * A malformed field, no dispatch decision, an LR shared by two clients, a departure before the loading (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token, or a device token without a badge-in (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * role-denied
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown load (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * load-dispatched, load-cancelled, freight-members-changed, freight-orders-refused (orders[{orderId, code}]), eway-part-b-unconfirmed, load-over-capacity, eway-threshold-missing, transporter-inactive, partner-not-transporter, warehouse-mismatch, client-departed
+     */
+    409: ProblemDetailsDto;
+    /**
+     * idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerDispatchLoadError = FreightControllerDispatchLoadErrors[keyof FreightControllerDispatchLoadErrors];
+
+export type FreightControllerDispatchLoadResponses = {
+    201: FreightDispatchResponse;
+};
+
+export type FreightControllerDispatchLoadResponse = FreightControllerDispatchLoadResponses[keyof FreightControllerDispatchLoadResponses];
+
+export type FreightControllerCancelLoadData = {
+    body: FreightReasonDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}/cancel';
+};
+
+export type FreightControllerCancelLoadErrors = {
+    /**
+     * No reason (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * role-denied
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown load (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * load-not-open
+     */
+    409: ProblemDetailsDto;
+    /**
+     * idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerCancelLoadError = FreightControllerCancelLoadErrors[keyof FreightControllerCancelLoadErrors];
+
+export type FreightControllerCancelLoadResponses = {
+    200: FreightLoadResponse;
+};
+
+export type FreightControllerCancelLoadResponse = FreightControllerCancelLoadResponses[keyof FreightControllerCancelLoadResponses];
+
+export type FreightControllerUploadSheetData = {
+    body: {
+        file: Blob | File;
+    };
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}/sheet';
+};
+
+export type FreightControllerUploadSheetErrors = {
+    /**
+     * No file (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * role-denied
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown load (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * loading-sheet-limit, load-cancelled
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not an image or a PDF (attachment-type-unsupported)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * attachment-too-large, attachment-content-invalid, pdf-unreadable, pdf-too-many-pages, idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+    /**
+     * file-storage-unavailable, file-storage-failed, file-storage-busy
+     */
+    503: ProblemDetailsDto;
+};
+
+export type FreightControllerUploadSheetError = FreightControllerUploadSheetErrors[keyof FreightControllerUploadSheetErrors];
+
+export type FreightControllerUploadSheetResponses = {
+    201: ShippingFileResponse;
+};
+
+export type FreightControllerUploadSheetResponse = FreightControllerUploadSheetResponses[keyof FreightControllerUploadSheetResponses];
+
+export type FreightControllerLoadingSheetData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+    };
+    query?: {
+        format?: 'pdf';
+    };
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}/loading-sheet';
+};
+
+export type FreightControllerLoadingSheetErrors = {
+    /**
+     * Unknown load (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * load-cancelled
+     */
+    409: ProblemDetailsDto;
+};
+
+export type FreightControllerLoadingSheetError = FreightControllerLoadingSheetErrors[keyof FreightControllerLoadingSheetErrors];
+
+export type FreightControllerLoadingSheetResponses = {
+    /**
+     * The loading sheet
+     */
+    200: Blob | File;
+};
+
+export type FreightControllerLoadingSheetResponse = FreightControllerLoadingSheetResponses[keyof FreightControllerLoadingSheetResponses];
+
+export type FreightControllerLoadDetailData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}';
+};
+
+export type FreightControllerLoadDetailErrors = {
+    /**
+     * Unknown load (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type FreightControllerLoadDetailError = FreightControllerLoadDetailErrors[keyof FreightControllerLoadDetailErrors];
+
+export type FreightControllerLoadDetailResponses = {
+    200: FreightLoadViewDto;
+};
+
+export type FreightControllerLoadDetailResponse = FreightControllerLoadDetailResponses[keyof FreightControllerLoadDetailResponses];
+
+export type FreightControllerUpdateLoadData = {
+    body: UpdateFreightLoadDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        loadId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-loads/{loadId}';
+};
+
+export type FreightControllerUpdateLoadErrors = {
+    /**
+     * A malformed field (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * role-denied
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown load or transporter (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * load-not-open, partner-not-transporter, transporter-inactive
+     */
+    409: ProblemDetailsDto;
+    /**
+     * idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerUpdateLoadError = FreightControllerUpdateLoadErrors[keyof FreightControllerUpdateLoadErrors];
+
+export type FreightControllerUpdateLoadResponses = {
+    200: FreightLoadResponse;
+};
+
+export type FreightControllerUpdateLoadResponse = FreightControllerUpdateLoadResponses[keyof FreightControllerUpdateLoadResponses];
+
+export type FreightControllerRecordLrData = {
+    body: RecordFreightLrDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        consignmentId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-consignments/{consignmentId}/lr';
+};
+
+export type FreightControllerRecordLrErrors = {
+    /**
+     * A malformed LR or date, a second client’s LR, no reason after departure (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * role-denied
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown consignment (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * consignment-removed
+     */
+    409: ProblemDetailsDto;
+    /**
+     * idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerRecordLrError = FreightControllerRecordLrErrors[keyof FreightControllerRecordLrErrors];
+
+export type FreightControllerRecordLrResponses = {
+    200: FreightConsignmentResponse;
+};
+
+export type FreightControllerRecordLrResponse = FreightControllerRecordLrResponses[keyof FreightControllerRecordLrResponses];
+
+export type FreightControllerRecordDeliveryData = {
+    body: RecordFreightDeliveryDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        consignmentId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/freight-consignments/{consignmentId}/delivery';
+};
+
+export type FreightControllerRecordDeliveryErrors = {
+    /**
+     * A malformed field, a delivery before the departure or in the future, more short + damaged than packages, no reason on an amendment (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * role-denied (an amendment by a dispatch.execute-only role: "Only an office role can amend a recorded delivery")
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown consignment (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * consignment-not-dispatched, delivery-amend-limit
+     */
+    409: ProblemDetailsDto;
+    /**
+     * idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+};
+
+export type FreightControllerRecordDeliveryError = FreightControllerRecordDeliveryErrors[keyof FreightControllerRecordDeliveryErrors];
+
+export type FreightControllerRecordDeliveryResponses = {
+    200: FreightConsignmentResponse;
+};
+
+export type FreightControllerRecordDeliveryResponse = FreightControllerRecordDeliveryResponses[keyof FreightControllerRecordDeliveryResponses];
+
+export type FreightControllerFreightNoteData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        consignmentId: string;
+    };
+    query?: {
+        format?: 'pdf';
+    };
+    url: '/tenants/{tenantId}/outbound/freight-consignments/{consignmentId}/note';
+};
+
+export type FreightControllerFreightNoteErrors = {
+    /**
+     * Unknown consignment (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * consignment-not-dispatched
+     */
+    409: ProblemDetailsDto;
+};
+
+export type FreightControllerFreightNoteError = FreightControllerFreightNoteErrors[keyof FreightControllerFreightNoteErrors];
+
+export type FreightControllerFreightNoteResponses = {
+    /**
+     * The freight note
+     */
+    200: Blob | File;
+};
+
+export type FreightControllerFreightNoteResponse = FreightControllerFreightNoteResponses[keyof FreightControllerFreightNoteResponses];
 
 export type ConsignmentControllerWithdrawData = {
     body: WithdrawConsignmentDto;
@@ -31621,7 +33152,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'courier_handover' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'courier_handover' | 'freight_load' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -35978,6 +37509,49 @@ export type PortalControllerOrderPackingSlipResponses = {
 };
 
 export type PortalControllerOrderPackingSlipResponse = PortalControllerOrderPackingSlipResponses[keyof PortalControllerOrderPackingSlipResponses];
+
+export type PortalControllerOrderFreightNoteData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders/{orderId}/freight-note';
+};
+
+export type PortalControllerOrderFreightNoteErrors = {
+    /**
+     * Malformed orderId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No dispatched truck consignment of this client's order — unknown, another client's, or not left yet (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerOrderFreightNoteError = PortalControllerOrderFreightNoteErrors[keyof PortalControllerOrderFreightNoteErrors];
+
+export type PortalControllerOrderFreightNoteResponses = {
+    /**
+     * The PDF
+     */
+    200: Blob | File;
+};
+
+export type PortalControllerOrderFreightNoteResponse = PortalControllerOrderFreightNoteResponses[keyof PortalControllerOrderFreightNoteResponses];
 
 export type PortalControllerUploadClientLabelData = {
     body: {

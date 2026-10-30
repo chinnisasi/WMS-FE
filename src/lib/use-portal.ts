@@ -30,6 +30,7 @@ import {
   fetchApiPortalStock,
   ApiProblem,
   fetchApiPortalPackingSlip,
+  fetchApiPortalFreightNote,
 } from '@/lib/api/client';
 import type {
   PortalOrderShippingResponse,
@@ -61,6 +62,7 @@ import type {
 import { readSession, subscribeSession } from '@/lib/auth';
 import { packingSlipFilename } from '@/lib/cartons';
 import { downloadBlob } from '@/lib/csv';
+import { portalFreightNoteFilename } from '@/lib/portal';
 import { PORTAL_SESSION_EXPIRED, PORTAL_SKU_MAX_PAGES, PORTAL_SKU_PAGE_LIMIT, portalReadReason, portalReturnFilterQuery, type PortalReturnFilter } from '@/lib/portal';
 import { portalServiceReason } from '@/lib/service-report';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
@@ -453,6 +455,29 @@ export function usePortalPackingSlipDownload(orderId: string, orderLabel: string
       downloadBlob(packingSlipFilename(orderLabel), await fetchApiPortalPackingSlip(tenantId, orderId));
     } catch (error) {
       setRefused(portalReadReason(error, 'The packing slip'));
+    } finally {
+      setBusy(false);
+    }
+  }, [tenantId, orderId, orderLabel]);
+  return { download, busy, refused };
+}
+
+/** Story 4-9a (A22, A31) — the client's freight note of a dispatched truck order, one explicit download. */
+export function usePortalFreightNoteDownload(orderId: string, orderLabel: string) {
+  const tenantId = useTenantId();
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const download = useCallback(async () => {
+    if (tenantId === null) {
+      setRefused(PORTAL_SESSION_EXPIRED);
+      return;
+    }
+    setBusy(true);
+    setRefused(null);
+    try {
+      downloadBlob(portalFreightNoteFilename(orderLabel), await fetchApiPortalFreightNote(tenantId, orderId));
+    } catch (error) {
+      setRefused(portalReadReason(error, 'The freight note'));
     } finally {
       setBusy(false);
     }

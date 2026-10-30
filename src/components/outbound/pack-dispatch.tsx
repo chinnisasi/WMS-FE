@@ -18,6 +18,7 @@ import type {
   HandoverResponse,
   ManifestDto,
   OrderEntryDto,
+  OrderEntryFreightDto,
   OrderLineDto,
   PackDto,
   ShipmentDto,
@@ -78,6 +79,7 @@ import {
 } from '@/lib/cartons';
 import { dispatchesByHandover, handoverOutcome, shippingCell } from '@/lib/shipping';
 import { useOrderShipments } from '@/lib/use-shipping';
+import { onTruckCell } from '@/lib/freight';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -301,6 +303,15 @@ function PackDispatchTable({
             </span>
           );
         }
+        // Story 4-9a (A30) — the row's own planned truck: "On truck LD-0007 (stop 3)".
+        const truck = order.freight ?? null;
+        if (truck !== null) {
+          return (
+            <span data-testid="shipping-cell-truck">
+              <StatusChip tone="info">{onTruckCell(truck)}</StatusChip>
+            </span>
+          );
+        }
         const cell = shipments.state === 'ready' ? shippingCell(shipments.data.get(order.id)) : null;
         return cell === null ? (
           <span className="text-xs text-(--muted-foreground)">…</span>
@@ -405,6 +416,7 @@ function PackDispatchTable({
               <PackDispatchPanel
                 tenantId={tenantId}
                 orderId={order.id}
+                truck={order.freight ?? null}
                 canPack={canPack}
                 canDispatch={canDispatch}
                 canLabel={canLabel}
@@ -456,6 +468,7 @@ const PIPELINE_STATUS_OPTIONS: readonly PipelineStatus[] = [...PIPELINE_STATUSES
 function PackDispatchPanel({
   tenantId,
   orderId,
+  truck = null,
   canPack,
   canDispatch,
   canLabel,
@@ -465,6 +478,8 @@ function PackDispatchPanel({
 }: {
   tenantId: string;
   orderId: string;
+  /** Story 4-9a (A30) — the list row's planned truck: Dispatch, Hand over and the labels give way to Open load. */
+  truck?: OrderEntryFreightDto | null;
   canPack: boolean;
   canDispatch: boolean;
   canLabel: boolean;
@@ -647,8 +662,16 @@ function PackDispatchPanel({
               {shipmentRead.state === 'failed' && (
                 <ReadFailure word="Shipment unavailable" reason={shipmentRead.reason} onRetry={shipmentRead.reload} />
               )}
-              {shipmentRead.state === 'ready' && !viaHandover && <LabelSection tenantId={tenantId} orderId={orderId} canLabel={canLabel} />}
-              {shipmentRead.state !== 'ready' ? null : viaHandover ? (
+              {truck !== null && (
+                <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="on-truck-row">
+                  <span>{onTruckCell(truck)} — it leaves with the truck.</span>
+                  <Link href={`/outbound?tab=freight&open=${truck.loadId}`} className={primaryClass} data-testid="open-load">
+                    Open load
+                  </Link>
+                </div>
+              )}
+              {truck === null && shipmentRead.state === 'ready' && !viaHandover && <LabelSection tenantId={tenantId} orderId={orderId} canLabel={canLabel} />}
+              {shipmentRead.state !== 'ready' || truck !== null ? null : viaHandover ? (
                 // The 4.6c Dispatch button gives way to Hand over (A20).
                 onHandOver !== undefined ? (
                   <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="hand-over-row">
