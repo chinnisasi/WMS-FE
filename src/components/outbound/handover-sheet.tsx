@@ -9,6 +9,7 @@ import { notifyOutboundChanged } from '@/lib/outbound';
 import {
   codTotalLabel,
   DOCUMENT_ACCEPT,
+  handoverCartonsLine,
   MAX_SHEET_PAGES,
   prepareShippingFile,
   rupees,
@@ -131,7 +132,24 @@ export function HandoverSheet({ handover }: { handover: HandoverDetailDto }) {
         <tbody>
           {handover.parcels.map((parcel) => (
             <tr key={parcel.shipmentId} className="border-b border-(--border)" data-testid="sheet-parcel">
-              <td className="py-1 pr-2 font-mono">{parcel.orderLabel}</td>
+              <td className="py-1 pr-2">
+                <span className="font-mono">{parcel.orderLabel}</span>
+                {/* Story 4-5a (A21, A34, A37, A44) — the order's cartons at this pickup. */}
+                {(() => {
+                  const line = handoverCartonsLine(parcel.cartons as typeof parcel.cartons | undefined);
+                  if (line === null) return null;
+                  return (
+                    <span className="flex flex-col text-(--muted-foreground)" data-testid="sheet-parcel-cartons">
+                      <span>{line.text}</span>
+                      {line.flags.map((flag) => (
+                        <span key={flag} className="text-(--warning)" data-testid="sheet-parcel-carton-flag">
+                          ⚠ {flag}
+                        </span>
+                      ))}
+                    </span>
+                  );
+                })()}
+              </td>
               <td className="py-1 pr-2 font-mono">{parcel.awb}</td>
               <td className="py-1 pr-2">{parcel.destinationCity ?? '—'}</td>
               {/* FB18 — the server's own per-parcel count (the total below is the server's too). */}

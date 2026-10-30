@@ -459,6 +459,42 @@ describe('the handover builder (A20, A49)', () => {
     expect(created).toEqual(response);
   });
 
+  test('story 4-5a (A21, A37, A44, AC5) — carton scans tick their order, a stale label is refused, and a short or COD-carton-less pickup asks first', async () => {
+    writeSession(session('operator'));
+    candidates = candidateRows().map((c, i) => (i === 0 ? { ...c, packSeq: 2, cartonCount: 3, defaultWeightGrams: null } : c));
+    view = render(
+      <HandoverBuilder tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} initialClientId={CLIENT_A} initialOrderId={null} onClose={() => {}} onCreated={() => {}} />,
+    );
+    await settle();
+    const root = byTestId(view.container, 'handover-builder')!;
+    // A superseded pack's label is refused on the web (the user reprints).
+    await scan(root, 'O8F90000000000001.1.2');
+    expect(byTestId(root, 'handover-scan-note')?.textContent).toBe('Old label — this order was re-packed; reprint its labels.');
+    // Cartons 2 and 3 of the live pack tick SO-1 ("2/3"); the label is verified, so no AWB is asked.
+    await scan(root, 'o8f90000000000001.2.2 ');
+    expect(byTestId(root, 'handover-scan-note')?.textContent).toBe('SO-1 — carton 2 (1/3) ticked.');
+    await scan(root, 'O8F90000000000001.2.3');
+    expect(byTestId(root, 'handover-carton-tally')?.textContent).toBe('Cartons 2/3');
+    // The parcels field defaults to the carton count; the over-bound note shows with no weight default.
+    const row = root.querySelector(`[data-order-id="${ORDER_A}"]`)!;
+    expect(row.querySelectorAll('input')[2]!.getAttribute('placeholder')).toBe('3');
+    expect(byTestId(row as HTMLElement, 'handover-row-weight-note')?.textContent).toContain('Over 1,000 kg — record the freight weight on the LR (4-9a)');
+    setValue(byTestId<HTMLInputElement>(root, 'handover-courier')!, 'Delhivery');
+    setValue(byTestId<HTMLInputElement>(root, 'handover-person')!, 'Ravi');
+    // First confirm asks (2 of 3; COD carton 1 unscanned) and sends nothing.
+    await submit(root.querySelector('form')!);
+    expect(requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+    const asks = byTestId(root, 'handover-carton-confirms')!.textContent!;
+    expect(asks).toContain('SO-1: 2 of 3 cartons scanned — hand over all 3?');
+    expect(asks).toContain('SO-1: Carton 1 carries the COD label and was not scanned — hand over anyway?');
+    // Confirming again sends the scanned cartons, sorted.
+    handoverReply = { status: 201, body: { handover: { id: 'ho-1', code: 'HO-0001', courierName: 'Delhivery' }, parcels: [], refused: [], rejectedOpId: null } };
+    await submit(root.querySelector('form')!);
+    const posted = requests.filter((r) => r.method === 'POST');
+    expect(posted).toHaveLength(1);
+    expect((posted[0]!.body as { parcels: unknown[] }).parcels).toEqual([{ orderId: ORDER_A, cartonCodes: ['O8F90000000000001.2.2', 'O8F90000000000001.2.3'] }]);
+  });
+
   test('a missing pickup person sends nothing', async () => {
     const root = await openBuilder();
     await scan(root, '123456789012');
@@ -616,8 +652,10 @@ describe('story 4-4a review — FV4 the handover sheet', () => {
     warehouseSnapshot: { code: 'WH1', name: 'Main DC', gstin: null, originAddress: { line1: '1 Dock Rd', line2: null, city: 'Chennai', stateCode: '33', pincode: '600001' } },
     courierSnapshot: null, createdBy: 'u-1',
     parcels: [
-      { orderId: ORDER_A, orderLabel: 'SO-1', shipmentId: 'sh-1', kind: 'client-label', awb: '123456789012', packageCount: 2, weightGrams: 1250, codAmountPaise: 125000, destinationCity: 'Pune' },
-      { orderId: ORDER_B, orderLabel: 'SO-2', shipmentId: 'sh-2', kind: 'courier-label', awb: '77001', packageCount: 1, weightGrams: null, codAmountPaise: null, destinationCity: null },
+      { orderId: ORDER_A, orderLabel: 'SO-1', shipmentId: 'sh-1', kind: 'client-label', awb: '123456789012', packageCount: 2, weightGrams: 1250, codAmountPaise: 125000, destinationCity: 'Pune',
+        cartons: { cartonCount: 3, scanned: 2, legacy: false, codCartonScanned: false, staleCartonLabels: true } },
+      { orderId: ORDER_B, orderLabel: 'SO-2', shipmentId: 'sh-2', kind: 'courier-label', awb: '77001', packageCount: 1, weightGrams: null, codAmountPaise: null, destinationCity: null,
+        cartons: { cartonCount: 1, scanned: 0, legacy: true, codCartonScanned: null, staleCartonLabels: false } },
     ],
     sheet: Array.from({ length: sheetPages }, (_, i) => ({
       id: `s-${i}`, purpose: 'handover-sheet', docKind: null, fileName: `HO-0001-sheet-${i + 1}.jpg`, contentType: 'image/jpeg', byteSize: 1024, pageCount: null,
@@ -647,6 +685,17 @@ describe('story 4-4a review — FV4 the handover sheet', () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]!.querySelectorAll('td')[3]!.textContent).toBe('2');
     expect(byTestId(root, 'sheet-upload')).not.toBeNull();
+  });
+
+  test('story 4-5a (AC5, A34, A37, A44) — each order’s cartons, the legacy line and the amber flags', async () => {
+    const root = await openSheet('operator', 0);
+    const lines = root.querySelectorAll('[data-testid="sheet-parcel-cartons"]');
+    expect(lines[0]!.textContent).toContain('3 cartons, 2 scanned');
+    expect(lines[1]!.textContent).toContain('1 carton (packed before cartons were recorded)');
+    const flags = [...root.querySelectorAll('[data-testid="sheet-parcel-carton-flag"]')].map((f) => f.textContent);
+    expect(flags).toHaveLength(2);
+    expect(flags[0]).toContain('Carton 1 (the COD label) was not scanned');
+    expect(flags[1]).toContain('Stale carton labels');
   });
 
   test('the sheet upload is hidden at 10 pages and without dispatch.execute', async () => {

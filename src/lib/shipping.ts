@@ -32,11 +32,8 @@ export { normalizeAwb, awbProblem, parcelTagCode };
 export type ShipmentKind = NonNullable<ShipmentDto['kind']>;
 export type ShipmentStatus = ShipmentDto['status'];
 export type DocKind = NonNullable<FileViewDto['docKind']>;
-/**
- * Story 4-5a (A21, D5) — the two carton refusals are appended LAST on the
- * server; the union names them until the regenerated client carries them.
- */
-export type HandoverRefusalCode = HandoverRefusedParcelDto['code'] | 'package-count-mismatch' | 'carton-not-current';
+/** Story 4-5a (A21, D5) — the server's union carries the two carton refusals, appended LAST. */
+export type HandoverRefusalCode = HandoverRefusedParcelDto['code'];
 
 // ── bounds (mirrored from wms-be, each named) ──────────────────────────────
 
@@ -713,6 +710,36 @@ export function handoverCartonConfirms(
   return out;
 }
 
+/** Story 4-5a (A21, A34, A37, A44) — one parcel's cartons at a handover, as the detail reads them. */
+export interface HandoverCartonsLine {
+  /** "3 cartons, 2 scanned" / "1 carton (packed before cartons were recorded)". */
+  readonly text: string;
+  /** Amber flags: a COD carton 1 left unscanned; a superseded pack's labels scanned on the handheld. */
+  readonly flags: readonly string[];
+}
+
+/** Null when the detail carries no cartons (a server before 4-5a). */
+export function handoverCartonsLine(
+  cartons:
+    | {
+        readonly cartonCount: number;
+        readonly scanned: number;
+        readonly legacy: boolean;
+        readonly codCartonScanned: boolean | null;
+        readonly staleCartonLabels: boolean;
+      }
+    | undefined,
+): HandoverCartonsLine | null {
+  if (cartons === undefined) return null;
+  const text = cartons.legacy
+    ? '1 carton (packed before cartons were recorded)'
+    : `${cartons.cartonCount} ${cartons.cartonCount === 1 ? 'carton' : 'cartons'}, ${cartons.scanned} scanned`;
+  const flags: string[] = [];
+  if (cartons.codCartonScanned === false) flags.push('Carton 1 (the COD label) was not scanned');
+  if (cartons.staleCartonLabels) flags.push('Stale carton labels — the order was re-packed; reprint its labels');
+  return { text, flags };
+}
+
 export type ParsedHandoverDraft = { readonly body: CreateHandoverDto; readonly problem: null } | { readonly body: null; readonly problem: string };
 
 /**
@@ -762,9 +789,7 @@ export function parseHandoverDraft(
   const parcels: CreateHandoverDto['parcels'] = [];
   for (const candidate of chosen) {
     const row = rowOf(draft, candidate.orderId);
-    const parcel: { orderId: string; awb?: string; packageCount?: number; weightGrams?: number; cartonCodes?: string[] } = {
-      orderId: candidate.orderId,
-    };
+    const parcel: CreateHandoverDto['parcels'][number] = { orderId: candidate.orderId };
     const awb = normalizeAwb(row.awb);
     if (awb !== '') {
       const issue = awbProblem(awb);

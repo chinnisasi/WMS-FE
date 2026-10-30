@@ -9,9 +9,13 @@ import {
   awbTail,
   bindHandoverKey,
   candidateBlocker,
+  cartonTally,
+  defaultPackageCountText,
   emptyHandoverDraft,
   EMPTY_ROW,
+  handoverCartonConfirms,
   handoverRefusals,
+  matchCartonScan,
   matchScan,
   normalizeAwb,
   MAX_HANDOVER_CANDIDATES,
@@ -22,6 +26,7 @@ import {
   rupees,
   SHIPMENT_KIND_WORD,
   shippingReason,
+  tickCarton,
   type HandoverDraft,
   type HandoverRowDraft,
   type RefusedParcel,
@@ -45,6 +50,12 @@ import { DetailDrawer } from '@/components/shared/detail-drawer';
  * weight). Confirm dispatches every ticked order (A12, all-or-nothing on the
  * web): a `handover-parcels-refused` answer marks each refused row with its
  * reason and keeps the draft. One key per draft, bound to its body.
+ *
+ * Story 4-5a (A21, A26, A37, A44) — a carton label scan ticks that carton of
+ * its order ("2/3"); a superseded pack's label is refused (reprint). The
+ * parcels field defaults to the order's carton count, and confirming with
+ * fewer cartons scanned than counted, or a COD order's carton 1 unscanned,
+ * asks first.
  */
 /** The wall clock, read in the confirm handler (never during render). */
 const clockNow = (): number => Date.now();
@@ -96,6 +107,8 @@ export function HandoverBuilder({
   const [problem, setProblem] = useState<string | null>(null);
   const [refused, setRefused] = useState<ReadonlyMap<string, RefusedParcel>>(new Map());
   const [foreign, setForeign] = useState<readonly string[]>([]);
+  // A44 / A24's web twin — the confirms asked before submit; acknowledged for exactly this body.
+  const [confirms, setConfirms] = useState<{ readonly body: string; readonly lines: readonly string[] } | null>(null);
   const inFlight = useRef(false);
   const scanRef = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
@@ -136,6 +149,35 @@ export function HandoverBuilder({
 
   function onScan(event: React.FormEvent) {
     event.preventDefault();
+    setConfirms(null);
+    // A21 — a carton label first (only while no AWB is awaited: an awaited AWB is the courier's label).
+    const carton = awaitingAwbFor === null ? matchCartonScan(scan, items) : null;
+    if (carton !== null) {
+      setScan('');
+      setAmbiguous(null);
+      if (carton.kind === 'unknown') {
+        setScanNote({ tone: 'warning', text: carton.problem });
+      } else if (carton.kind === 'ambiguous') {
+        setAmbiguous(carton.orderIds);
+        setScanNote({ tone: 'warning', text: 'This carton matches two parcels — tick the right one below.' });
+      } else {
+        const before = rowOf(draft, carton.orderId);
+        const ticked = tickCarton({ ...draft, rows: { ...draft.rows, [carton.orderId]: before } }, carton.orderId, carton.code);
+        editRow(carton.orderId, { selected: true, cartonCodes: ticked.rows[carton.orderId]?.cartonCodes ?? [] });
+        const candidate = items.find((c) => c.orderId === carton.orderId);
+        const tally = candidate === undefined ? null : cartonTally(ticked.rows[carton.orderId]!, candidate);
+        const lead = `${labelOf(carton.orderId)} — carton ${carton.seq}${tally === null ? '' : ` (${tally})`}`;
+        if (carton.needsAwb && before.awb === '') {
+          setAwaitingAwbFor(carton.orderId);
+          setScanNote({ tone: 'warning', text: `${lead} ticked — now scan the courier’s AWB on this parcel.` });
+        } else {
+          setAwaitingAwbFor(null);
+          setScanNote({ tone: 'accepted', text: `${lead} ticked.` });
+        }
+      }
+      scanRef.current?.focus();
+      return;
+    }
     const result = matchScan(scan, items, awaitingAwbFor);
     setScan('');
     setAmbiguous(null);
@@ -174,6 +216,14 @@ export function HandoverBuilder({
       setProblem(parsed.problem);
       return;
     }
+    // A44 / A24 — warn, never refuse: ask once for exactly this body.
+    const asks = handoverCartonConfirms(draft, items);
+    const bodyText = JSON.stringify(parsed.body);
+    if (asks.length > 0 && confirms?.body !== bodyText) {
+      setConfirms({ body: bodyText, lines: asks });
+      setProblem(null);
+      return;
+    }
     const next = bindHandoverKey(bound, parsed.body, ulid);
     setBound(next);
     inFlight.current = true;
@@ -184,6 +234,7 @@ export function HandoverBuilder({
       notifyOutboundChanged();
       if (!mounted.current) return;
       setBound(null);
+      setConfirms(null);
       onCreated(response);
     } catch (caught) {
       if (!mounted.current) return;
@@ -292,7 +343,7 @@ export function HandoverBuilder({
             )}
             <div className="flex flex-col gap-1">
               <label className="flex flex-col gap-1">
-                <span className={labelClass}>{awaitingAwbFor === null ? 'Scan an AWB or a parcel tag' : `Scan the courier’s AWB for ${labelOf(awaitingAwbFor)}`}</span>
+                <span className={labelClass}>{awaitingAwbFor === null ? 'Scan an AWB, a parcel tag or a carton label' : `Scan the courier’s AWB for ${labelOf(awaitingAwbFor)}`}</span>
                 <input
                   ref={scanRef}
                   className={inputClass}
@@ -317,6 +368,10 @@ export function HandoverBuilder({
                 const blocker = candidateBlocker(candidate, row);
                 const refusal = refused.get(candidate.orderId);
                 const isForeign = foreign.includes(candidate.orderId);
+                const tally = cartonTally(row, candidate);
+                const cartonsDefault = defaultPackageCountText(candidate);
+                // A33 — a stored pack with no weight to default (over 1,000 kg, or never weighed).
+                const noWeightDefault = candidate.packSeq !== undefined && candidate.defaultWeightGrams === null;
                 return (
                   <li
                     key={candidate.orderId}
@@ -339,6 +394,11 @@ export function HandoverBuilder({
                         {candidate.destinationCity === null ? '' : ` · ${candidate.destinationCity}`}
                         {candidate.codAmountPaise === null ? ' · Prepaid' : ` · COD ${rupees(candidate.codAmountPaise)}`}
                       </span>
+                      {tally !== null && (
+                        <span className="font-mono" data-testid="handover-carton-tally">
+                          Cartons {tally}
+                        </span>
+                      )}
                     </div>
                     {row.selected && (
                       <div className="flex flex-col gap-2 sm:flex-row">
@@ -348,12 +408,17 @@ export function HandoverBuilder({
                         </label>
                         <label className="flex flex-col gap-1 sm:w-20">
                           <span className={labelClass}>Parcels</span>
-                          <input className={inputClass} inputMode="numeric" value={row.packageCount} onChange={(e) => editRow(candidate.orderId, { packageCount: e.target.value })} placeholder={String(candidate.shipment?.packageCount ?? 1)} />
+                          <input className={inputClass} inputMode="numeric" value={row.packageCount} onChange={(e) => editRow(candidate.orderId, { packageCount: e.target.value })} placeholder={cartonsDefault !== '' ? cartonsDefault : String(candidate.shipment?.packageCount ?? 1)} />
                         </label>
                         <label className="flex flex-col gap-1 sm:w-28">
                           <span className={labelClass}>Weight (g)</span>
-                          <input className={inputClass} inputMode="numeric" value={row.weightGrams} onChange={(e) => editRow(candidate.orderId, { weightGrams: e.target.value })} placeholder="as packed" />
+                          <input className={inputClass} inputMode="numeric" value={row.weightGrams} onChange={(e) => editRow(candidate.orderId, { weightGrams: e.target.value })} placeholder={candidate.defaultWeightGrams === null || candidate.defaultWeightGrams === undefined ? 'as packed' : String(candidate.defaultWeightGrams)} />
                         </label>
+                      </div>
+                    )}
+                    {row.selected && noWeightDefault && row.weightGrams.trim() === '' && (
+                      <div className="text-(--muted-foreground)" data-testid="handover-row-weight-note">
+                        No packed weight to default. Over 1,000 kg — record the freight weight on the LR (4-9a); otherwise type it.
                       </div>
                     )}
                     {row.selected && blocker !== null && refusal === undefined && (
@@ -390,6 +455,14 @@ export function HandoverBuilder({
             Dispatch is terminal. At most {MAX_HANDOVER_PARCELS} parcels per handover.
           </span>
         </div>
+        {confirms !== null && (
+          <div role="alert" className="flex flex-col gap-1 rounded-sm border border-(--warning) p-2 text-(--warning)" data-testid="handover-carton-confirms">
+            <span className="font-medium">Check the cartons — confirm again to hand over anyway</span>
+            {confirms.lines.map((line) => (
+              <span key={line}>⚠ {line}</span>
+            ))}
+          </div>
+        )}
         {problem !== null && <FeedbackBanner tone="rejected" word="Not handed over" reason={problem} />}
       </form>
     </DetailDrawer>
