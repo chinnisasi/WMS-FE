@@ -26014,6 +26014,10 @@ export type FreightControllerRecordScanErrors = {
 export type FreightControllerRecordScanError = FreightControllerRecordScanErrors[keyof FreightControllerRecordScanErrors];
 
 export type FreightControllerRecordScanResponses = {
+    /**
+     * The package was already loaded on this load (alreadyLoaded: true) — a no-op that stores the key; its replay answers 200 too
+     */
+    200: FreightScanResponse;
     201: FreightScanResponse;
 };
 
