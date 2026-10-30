@@ -12,6 +12,8 @@ import { ApiProblem } from '@/lib/api/client';
 import type {
   PortalFileDto,
   PortalOrderShippingResponse,
+  PortalFreightBlockDto,
+  PortalOrderFreightDto,
   PortalCreateAsnDto,
   PortalCreateOrderDto,
   PortalPlacedOrderResponse,
@@ -734,10 +736,19 @@ const ORDER_TIMELINE: Readonly<Record<PortalOrderRowDto['status'], readonly Omit
 };
 
 /** An order's lifecycle for the portal timeline: Placed (with its IST time), then the status's steps. */
-export function orderTimeline(order: Pick<PortalOrderRowDto, 'status' | 'createdAt'>): readonly PortalTimelineStep[] {
+export function orderTimeline(
+  order: Pick<PortalOrderRowDto, 'status' | 'createdAt'>,
+  /** Story 4-9a (A31) — the list row's truck facts: a recorded delivery adds a last step. */
+  freight: PortalOrderFreightDto | null = null,
+): readonly PortalTimelineStep[] {
   // A status a newer backend added and this build does not know: Placed alone, never a guess.
   const rest = Object.hasOwn(ORDER_TIMELINE, order.status) ? ORDER_TIMELINE[order.status] : [];
-  return [{ label: 'Placed', state: 'done', time: portalDateTime(order.createdAt) }, ...rest];
+  const steps: PortalTimelineStep[] = [{ label: 'Placed', state: 'done', time: portalDateTime(order.createdAt) }, ...rest];
+  if (order.status === 'dispatched' && freight !== null && freight.outcome !== null && freight.deliveredAt !== null) {
+    const label = freight.outcome === 'refused' ? 'Refused by the consignee' : freight.outcome === 'delivered-with-exceptions' ? 'Delivered with exceptions' : 'Delivered';
+    steps.push({ label, state: freight.outcome === 'refused' ? 'stopped' : 'done', time: portalDateTime(freight.deliveredAt) });
+  }
+  return steps;
 }
 
 // ── returns (story 4-7a) ─────────────────────────────────────────────────────
@@ -1013,6 +1024,72 @@ export function portalShippingLine(shipping: Pick<PortalOrderShippingResponse, '
   const base = PORTAL_SHIPPING_STATUS_LABEL[shipping.status];
   if (shipping.awb === null) return base;
   return `${base} — ${shipping.courierName ?? 'courier'} AWB ${shipping.awb}`;
+}
+
+// ── story 4-9a: the Truck block (A22, A31) ─────────────────────────────────
+
+/**
+ * The Truck block's status line, in the client's words: "Booked on a truck",
+ * "Left by truck on 30 Oct 2026, 16:05 IST — VRL Logistics, LR 4410, vehicle
+ * KA01AB1234", "Delivered on 2 Nov 2026, 11:20 IST — received by A. Kumar",
+ * "Delivered with exceptions — 1 package damaged: 'pallet 4 crushed corner'",
+ * "Refused by the consignee — 'wrong item'".
+ */
+export function portalFreightLine(freight: PortalFreightBlockDto): string {
+  const note = freight.deliveryNote == null ? '' : `: ‘${freight.deliveryNote}’`;
+  switch (freight.status) {
+    case 'planned':
+      return 'Booked on a truck';
+    case 'dispatched': {
+      const when = freight.dispatchedAt === undefined ? '' : ` on ${portalDateTime(freight.dispatchedAt)}`;
+      const parts = [freight.transporterName, freight.lrNumber == null ? null : `LR ${freight.lrNumber}`, freight.vehicleNumber === undefined ? null : `vehicle ${freight.vehicleNumber}`].filter(
+        (p): p is string => p !== null && p !== undefined,
+      );
+      return `Left by truck${when}${parts.length === 0 ? '' : ` — ${parts.join(', ')}`}`;
+    }
+    case 'delivered': {
+      const when = freight.deliveredAt == null ? '' : ` on ${portalDateTime(freight.deliveredAt)}`;
+      return `Delivered${when}${freight.receiverName == null ? '' : ` — received by ${freight.receiverName}`}`;
+    }
+    case 'delivered-with-exceptions':
+      return `Delivered with exceptions — ${portalExceptionCounts(freight.shortPackageCount ?? null, freight.damagedPackageCount ?? null)}${note}`;
+    case 'refused':
+      return `Refused by the consignee${note.replace(/^: /, ' — ')}`;
+  }
+}
+
+/** "1 package short, 2 packages damaged". */
+export function portalExceptionCounts(short: number | null, damaged: number | null): string {
+  const parts: string[] = [];
+  if (short !== null && short > 0) parts.push(`${short} package${short === 1 ? '' : 's'} short`);
+  if (damaged !== null && damaged > 0) parts.push(`${damaged} package${damaged === 1 ? '' : 's'} damaged`);
+  return parts.length === 0 ? 'see the note' : parts.join(', ');
+}
+
+/** "15 pallets, 2 cartons — 9,840 kg". */
+export function portalFreightPackages(freight: Pick<PortalFreightBlockDto, 'packageCount' | 'palletCount' | 'weightGrams'>): string | null {
+  if (freight.packageCount === undefined) return null;
+  const pallets = freight.palletCount ?? 0;
+  const cartons = freight.packageCount - pallets;
+  const parts: string[] = [];
+  if (pallets > 0) parts.push(`${pallets} pallet${pallets === 1 ? '' : 's'}`);
+  if (cartons > 0 || pallets === 0) parts.push(`${cartons} carton${cartons === 1 ? '' : 's'}`);
+  const weight = freight.weightGrams == null ? '' : ` — ${groupIndianDigits(String(Math.round(freight.weightGrams / 1000)))} kg`;
+  return `${parts.join(', ')}${weight}`;
+}
+
+export const PORTAL_FREIGHT_TERMS_LABEL: Readonly<Record<string, string>> = { paid: 'Paid', 'to-pay': 'To pay', tbb: 'To be billed' };
+
+/** The order list row's truck cell: "LR 4410 · Delivered" — null when the order has no truck. */
+export function portalOrderFreightCell(freight: PortalOrderFreightDto | null | undefined): { readonly text: string; readonly delivered: string | null } | null {
+  if (freight == null) return null;
+  const delivered =
+    freight.outcome === 'delivered' ? 'Delivered' : freight.outcome === 'delivered-with-exceptions' ? 'Delivered with exceptions' : freight.outcome === 'refused' ? 'Refused' : null;
+  return { text: freight.lrNumber === null ? `By truck — ${freight.transporterName}` : `LR ${freight.lrNumber}`, delivered };
+}
+
+export function portalFreightNoteFilename(orderLabel: string): string {
+  return `${orderLabel.replace(/[^A-Za-z0-9-]+/g, '-')}-freight-note.pdf`;
 }
 
 /** The portal's document kinds (never a POD — the warehouse's record of delivery). */

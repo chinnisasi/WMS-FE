@@ -8,7 +8,7 @@ import { orderTypeLabel } from '@/lib/order-fields';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiPortalImportOrders, fetchApiPortalPlaceOrder } from '@/lib/api/client';
-import type { PortalOrderRowDto, PortalPlacedOrderResponse } from '@/lib/api/generated';
+import type { PortalOrderFreightDto, PortalOrderRowDto, PortalPlacedOrderResponse } from '@/lib/api/generated';
 import type { AsnDraftLine, LineOption } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { emptyDestinationFields, type DestinationFields } from '@/lib/outbound-orders';
@@ -19,6 +19,7 @@ import {
   orderReference,
   orderStatusLabel,
   orderTimeline,
+  portalOrderFreightCell,
   portalFollowOnOfText,
   portalLineShipped,
   portalShippedShortText,
@@ -150,7 +151,24 @@ export function PortalOrders() {
     { key: 'destination', header: 'Destination', priority: 3, render: (row) => orderDestination(row) },
     { key: 'lines', header: 'Lines', numeric: true, priority: 3, render: (row) => lineCountLabel(row.lineCount) },
     // Story 4-4a (A17) — the courier and AWB of the live shipment, when there is one.
-    { key: 'awb', header: 'AWB', priority: 2, render: (row) => (row.awb === undefined ? '—' : `${row.courierName ?? ''} ${row.awb}`.trim()) },
+    {
+      key: 'awb',
+      header: 'AWB / LR',
+      priority: 2,
+      render: (row) => {
+        // Story 4-9a (A22, A31) — a truck order shows its LR and a Delivered chip.
+        const truck = portalOrderFreightCell(row.freight);
+        if (truck !== null) {
+          return (
+            <span className="flex flex-wrap items-center gap-1" data-testid="portal-order-freight">
+              <span>{truck.text}</span>
+              {truck.delivered !== null && <StatusChip tone={truck.delivered === 'Delivered' ? 'success' : 'warning'}>{truck.delivered}</StatusChip>}
+            </span>
+          );
+        }
+        return row.awb === undefined ? '—' : `${row.courierName ?? ''} ${row.awb}`.trim();
+      },
+    },
     { key: 'created', header: 'Placed', render: (row) => portalDate(row.createdAt) },
   ];
 
@@ -289,7 +307,7 @@ export function PortalOrders() {
               <EmptyState kind="filtered">{`None of your orders has the order number or channel reference "${reference}".`}</EmptyState>
             )
           }
-          renderExpanded={(row) => (row.id === openId ? <OrderLines orderId={row.id} canWrite={canPlace} onRecorded={() => void needed.refresh()} /> : null)}
+          renderExpanded={(row) => (row.id === openId ? <OrderLines orderId={row.id} canWrite={canPlace} freight={row.freight ?? null} onRecorded={() => void needed.refresh()} /> : null)}
           loading={orders.state === 'loading' ? 'Loading your orders…' : undefined}
         />
       </div>
@@ -584,12 +602,15 @@ function OrderDeepLink({
 
 function OrderLines({
   orderId,
+  freight = null,
   canWrite = false,
   focusDocuments = false,
   onRecorded,
   notFoundAsUnavailable = false,
 }: {
   orderId: string;
+  /** Story 4-9a — the list row's truck facts (the detail read carries none). */
+  freight?: PortalOrderFreightDto | null;
   canWrite?: boolean;
   focusDocuments?: boolean;
   onRecorded?: () => void;
@@ -628,7 +649,7 @@ function OrderLines({
       )}
       <div className="flex flex-col gap-3 sm:flex-row sm:gap-8">
         {/* Story UI-1 — where the order is, from its status and its placed time only. */}
-        <StatusTimeline label={`Order ${orderReference(order.data)} progress`} steps={orderTimeline(order.data)} />
+        <StatusTimeline label={`Order ${orderReference(order.data)} progress`} steps={orderTimeline(order.data, freight)} />
         <ul className="flex flex-col gap-1" data-testid="order-lines">
           {order.data.lines.map((line, index) => (
             <li key={index}>
