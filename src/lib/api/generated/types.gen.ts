@@ -3729,6 +3729,18 @@ export type UomTotalDto = {
     qty: number;
 };
 
+export type CartonCaseViewDto = {
+    id: string;
+    /**
+     * The case label’s barcode text (a case label encodes its handling-unit id)
+     */
+    code: string;
+    /**
+     * Grams captured at receipt; null when the case is no longer on record
+     */
+    weightGrams: number | null;
+};
+
 export type PackCartonLineViewDto = {
     skuId: string;
     skuCode: string;
@@ -3745,6 +3757,10 @@ export type PackCartonLineViewDto = {
      * Catch weight — the cases in this carton, sorted; null otherwise
      */
     handlingUnitIds: Array<string> | null;
+    /**
+     * Catch weight — each case as a person finds it (beside handlingUnitIds, same order): its label’s barcode text and its receipt weight
+     */
+    handlingUnits?: Array<CartonCaseViewDto>;
 };
 
 export type PackCartonViewDto = {
@@ -22555,7 +22571,7 @@ export type OutboundControllerCartonLabelsErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied) — checked before anything it sent
+     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied) — checked before every path and query value the handler judges (an unknown query key is 400 first, at the ValidationPipe)
      */
     403: ProblemDetailsDto;
     /**
@@ -37664,7 +37680,7 @@ export type VendorReturnsControllerPackageLabelsErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied) — checked before anything it sent
+     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied) — checked before every path and query value the handler judges (an unknown query key is 400 first, at the ValidationPipe)
      */
     403: ProblemDetailsDto;
     /**
@@ -38096,7 +38112,7 @@ export type ClientReturnsControllerPackageLabelsErrors = {
      */
     401: ProblemDetailsDto;
     /**
-     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied) — checked before anything it sent
+     * Session belongs to another tenant (permission-denied), or the caller lacks labels.execute (role-denied) — checked before every path and query value the handler judges (an unknown query key is 400 first, at the ValidationPipe)
      */
     403: ProblemDetailsDto;
     /**
