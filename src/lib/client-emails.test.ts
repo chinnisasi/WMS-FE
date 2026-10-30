@@ -123,7 +123,7 @@ describe('client emails — the log (story 5-2b)', () => {
     // Story 4-4a (D5) — the third kind's own cap.
     const docs = clientEmailBanners({ ...on, capReachedToday: { receipt: false, dispatch: false, shipmentDocument: true } });
     expect(docs.map((b) => b.word)).toEqual(['Daily limit of 500 reached — later shipping documents today were not emailed']);
-    expect(docs[0]!.reason).toContain('shipping-document emails');
+    expect(docs[0]!.reason).toContain('shipping document emails');
   });
 
   test('story 4-4a — the shipping documents event and kind have words', () => {

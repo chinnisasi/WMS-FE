@@ -19,6 +19,8 @@ import {
   rejectedOpGuidance,
   pickBinBlockedGuidance,
   rejectedOpDecisions,
+  handoverReviewPhotos,
+  HANDOVER_PHOTO_LINK_WORD,
   rejectedOpPayloadBinId,
   rejectedOpSummary,
   rejectedOpsResolveReason,
@@ -380,6 +382,22 @@ function RejectedOpCard({
                 {guidance}
               </div>
             ))}
+          {/* Story 4-4a (A29) — the kept signed-sheet photos of a refused handover, as links. */}
+          {open && handoverReviewPhotos(entry).length > 0 && (
+            <ul className="flex flex-col gap-0.5" data-testid="handover-review-photos">
+              {handoverReviewPhotos(entry).map((photo, index) => (
+                <li key={photo.ref}>
+                  {photo.url === null ? (
+                    <span className="text-(--muted-foreground)">Photo {index + 1} — link unavailable, refresh to try again</span>
+                  ) : (
+                    <a href={photo.url} target="_blank" rel="noopener noreferrer" download className="text-(--primary) underline underline-offset-2">
+                      {HANDOVER_PHOTO_LINK_WORD} (photo {index + 1})
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-(--muted-foreground)">

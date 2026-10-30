@@ -40,7 +40,6 @@ import {
   type LineOption,
 } from '@/lib/asns';
 import { parseQuantityInput } from '@/lib/format-quantity';
-import { shippingReason, type ShippingAction } from '@/lib/shipping';
 import { parseGstinField } from '@/lib/gstin';
 import { istDateOf } from '@/lib/rate-cards';
 import { clientOrderRefBody, parseClientOrderRef } from '@/lib/orders';
@@ -996,11 +995,6 @@ export function portalShippingLine(shipping: Pick<PortalOrderShippingResponse, '
   return `${base} — ${shipping.courierName ?? 'courier'} AWB ${shipping.awb}`;
 }
 
-/** Whether the client may still upload or replace its label / AWB (before the handover; not cancelled or shipped). */
-export function portalCanRecordShipment(status: PortalShippingStatus): boolean {
-  return status === 'no-label-yet' || status === 'label-received' || status === 'awb-received' || status === 'ready-for-pickup';
-}
-
 /** The portal's document kinds (never a POD — the warehouse's record of delivery). */
 export const PORTAL_DOC_KIND_LABEL: Readonly<Record<'invoice' | 'challan' | 'eway-bill' | 'other', string>> = {
   invoice: 'Invoice',
@@ -1021,30 +1015,59 @@ export function portalFileLine(file: Pick<PortalFileDto, 'kind' | 'fileName' | '
   return parts.join(' · ');
 }
 
-/** The portal's shipping refusals: the session codes in portal words, the rest as the staff copy. */
-export function portalShippingReason(error: unknown, action: ShippingAction): string {
-  if (error instanceof ApiProblem) {
-    switch (error.code) {
-      case 'client-suspended':
-        return PORTAL_SUSPENDED_MESSAGE;
-      case 'client-departed':
-        return PORTAL_DEPARTED_MESSAGE;
-      case 'unauthenticated':
-        return PORTAL_SESSION_EXPIRED;
-      case 'not-found':
-        return 'This order could not be found — it may not belong to your company.';
-      case 'role-denied':
-      case 'permission-denied':
-        return 'Your portal role cannot change this order’s shipping.';
-      case 'shipment-handed-over':
-        return 'The parcel was already handed over to the courier — the label can no longer change.';
-      case 'shipment-exists':
-        return error.extensions['kind'] === 'carrier'
-          ? 'The warehouse already labelled this order with a carrier — ask the warehouse before sending your own label.'
-          : 'This order already has your label or AWB — use Replace to send another.';
-      default:
-        return shippingReason(error, action);
-    }
+/**
+ * The portal's shipping refusals (FB10) — client wording for every code the
+ * portal shipping routes answer, never the staff sentence and never the
+ * server's `detail` (it names warehouse internals).
+ */
+export function portalShippingReason(error: unknown, action: 'label' | 'awb' | 'document'): string {
+  if (!(error instanceof ApiProblem)) return UNREACHABLE_REASON;
+  const lead = action === 'label' ? 'Your label was not sent' : action === 'awb' ? 'Your AWB was not sent' : 'Your document was not uploaded';
+  switch (error.code) {
+    case 'client-suspended':
+      return PORTAL_SUSPENDED_MESSAGE;
+    case 'client-departed':
+      return PORTAL_DEPARTED_MESSAGE;
+    case 'unauthenticated':
+      return PORTAL_SESSION_EXPIRED;
+    case 'not-found':
+      return 'This order could not be found — it may not belong to your company.';
+    case 'role-denied':
+    case 'permission-denied':
+      return 'Your portal role cannot change this order’s shipping.';
+    case 'shipment-handed-over':
+      return `${lead} — the parcel was already handed over to the courier, so the label can no longer change.`;
+    case 'shipment-exists':
+      return error.extensions['kind'] === 'carrier'
+        ? `${lead} — the warehouse already booked a courier for this order. Contact the warehouse before sending your own label.`
+        : `${lead} — this order already has your label or AWB. Use Replace to send another.`;
+    case 'awb-in-use':
+      return `${lead} — this AWB is already on another of your orders that has not been picked up. Check the AWB.`;
+    case 'order-not-open':
+      return `${lead} — the order has already shipped or was cancelled.`;
+    case 'document-limit':
+      return `${lead} — this order already has the most documents you can upload. Contact the warehouse to remove one.`;
+    case 'attachment-type-unsupported':
+      return action === 'label' ? `${lead} — a label must be a PDF.` : `${lead} — only a PDF, or a JPEG, PNG or WebP photo, can be uploaded.`;
+    case 'attachment-too-large':
+      return `${lead} — the file is larger than 10 MB.`;
+    case 'attachment-content-invalid':
+      return `${lead} — the image could not be read. Try another photo.`;
+    case 'pdf-unreadable':
+      return `${lead} — the PDF could not be read. Remove the password or print restriction and upload it again.`;
+    case 'pdf-too-many-pages':
+      return `${lead} — the PDF has more than 50 pages.`;
+    case 'file-storage-unavailable':
+    case 'file-storage-failed':
+    case 'file-storage-busy':
+      return `${lead} — the warehouse could not store the file just now. Try again in a moment.`;
+    case 'conflict':
+      return `${lead} — something changed on this order at the same moment. Try again.`;
+    case 'validation-failed':
+      return `${lead} — check the AWB, courier and file, then try again.`;
+    case 'idempotency-key-reuse':
+      return `${lead} — the details changed after it was first sent. Send it again.`;
+    default:
+      return `${lead}. Try again, or contact the warehouse if it keeps happening.`;
   }
-  return UNREACHABLE_REASON;
 }

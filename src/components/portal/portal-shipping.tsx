@@ -11,7 +11,6 @@ import type { PortalFileDto } from '@/lib/api/generated';
 import {
   PORTAL_DOC_KIND_LABEL,
   PORTAL_SHIPPING_STATUS_TONE,
-  portalCanRecordShipment,
   portalFileLine,
   portalShippingLine,
   portalShippingReason,
@@ -44,7 +43,7 @@ type PortalDocKind = (typeof PORTAL_DOC_KINDS)[number];
 export function PortalShipping({ orderId, canWrite }: { orderId: string; canWrite: boolean }) {
   const shipping = usePortalOrderShipping(orderId);
   const [form, setForm] = useState<'closed' | 'label' | 'awb'>('closed');
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ word: string; reason: string } | null>(null);
 
   if (shipping.state === 'loading') return <div className="text-(--muted-foreground)">Loading shipping…</div>;
   if (shipping.state === 'failed') {
@@ -53,12 +52,18 @@ export function PortalShipping({ orderId, canWrite }: { orderId: string; canWrit
     return <ReadFailure word="Shipping not loaded" reason={shipping.reason} onRetry={shipping.reload} />;
   }
   const data = shipping.data;
-  const recordable = canWrite && portalCanRecordShipment(data.status);
+  // FB9 — the server decides whether the label / AWB may still change (`canRecord`).
+  const recordable = canWrite && data.canRecord;
   const hasShipment = data.awb !== null && data.status !== 'no-label-yet';
-  const onDone = (message: string) => {
+  const onDone = (word: string, message: string) => {
     setForm('closed');
-    setNotice(message);
+    setNotice({ word, reason: message });
     void shipping.refresh();
+  };
+  // FB15 — a success banner clears on the next action.
+  const openForm = (mode: 'label' | 'awb') => {
+    setNotice(null);
+    setForm(mode);
   };
 
   return (
@@ -79,16 +84,16 @@ export function PortalShipping({ orderId, canWrite }: { orderId: string; canWrit
             .join(' · ')}
         </div>
       )}
-      {notice !== null && <FeedbackBanner tone="accepted" word="Sent" reason={notice} />}
+      {notice !== null && <FeedbackBanner tone="accepted" word={notice.word} reason={notice.reason} />}
 
       {data.label !== null && <PortalFiles title="Your label" files={[data.label]} onExpired={shipping.refresh} />}
 
       {recordable && form === 'closed' && (
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={rowButtonClass} onClick={() => setForm('label')} data-testid="portal-open-label">
+          <button type="button" className={rowButtonClass} onClick={() => openForm('label')} data-testid="portal-open-label">
             {hasShipment ? 'Replace label' : 'Upload label'}
           </button>
-          <button type="button" className={rowButtonClass} onClick={() => setForm('awb')} data-testid="portal-open-awb">
+          <button type="button" className={rowButtonClass} onClick={() => openForm('awb')} data-testid="portal-open-awb">
             Send AWB only
           </button>
         </div>
@@ -99,7 +104,7 @@ export function PortalShipping({ orderId, canWrite }: { orderId: string; canWrit
 
       {data.handoverSheet.length > 0 && <PortalFiles title="Signed handover sheet" files={data.handoverSheet} onExpired={shipping.refresh} />}
       <PortalFiles title="Documents" files={data.documents} onExpired={shipping.refresh} empty="No invoice, e-way bill or proof of delivery yet." />
-      {canWrite && data.status !== 'cancelled' && <PortalDocumentUpload orderId={orderId} onDone={onDone} />}
+      {canWrite && data.status !== 'cancelled' && <PortalDocumentUpload orderId={orderId} onDone={onDone} onStart={() => setNotice(null)} />}
     </section>
   );
 }
@@ -175,7 +180,7 @@ function PortalShipmentForm({
   mode: 'label' | 'awb';
   replace: boolean;
   onCancel: () => void;
-  onDone: (message: string) => void;
+  onDone: (word: string, message: string) => void;
 }) {
   const tenantId = usePortalTenantId();
   const [file, setFile] = useState<File | null>(null);
@@ -189,20 +194,20 @@ function PortalShipmentForm({
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (inFlight.current || tenantId === null) return;
+    // FE6 — the in-flight flag is set before the first await (the file check), so a double submit sends once.
+    inFlight.current = true;
     const parsed = parseLabelDraft({ ...fields, transporterId: '' });
     if (parsed.problem !== null) {
+      inFlight.current = false;
       setProblem(parsed.problem);
       return;
     }
     const courierName = 'courierName' in parsed.courier ? parsed.courier.courierName : '';
     if (mode === 'label') {
-      if (file === null) {
-        setProblem('Choose your label PDF.');
-        return;
-      }
-      const issue = await shippingFileProblem(file, 'label');
+      const issue = file === null ? 'Choose your label PDF.' : await shippingFileProblem(file, 'label');
       if (issue !== null) {
-        setProblem(issue);
+        inFlight.current = false;
+        if (mounted.current) setProblem(issue);
         return;
       }
     }
@@ -210,7 +215,6 @@ function PortalShipmentForm({
     const fileNow = mode === 'label' ? file : null;
     const next = bound !== null && bound.body === body && bound.file === fileNow ? bound : { key: ulid(), body, file: fileNow };
     setBound(next);
-    inFlight.current = true;
     setPending(true);
     setProblem(null);
     try {
@@ -222,7 +226,7 @@ function PortalShipmentForm({
       };
       if (mode === 'label') await fetchApiPortalUploadClientLabel(tenantId, orderId, { file: fileNow!, ...shared }, next.key);
       else await fetchApiPortalAdviseAwb(tenantId, orderId, shared, next.key);
-      if (mounted.current) onDone(mode === 'label' ? `Label received — AWB ${parsed.awb}.` : `AWB ${parsed.awb} received — your courier brings its labels.`);
+      if (mounted.current) onDone('Sent', mode === 'label' ? `Label received — AWB ${parsed.awb}.` : `AWB ${parsed.awb} received — your courier brings its labels.`);
     } catch (caught) {
       if (mounted.current) setProblem(portalShippingReason(caught, mode === 'label' ? 'label' : 'awb'));
     } finally {
@@ -273,7 +277,7 @@ function PortalShipmentForm({
 }
 
 /** Upload invoice / challan / e-way bill / other (never a POD); the key per prepared file and kind. */
-function PortalDocumentUpload({ orderId, onDone }: { orderId: string; onDone: (message: string) => void }) {
+function PortalDocumentUpload({ orderId, onDone, onStart }: { orderId: string; onDone: (word: string, message: string) => void; onStart: () => void }) {
   const tenantId = usePortalTenantId();
   const [kind, setKind] = useState<PortalDocKind>('invoice');
   const [prepared, setPrepared] = useState<{ file: File; key: string; kind: PortalDocKind } | null>(null);
@@ -282,15 +286,19 @@ function PortalDocumentUpload({ orderId, onDone }: { orderId: string; onDone: (m
   const inFlight = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const mounted = useMounted();
+  // FE9 — only the newest pick may land: a slower earlier preparation never overwrites a later one.
+  const pickSeq = useRef(0);
 
   async function onPick(picked: File | null) {
+    const mine = ++pickSeq.current;
     setProblem(null);
+    onStart();
     if (picked === null) {
       setPrepared(null);
       return;
     }
     const result = await prepareShippingFile(picked);
-    if (!mounted.current) return;
+    if (!mounted.current || mine !== pickSeq.current) return;
     if (!result.ok) {
       setPrepared(null);
       setProblem(result.problem);
@@ -316,7 +324,7 @@ function PortalDocumentUpload({ orderId, onDone }: { orderId: string; onDone: (m
       if (!mounted.current) return;
       setPrepared(null);
       if (inputRef.current !== null) inputRef.current.value = '';
-      onDone(`${PORTAL_DOC_KIND_LABEL[next.kind]} uploaded.`);
+      onDone('Uploaded', `${PORTAL_DOC_KIND_LABEL[next.kind]} uploaded.`);
     } catch (caught) {
       if (mounted.current) setProblem(portalShippingReason(caught, 'document'));
     } finally {

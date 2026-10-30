@@ -47,7 +47,7 @@ import {
   portalOrderReason,
   type PortalOrderDraft,
 } from './portal';
-import { portalCanRecordShipment, portalFileLine, portalShippingLine, portalShippingReason, portalShippingStatus } from './portal';
+import { portalFileLine, portalShippingLine, portalShippingReason, portalShippingStatus } from './portal';
 import { asnExpected, atLeastCount, orderTimeline, portalDateTime, portalNavCurrent, PORTAL_HOME } from './portal';
 
 describe('portal routing (story 21-7)', () => {
@@ -562,14 +562,6 @@ describe('story 4-4a — the order Shipping section', () => {
     );
   });
 
-  test('the client may record or replace only before the handover', () => {
-    expect(portalCanRecordShipment('no-label-yet')).toBe(true);
-    expect(portalCanRecordShipment('ready-for-pickup')).toBe(true);
-    expect(portalCanRecordShipment('handed-over')).toBe(false);
-    expect(portalCanRecordShipment('cancelled')).toBe(false);
-    expect(portalCanRecordShipment('shipped-no-courier-record')).toBe(false);
-  });
-
   test('file lines and refusals in client words', () => {
     expect(portalFileLine({ kind: 'eway-bill', fileName: 'SO-1-eway-bill-1.pdf', pageCount: 2, uploadedByYou: true })).toBe(
       'E-way bill · SO-1-eway-bill-1.pdf · 2 pages · uploaded by you',
@@ -577,9 +569,20 @@ describe('story 4-4a — the order Shipping section', () => {
     expect(portalFileLine({ kind: 'signed-sheet', fileName: 'HO-0001-sheet-1.jpg', pageCount: null, uploadedByYou: false })).toBe(
       'Signed handover sheet · HO-0001-sheet-1.jpg',
     );
-    expect(portalShippingReason(new ApiProblem('shipment-exists', 409, 'x', 'y', { kind: 'carrier' }), 'label')).toContain('carrier');
+    expect(portalShippingReason(new ApiProblem('shipment-exists', 409, 'x', 'y', { kind: 'carrier' }), 'label')).toContain('already booked a courier');
     expect(portalShippingReason(new ApiProblem('shipment-exists', 409, 'x', 'y', { kind: 'client-label' }), 'label')).toContain('Replace');
     expect(portalShippingReason(new ApiProblem('not-found', 404), 'awb')).toContain('may not belong to your company');
     expect(portalShippingReason(new ApiProblem('pdf-unreadable', 422), 'label')).toContain('Remove the password');
+  });
+});
+
+describe('story 4-4a review — FB10 portal refusals are client words, never the server detail', () => {
+  test('every portal code has its own sentence; an unknown code a generic one', () => {
+    const codes = ['shipment-exists', 'shipment-handed-over', 'awb-in-use', 'order-not-open', 'document-limit', 'attachment-type-unsupported', 'attachment-too-large', 'pdf-unreadable', 'pdf-too-many-pages', 'file-storage-unavailable', 'conflict', 'validation-failed', 'idempotency-key-reuse', 'brand-new'];
+    for (const code of codes) {
+      const words = portalShippingReason(new ApiProblem(code, 409, 'SERVER DETAIL on order SO-7 holder'), 'awb');
+      expect(words).not.toContain('SERVER DETAIL');
+      expect(words.startsWith('Your AWB was not sent')).toBe(true);
+    }
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from '@/lib/api/client';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
+import { DISPATCH_VIA_HANDOVER_REASON } from '@/lib/outbound-pack-dispatch';
 import {
   bindHandoverKey,
   candidateBlocker,
@@ -150,7 +151,7 @@ describe('the refusal copy (by code, never prose)', () => {
       const words = shippingReason(new ApiProblem(code, 409), 'handover');
       expect(words).not.toContain(`(${code})`);
     }
-    expect(shippingReason(new ApiProblem('dispatch-via-handover', 409), 'handover')).toContain('the handover dispatches it');
+    expect(shippingReason(new ApiProblem('dispatch-via-handover', 409), 'handover')).toBe(DISPATCH_VIA_HANDOVER_REASON);
   });
 
   test('a label refusal of the type says PDF; the AWB-in-use detail renders verbatim', () => {
@@ -248,6 +249,18 @@ describe('the handover builder (A20, A49)', () => {
     expect(candidateBlocker({ shipment: { kind: 'carrier', awb: 'SBX1', courierName: 'S', packageCount: 1, labelVerified: false } }, EMPTY_ROW)).toBe(
       'Carrier label — use the manifest',
     );
+  });
+
+  test('FE1/FE2 — a courier label needs the AWB scanned at the dock: blocked without it, and its tag asks for it', () => {
+    const courier = { orderId: 'cl', orderLabel: 'SO-4', parcelTagCode: 'O8FE5145B99902275', shipment: { kind: 'courier-label' as const, awb: '440011', courierName: 'D', packageCount: null, labelVerified: false } };
+    expect(candidateBlocker(courier, EMPTY_ROW)).toBe('Scan the courier’s AWB');
+    expect(candidateBlocker(courier, { ...EMPTY_ROW, awb: '440011' })).toBeNull();
+    expect(matchScan('O8FE5145B99902275', [courier], null)).toEqual({ kind: 'matched', orderId: 'cl', by: 'tag', needsAwb: true });
+  });
+
+  test('FB12 — two candidates sharing an AWB: ask which', () => {
+    const twin = { ...candidates[0]!, orderId: 'twin', parcelTagCode: 'O0000000000000009' };
+    expect(matchScan('123456789012', [candidates[0]!, twin], null)).toEqual({ kind: 'ambiguous', orderIds: [ORDER_A, 'twin'] });
   });
 
   test('a scan: the AWB on record, the tag, the tag that needs an AWB, then that AWB', () => {

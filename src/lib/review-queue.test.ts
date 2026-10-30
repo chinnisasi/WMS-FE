@@ -4,6 +4,9 @@ import { ApiProblem } from '@/lib/api/client';
 import type { CountVarianceEntryResponseDto } from '@/lib/api/generated';
 import { UNREACHABLE_REASON } from './outbound-orders';
 import {
+  HANDOVER_CANCELLED_GUIDANCE,
+  HANDOVER_OTHER_GUIDANCE,
+  handoverReviewPhotos,
   RETURN_RESTOCK_PROBLEM_WORDS,
   returnRestockGuidance,
   RECEIPT_PHOTO_GUIDANCE,
@@ -1165,7 +1168,7 @@ describe('story 4-4a — the handheld shipping review rows (A19, A29, A32)', () 
         parcels: [{ orderId: ORDER }],
         photoRefs: ['01JD0000000000000000000000', '01JD0000000000000000000001'],
         refusals: [
-          { orderId: ORDER, code: 'order-not-ready', detail: 'x' },
+          { orderId: ORDER, code: 'order-not-ready', detail: 'x', orderStatus: 'cancelled' },
           { orderId: 'other-order-0000000000000001', code: 'awb-required', detail: 'y' },
         ],
       },
@@ -1195,5 +1198,27 @@ describe('story 4-4a — the handheld shipping review rows (A19, A29, A32)', () 
     const entry = { opType: 'handover-photo.stage' as const, problemCode: 'attachment-too-large', payload: { ref: '01JD00000000000000ABCDEFGH' } };
     expect(rejectedOpGuidance(entry)[0]).toContain('The handover is not affected');
     expect(rejectedOpSummary(entry)).toEqual({ heading: 'Signed-sheet photo not uploaded', lines: ['Photo …ABCDEFGH — larger than 10 MB'] });
+  });
+});
+
+describe('story 4-4a review — FB11 the not-ready consequence by order status; FA29 the photo links', () => {
+  const ORDER = '01a18ba8-4743-79dd-8fe5-145b99902272';
+  const row = (orderStatus: string | undefined) => ({
+    opType: 'handover.create' as const,
+    problemCode: 'handover-parcels-refused',
+    payload: { courier: { courierName: 'D' }, parcels: [{ orderId: ORDER }], refusals: [{ orderId: ORDER, code: 'order-not-ready', ...(orderStatus === undefined ? {} : { orderStatus }) }] },
+  });
+
+  test('a cancelled order gets the restocked consequence; an accepted (unpacked) one the web remedy', () => {
+    expect(rejectedOpGuidance(row('cancelled'))).toEqual([HANDOVER_CANCELLED_GUIDANCE]);
+    expect(rejectedOpGuidance(row('accepted'))).toEqual([HANDOVER_OTHER_GUIDANCE]);
+    expect(rejectedOpGuidance(row(undefined))).toEqual([HANDOVER_OTHER_GUIDANCE]);
+  });
+
+  test('the kept photos are listed only on a handover row', () => {
+    const photos = [{ ref: 'R1', url: 'https://files/x', urlExpiresAt: null }];
+    expect(handoverReviewPhotos({ opType: 'handover.create', photos })).toEqual(photos);
+    expect(handoverReviewPhotos({ opType: 'handover.create' })).toEqual([]);
+    expect(handoverReviewPhotos({ opType: 'pack.execute', photos })).toEqual([]);
   });
 });

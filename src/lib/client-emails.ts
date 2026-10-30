@@ -185,20 +185,20 @@ export function clientEmailBanners(log: Pick<ClientEmailLogResponse, 'mailEnable
   if (!log.clientMailEnabled) {
     banners.push({
       word: 'Client emails are off on this server',
-      reason: 'Receipts and dispatches are not emailed to client contacts until an administrator switches them on. Opt-ins can still be edited.',
+      reason: 'Receipts, dispatches and shipping documents are not emailed to client contacts until an administrator switches them on. Opt-ins can still be edited.',
     });
   }
   // Story 4-4a (D5) — the third kind; its cap flag is `shipmentDocument`.
-  const capped: [string, keyof ClientEmailLogResponse['capReachedToday'], string][] = [
-    ['receipt', 'receipt', 'receipts'],
-    ['dispatch', 'dispatch', 'dispatches'],
-    ['shipping-document', 'shipmentDocument', 'shipping documents'],
+  const capped: [ClientEmailKind, keyof ClientEmailLogResponse['capReachedToday'], string, string][] = [
+    ['receipt', 'receipt', 'receipts', 'receipt'],
+    ['dispatch', 'dispatch', 'dispatches', 'dispatch'],
+    ['shipment-document', 'shipmentDocument', 'shipping documents', 'shipping document'],
   ];
-  for (const [kind, flag, plural] of capped) {
+  for (const [, flag, plural, noun] of capped) {
     if (log.capReachedToday[flag]) {
       banners.push({
         word: `Daily limit of ${CLIENT_EMAIL_DAILY_CAP} reached — later ${plural} today were not emailed`,
-        reason: `The limit counts this client’s ${kind} emails since midnight IST, and resets at the next midnight.`,
+        reason: `The limit counts this client’s ${noun} emails since midnight IST, and resets at the next midnight.`,
       });
     }
   }

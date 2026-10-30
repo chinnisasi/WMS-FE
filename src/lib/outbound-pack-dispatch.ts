@@ -502,15 +502,15 @@ export function packReason(error: unknown): string {
   return UNREACHABLE_REASON;
 }
 
+/** Story 4-4a — the per-order dispatch of a client-arranged order, refused in words (the one copy). */
+export const DISPATCH_VIA_HANDOVER_REASON =
+  'The client arranged this courier — hand the parcel over to the courier (Hand over); the handover dispatches it.';
+
 /**
  * Dispatch failures. The 409 is verbatim: "not packed — it reads accepted"
  * is a race with a pack this client cannot see, and "already dispatched"
  * likewise. The 422 `idempotency-key-reuse` is the fixed house copy.
  */
-/** Story 4-4a — the per-order dispatch of a client-arranged order, refused in words. */
-export const DISPATCH_VIA_HANDOVER_REASON =
-  'The client arranged this courier — hand the parcel over to the courier (Hand over); the handover dispatches it.';
-
 export function dispatchReason(error: unknown): string {
   if (error instanceof ApiProblem) {
     // Story 3-7a — its picks drew a lot on an OPEN LIVE recall: named, with the two ways out.

@@ -2090,6 +2090,7 @@ describe('story 4-4a — the portal order Shipping section (A21)', () => {
     label: null,
     documents: [],
     handoverSheet: [],
+    canRecord: true,
     ...over,
   });
   const file = (over: Record<string, unknown>) => ({
@@ -2148,6 +2149,7 @@ describe('story 4-4a — the portal order Shipping section (A21)', () => {
           pickupPersonName: 'Ravi',
           documents: [file({})],
           handoverSheet: [file({ id: 'f-2', kind: 'signed-sheet', fileName: 'HO-0001-sheet-1.jpg' })],
+          canRecord: false,
         }),
       ],
     };
@@ -2208,5 +2210,61 @@ describe('story 4-4a — the portal order Shipping section (A21)', () => {
     expect(section.querySelector('[data-testid="portal-open-label"]')).toBeNull();
     expect(section.querySelector('[data-testid="portal-document-upload"]')).toBeNull();
     expect(section.textContent).toContain('Your label · SO-9-label.pdf');
+  });
+});
+
+describe('story 4-4a review — FB9 canRecord, FV5 the ?order= deep link', () => {
+  beforeEach(() => {
+    writeSession(PORTAL_SESSION);
+  });
+  const row = { id: ORDER_ID, status: 'accepted', source: 'manual', externalRef: null, clientOrderRef: 'SO-9', orderType: 'b2c', priority: 'normal', shipByDate: null, codAmountPaise: null, warehouseName: 'Whitefield', destinationName: 'Asha', destinationCity: 'Bengaluru', destinationPincode: '560001', lineCount: 1, createdAt: '2026-10-08T10:00:00.000Z' };
+  const shippingBody = (canRecord: boolean) => ({
+    status: 'awb-received', courierName: 'Sandbox Express', awb: 'SBX0001', packageCount: null, handedOverAt: null, vehicleNumber: null,
+    handoverCode: null, pickupPersonName: null, label: null, documents: [], handoverSheet: [], canRecord,
+  });
+  const setURL = (url: string) => (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(url);
+
+  test('FB9 — the server’s canRecord: false hides Replace and Send AWB (a warehouse carrier label)', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [row], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row, lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [200, shippingBody(false)],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Lines'));
+    await settle();
+    const section = view.container.querySelector('[data-testid="portal-shipping"]')!;
+    expect(section.textContent).toContain('AWB received');
+    expect(section.querySelector('[data-testid="portal-open-label"]')).toBeNull();
+    expect(section.querySelector('[data-testid="portal-open-awb"]')).toBeNull();
+  });
+
+  test('FV5 — ?order=<id> opens that order’s Shipping; close strips the param', async () => {
+    setURL(`http://localhost/portal/orders?order=${ORDER_ID}&x=1`);
+    routes = {
+      '/portal/orders': [200, { items: [], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row, lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [200, shippingBody(true)],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    const link = view.container.querySelector('[data-testid="order-deep-link"]')!;
+    expect(link).not.toBeNull();
+    expect(link.querySelector('[data-testid="portal-shipping"]')?.textContent).toContain('AWB received');
+    click(buttonNamed(link as HTMLElement, 'All orders'));
+    await settle();
+    expect(view.container.querySelector('[data-testid="order-deep-link"]')).toBeNull();
+    expect(window.location.search).toBe('?x=1');
+  });
+
+  test('FV5 — a malformed ?order= shows the refusal and reads nothing', async () => {
+    setURL('http://localhost/portal/orders?order=not-a-uuid');
+    routes = { '/portal/orders': [200, { items: [], nextCursor: null }] };
+    view = render(<PortalOrders />);
+    await settle();
+    expect(view.container.querySelector('[data-testid="order-deep-link"]')?.textContent).toContain('This order is not available');
+    expect(urls.some((u) => u.includes('/shipping'))).toBe(false);
+    setURL('http://localhost/portal/orders');
   });
 });

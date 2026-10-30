@@ -1675,12 +1675,14 @@ export const HANDOVER_REFUSAL_WORDS: Readonly<Record<string, string>> = {
   'order-holds-recalled-batch': 'it holds a recalled lot',
 };
 
-function handoverRefusalsOf(payload: Record<string, unknown>): { orderId: string | null; code: string }[] {
+function handoverRefusalsOf(payload: Record<string, unknown>): { orderId: string | null; code: string; orderStatus: string | null }[] {
   const refusals = Array.isArray(payload['refusals']) ? (payload['refusals'] as unknown[]) : [];
   return refusals.flatMap((refusal) => {
     if (typeof refusal !== 'object' || refusal === null) return [];
     const r = refusal as Record<string, unknown>;
-    return typeof r['code'] === 'string' ? [{ orderId: typeof r['orderId'] === 'string' ? r['orderId'] : null, code: r['code'] }] : [];
+    return typeof r['code'] === 'string'
+      ? [{ orderId: typeof r['orderId'] === 'string' ? r['orderId'] : null, code: r['code'], orderStatus: typeof r['orderStatus'] === 'string' ? r['orderStatus'] : null }]
+      : [];
   });
 }
 
@@ -1698,10 +1700,12 @@ export function handoverGuidance(entry: Pick<RejectedOpResponse, 'payload' | 'pr
   const out: string[] = [];
   if (refusals.length === 0) out.push(HANDOVER_WHOLE_OP_GUIDANCE);
   else {
-    const codes = new Set(refusals.map((r) => r.code));
-    if (codes.has('order-not-ready')) out.push(HANDOVER_CANCELLED_GUIDANCE);
-    if (codes.has('order-holds-recalled-batch')) out.push(HANDOVER_RECALLED_GUIDANCE);
-    if ([...codes].some((code) => code !== 'order-not-ready' && code !== 'order-holds-recalled-batch')) out.push(HANDOVER_OTHER_GUIDANCE);
+    // FB11 — the restocked-units consequence is a CANCELLED order's only (its refusal names the status);
+    // an order merely not packed yet gets the plain web remedy.
+    const cancelled = (r: { code: string; orderStatus: string | null }) => r.code === 'order-not-ready' && r.orderStatus === 'cancelled';
+    if (refusals.some(cancelled)) out.push(HANDOVER_CANCELLED_GUIDANCE);
+    if (refusals.some((r) => r.code === 'order-holds-recalled-batch')) out.push(HANDOVER_RECALLED_GUIDANCE);
+    if (refusals.some((r) => !cancelled(r) && r.code !== 'order-holds-recalled-batch')) out.push(HANDOVER_OTHER_GUIDANCE);
   }
   if (photoRefCount(entry.payload) > 0) out.push(HANDOVER_PHOTOS_KEPT_NOTE);
   return out;
@@ -1758,4 +1762,14 @@ function handoverPhotoSummary(entry: Pick<RejectedOpResponse, 'payload' | 'probl
   const ref = payloadString(entry.payload, 'ref');
   const problem = RECEIPT_PHOTO_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
   return { heading: 'Signed-sheet photo not uploaded', lines: [`${ref === null ? 'Photo' : `Photo …${ref.slice(-8)}`} — ${problem}`] };
+}
+
+/** FA29 — the kept signed-sheet photos of a `handover.create` row, with their presigned links (null when unsigned). */
+export const HANDOVER_PHOTO_LINK_WORD = 'Download the signed sheet to attach it to the web handover';
+
+export function handoverReviewPhotos(
+  entry: Pick<RejectedOpResponse, 'opType'> & { readonly photos?: RejectedOpResponse['photos'] },
+): readonly { readonly ref: string; readonly url: string | null; readonly urlExpiresAt: string | null }[] {
+  if (entry.opType !== 'handover.create' || entry.photos === undefined) return [];
+  return entry.photos;
 }

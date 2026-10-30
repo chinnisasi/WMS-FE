@@ -21,6 +21,7 @@ import type {
 import { awbProblem, normalizeAwb } from '@/lib/awb';
 import { istLocalToIso, normalizePhone, normalizeVehicleNo, PHONE_RE, VEHICLE_NO_RE, VEHICLE_RULE } from '@/lib/gate-ins';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
+import { DISPATCH_VIA_HANDOVER_REASON } from '@/lib/outbound-pack-dispatch';
 import { parcelTagCode, parcelTagOrderSuffix } from '@/lib/parcel-tag';
 import { prepareImageForUpload, sniffImage } from '@/lib/receipt-photos';
 import type { StatusTone } from '@/lib/status-tone';
@@ -280,7 +281,7 @@ export function shippingReason(error: unknown, action: ShippingAction): string {
     case 'handover-parcels-refused':
       return `${lead} — some parcels cannot go yet. Each is marked below with why; fix them or untick them, then confirm again.`;
     case 'dispatch-via-handover':
-      return 'Not dispatched — the client arranged this courier. Hand it over to the courier — the handover dispatches it.';
+      return DISPATCH_VIA_HANDOVER_REASON;
     case 'client-departed':
       return `${lead} — the client has left the warehouse.`;
     case 'client-suspended':
@@ -557,7 +558,8 @@ export function candidateBlocker(candidate: Pick<HandoverCandidateDto, 'shipment
     }
     return null;
   }
-  if (shipment === null) return HANDOVER_REFUSAL_WORD['awb-required'];
+  // The server's rule (A12): a courier label, or no shipment, needs the AWB scanned at the dock.
+  if (shipment === null || shipment.kind === 'courier-label') return HANDOVER_REFUSAL_WORD['awb-required'];
   if (shipment.kind === 'client-label' && !shipment.labelVerified) return HANDOVER_REFUSAL_WORD['label-not-verified'];
   return null;
 }
@@ -589,11 +591,14 @@ export function matchScan(
     if (hits.length === 0) return { kind: 'unknown', problem: 'Not a parcel awaiting pickup for this client — refresh, or check the tag.' };
     if (hits.length > 1) return { kind: 'ambiguous', orderIds: hits.map((h) => h.orderId) };
     const hit = hits[0]!;
-    const needsAwb = hit.shipment === null || (hit.shipment.kind === 'client-label' && !hit.shipment.labelVerified);
+    const needsAwb =
+      hit.shipment === null || hit.shipment.kind === 'courier-label' || (hit.shipment.kind === 'client-label' && !hit.shipment.labelVerified);
     return { kind: 'matched', orderId: hit.orderId, by: 'tag', needsAwb };
   }
   const byAwb = candidates.filter((c) => c.shipment !== null && normalizeAwb(c.shipment.awb) === code);
   if (byAwb.length === 1) return { kind: 'matched', orderId: byAwb[0]!.orderId, by: 'awb', needsAwb: false };
+  // Two open shipments on one AWB (a replaced label, a typo) — ask which, never guess.
+  if (byAwb.length > 1) return { kind: 'ambiguous', orderIds: byAwb.map((c) => c.orderId) };
   if (awaitingAwbFor !== null) {
     const issue = awbProblem(code);
     if (issue !== null) return { kind: 'unknown', problem: issue };
