@@ -464,7 +464,7 @@ describe('cartons at the handover builder', () => {
   });
 
   test('an ambiguous carton keeps its code for the row picked', () => {
-    const twin = { ...candidate(), orderId: 'twin' } as never;
+    const twin = candidate({ orderId: 'twin' });
     expect(matchCartonScan(`${TAG}.2.1`, [candidate(), twin])).toEqual({ kind: 'ambiguous', orderIds: [ORDER, 'twin'], code: `${TAG}.2.1` });
   });
 

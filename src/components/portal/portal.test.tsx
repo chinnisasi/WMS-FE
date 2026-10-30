@@ -2268,6 +2268,20 @@ describe('story 4-4a — the portal order Shipping section (A21)', () => {
     const section = await expand();
     expect(section.querySelector('[data-testid="portal-cartons"]')).toBeNull();
   });
+
+  test('story 4-5a: a Shipping payload WITHOUT the cartons and packingSlipAvailable keys (an older api) renders the section without them', async () => {
+    const legacy = shipping({ status: 'awb-received', courierName: 'Delhivery', awb: '123456789012' }) as Record<string, unknown>;
+    expect('cartons' in legacy || 'packingSlipAvailable' in legacy).toBe(false);
+    routes = {
+      '/portal/orders': [200, { items: [row('ready_to_dispatch')], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row('ready_to_dispatch'), lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [200, legacy],
+    };
+    const section = await expand();
+    expect(section.textContent).toContain('Delhivery');
+    expect(section.querySelector('[data-testid="portal-cartons"]')).toBeNull();
+    expect(section.textContent).not.toContain('Download packing slip');
+  });
 });
 
 describe('story 4-4a review — FB9 canRecord, FV5 the ?order= deep link', () => {

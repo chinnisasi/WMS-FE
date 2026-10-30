@@ -300,6 +300,10 @@ describe('file names, totals, summaries', () => {
   test('the packed row and a carton line', () => {
     expect(cartonSummary(3, 12_400)).toBe('3 cartons · 12.4 kg');
     expect(cartonSummary(1, null)).toBe('1 carton');
+    // Under 1 kg reads grams, never "0 kg" or a rounded "1 kg".
+    expect(cartonSummary(1, 450)).toBe('1 carton · 450 g');
+    expect(cartonSummary(2, 999)).toBe('2 cartons · 999 g');
+    expect(cartonSummary(2, 1000)).toBe('2 cartons · 1 kg');
     expect(cartonLine(2, 3, 4200, { lengthMm: 400, widthMm: 300, heightMm: 200 })).toBe('Carton 2 of 3 — 4.2 kg — 40 × 30 × 20 cm');
   });
 
@@ -344,6 +348,7 @@ describe('the print group', () => {
   test('each choice names its route, format, layout and file', () => {
     expect(packPrintRequest('labels-a4', 'SO-1')).toEqual({ route: 'carton-labels', format: 'pdf', layout: 'a4', filename: 'SO-1-carton-labels.pdf' });
     expect(packPrintRequest('slips-zpl', 'SO-1')).toEqual({ route: 'packing-slip', format: 'zpl', layout: 'label', filename: 'SO-1-carton-slips.zpl' });
+    expect(packPrintRequest('slips-pdf', 'SO-1')).toEqual({ route: 'packing-slip', format: 'pdf', layout: 'label', filename: 'SO-1-carton-slips.pdf' });
   });
 });
 

@@ -5,6 +5,7 @@ import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import type { ClientReturnDto } from '../../lib/api/generated';
 import { RTC_DRAFT_WATERMARK, RTC_INVOICE_ADVICE, RTC_NOT_A_TAX_INVOICE, RTC_SUSPENDED_WARNING } from '../../lib/client-returns';
+import { rememberPackageLabelCount } from '../../lib/cartons';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import {
@@ -205,6 +206,38 @@ describe('Returns to client — reads and gates', () => {
     expect(detail('RTC-0001').querySelector('[data-testid="rtc-pick-guidance"]')!.textContent).toContain('Returns out tab');
     expect(button(detail('RTC-0001'), 'Dispatch')).toBeUndefined();
     expect(button(detail('RTC-0001'), 'Cancel return')).toBeDefined();
+  });
+});
+
+describe('story 4-5a — package labels on a return to client (A27, A43)', () => {
+  test('an operator is offered Print package labels on a picked return, not on a draft; an accountant (no labels.execute) never', async () => {
+    await mount('operator');
+    await expand('RTC-0002');
+    expect(button(detail('RTC-0002'), 'Print package labels')).toBeDefined();
+    view!.unmount();
+    view = undefined;
+    await mount('accountant');
+    await expand('RTC-0002');
+    expect(button(detail('RTC-0002'), 'Print package labels')).toBeUndefined();
+  });
+
+  test('a draft return offers no package labels', async () => {
+    await mount('owner');
+    const draftCode = rtcs[0]!.code;
+    await expand(draftCode);
+    expect(button(detail(draftCode), 'Print package labels')).toBeUndefined();
+  });
+
+  test('the dispatch dialog warns when its packages differ from the labels last printed', async () => {
+    rememberPackageLabelCount('0198f7a2-1b3c-7d4e-8f90-0000000003f2', 4);
+    await mount('owner');
+    await expand('RTC-0002');
+    await press(button(detail('RTC-0002'), 'Dispatch'));
+    const form = detail('RTC-0002').querySelector<HTMLFormElement>('form[aria-label="Dispatch RTC-0002 form"]')!;
+    const packages = [...form.querySelectorAll('label')].find((l) => l.textContent?.startsWith('Packages'))!.control as HTMLInputElement;
+    setValue(packages, '3');
+    await settle();
+    expect(detail('RTC-0002').querySelector('[data-testid="dispatch-package-count-warning"]')?.textContent).toContain('4 package labels were printed, but 3 packages are recorded');
   });
 });
 

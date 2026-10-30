@@ -101,21 +101,51 @@ export function useOrderCartons(
   return { ...result.state, reload };
 }
 
+/** At most this many cartons reads are in flight at once for the packed rows. */
+export const MAX_CONCURRENT_CARTON_READS = 4;
+
+/**
+ * `fn` over `items` with at most `limit` calls in flight, results in input
+ * order (as `Promise.allSettled` would give them).
+ */
+export async function settleLimited<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const out: PromiseSettledResult<R>[] = new Array(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const index = next++;
+      try {
+        out[index] = { status: 'fulfilled', value: await fn(items[index]!) };
+      } catch (reason) {
+        out[index] = { status: 'rejected', reason };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(Math.max(limit, 1), items.length) }, () => worker()));
+  return out;
+}
+
 /**
  * Story 4-5a (A26) — the packed rows' carton summaries ("3 cartons · 12.4
- * kg"), one cartons read per packed order on the page (the
- * `useOrderShipments` fan-out). A failed read leaves its row without a
- * summary (the expanded panel says why).
+ * kg"), one cartons read per packed order on the page, at most
+ * `MAX_CONCURRENT_CARTON_READS` at once. Keyed by the page's orders, not the
+ * change revision: a refetch after an outbound change keeps the last
+ * summaries on screen until it lands (no blank flash). A failed read leaves
+ * its row without a summary (the expanded panel says why).
  */
 export function usePackedCartonSummaries(tenantId: string, orderIds: readonly string[]): ReadonlyMap<string, string> {
   const [revision] = useOutboundChangeRevision();
   const [result, setResult] = useState<{ key: string; data: ReadonlyMap<string, string> } | null>(null);
-  const key = `${tenantId}|${orderIds.join(',')}|${revision}`;
+  const key = `${tenantId}|${orderIds.join(',')}`;
   useEffect(() => {
     if (orderIds.length === 0) return;
     let cancelled = false;
     (async () => {
-      const settled = await Promise.allSettled(orderIds.map((orderId) => fetchApiOrderCartons(tenantId, orderId)));
+      const settled = await settleLimited(orderIds, MAX_CONCURRENT_CARTON_READS, (orderId) => fetchApiOrderCartons(tenantId, orderId));
       if (cancelled) return;
       const data = new Map<string, string>();
       settled.forEach((entry, index) => {
@@ -130,7 +160,7 @@ export function usePackedCartonSummaries(tenantId: string, orderIds: readonly st
     };
     // `orderIds` enters through `key` — the array's identity churns every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, revision]);
   if (orderIds.length === 0 || result === null || result.key !== key) return EMPTY_SUMMARIES;
   return result.data;
 }

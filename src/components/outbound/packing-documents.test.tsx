@@ -367,7 +367,7 @@ describe('a packed order’s cartons and prints (A26)', () => {
     view = await mount('accountant');
     await expand(view, 'order-2');
     const options = [...view.container.querySelectorAll('[data-testid="print-pack-documents"] option')].map((o) => o.textContent);
-    expect(options).toEqual(['Packing slip (A4 PDF)', 'Carton slips (ZPL)']);
+    expect(options).toEqual(['Packing slip (A4 PDF)', 'Carton slips (ZPL)', 'Carton slips (PDF 4×6)']);
     expect(text(view)).not.toContain('Re-pack into cartons');
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { fetchApiClientReturnPackageLabels, fetchApiVendorReturnPackageLabels } from '@/lib/api/client';
 import { readSession } from '@/lib/auth';
@@ -63,12 +63,25 @@ export function PackageLabelsDialog({
   const [problem, setProblem] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const inFlight = useRef(false);
+  // A download that settles after the dialog closed sets no state.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const effectiveLayout: Layout = format === 'zpl' ? 'label' : layout;
+
+  /** Any change (count, slice, format, layout) clears the last outcome — it described another print. */
+  function clearOutcome() {
+    setProblem(null);
+    setDone(null);
+  }
 
   function edit(patch: Partial<PackageLabelDraft>) {
     setDraft((current) => ({ ...current, ...patch }));
-    setProblem(null);
-    setDone(null);
+    clearOutcome();
   }
 
   async function download() {
@@ -96,12 +109,12 @@ export function PackageLabelsDialog({
       const name = packageLabelsFilename(documentCode, format);
       downloadBlob(name, blob);
       rememberPackageLabelCount(documentId, parsed.query.count);
-      setDone(`${name} downloaded`);
+      if (mounted.current) setDone(`${name} downloaded`);
     } catch (error) {
-      setProblem(cartonReason(error, 'package-labels'));
+      if (mounted.current) setProblem(cartonReason(error, 'package-labels'));
     } finally {
       inFlight.current = false;
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -127,6 +140,8 @@ export function PackageLabelsDialog({
             className={inputClass}
             inputMode="numeric"
             value={draft.count}
+            // After dispatch the count is the one recorded (any other is refused): read-only.
+            readOnly={dispatchedCount !== null}
             onChange={(e) => edit({ count: e.target.value })}
             data-testid="package-labels-count"
           />
@@ -141,7 +156,10 @@ export function PackageLabelsDialog({
         </label>
         <label className="flex flex-col gap-0.5">
           <span className="font-medium">Format</span>
-          <select className={selectClass} value={format} onChange={(e) => setFormat(e.target.value as LabelFormat)} data-testid="package-labels-format">
+          <select className={selectClass} value={format} onChange={(e) => {
+              setFormat(e.target.value as LabelFormat);
+              clearOutcome();
+            }} data-testid="package-labels-format">
             <option value="zpl">ZPL — Zebra thermal 4 × 6 (203 dpi)</option>
             <option value="pdf">PDF</option>
           </select>
@@ -149,7 +167,10 @@ export function PackageLabelsDialog({
         {format === 'pdf' && (
           <label className="flex flex-col gap-0.5">
             <span className="font-medium">Layout</span>
-            <select className={selectClass} value={layout} onChange={(e) => setLayout(e.target.value as Layout)} data-testid="package-labels-layout">
+            <select className={selectClass} value={layout} onChange={(e) => {
+                setLayout(e.target.value as Layout);
+                clearOutcome();
+              }} data-testid="package-labels-layout">
               <option value="label">4 × 6 label per page</option>
               <option value="a4">A4 sheet (two per page)</option>
             </select>

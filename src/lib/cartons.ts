@@ -617,8 +617,13 @@ export function perUomTotals(lines: readonly { readonly qty: number; readonly uo
 export function cartonSummary(cartonCount: number, grossWeightGrams: number | null | undefined): string {
   const count = `${formatCount(cartonCount)} ${cartonCount === 1 ? 'carton' : 'cartons'}`;
   if (grossWeightGrams === null || grossWeightGrams === undefined) return count;
-  const kg = (grossWeightGrams / 1000).toLocaleString('en-IN', { maximumFractionDigits: 1 });
-  return `${count} · ${kg} kg`;
+  return `${count} · ${grossWeightText(grossWeightGrams)}`;
+}
+
+/** A gross weight: grams under 1 kg ("900 g" — never "0.9" rounded to "0 kg" … or "1 kg"), else kg to 1 decimal. */
+export function grossWeightText(grams: number): string {
+  if (grams < 1000) return `${formatCount(grams)} g`;
+  return `${(grams / 1000).toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg`;
 }
 
 /** "Carton 2 of 3 — 4.2 kg — 40 × 30 × 20 cm". */
@@ -656,14 +661,15 @@ export function carrierMultiCartonWarning(cartonCount: number | null | undefined
 
 // ── the print group and its remembered format (A26) ────────────────────────
 
-export type PackPrintChoice = 'labels-zpl' | 'labels-pdf' | 'labels-a4' | 'slip-a4' | 'slips-zpl';
+export type PackPrintChoice = 'labels-zpl' | 'labels-pdf' | 'labels-a4' | 'slip-a4' | 'slips-zpl' | 'slips-pdf';
 
 export const PACK_PRINT_CHOICES: readonly { readonly choice: PackPrintChoice; readonly word: string }[] = [
   { choice: 'labels-zpl', word: 'Carton labels (ZPL)' },
-  { choice: 'labels-pdf', word: 'PDF 4×6' },
-  { choice: 'labels-a4', word: 'PDF on A4' },
+  { choice: 'labels-pdf', word: 'Carton labels (PDF 4×6)' },
+  { choice: 'labels-a4', word: 'Carton labels (PDF on A4)' },
   { choice: 'slip-a4', word: 'Packing slip (A4 PDF)' },
   { choice: 'slips-zpl', word: 'Carton slips (ZPL)' },
+  { choice: 'slips-pdf', word: 'Carton slips (PDF 4×6)' },
 ];
 
 /** D7: the pack station's default is the 4×6 ZPL. */
@@ -685,6 +691,8 @@ export function packPrintRequest(
       return { route: 'packing-slip', format: 'pdf', layout: 'a4', filename: packingSlipFilename(orderLabel) };
     case 'slips-zpl':
       return { route: 'packing-slip', format: 'zpl', layout: 'label', filename: cartonSlipsFilename(orderLabel, 'zpl') };
+    case 'slips-pdf':
+      return { route: 'packing-slip', format: 'pdf', layout: 'label', filename: cartonSlipsFilename(orderLabel, 'pdf') };
   }
 }
 

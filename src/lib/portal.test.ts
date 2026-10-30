@@ -49,6 +49,7 @@ import {
 } from './portal';
 import { portalFileLine, portalShippingLine, portalShippingReason, portalShippingStatus } from './portal';
 import { asnExpected, atLeastCount, orderTimeline, portalDateTime, portalNavCurrent, PORTAL_HOME } from './portal';
+import { portalCartonsSummary } from './portal';
 
 describe('portal routing (story 21-7)', () => {
   test('sign-in sends a client user to the portal and staff to Settings', () => {
@@ -584,5 +585,13 @@ describe('story 4-4a review — FB10 portal refusals are client words, never the
       expect(words).not.toContain('SERVER DETAIL');
       expect(words.startsWith('Your AWB was not sent')).toBe(true);
     }
+  });
+});
+
+describe('story 4-5a — the portal cartons summary', () => {
+  test('grams under 1 kg, kg from 1 kg', () => {
+    expect(portalCartonsSummary([{ seq: 1, weightGrams: 450, totals: [] }])).toBe('1 carton · 450 g');
+    expect(portalCartonsSummary([{ seq: 1, weightGrams: 3200, totals: [] }, { seq: 2, weightGrams: 2800, totals: [] }])).toBe('2 cartons · 6 kg');
+    expect(portalCartonsSummary([{ seq: 1, weightGrams: null, totals: [] }])).toBe('1 carton');
   });
 });

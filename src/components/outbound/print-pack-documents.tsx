@@ -31,7 +31,8 @@ export function availablePrintChoices(canLabel: boolean, status: string): readon
 
 /**
  * Story 4-5a (A26) — the Print group: Carton labels (ZPL, the D7 default),
- * PDF 4×6, PDF on A4, Packing slip (A4 PDF), Carton slips (ZPL). The choice
+ * Carton labels (PDF 4×6), Carton labels (PDF on A4), Packing slip (A4 PDF),
+ * Carton slips (ZPL), Carton slips (PDF 4×6). The choice
  * is remembered per browser (best-effort). Downloads are the 2-10b blob
  * pattern; a refusal is worded by `code`.
  */
@@ -79,7 +80,7 @@ export function PrintPackDocuments({
       if (mounted.current) setDone(`${request.filename} downloaded`);
     } catch (error) {
       if (mounted.current) {
-        const action = request.route === 'carton-labels' ? 'carton-labels' : request.format === 'zpl' ? 'carton-slips' : 'packing-slip';
+        const action = request.route === 'carton-labels' ? 'carton-labels' : request.layout === 'label' ? 'carton-slips' : 'packing-slip';
         setProblem(cartonReason(error, action));
       }
     } finally {

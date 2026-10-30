@@ -1095,6 +1095,8 @@ export function portalCartonsSummary(cartons: readonly PortalCarton[]): string {
   const count = `${cartons.length} ${cartons.length === 1 ? 'carton' : 'cartons'}`;
   if (cartons.length === 0 || cartons.some((c) => c.weightGrams === null)) return count;
   const grams = cartons.reduce((sum, c) => sum + (c.weightGrams ?? 0), 0);
+  // Grams under 1 kg ("900 g"), never "0 kg" or a rounded "1 kg".
+  if (grams < 1000) return `${count} · ${grams.toLocaleString('en-IN')} g`;
   return `${count} · ${(grams / 1000).toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg`;
 }
 

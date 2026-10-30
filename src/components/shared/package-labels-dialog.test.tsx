@@ -141,13 +141,40 @@ describe('story 4-5a — return package labels (A22, A27, A43)', () => {
         status: 409,
         headers: { 'content-type': 'application/problem+json' },
       });
-    view = render(<PackageLabelsDialog kind="rtv" documentId={RTV_ID} documentCode="RTV-0007" dispatchedCount={3} onClose={() => {}} />);
+    view = render(<PackageLabelsDialog kind="rtv" documentId={RTV_ID} documentCode="RTV-0007" dispatchedCount={null} onClose={() => {}} />);
     const root = view.container;
     setValue(byTestId<HTMLInputElement>(root, 'package-labels-count')!, '4');
     await click(byTestId(root, 'package-labels-download')!);
     expect(byTestId(root, 'package-labels-problem')?.textContent).toBe('3 packages were dispatched, not 4.');
     expect(downloads).toHaveLength(0);
     expect(lastPrintedPackageLabelCount(RTV_ID)).toBeNull();
+    // A changed format clears the stale refusal — it described another print.
+    setValue(byTestId<HTMLSelectElement>(root, 'package-labels-format')!, 'pdf');
+    expect(byTestId(root, 'package-labels-problem')).toBeNull();
+  });
+
+  test('after dispatch the count is read-only; a done banner clears when the layout changes; a download that settles after close sets nothing', async () => {
+    view = render(<PackageLabelsDialog kind="rtv" documentId={RTV_ID} documentCode="RTV-0007" dispatchedCount={3} onClose={() => {}} />);
+    const root = view.container;
+    expect(byTestId<HTMLInputElement>(root, 'package-labels-count')!.readOnly).toBe(true);
+    setValue(byTestId<HTMLSelectElement>(root, 'package-labels-format')!, 'pdf');
+    await click(byTestId(root, 'package-labels-download')!);
+    expect(root.textContent).toContain('RTV-0007-package-labels.pdf downloaded');
+    setValue(byTestId<HTMLSelectElement>(root, 'package-labels-layout')!, 'a4');
+    expect(root.textContent).not.toContain('downloaded');
+    // Unmount while a download is in flight: no state is set after it settles (no React warning, no throw).
+    let release: () => void = () => {};
+    reply = () => new Response('%PDF-1.4', { status: 200, headers: { 'content-type': 'application/pdf' } });
+    stubGlobal('fetch', (async () => {
+      await new Promise<void>((resolve) => (release = resolve));
+      return reply();
+    }) as unknown as typeof fetch);
+    await act(async () => void byTestId(root, 'package-labels-download')!.click());
+    view.unmount();
+    view = undefined;
+    release();
+    await settle();
+    expect(downloads).toEqual(['RTV-0007-package-labels.pdf', 'RTV-0007-package-labels.pdf']);
   });
 
   test('the dispatch form warns when its packages differ from the labels last printed (A43)', () => {
