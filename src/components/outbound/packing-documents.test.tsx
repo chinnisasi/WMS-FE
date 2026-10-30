@@ -5,6 +5,7 @@ import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import { PACK_PRINT_STORAGE_KEY } from '../../lib/cartons';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
+import { caseLabel, cartonSkusFromPack } from './carton-editor';
 import { OutboundPackDispatch } from './pack-dispatch';
 
 /**
@@ -432,5 +433,53 @@ describe('Re-pack into cartons (A8, A26)', () => {
     view = await mount('operator');
     await expand(view, 'order-2');
     expect(text(view)).toContain('One AWB will cover 2 cartons — every carton label prints it.');
+  });
+});
+
+describe('the re-carton lists catch-weight cases by weight and code (A26)', () => {
+  const pack = (handlingUnits: unknown) =>
+    ({
+      packSeq: 1,
+      status: 'live',
+      legacy: false,
+      partiesFrozen: true,
+      cartonCount: 1,
+      grossWeightGrams: null,
+      packedAt: NOW_ISO,
+      packedBy: 'u-1',
+      cartons: [
+        {
+          seq: 1,
+          code: 'O8F90000000000001.1.1',
+          weightGrams: null,
+          dimensionsMm: null,
+          lineCount: 1,
+          totals: [],
+          lines: [
+            {
+              skuId: 'sku-f',
+              skuCode: 'FISH',
+              skuName: 'Fish',
+              uom: 'KG',
+              qty: 2,
+              handlingUnitIds: ['0198f7a2-1b3c-7d4e-8f90-0000a1b2c3d4', '0198f7a2-1b3c-7d4e-8f90-0000e5f6a7b8'],
+              ...(handlingUnits === undefined ? {} : { handlingUnits }),
+            },
+          ],
+        },
+      ],
+    }) as never;
+
+  test('a case shows its captured weight and the code’s tail; no weight (or an older api) shows the tail alone', () => {
+    const skus = cartonSkusFromPack(
+      pack([
+        { id: '0198f7a2-1b3c-7d4e-8f90-0000a1b2c3d4', code: '0198f7a2-1b3c-7d4e-8f90-0000a1b2c3d4', weightGrams: 12_400 },
+        { id: '0198f7a2-1b3c-7d4e-8f90-0000e5f6a7b8', code: '0198f7a2-1b3c-7d4e-8f90-0000e5f6a7b8', weightGrams: null },
+      ]),
+      null,
+    );
+    expect(skus[0]!.cases!.map((c) => c.label)).toEqual(['12.40 kg · …A1B2C3D4', '…E5F6A7B8']);
+    expect(cartonSkusFromPack(pack(undefined), null)[0]!.cases!.map((c) => c.label)).toEqual(['…A1B2C3D4', '…E5F6A7B8']);
+    expect(caseLabel('x-0000a1b2c3d4', 950)).toBe('0.95 kg · …A1B2C3D4');
   });
 });

@@ -211,8 +211,18 @@ function CaseCell({
 }
 
 /** The live pack's SKUs as grid rows (A26: the re-carton grid is prefilled from the live pack). */
+/** A catch-weight case as the re-carton lists it: "12.40 kg · …A1B2C3D4", or the code's tail alone with no weight. */
+export function caseLabel(id: string, weightGrams: number | null): string {
+  const tail = `…${id.replace(/-/g, '').slice(-8).toUpperCase()}`;
+  if (weightGrams === null) return tail;
+  return `${(weightGrams / 1000).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg · ${tail}`;
+}
+
 export function cartonSkusFromPack(pack: PackViewDto, skuMap: Readonly<Record<string, SkuResponse>> | null): readonly CartonSku[] {
   const bySku = new Map<string, { milli: number; code: string; name: string; uom: string; cases: string[]; catchWeight: boolean }>();
+  // Each case's facts (the cartons read's optional `handlingUnits`; an older api sends none). The code a
+  // case label encodes is its handling-unit id, so a case is shown by its captured weight and the code's tail.
+  const caseWeight = new Map<string, number | null>();
   for (const carton of pack.cartons) {
     for (const line of carton.lines) {
       const entry = bySku.get(line.skuId) ?? { milli: 0, code: line.skuCode, name: line.skuName, uom: line.uom, cases: [], catchWeight: false };
@@ -221,6 +231,7 @@ export function cartonSkusFromPack(pack: PackViewDto, skuMap: Readonly<Record<st
         entry.catchWeight = true;
         entry.cases.push(...line.handlingUnitIds);
       }
+      for (const unit of line.handlingUnits ?? []) caseWeight.set(unit.id, unit.weightGrams);
       bySku.set(line.skuId, entry);
     }
   }
@@ -234,7 +245,7 @@ export function cartonSkusFromPack(pack: PackViewDto, skuMap: Readonly<Record<st
       uom: sku === undefined ? null : { uom: sku.uom, uomPrecision: sku.uomPrecision },
       packedQty: entry.milli / 1000,
       catchWeight,
-      ...(catchWeight ? { cases: entry.cases.map((id) => ({ id, label: `…${id.replace(/-/g, '').slice(-8)}` })) } : {}),
+      ...(catchWeight ? { cases: entry.cases.map((id) => ({ id, label: caseLabel(id, caseWeight.get(id) ?? null) })) } : {}),
     };
   });
 }
