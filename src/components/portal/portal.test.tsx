@@ -1567,6 +1567,17 @@ describe('Inbound — Receipts and their damage photos (story 2-5a)', () => {
   };
   const detail = {
     ...row,
+    // Story 2-9a — the GRN document's header.
+    parties: {
+      frozen: true,
+      warehouse: { code: 'WF', name: 'Whitefield', legalName: null, gstin: '29AAAAA0000A1Z5', address: null, operatorName: 'Three PL Co' },
+      client: { code: 'BRAND-A', name: 'Brand A Apparel', legalName: null, gstin: null, address: null },
+      vendor: null,
+      supplierNote: 'As announced by the client — ASN ASN-001',
+    },
+    document: { kind: 'asn', code: 'ASN-001', blindReasonCode: null, blindReasonLabel: null, label: 'ASN ASN-001' },
+    arrival: null,
+    totals: { lineCount: 1, byUom: [{ uom: 'each', goodQty: 1200, damagedQty: 3, shortQty: 0 }] },
     lines: [
       {
         lineNo: 1,
@@ -1577,6 +1588,18 @@ describe('Inbound — Receipts and their damage photos (story 2-5a)', () => {
         damageReasonCode: 'crushed',
         shortQty: 0,
         shortReasonCode: null,
+        damageReasonLabel: 'Crushed',
+        shortReasonLabel: null,
+        uom: 'each',
+        uomPrecision: 0,
+        batchCode: 'B-9',
+        mfgDate: null,
+        expiryDate: '2027-01-31',
+        expirySource: 'derived',
+        excess: { pendingQty: 20, approvedQty: 0, rejectedQty: 0 },
+        qc: { status: 'inspected', heldQty: 20, releasedQty: 0, passedQty: 18, failedQty: 2 },
+        serialCount: 0,
+        unreadableSerialCount: 0,
         photos: [
           { id: 'ph-1', status: 'attached', url: 'https://bucket.example/ph-1?sig=1', urlExpiresAt: '2999-01-01T00:00:00.000Z', width: 1600, height: 1200, capturedAt: '2026-10-13T08:33:00.000Z' },
           { id: 'ph-2', status: 'removed', url: null, urlExpiresAt: null, width: null, height: null, capturedAt: null },
@@ -1628,6 +1651,94 @@ describe('Inbound — Receipts and their damage photos (story 2-5a)', () => {
     expect(dialog.querySelector('img')).toBeNull();
     expect(dialog.textContent).toContain('Removed by the warehouse');
     expect(view.container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  });
+});
+
+describe('Inbound — the GRN document in the portal (story 2-9a)', () => {
+  const GRN_ID = '0198f7a2-1b3c-7d4e-8f90-0000000000c9';
+  const detail = {
+    id: GRN_ID,
+    code: 'GRN-0099',
+    warehouseName: 'Whitefield',
+    poCode: 'PO-7',
+    asnCode: null,
+    lineCount: 1,
+    receivedTotal: 12.5,
+    damagedTotal: 0,
+    shortTotal: 0,
+    photoCount: 0,
+    receivedAt: '2026-10-13T08:33:00.000Z',
+    createdAt: '2026-10-13T08:40:00.000Z',
+    parties: {
+      frozen: false,
+      warehouse: { code: 'WF', name: 'Whitefield', legalName: null, gstin: null, address: null, operatorName: 'Three PL Co' },
+      client: { code: 'BRAND-A', name: 'Brand A Apparel', legalName: null, gstin: null, address: null },
+      vendor: { code: 'V-1', name: 'Fabrics Co', legalName: null, gstin: '24AAACF1234A1Z5', address: null },
+      supplierNote: null,
+    },
+    document: { kind: 'po', code: 'PO-7', blindReasonCode: null, blindReasonLabel: null, label: 'PO PO-7' },
+    arrival: {
+      gateInCode: 'GI-3', vehicleNo: 'KA01AB1234', containerNo: null, transporterName: 'Swift', lrNumber: null, sealStatus: 'intact', sealNumber: null,
+      dockDoor: null, gatedInAt: '2026-10-13T08:00:00.000Z', unloadStartedAt: null, unloadEndedAt: null,
+      documents: [{ kind: 'invoice', number: 'INV-1', date: '2026-10-12', ewayBillNo: null }], documentsOmitted: true,
+    },
+    totals: { lineCount: 1, byUom: [{ uom: 'kg', goodQty: 12.5, damagedQty: 0, shortQty: 0 }] },
+    lines: [
+      {
+        lineNo: 1, skuCode: 'RICE', skuName: 'Rice', qty: 12.5, damagedQty: 0, damageReasonCode: null, shortQty: 0, shortReasonCode: null,
+        damageReasonLabel: null, shortReasonLabel: null, uom: 'kg', uomPrecision: 3, batchCode: 'B-1', mfgDate: null, expiryDate: null, expirySource: null,
+        excess: { pendingQty: 0, approvedQty: 0, rejectedQty: 0 }, qc: { status: 'on-hold', heldQty: 12.5, releasedQty: 0, passedQty: 0, failedQty: 0 },
+        serialCount: 0, unreadableSerialCount: 0, photos: [],
+      },
+    ],
+  };
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  test('A18: ?grn=<id> opens that receipt by id — the list (empty here) is not needed; the header, the client words and the downloads', async () => {
+    writeSession(PORTAL_SESSION);
+    window.history.replaceState(null, '', `/portal/inbound?grn=${GRN_ID}`);
+    routes = {
+      '/portal/inbound/goods-receipts': [200, { items: [], nextCursor: null }],
+      [`/portal/inbound/goods-receipts/${GRN_ID}`]: [200, detail],
+    };
+    view = render(<PortalInbound />);
+    await settle();
+    const panel = view.container.querySelector('[data-testid="receipt-deep-link"]')!;
+    expect(panel).not.toBeNull();
+    expect(requests).toContain(`GET /api/v1/tenants/${TENANT_ID}/portal/inbound/goods-receipts/${GRN_ID}`);
+    const text = panel.textContent ?? '';
+    expect(text).toContain('PO PO-7');
+    expect(text).toContain('Fabrics Co');
+    expect(text).toContain('Party details are current, not as at receipt');
+    expect(text).toContain('INV-1');
+    expect(text).toContain('Other documents of this vehicle are not shown.');
+    expect(text).toContain('On quality hold');
+    expect(text).toContain('batch B-1');
+    expect(buttonNamed(panel as HTMLElement, 'Download GRN (PDF)')).toBeDefined();
+    expect(buttonNamed(panel as HTMLElement, 'Export lines (CSV)')).toBeDefined();
+    expect(requests.every((r) => !r.includes('/receiving/'))).toBe(true);
+  });
+
+  test('A18: an unknown id (404) or a malformed one reads "This receipt is not available", with a way back to the list', async () => {
+    writeSession(PORTAL_SESSION);
+    window.history.replaceState(null, '', `/portal/inbound?grn=${GRN_ID}`);
+    routes = { [`/portal/inbound/goods-receipts/${GRN_ID}`]: [404, { code: 'not-found', status: 404, title: 'Not found' }] };
+    view = render(<PortalInbound />);
+    await settle();
+    expect(view.container.querySelector('[data-testid="receipt-deep-link"]')!.textContent).toContain('This receipt is not available.');
+    view.unmount();
+    window.history.replaceState(null, '', '/portal/inbound?grn=not-a-uuid');
+    view = render(<PortalInbound />);
+    await settle();
+    const panel = view.container.querySelector('[data-testid="receipt-deep-link"]')!;
+    expect(panel.textContent).toContain('This receipt is not available.');
+    click(buttonNamed(panel as HTMLElement, 'Go to your receipts'));
+    await settle();
+    expect(view.container.querySelector('[data-testid="receipt-deep-link"]')).toBeNull();
+    expect(window.location.search).toBe('');
   });
 });
 

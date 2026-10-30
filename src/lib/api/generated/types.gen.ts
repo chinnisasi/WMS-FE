@@ -6062,6 +6062,216 @@ export type GoodsReceiptListResponse = {
     nextCursor?: string | null;
 };
 
+export type GrnAddressDto = {
+    line1: string;
+    line2: string | null;
+    city: string;
+    /**
+     * The warehouse's state name, or a client/vendor address's `State code {nn}`
+     */
+    state: string;
+    pincode: string;
+};
+
+export type GrnWarehousePartyDto = {
+    code: string;
+    name: string;
+    legalName: string | null;
+    gstin: string | null;
+    address: GrnAddressDto | null;
+    /**
+     * The warehouse operator (the tenant)
+     */
+    operatorName: string;
+};
+
+export type GrnPartyDto = {
+    code: string;
+    name: string;
+    legalName: string | null;
+    gstin: string | null;
+    address: GrnAddressDto | null;
+};
+
+export type GrnPartiesDto = {
+    /**
+     * True when the parties were frozen at receipt; false on a GRN recorded before frozen documents (the parties are the current ones)
+     */
+    frozen: boolean;
+    /**
+     * Received at — no contact name or phone
+     */
+    warehouse: GrnWarehousePartyDto;
+    /**
+     * The owner of the goods; null on an older mixed-client receipt
+     */
+    client: GrnPartyDto | null;
+    /**
+     * The supplier as on the PO (frozen at PO creation); null on an ASN or blind receipt
+     */
+    vendor: GrnPartyDto | null;
+    /**
+     * The supplier block in words when there is no vendor (an ASN, a blind receipt, a PO without one)
+     */
+    supplierNote: string | null;
+};
+
+export type GrnDocumentRefDto = {
+    kind: 'po' | 'asn' | 'blind';
+    code: string | null;
+    blindReasonCode: string | null;
+    blindReasonLabel: string | null;
+    /**
+     * "PO P-1", "ASN A-77" or "Blind receipt (Unannounced delivery)"
+     */
+    label: string;
+};
+
+export type GrnArrivalDocumentDto = {
+    kind: 'invoice' | 'challan' | 'bill_of_entry';
+    number: string;
+    /**
+     * YYYY-MM-DD
+     */
+    date: string;
+    ewayBillNo: string | null;
+};
+
+export type GrnArrivalDto = {
+    gateInCode: string;
+    vehicleNo: string | null;
+    containerNo: string | null;
+    transporterName: string | null;
+    lrNumber: string | null;
+    sealStatus: 'intact' | 'broken' | 'none';
+    sealNumber: string | null;
+    dockDoor: string | null;
+    gatedInAt: string;
+    unloadStartedAt: string | null;
+    unloadEndedAt: string | null;
+    /**
+     * Only this GRN's own documents (a shared truck's other paperwork is omitted)
+     */
+    documents: Array<GrnArrivalDocumentDto>;
+    /**
+     * True when the gate-in carried documents this GRN does not show
+     */
+    documentsOmitted: boolean;
+};
+
+export type GrnExcessDto = {
+    pendingQty: number;
+    approvedQty: number;
+    rejectedQty: number;
+};
+
+export type GrnLineQcDto = {
+    status: 'on-hold' | 'released' | 'inspected' | null;
+    /**
+     * Released + passed + failed + still on hold
+     */
+    heldQty: number;
+    releasedQty: number;
+    passedQty: number;
+    failedQty: number;
+};
+
+export type GrnDocumentLineDto = {
+    id: string;
+    lineNo: number;
+    skuCode: string;
+    /**
+     * The current SKU name (item descriptions are not frozen)
+     */
+    skuName: string;
+    /**
+     * The line SKU's client
+     */
+    clientCode: string;
+    uom: string;
+    /**
+     * Decimal places of the UoM
+     */
+    uomPrecision: number;
+    batchCode: string | null;
+    /**
+     * IST calendar date
+     */
+    mfgDate: string | null;
+    /**
+     * IST calendar date
+     */
+    expiryDate: string | null;
+    expirySource: 'typed' | 'derived' | null;
+    /**
+     * The PO line's ordered or the ASN line's announced quantity, as at print
+     */
+    expectedQty: number | null;
+    /**
+     * Good units (an excess included)
+     */
+    goodQty: number;
+    damagedQty: number;
+    damageReasonCode: string | null;
+    damageReasonLabel: string | null;
+    shortQty: number;
+    shortReasonCode: string | null;
+    shortReasonLabel: string | null;
+    /**
+     * Units booked within the over-receipt tolerance
+     */
+    toleranceQty: number;
+    excess: GrnExcessDto;
+    qc: GrnLineQcDto;
+    /**
+     * Serials captured (applied + awaiting approval)
+     */
+    serialCount: number;
+    unreadableSerialCount: number;
+    rejectedSerialCount: number;
+    /**
+     * Attached damage photos
+     */
+    photoCount: number;
+};
+
+export type GrnUomTotalsDto = {
+    uom: string;
+    goodQty: number;
+    damagedQty: number;
+    shortQty: number;
+};
+
+export type GrnTotalsDto = {
+    lineCount: number;
+    /**
+     * Per UoM, in first-appearance order
+     */
+    byUom: Array<GrnUomTotalsDto>;
+};
+
+export type GoodsReceiptDocumentDto = {
+    id: string;
+    code: string;
+    /**
+     * When the goods were received (the device time)
+     */
+    receivedAt: string;
+    recordedAt: string;
+    /**
+     * The read instant (over-receipt and QC are as at this time)
+     */
+    printedAt: string;
+    parties: GrnPartiesDto;
+    document: GrnDocumentRefDto;
+    /**
+     * Only when a gate-in is linked; as recorded on the gate-in
+     */
+    arrival: GrnArrivalDto | null;
+    lines: Array<GrnDocumentLineDto>;
+    totals: GrnTotalsDto;
+};
+
 export type GrnLineSerialEntryDto = {
     /**
      * The serial number (IMEI 1 on an imei SKU)
@@ -12929,6 +13139,33 @@ export type PortalGoodsReceiptLineDto = {
     shortQty: number;
     shortReasonCode: string | null;
     photos: Array<PortalReceiptPhotoDto>;
+    damageReasonLabel: string | null;
+    shortReasonLabel: string | null;
+    uom: string;
+    /**
+     * Decimal places of the UoM
+     */
+    uomPrecision: number;
+    batchCode: string | null;
+    /**
+     * IST calendar date
+     */
+    mfgDate: string | null;
+    /**
+     * IST calendar date
+     */
+    expiryDate: string | null;
+    expirySource: 'typed' | 'derived' | null;
+    /**
+     * Over-receipt units awaiting approval, approved and rejected
+     */
+    excess: GrnExcessDto;
+    /**
+     * The quality-check outcome of the line
+     */
+    qc: GrnLineQcDto;
+    serialCount: number;
+    unreadableSerialCount: number;
 };
 
 export type PortalGoodsReceiptDetailDto = {
@@ -12966,6 +13203,10 @@ export type PortalGoodsReceiptDetailDto = {
     receivedAt: string;
     createdAt: string;
     lines: Array<PortalGoodsReceiptLineDto>;
+    parties: GrnPartiesDto;
+    document: GrnDocumentRefDto;
+    arrival: GrnArrivalDto | null;
+    totals: GrnTotalsDto;
 };
 
 export type PortalPurchaseOrderRowDto = {
@@ -22699,6 +22940,100 @@ export type ReceivingControllerGetCatalogSnapshotResponses = {
 };
 
 export type ReceivingControllerGetCatalogSnapshotResponse = ReceivingControllerGetCatalogSnapshotResponses[keyof ReceivingControllerGetCatalogSnapshotResponses];
+
+export type ReceivingControllerGoodsReceiptDocumentData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The goods receipt
+         */
+        grnId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/document';
+};
+
+export type ReceivingControllerGoodsReceiptDocumentErrors = {
+    /**
+     * Malformed grnId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such goods receipt in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReceivingControllerGoodsReceiptDocumentError = ReceivingControllerGoodsReceiptDocumentErrors[keyof ReceivingControllerGoodsReceiptDocumentErrors];
+
+export type ReceivingControllerGoodsReceiptDocumentResponses = {
+    200: GoodsReceiptDocumentDto;
+};
+
+export type ReceivingControllerGoodsReceiptDocumentResponse = ReceivingControllerGoodsReceiptDocumentResponses[keyof ReceivingControllerGoodsReceiptDocumentResponses];
+
+export type ReceivingControllerGoodsReceiptDocumentFileData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        /**
+         * The goods receipt
+         */
+        grnId: string;
+    };
+    query: {
+        /**
+         * The file: the A4 PDF, or the lines as CSV (UTF-8 with BOM)
+         */
+        format: 'pdf' | 'csv';
+    };
+    url: '/tenants/{tenantId}/receiving/goods-receipts/{grnId}/document/file';
+};
+
+export type ReceivingControllerGoodsReceiptDocumentFileErrors = {
+    /**
+     * format absent or not pdf|csv, or a malformed grnId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such goods receipt in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ReceivingControllerGoodsReceiptDocumentFileError = ReceivingControllerGoodsReceiptDocumentFileErrors[keyof ReceivingControllerGoodsReceiptDocumentFileErrors];
+
+export type ReceivingControllerGoodsReceiptDocumentFileResponses = {
+    /**
+     * The file
+     */
+    200: Blob | File;
+};
+
+export type ReceivingControllerGoodsReceiptDocumentFileResponse = ReceivingControllerGoodsReceiptDocumentFileResponses[keyof ReceivingControllerGoodsReceiptDocumentFileResponses];
 
 export type ReceivingControllerListGoodsReceiptLinesData = {
     body?: never;
@@ -33197,6 +33532,54 @@ export type PortalControllerGoodsReceiptResponses = {
 };
 
 export type PortalControllerGoodsReceiptResponse = PortalControllerGoodsReceiptResponses[keyof PortalControllerGoodsReceiptResponses];
+
+export type PortalControllerGoodsReceiptFileData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        grnId: string;
+    };
+    query: {
+        /**
+         * The file: the A4 PDF, or the lines as CSV (UTF-8 with BOM)
+         */
+        format: 'pdf' | 'csv';
+    };
+    url: '/tenants/{tenantId}/portal/inbound/goods-receipts/{grnId}/document/file';
+};
+
+export type PortalControllerGoodsReceiptFileErrors = {
+    /**
+     * format absent or not pdf|csv, or a malformed grnId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such goods receipt of this client — unknown, another client's, or unattributed (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerGoodsReceiptFileError = PortalControllerGoodsReceiptFileErrors[keyof PortalControllerGoodsReceiptFileErrors];
+
+export type PortalControllerGoodsReceiptFileResponses = {
+    /**
+     * The file
+     */
+    200: Blob | File;
+};
+
+export type PortalControllerGoodsReceiptFileResponse = PortalControllerGoodsReceiptFileResponses[keyof PortalControllerGoodsReceiptFileResponses];
 
 export type PortalControllerPurchaseOrdersData = {
     body?: never;
