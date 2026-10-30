@@ -786,4 +786,30 @@ describe('the Returns list — the disposition badge (story 4-7a, A7)', () => {
     expect(view.container.textContent).toContain('↩ Awaiting disposition');
     expect(view.container.textContent).toContain('1 on hold');
   });
+
+  test('story 4-7c (A5) — a line whose units sit on an open return to client reads "Returning to client", never "Dispositioned"', async () => {
+    listItems = [received()];
+    detailAnswer = detail({ openQty: 0, restockedQty: 0, scrappedQty: 0, onHoldQty: 0, failedInspectionQty: 0, returningToClientQty: 1 });
+    writeSession(session('ops_manager'));
+    view = render(<ReturnsList tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH-1 Peenya" canManage />);
+    await settle();
+    await press([...view.container.querySelectorAll('button')].find((b) => b.textContent?.includes('RMA-0007')));
+    await settle();
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('⇢ Returning to client');
+    expect(text).toContain('1 returning to client');
+    expect(text).not.toContain('✓ Dispositioned');
+  });
+});
+
+describe('the Returns page — the To client tab (story 4-7c)', () => {
+  test('initialTab "to-client" mounts the returns-to-client card, and the tab sits in the strip', async () => {
+    writeSession(session('ops_manager'));
+    view = render(<ReturnsView initialTab="to-client" />);
+    await settle();
+    const tabs = [...view.container.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent);
+    expect(tabs.some((label) => label?.startsWith('To client'))).toBe(true);
+    expect(view.container.querySelector('[data-testid="client-returns-card"]')).not.toBeNull();
+    expect(requests.some((r) => r.method === 'GET' && r.pathname.endsWith(`/tenants/${TENANT_ID}/client-returns`))).toBe(true);
+  });
 });

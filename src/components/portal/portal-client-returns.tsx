@@ -11,6 +11,7 @@ import {
   portalClientReturnQuantity,
   portalClientReturnStatusLabel,
   portalClientReturnTone,
+  portalConsigneeState,
   portalDate,
   portalQuantity,
 } from '@/lib/portal';
@@ -94,7 +95,7 @@ function ClientReturnDetail({ clientReturnId }: { clientReturnId: string }) {
   if (rtc.state === 'failed') return <ReadFailure word="Shipment not loaded" reason={rtc.reason} onRetry={rtc.reload} />;
   const data = rtc.data;
   const address = data.consigneeAddress;
-  const place = [address.city, address.state, address.pincode].filter((part) => part !== null && part !== '').join(', ');
+  const place = [address.city, portalConsigneeState(address), address.pincode].filter((part) => part !== null && part !== '').join(', ');
   return (
     <div className="flex flex-col gap-3 py-1 text-xs" data-testid="portal-client-return-detail">
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5">

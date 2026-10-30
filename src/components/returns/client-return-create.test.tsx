@@ -3,6 +3,7 @@ import { act } from 'react';
 
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import type { AwaitingDispositionDto, ClientDto } from '../../lib/api/generated';
+import { notifyReturnsChanged } from '../../lib/returns';
 import { RETURNS_CHANGED_EVENT } from '../../lib/returns';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
@@ -45,6 +46,10 @@ function session(role: UserRole): StoredSession {
 const B_CLIENT = { ...glowClient(), id: CLIENT_B, code: 'ZEN', name: 'Zen Foods' } as ClientDto;
 
 let queue: AwaitingDispositionDto[] = [];
+let nextCursor: string | null = null;
+let hidden = new Set<string>();
+let arm = damagedArm();
+let glow: ClientDto = glowClient();
 let createAnswers: { status: number; body: unknown }[] = [];
 let requests: { method: string; url: URL; body: unknown; key: string | null }[] = [];
 
@@ -61,6 +66,10 @@ beforeEach(() => {
   ];
   createAnswers = [];
   requests = [];
+  nextCursor = null;
+  hidden = new Set();
+  arm = damagedArm();
+  glow = glowClient();
   stubGlobal('fetch', (async (input: RequestInfo | URL) => {
     const request = input instanceof Request ? input : new Request(input.toString());
     const url = new URL(request.url);
@@ -73,16 +82,16 @@ beforeEach(() => {
     }
     requests.push({ method, url, body, key: request.headers.get('Idempotency-Key') });
     const base = `/api/v1/tenants/${T}`;
-    if (url.pathname === `${base}/returns/awaiting`) return json(200, { items: queue, nextCursor: null });
-    if (url.pathname === `${base}/clients`) return json(200, { items: [glowClient(), B_CLIENT] });
+    if (url.pathname === `${base}/returns/awaiting`) return json(200, { items: queue, nextCursor });
+    if (url.pathname === `${base}/clients`) return json(200, { items: [glow, B_CLIENT, { ...glowClient(), id: 'c-self', code: 'self', name: 'Priya Logistics', systemOwned: true }] });
     if (url.pathname === `${base}/warehouses/${WH}/client-returns/returnable`) {
       const clientId = url.searchParams.get('clientId');
       return json(200, {
         warehouseId: WH,
         clientId,
         truncated: false,
-        awaiting: queue.filter((line) => line.clientId === clientId && line.weightGrams === null),
-        damaged: clientId === CLIENT ? [damagedArm()] : [],
+        awaiting: queue.filter((line) => line.clientId === clientId && line.weightGrams === null && !hidden.has(line.receiptLineId)),
+        damaged: clientId === CLIENT ? [arm] : [],
       });
     }
     if (url.pathname === `${base}/client-returns` && method === 'POST') {
@@ -218,5 +227,97 @@ describe('the create dialog', () => {
     expect(d.textContent).toContain('no return address on file');
     const link = d.querySelector<HTMLAnchorElement>('[data-testid="rtc-client-page-link"]')!;
     expect(link.getAttribute('href')).toBe('/settings?tab=clients');
+  });
+});
+
+async function submitDialog(): Promise<void> {
+  await act(async () => {
+    dialog()!.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  await settle();
+}
+
+const createButton = () => [...dialog()!.querySelectorAll('button')].find((b) => b.textContent === 'Create return to client')!;
+
+describe('code review — the selection is one page’s; the created link', () => {
+  test('a page move and a returns change clear the selection', async () => {
+    nextCursor = 'c2';
+    await mount('owner', true);
+    await click(box('Select SKU-A on RMA-0003'));
+    expect(returnButton()).toBeDefined();
+    await click([...view!.container.querySelectorAll('button')].find((b) => b.textContent === 'Next'));
+    expect(returnButton()).toBeUndefined();
+    expect(box('Select SKU-A on RMA-0003')!.checked).toBe(false);
+    await click(box('Select SKU-A on RMA-0003'));
+    expect(returnButton()).toBeDefined();
+    await act(async () => notifyReturnsChanged());
+    await settle();
+    expect(returnButton()).toBeUndefined();
+  });
+
+  test('a created return links to the To client tab', async () => {
+    await mount('owner', true);
+    await click(box('Select SKU-A on RMA-0003'));
+    await click(returnButton());
+    await submitDialog();
+    expect(view!.container.querySelector('[data-testid="rtc-created-link"]')!.getAttribute('href')).toBe('/returns?tab=to-client');
+  });
+});
+
+describe('code review — the draft is pruned to the fresh read', () => {
+  test('a selected line the read no longer offers is left out (said), and Create sends the rest', async () => {
+    hidden = new Set([RRL_2]);
+    await mount('owner', true);
+    await click(box('Select SKU-A on RMA-0003'));
+    await click(box('Select SKU-A on RMA-0004'));
+    await click(returnButton());
+    expect(dialog()!.textContent).toContain('RMA-0004 SKU-A no longer await a decision here');
+    await submitDialog();
+    expect(creates()).toHaveLength(1);
+    expect((creates()[0]!.body as { lines: unknown[] }).lines).toEqual([{ source: 'returns', returnReceiptLineId: RRL_1, quantity: 4, reasonCode: 'client-instruction' }]);
+  });
+
+  test('a DAMAGED arm that drops to nothing available after a re-read leaves the draft', async () => {
+    await mount('owner', true);
+    await click(box('Select SKU-A on RMA-0003'));
+    await click(returnButton());
+    setValue(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Send back SKU-D"]')!, '2');
+    arm = damagedArm({ available: 0, claimedRtc: 2, claimedBy: ['RTC-0005', 'RTV-0002'] });
+    // A returns change re-reads the returnable list under the open dialog.
+    await act(async () => notifyReturnsChanged());
+    await settle();
+    expect(dialog()).not.toBeNull();
+    await submitDialog();
+    expect(creates()).toHaveLength(1);
+    expect((creates()[0]!.body as { lines: { source: string }[] }).lines.map((line) => line.source)).toEqual(['returns']);
+  });
+});
+
+describe('code review — decision 7, no address fallback', () => {
+  test('a client without a return address: the return address stays chosen, Create waits for an explicit pick of the registered one', async () => {
+    glow = glowClient({ returnAddress: null });
+    await mount('owner', true);
+    await click(box('Select SKU-A on RMA-0003'));
+    await click(returnButton());
+    const d = dialog()!;
+    expect(d.querySelector<HTMLInputElement>('input[aria-label="Return address"]')!.checked).toBe(true);
+    expect(d.querySelector<HTMLInputElement>('input[aria-label="Registered address"]')!.checked).toBe(false);
+    const missing = d.querySelector('[data-testid="rtc-chosen-address-missing"]')!;
+    expect(missing.textContent).toContain('no return address on file');
+    expect(missing.querySelector('a')!.getAttribute('href')).toBe('/settings?tab=clients');
+    expect(createButton().disabled).toBe(true);
+    await click(d.querySelector<HTMLInputElement>('input[aria-label="Registered address"]'));
+    expect(createButton().disabled).toBe(false);
+    await submitDialog();
+    expect((creates()[0]!.body as { consigneeAddress: string }).consigneeAddress).toBe('registered');
+  });
+
+  test('a client with no address at all: Create is disabled with its own message', async () => {
+    glow = glowClient({ returnAddress: null, registeredAddress: null });
+    await mount('owner', true);
+    await click(box('Select SKU-A on RMA-0003'));
+    await click(returnButton());
+    expect(dialog()!.querySelector('[data-testid="rtc-no-address"]')!.textContent).toContain('has no address on file');
+    expect(createButton().disabled).toBe(true);
   });
 });

@@ -19,6 +19,7 @@ import {
   draftLine,
   emptyRtcDraft,
   keyForBody,
+  pruneRtcDraft,
   rtcAddressBlock,
   rtcAddressMissing,
   rtcArmKey,
@@ -106,6 +107,14 @@ export function ClientReturnCreateDialog({
   const returnable = useReturnableToClient(warehouseId, clientId);
   const awaiting: readonly AwaitingDispositionDto[] = returnable.state === 'ready' ? returnable.data.awaiting : [];
   const damaged: readonly ReturnableToClientArmDto[] = returnable.state === 'ready' ? returnable.data.damaged : [];
+  // A fresh read prunes what it no longer offers (a line decided elsewhere, an arm gone or fully claimed):
+  // a line the dialog cannot show could never be cleared and would fail every Create. A guarded set-state, not an effect.
+  const [prunedFor, setPrunedFor] = useState<object | null>(null);
+  if (returnable.state === 'ready' && prunedFor !== returnable.data) {
+    setPrunedFor(returnable.data);
+    const fresh = returnable.data;
+    setDraft((current) => pruneRtcDraft(current, { awaiting: fresh.awaiting, damaged: fresh.damaged }));
+  }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -124,13 +133,19 @@ export function ClientReturnCreateDialog({
     edit((current) => ({ ...current, [bucket]: { ...current[bucket], [id]: { ...draftLine(current[bucket], id), ...patch } } }));
   }
 
-  // The address a client lacks is never the choice (decision 7 — no fallback): the other kind when only it exists.
-  const chosenKind: RtcAddressKind =
-    client !== null && rtcAddressBlock(client, draft.consigneeAddress) !== null && rtcAddressBlock(client, draft.consigneeAddress === 'return' ? 'registered' : 'return') === null
-      ? draft.consigneeAddress === 'return'
-        ? 'registered'
-        : 'return'
-      : draft.consigneeAddress;
+  // Decision 7 — no fallback: the return address stays the default even when the client lacks it; the
+  // viewer picks the registered address explicitly, and Create waits for a kind the client has.
+  const chosenKind: RtcAddressKind = draft.consigneeAddress;
+  const chosenBlock = rtcAddressBlock(client, chosenKind);
+  const noAddress = client !== null && rtcAddressBlock(client, 'return') !== null && rtcAddressBlock(client, 'registered') !== null;
+  const notReadyReason =
+    clientId === ''
+      ? 'Pick the client first.'
+      : noAddress
+        ? 'The client has no address on file — add one on the client page.'
+        : chosenBlock !== null
+          ? `${chosenBlock} — pick the other address, or add it on the client page.`
+          : undefined;
 
   async function submit() {
     const session = readSession();
@@ -203,7 +218,8 @@ export function ClientReturnCreateDialog({
                     className={selectClass}
                   >
                     <option value="">Pick the client…</option>
-                    {(clients ?? []).map((entry) => (
+                    {/* The tenant's own (system-owned) client never gets goods "returned"; a departed one does (A8). */}
+                    {(clients ?? []).filter((entry) => !entry.systemOwned).map((entry) => (
                       <option key={entry.id} value={entry.id}>
                         {clientLabel(entry, tenantName)}
                       </option>
@@ -245,7 +261,16 @@ export function ClientReturnCreateDialog({
                   );
                 })}
               </div>
-              {client !== null && rtcAddressBlock(client, 'return') !== null && rtcAddressBlock(client, 'registered') !== null && (
+              {!noAddress && chosenBlock !== null && (
+                <div className="text-xs text-(--destructive)" data-testid="rtc-chosen-address-missing">
+                  {chosenBlock} — pick the {RTC_ADDRESS_LABEL[chosenKind === 'return' ? 'registered' : 'return'].toLowerCase()}, or{' '}
+                  <Link href={SETTINGS_PAGE_TABS.href('clients')} className="underline underline-offset-2">
+                    add it on the client page
+                  </Link>
+                  .
+                </div>
+              )}
+              {noAddress && (
                 <div className="text-xs text-(--destructive)" data-testid="rtc-no-address">
                   {clientName} has no address on file —{' '}
                   <Link href={SETTINGS_PAGE_TABS.href('clients')} className="underline underline-offset-2">
@@ -426,7 +451,7 @@ export function ClientReturnCreateDialog({
           </div>
         )}
         <div className="flex flex-wrap gap-2">
-          <SubmitButton busy={busy} label="Create return to client" busyLabel="Creating…" />
+          <SubmitButton busy={busy} ready={notReadyReason === undefined} notReadyReason={notReadyReason} label="Create return to client" busyLabel="Creating…" />
           <button type="button" disabled={busy} onClick={onCancel} className={buttonClass}>
             Discard
           </button>

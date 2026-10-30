@@ -1557,7 +1557,7 @@ export function rtvPickSummary(entry: Pick<RejectedOpResponse, 'payload' | 'prob
  * moved no stock, so only the floor has anything to undo — the staged units
  * go back to the Returns or Damaged area, or the return is picked again.
  */
-export const RTC_PICK_GUIDANCE =
+export const RTC_REJECTED_PICK_GUIDANCE =
   'The pick moved nothing in the system. Return the staged units to the Returns or Damaged area, or pick the return again on the handheld (Returns out tab), then discard this row.';
 
 /** A return to client that is no longer a draft: nothing to pick again. */
@@ -1565,7 +1565,7 @@ export const RTC_PICK_CLOSED_GUIDANCE =
   'The return to client is no longer awaiting a pick (cancelled, or picked elsewhere) — the pick moved nothing. Return the staged units to the Returns or Damaged area, then discard this row.';
 
 export function rtcPickGuidance(problemCode: string): string {
-  return problemCode === 'rtc-not-draft' || problemCode === 'not-found' ? RTC_PICK_CLOSED_GUIDANCE : RTC_PICK_GUIDANCE;
+  return problemCode === 'rtc-not-draft' || problemCode === 'not-found' ? RTC_PICK_CLOSED_GUIDANCE : RTC_REJECTED_PICK_GUIDANCE;
 }
 
 /** Why the RTC pick was refused, in words (the row's whole-op `problemCode`); an unknown code reads as itself. */

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiDisposeReturn } from '@/lib/api/client';
@@ -41,6 +42,7 @@ import {
   type ReturnCondition,
 } from '@/lib/returns';
 import { parseQuantityInput } from '@/lib/format-quantity';
+import { RETURNS_PAGE_TABS } from '@/lib/page-tabs';
 import { useActiveClient } from '@/lib/use-active-client';
 import { useWarehouseBins } from '@/lib/use-inventory';
 import { useOutboundSkus } from '@/lib/use-outbound-orders';
@@ -68,7 +70,7 @@ const CONDITION_TONE: Readonly<Record<ReturnCondition, string>> = {
 };
 
 type QueueRow = AwaitingReturnLine & { readonly id: string };
-type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string };
+type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string; link?: { href: string; label: string } };
 
 /**
  * Story 4-7a — the Returns page's "Awaiting disposition" tab: every received
@@ -123,12 +125,21 @@ export function AwaitingDispositions({
   // Story 4-7c — the selection for a return to client, and the lines the open dialog was started with.
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [returning, setReturning] = useState<readonly AwaitingDispositionDto[] | null>(null);
+  // The selection belongs to one page under one client filter: a filter change clears it (a guarded set-state).
+  const filterKey = clientFilterKey(active.filter);
+  const [selectionScope, setSelectionScope] = useState(filterKey);
+  if (selectionScope !== filterKey) {
+    setSelectionScope(filterKey);
+    setSelected(new Set());
+  }
 
   const { onCursor } = queue;
   useEffect(() => {
     const onChange = () => {
       onCursor(null);
       setPageEpoch((epoch) => epoch + 1);
+      // Story 4-7c — a selection is one page's: the re-read starts a new one.
+      setSelected(new Set());
     };
     window.addEventListener(RETURNS_CHANGED_EVENT, onChange);
     return () => window.removeEventListener(RETURNS_CHANGED_EVENT, onChange);
@@ -281,6 +292,11 @@ export function AwaitingDispositions({
       </div>
       <ClientFilterChip active={active} tenantName={active.tenantName} />
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
+      {outcome?.link !== undefined && (
+        <Link href={outcome.link.href} className="text-xs text-(--primary) underline underline-offset-2" data-testid="rtc-created-link">
+          {outcome.link.label}
+        </Link>
+      )}
       {canManage && returning !== null && returning.length > 0 && (
         <ClientReturnCreateDialog
           warehouseId={warehouseId}
@@ -295,7 +311,7 @@ export function AwaitingDispositions({
             setReturning(null);
             setSelected(new Set());
             const created = rtcCreatedOutcome(rtc);
-            setOutcome({ tone: 'accepted', word: created.word, reason: `${created.reason} Find it under the To client tab.` });
+            setOutcome({ tone: 'accepted', word: created.word, reason: created.reason, link: { href: RETURNS_PAGE_TABS.href('to-client'), label: 'Open it under the To client tab' } });
             // The claimed lines leave the queue (their open quantity fell); an open RMA's split moves.
             notifyReturnsDisposed();
           }}
@@ -309,7 +325,11 @@ export function AwaitingDispositions({
           columns={columns}
           rows={rows}
           nextCursor={queue.state === 'ready' ? queue.data.nextCursor : null}
-          onCursor={queue.onCursor}
+          onCursor={(cursor) => {
+            // A page move clears the selection: its count, client and the dialog's lines are this page's.
+            setSelected(new Set());
+            queue.onCursor(cursor);
+          }}
           emptyMessage={emptyMessage}
           selection={
             canManage
@@ -361,6 +381,7 @@ export function AwaitingDispositions({
                   setOpenId(null);
                   setOutcome({ tone: 'rejected', word: 'Not recorded', reason });
                   // Back to page one with a fresh cursor stack (the RETURNS_CHANGED reset).
+                  setSelected(new Set());
                   onCursor(null);
                   setPageEpoch((epoch) => epoch + 1);
                   queue.reload();

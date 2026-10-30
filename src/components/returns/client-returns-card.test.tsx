@@ -307,3 +307,25 @@ describe('Returns to client — dispatch and cancel', () => {
     expect(card().textContent).toContain('RTC-0002 cancelled');
   });
 });
+
+describe('code review — the New picker', () => {
+  test('(d) an owner with no active client picks the client: the system-owned one is not offered, and the returnable read carries the picked client', async () => {
+    writeSession(session('owner'));
+    view = render(<ClientReturnsCard warehouseId={WH} warehouseLabel="BLR Bengaluru DC" />);
+    await settle();
+    await press(button(card(), 'New return to client'));
+    const dialog = card().querySelector<HTMLElement>('[role="dialog"][aria-label="New return to client"]')!;
+    const picker = [...dialog.querySelectorAll('label')].find((l) => l.textContent?.startsWith('Client'))!.control as HTMLSelectElement;
+    const offered = [...picker.options].map((o) => o.value).filter((v) => v !== '');
+    expect(offered).toEqual([CLIENT]);
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(picker, CLIENT);
+      picker.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await settle();
+    const read = requests.find((r) => r.method === 'GET' && r.url.pathname.endsWith(`/warehouses/${WH}/client-returns/returnable`));
+    expect(read).toBeDefined();
+    expect(read!.url.searchParams.get('clientId')).toBe(CLIENT);
+  });
+
+});

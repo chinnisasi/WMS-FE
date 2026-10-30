@@ -15,7 +15,7 @@ import {
   portalReturnDecisionState,
 } from './portal';
 import { lineAwaitsDisposition, lineDispositionSplit, lineDispositionState, lineDispositionText, RETURNING_TO_CLIENT_BADGE } from './returns';
-import { RTC_PICK_CLOSED_GUIDANCE, RTC_PICK_GUIDANCE, STOCK_ADJUST_PROBLEM_WORDS, rejectedOpGuidance, rejectedOpSummary, rtcPickGuidance, rtcPickSummary } from './review-queue';
+import { RTC_PICK_CLOSED_GUIDANCE, RTC_REJECTED_PICK_GUIDANCE, STOCK_ADJUST_PROBLEM_WORDS, rejectedOpGuidance, rejectedOpSummary, rtcPickGuidance, rtcPickSummary } from './review-queue';
 import { writeOffReason } from './write-off';
 
 /**
@@ -85,9 +85,9 @@ describe('the 4-7c mirrors', () => {
       },
     };
     expect(rtcPickGuidance('rtc-not-draft')).toBe(RTC_PICK_CLOSED_GUIDANCE);
-    expect(rtcPickGuidance('rtc-pick-mismatch')).toBe(RTC_PICK_GUIDANCE);
-    expect(RTC_PICK_GUIDANCE).toContain('The pick moved nothing');
-    expect(RTC_PICK_GUIDANCE).toContain('Returns or Damaged area');
+    expect(rtcPickGuidance('rtc-pick-mismatch')).toBe(RTC_REJECTED_PICK_GUIDANCE);
+    expect(RTC_REJECTED_PICK_GUIDANCE).toContain('The pick moved nothing');
+    expect(RTC_REJECTED_PICK_GUIDANCE).toContain('Returns or Damaged area');
     expect(rejectedOpGuidance(entry)).toEqual([RTC_PICK_CLOSED_GUIDANCE]);
     const summary = rtcPickSummary(entry);
     expect(summary).toEqual({

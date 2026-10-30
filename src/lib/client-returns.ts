@@ -118,8 +118,11 @@ export function rtcReasonWord(code: string): string {
 export const RTC_PICK_GUIDANCE =
   'Pick it on the handheld (Returns out tab). Nothing moves until it is dispatched — the units stay in the Returns and Damaged areas.';
 
-/** A11 — a short pick's units stay awaiting disposition. */
+/** A11 — a short pick's RETURNS units stay awaiting disposition. */
 export const RTC_SHORT_PICK_NOTE = 'Units you could not find stay awaiting disposition — raise a count for the RETURNS area';
+
+/** A short pick's DAMAGED units stay in DAMAGED (the pick moved nothing). */
+export const RTC_DAMAGED_SHORT_PICK_NOTE = 'Units you could not find stay in DAMAGED — raise a count for the DAMAGED area';
 
 /** The watermark on a note printed before dispatch. */
 export const RTC_DRAFT_WATERMARK = 'DRAFT — not dispatched';
@@ -306,6 +309,8 @@ export function rtcAddressMissing(error: unknown): { readonly addressKind: RtcAd
 export const canCancelClientReturn = (status: string): boolean => status === 'draft' || status === 'picked';
 export const canDispatchClientReturn = (status: string): boolean => status === 'picked';
 
+const milli = (qty: number): number => Math.round(qty * 1000);
+
 /** Milli-exact sum (quantities may be fractional, AD-9). */
 function sumMilli(values: readonly number[]): number {
   return values.reduce((total, value) => total + Math.round(value * 1000), 0) / 1000;
@@ -321,17 +326,42 @@ export function stagedUnits(rtc: Pick<ClientReturnDto, 'lines'>): { readonly ret
   return { returns: staged('returns'), damaged: staged('damaged') };
 }
 
-/** A11 — the floor instruction when a picked RTC is cancelled. */
+/** A11 — the floor instruction when a picked RTC is cancelled, naming only the areas it staged units from. */
 export function cancelPickedInstruction(rtc: Pick<ClientReturnDto, 'lines'>): string {
   const staged = stagedUnits(rtc);
-  return `Return the staged units to the Returns area (${formatCount(staged.returns)}) and the Damaged area (${formatCount(staged.damaged)})`;
+  const areas = [
+    ...(staged.returns > 0 ? [`the Returns area (${formatCount(staged.returns)})`] : []),
+    ...(staged.damaged > 0 ? [`the Damaged area (${formatCount(staged.damaged)})`] : []),
+  ];
+  return areas.length === 0 ? 'Return any staged units to where they were picked from' : `Return the staged units to ${areas.join(' and ')}`;
+}
+
+/**
+ * A11 — a short pick's note per source the RTC was picked short on: RETURNS
+ * units stay awaiting disposition, DAMAGED units stay in DAMAGED. Empty when
+ * nothing was short.
+ */
+export function shortPickNotes(rtc: Pick<ClientReturnDto, 'lines' | 'picked'>): readonly string[] {
+  if (rtc.picked === null) return [];
+  const short = (source: RtcLineSource) =>
+    rtc.lines.some((line) => line.source === source && line.pickedQuantity !== null && milli(line.pickedQuantity) < milli(line.quantity));
+  return [...(short('returns') ? [RTC_SHORT_PICK_NOTE] : []), ...(short('damaged') ? [RTC_DAMAGED_SHORT_PICK_NOTE] : [])];
+}
+
+/** What a cancel releases, naming only the sources the RTC draws from. */
+function releasedPhrase(rtc: Pick<ClientReturnDto, 'lines'>): string {
+  const parts = [
+    ...(rtc.lines.some((line) => line.source === 'returns') ? ['its returned units go back to awaiting disposition'] : []),
+    ...(rtc.lines.some((line) => line.source === 'damaged') ? ['its claim on DAMAGED is released'] : []),
+  ];
+  return parts.length === 0 ? 'its claims are released' : parts.join(' and ');
 }
 
 /** The cancel confirmation's sentence — a picked RTC's units are staged on the dock (A11). */
 export function rtcCancelConfirmSentence(rtc: Pick<ClientReturnDto, 'code' | 'status' | 'lines'>): string {
   return rtc.status === 'picked'
     ? `Cancel ${rtc.code}? Nothing has moved in the system. ${cancelPickedInstruction(rtc)}.`
-    : `Cancel ${rtc.code}? Nothing has moved — its returned units go back to awaiting disposition and its claim on DAMAGED is released.`;
+    : `Cancel ${rtc.code}? Nothing has moved — ${releasedPhrase(rtc)}.`;
 }
 
 export function parseRtcCancelReason(text: string): { readonly reason: string | null; readonly problem: string | null } {
@@ -367,7 +397,8 @@ export function rtcDispatchedOutcome(rtc: Pick<ClientReturnDto, 'code' | 'client
 }
 
 export function rtcCancelledOutcome(rtc: Pick<ClientReturnDto, 'code' | 'picked' | 'lines'>): RtcOutcome {
-  const released = 'Its returned units are awaiting disposition again and its claim on DAMAGED is released.';
+  const phrase = releasedPhrase(rtc);
+  const released = `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}.`;
   return {
     tone: 'accepted',
     word: `${rtc.code} cancelled`,
@@ -456,6 +487,24 @@ export function emptyRtcDraft(preselected: readonly Pick<AwaitingDispositionDto,
   return { consigneeAddress: 'return', note: '', returns, damaged: {} };
 }
 
+/**
+ * The draft against a fresh returnable read: a returned line no longer
+ * awaiting, and a DAMAGED arm gone or with nothing available, leave the draft
+ * — a line the dialog cannot show can never be cleared, and would fail every
+ * Create. Returns the same object when nothing was dropped.
+ */
+export function pruneRtcDraft(
+  draft: RtcDraft,
+  sources: { readonly awaiting: readonly Pick<AwaitingDispositionDto, 'receiptLineId' | 'weightGrams'>[]; readonly damaged: readonly ReturnableToClientArmDto[] },
+): RtcDraft {
+  const live = new Set(sources.awaiting.filter(rtcSelectable).map((line) => line.receiptLineId));
+  const arms = new Set(sources.damaged.filter((arm) => arm.available > 0).map(rtcArmKey));
+  const returns = Object.fromEntries(Object.entries(draft.returns).filter(([id]) => live.has(id)));
+  const damaged = Object.fromEntries(Object.entries(draft.damaged).filter(([key]) => arms.has(key)));
+  if (Object.keys(returns).length === Object.keys(draft.returns).length && Object.keys(damaged).length === Object.keys(draft.damaged).length) return draft;
+  return { ...draft, returns, damaged };
+}
+
 /** The draft line for an id, or the untouched default. */
 export function draftLine(lines: Readonly<Record<string, RtcDraftLine>>, id: string): RtcDraftLine {
   return lines[id] ?? { quantity: '', reason: RTC_DEFAULT_REASON };
@@ -471,8 +520,6 @@ export function rtcAddressBlock(client: Pick<ClientDto, 'returnAddress' | 'regis
 export type BuiltRtcCreate =
   | { readonly ok: true; readonly body: CreateClientReturnDto; readonly lineCount: number }
   | { readonly ok: false; readonly problem: string; readonly lineId?: string };
-
-const milli = (qty: number): number => Math.round(qty * 1000);
 
 function precisionProblem(name: string, uom: string, raw: string, qty: number, precision: number | null): string | null {
   if (precision === null) return null;
@@ -672,6 +719,12 @@ export function consigneeAddressLines(address: ConsigneeAddressDto): readonly st
     address.stateCode !== null ? `State: ${stateCodeLabel(address.stateCode)}` : address.state !== null && address.state !== '' ? `State: ${address.state}` : null,
     ...(address.phone === null || address.phone === '' ? [] : [`Phone: ${address.phone}`]),
   ].filter((line): line is string => line !== null);
+}
+
+/** The consignee address's state in words: the typed state, else the GST state code's label (A2), else null. */
+export function consigneeStateLabel(address: Pick<ConsigneeAddressDto, 'state' | 'stateCode'>): string | null {
+  if (address.state !== null && address.state !== '') return address.state;
+  return address.stateCode === null ? null : stateCodeLabel(address.stateCode);
 }
 
 /** A returned line's group on the note: its RMA and the order it came back from (A9). */

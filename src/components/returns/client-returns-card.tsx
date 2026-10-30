@@ -12,15 +12,14 @@ import {
   RTC_ADDRESS_LABEL,
   RTC_LIMITS,
   RTC_PICK_GUIDANCE,
-  RTC_SHORT_PICK_NOTE,
   RTC_SOURCE_LABEL,
   canCancelClientReturn,
+  consigneeStateLabel,
   canDispatchClientReturn,
   clientReturnStatusLabel,
   clientReturnStatusTone,
   lineQuantityLabel,
   parseRtcCancelReason,
-  pickedShort,
   rtcCancelConfirmSentence,
   rtcCancelledOutcome,
   rtcCreatedOutcome,
@@ -28,6 +27,7 @@ import {
   rtcReason,
   rtcReasonWord,
   rtcRefusalReloads,
+  shortPickNotes,
   stampLabel,
   summaryDocumentLabel,
   summaryQuantityLabel,
@@ -325,9 +325,9 @@ function ClientReturnDetail({
           {RTC_PICK_GUIDANCE}
         </div>
       )}
-      {rtc.status === 'picked' && pickedShort(rtc) && (
+      {rtc.status === 'picked' && shortPickNotes(rtc).length > 0 && (
         <div role="status" className="rounded-sm border border-(--warning) bg-(--warning)/10 px-3 py-2 text-sm" data-testid="rtc-short-pick">
-          Picked short. {RTC_SHORT_PICK_NOTE}.
+          Picked short. {shortPickNotes(rtc).join('. ')}.
         </div>
       )}
 
@@ -339,7 +339,7 @@ function ClientReturnDetail({
         </dd>
         <dt className="text-(--muted-foreground)">Send to</dt>
         <dd>
-          {RTC_ADDRESS_LABEL[rtc.consigneeAddressKind]} — {[address.contactName, address.line1, address.line2, address.city, address.state, address.pincode].filter((part) => part !== null && part !== '').join(', ')}
+          {RTC_ADDRESS_LABEL[rtc.consigneeAddressKind]} — {[address.contactName, address.line1, address.line2, address.city, consigneeStateLabel(address), address.pincode].filter((part) => part !== null && part !== '').join(', ')}
         </dd>
         <dt className="text-(--muted-foreground)">Created</dt>
         <dd>{stampLabel(rtc.created)}</dd>
@@ -477,7 +477,11 @@ function CancelConfirm({
 
   async function confirm() {
     const session = readSession();
-    if (session === null || inFlight.current) return;
+    if (session === null) {
+      setProblem('Your session expired — sign in again.');
+      return;
+    }
+    if (inFlight.current) return;
     const parsed = parseRtcCancelReason(reason);
     if (parsed.reason === null) {
       setProblem(parsed.problem);

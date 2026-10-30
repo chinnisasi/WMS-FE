@@ -7,6 +7,7 @@
  * claim left in JSX is a claim nothing can pin).
  */
 import { groupIndianDigits } from '@/lib/format-quantity';
+import { GST_STATE_NAMES } from '@/lib/gst-states';
 import { ApiProblem } from '@/lib/api/client';
 import type {
   PortalCreateAsnDto,
@@ -914,4 +915,12 @@ export function portalClientReturnQuantity(row: Pick<PortalClientReturnRowDto, '
   return row.shippedQuantity === row.totalQuantity
     ? portalQuantity(row.shippedQuantity)
     : `${portalQuantity(row.shippedQuantity)} of ${portalQuantity(row.totalQuantity)} shipped`;
+}
+
+/** The consignee address's state: the typed state, else the GST state code's name (a registered address carries only the code). */
+export function portalConsigneeState(address: { readonly state: string | null; readonly stateCode: string | null }): string | null {
+  if (address.state !== null && address.state !== '') return address.state;
+  if (address.stateCode === null) return null;
+  const name = GST_STATE_NAMES[address.stateCode];
+  return name === undefined ? address.stateCode : `${address.stateCode} ${name}`;
 }

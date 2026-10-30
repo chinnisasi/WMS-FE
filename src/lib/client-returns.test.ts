@@ -15,6 +15,7 @@ import {
   cancelPickedInstruction,
   clientReturnNoteModel,
   consigneeAddressLines,
+  consigneeStateLabel,
   emptyRtcDispatchExtra,
   emptyRtcDraft,
   keyForBody,
@@ -22,6 +23,11 @@ import {
   parseRtcCancelReason,
   parseRtcDispatch,
   pickedShort,
+  pruneRtcDraft,
+  RTC_DAMAGED_SHORT_PICK_NOTE,
+  RTC_SHORT_PICK_NOTE,
+  rtcCancelledOutcome,
+  shortPickNotes,
   rtcAddressBlock,
   rtcAddressMissing,
   rtcCancelConfirmSentence,
@@ -114,7 +120,9 @@ describe('A11 — the floor copy', () => {
     expect(rtcCancelConfirmSentence(picked)).toBe(
       'Cancel RTC-0001? Nothing has moved in the system. Return the staged units to the Returns area (3) and the Damaged area (3).',
     );
-    expect(rtcCancelConfirmSentence(clientReturn())).toContain('go back to awaiting disposition');
+    expect(rtcCancelConfirmSentence(clientReturn())).toBe(
+      'Cancel RTC-0001? Nothing has moved — its returned units go back to awaiting disposition and its claim on DAMAGED is released.',
+    );
     expect(pickedShort(picked)).toBe(true);
     expect(pickedShort(clientReturn())).toBe(false);
   });
@@ -309,5 +317,51 @@ describe('the note model', () => {
     const base = clientReturn();
     const serial = clientReturnNoteModel({ ...base, lines: [{ ...base.lines[0]!, serialNumber: 'SN-1', quantity: 1 }] });
     expect(serial.lines[0]!.detail).toBe('received opened · serial SN-1');
+  });
+});
+
+describe('code review — source-aware floor copy, the pruned draft, the consignee state', () => {
+  const base = pickedClientReturn();
+  const returnsOnly = { ...base, lines: [base.lines[0]!] };
+  const damagedOnly = { ...base, lines: [base.lines[1]!] };
+
+  test('the cancel names only the areas the RTC draws from', () => {
+    expect(cancelPickedInstruction(returnsOnly)).toBe('Return the staged units to the Returns area (3)');
+    expect(cancelPickedInstruction(damagedOnly)).toBe('Return the staged units to the Damaged area (3)');
+    expect(rtcCancelConfirmSentence({ ...clientReturn(), lines: [clientReturn().lines[1]!] })).toBe('Cancel RTC-0001? Nothing has moved — its claim on DAMAGED is released.');
+    expect(rtcCancelledOutcome({ ...clientReturn(), lines: [clientReturn().lines[0]!] }).reason).toBe('Its returned units go back to awaiting disposition.');
+    expect(rtcCancelledOutcome(returnsOnly).reason).toBe('Its returned units go back to awaiting disposition. Return the staged units to the Returns area (3).');
+  });
+
+  test('the short-pick note follows the short source', () => {
+    // The fixture: the returns line 3 of 4 (short), the damaged line whole.
+    expect(shortPickNotes(base)).toEqual([RTC_SHORT_PICK_NOTE]);
+    const damagedShort = { ...base, lines: [{ ...base.lines[0]!, pickedQuantity: 4 }, { ...base.lines[1]!, pickedQuantity: 1 }] };
+    expect(shortPickNotes(damagedShort)).toEqual([RTC_DAMAGED_SHORT_PICK_NOTE]);
+    expect(RTC_DAMAGED_SHORT_PICK_NOTE).toBe('Units you could not find stay in DAMAGED — raise a count for the DAMAGED area');
+    const both = { ...base, lines: [base.lines[0]!, { ...base.lines[1]!, pickedQuantity: 1 }] };
+    expect(shortPickNotes(both)).toEqual([RTC_SHORT_PICK_NOTE, RTC_DAMAGED_SHORT_PICK_NOTE]);
+    expect(shortPickNotes(clientReturn())).toEqual([]);
+  });
+
+  test('a fresh read prunes lines it no longer offers; an untouched draft is returned as is', () => {
+    const key = `${damagedArm().skuId}|`;
+    const draft: RtcDraft = {
+      consigneeAddress: 'return',
+      note: '',
+      returns: { [RRL_1]: { quantity: '4', reason: 'client-instruction' }, gone: { quantity: '1', reason: 'client-instruction' } },
+      damaged: { [key]: { quantity: '2', reason: 'damaged' } },
+    };
+    const pruned = pruneRtcDraft(draft, { awaiting: [awaitingLine()], damaged: [damagedArm({ available: 0 })] });
+    expect(Object.keys(pruned.returns)).toEqual([RRL_1]);
+    expect(pruned.damaged).toEqual({});
+    const kept = { ...draft, returns: { [RRL_1]: draft.returns[RRL_1]! } };
+    expect(pruneRtcDraft(kept, { awaiting: [awaitingLine()], damaged: [damagedArm()] })).toBe(kept);
+  });
+
+  test('a registered-address consignee prints its state code’s name', () => {
+    expect(consigneeStateLabel({ state: null, stateCode: '29' })).toBe('29 Karnataka');
+    expect(consigneeStateLabel({ state: 'Karnataka', stateCode: null })).toBe('Karnataka');
+    expect(consigneeStateLabel({ state: null, stateCode: null })).toBeNull();
   });
 });
