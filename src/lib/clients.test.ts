@@ -96,6 +96,7 @@ function client(over: Partial<ClientDto> = {}): ClientDto {
     taxDetails: NO_TAX_DETAILS,
     registeredAddress: null,
     returnAddress: null,
+    emailReplyTo: null,
     ...over,
   };
 }
@@ -581,18 +582,26 @@ describe('story 1-2a — departure, no new work, contacts and addresses', () => 
   });
 
   test('parseContactDraft: trimmed, lower-cased, a blank phone is null, roles in vocabulary order', () => {
-    expect(parseContactDraft({ name: ' Asha ', email: ' Asha@Acme.Example ', phone: '  ', roles: ['returns', 'operations'] })).toEqual({
+    expect(parseContactDraft({ name: ' Asha ', email: ' Asha@Acme.Example ', phone: '  ', roles: ['returns', 'operations'], emailEvents: ['order.dispatched'] })).toEqual({
       body: { name: 'Asha', email: 'asha@acme.example', phone: null, roles: ['operations', 'returns'] },
       problem: null,
     });
-    expect(parseContactDraft({ name: '  ', email: 'a@b.co', phone: '', roles: [] }).problem).toBe('A contact name is 1–120 characters.');
-    expect(parseContactDraft({ name: 'A', email: 'a@b.co', phone: '0'.repeat(21), roles: [] }).problem).toBe(
+    expect(parseContactDraft({ name: '  ', email: 'a@b.co', phone: '', roles: [], emailEvents: [] }).problem).toBe('A contact name is 1–120 characters.');
+    expect(parseContactDraft({ name: 'A', email: 'a@b.co', phone: '0'.repeat(21), roles: [], emailEvents: [] }).problem).toBe(
       'A phone is at most 20 characters.',
     );
     expect(contactRolesLabel([])).toBe('General');
     expect(contactRolesLabel(['operations', 'billing'])).toBe('Operations, Billing');
     expect(contactDraftDirty(emptyContactFields(), emptyContactFields())).toBe(false);
     expect(contactDraftDirty({ ...emptyContactFields(), roles: ['billing'] }, emptyContactFields())).toBe(true);
+    // Story 5-2b — ticking or unticking an email event is an edit; the order is not.
+    expect(contactDraftDirty({ ...emptyContactFields(), emailEvents: ['receipt.recorded'] }, emptyContactFields())).toBe(true);
+    expect(
+      contactDraftDirty(
+        { ...emptyContactFields(), emailEvents: ['order.dispatched', 'receipt.recorded'] },
+        { ...emptyContactFields(), emailEvents: ['receipt.recorded', 'order.dispatched'] },
+      ),
+    ).toBe(false);
   });
 
   test('contactReason words the contact codes', () => {
