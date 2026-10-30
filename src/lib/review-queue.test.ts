@@ -65,6 +65,11 @@ import {
   resolveDraftProblem,
   varianceListReason,
   varianceResolveReason,
+  FREIGHT_DISPATCH_LEFT_GUIDANCE,
+  FREIGHT_DISPATCH_RECALLED_GUIDANCE,
+  FREIGHT_DISPATCH_WHOLE_OP_GUIDANCE,
+  FREIGHT_PHOTO_GUIDANCE,
+  FREIGHT_PHOTOS_KEPT_NOTE,
 } from './review-queue';
 
 /**
@@ -1220,5 +1225,40 @@ describe('story 4-4a review — FB11 the not-ready consequence by order status; 
     expect(handoverReviewPhotos({ opType: 'handover.create', photos })).toEqual(photos);
     expect(handoverReviewPhotos({ opType: 'handover.create' })).toEqual([]);
     expect(handoverReviewPhotos({ opType: 'pack.execute', photos })).toEqual([]);
+  });
+});
+
+describe('story 4-9a — the freight review rows (A29, A41, A43, A50)', () => {
+  const row = (opType: string, problemCode: string, payload: Record<string, unknown>) =>
+    ({ opType, problemCode, payload }) as unknown as Parameters<typeof rejectedOpGuidance>[0];
+
+  test('a refused scan names the package and the load', () => {
+    const entry = row('freight.load-scan', 'package-not-on-load', { loadId: '0198f7a2-1b3c-7d4e-8f90-00000000a001', packageCode: 'O8FE5145B99902272.1.3', action: 'load' });
+    expect(rejectedOpGuidance(entry)).toEqual([
+      'O8FE5145B99902272.1.3 was not loaded on load …0000a001 — it belongs to no order on this truck. Check where that package is, then discard this row.',
+    ]);
+    expect(rejectedOpSummary(entry)).toEqual({ heading: 'Package not loaded', lines: ['O8FE5145B99902272.1.3 — it belongs to no order on this truck'] });
+  });
+
+  test('a partly refused departure: the orders left on the truck, the recall, the photos kept', () => {
+    const entry = row('freight.dispatch', 'freight-orders-refused', {
+      loadId: 'l-1',
+      loadCode: 'LD-0007',
+      vehicleNumber: 'KA01AB1234',
+      consignments: [{ orderId: 'o-4', decision: 'dispatch' }],
+      photoRefs: ['r1'],
+      refusals: [{ orderId: '0198f7a2-1b3c-7d4e-8f90-0000000000a4', code: 'order-holds-recalled-batch', detail: 'x' }],
+    });
+    expect(rejectedOpGuidance(entry)).toEqual([FREIGHT_DISPATCH_LEFT_GUIDANCE, FREIGHT_DISPATCH_RECALLED_GUIDANCE, FREIGHT_PHOTOS_KEPT_NOTE]);
+    const summary = rejectedOpSummary(entry)!;
+    expect(summary.heading).toBe('1 order left on LD-0007 (KA01AB1234) but not dispatched');
+    expect(summary.lines.at(-1)).toBe('1 loading-sheet photo kept');
+  });
+
+  test('a whole-op departure refusal and a photo row', () => {
+    const whole = row('freight.dispatch', 'load-dispatched', { loadId: 'l-1', consignments: [{}, {}], vehicleNumber: 'KA01AB1234' });
+    expect(rejectedOpGuidance(whole)).toEqual([FREIGHT_DISPATCH_WHOLE_OP_GUIDANCE]);
+    expect(rejectedOpSummary(whole)!.lines).toEqual(['2 orders, vehicle KA01AB1234 — the truck was already dispatched']);
+    expect(rejectedOpGuidance(row('freight-photo.stage', 'file-too-large', { ref: 'r', capturedAt: 'x', dispatchOpId: 'y' }))).toEqual([FREIGHT_PHOTO_GUIDANCE]);
   });
 });
