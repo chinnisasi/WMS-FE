@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchApiUploadHandoverSheet } from '@/lib/api/client';
 import type { HandoverDetailDto } from '@/lib/api/generated';
 import { istDateTimeLabel } from '@/lib/audit-exports';
+import { sheetDocumentCell, sheetEwayCell, sheetExceptionNote } from '@/lib/consignment';
 import { notifyOutboundChanged } from '@/lib/outbound';
 import {
   codTotalLabel,
@@ -124,6 +125,9 @@ export function HandoverSheet({ handover }: { handover: HandoverDetailDto }) {
             <th className="py-1 pr-2 font-medium">Order</th>
             <th className="py-1 pr-2 font-medium">AWB / LR</th>
             <th className="py-1 pr-2 font-medium">City</th>
+            {/* Story 4-6a (A19) — the brand's documents the parcel LEFT under (the stamped version). */}
+            <th className="py-1 pr-2 font-medium">Invoice / challan</th>
+            <th className="py-1 pr-2 font-medium">E-way bill</th>
             <th className="data py-1 pr-2 text-right font-medium">Parcels</th>
             <th className="data py-1 pr-2 text-right font-medium">Weight</th>
             <th className="data py-1 text-right font-medium">COD</th>
@@ -149,9 +153,21 @@ export function HandoverSheet({ handover }: { handover: HandoverDetailDto }) {
                     </span>
                   );
                 })()}
+                {/* Story 4-6a (A39) — staff only: the device flag, and the late record that cleared it. */}
+                {sheetExceptionNote(parcel, (iso) => `${istDateTimeLabel(iso)} IST`) !== null && (
+                  <span className="flex text-(--warning) print:hidden" data-testid="sheet-parcel-exception">
+                    ⚠ {sheetExceptionNote(parcel, (iso) => `${istDateTimeLabel(iso)} IST`)}
+                  </span>
+                )}
               </td>
               <td className="py-1 pr-2 font-mono">{parcel.awb}</td>
               <td className="py-1 pr-2">{parcel.destinationCity ?? '—'}</td>
+              <td className="py-1 pr-2 font-mono" data-testid="sheet-parcel-document">
+                {sheetDocumentCell(parcel)}
+              </td>
+              <td className="py-1 pr-2 font-mono" data-testid="sheet-parcel-eway">
+                {sheetEwayCell(parcel)}
+              </td>
               {/* FB18 — the server's own per-parcel count (the total below is the server's too). */}
               <td className="data py-1 pr-2 text-right">{parcel.packageCount ?? '—'}</td>
               <td className="data py-1 pr-2 text-right">{weightLabel(parcel.weightGrams)}</td>
@@ -161,7 +177,7 @@ export function HandoverSheet({ handover }: { handover: HandoverDetailDto }) {
         </tbody>
         <tfoot>
           <tr className="font-medium">
-            <td className="py-1 pr-2" colSpan={3}>
+            <td className="py-1 pr-2" colSpan={5}>
               {handover.shipmentCount} {handover.shipmentCount === 1 ? 'order' : 'orders'}
             </td>
             <td className="data py-1 pr-2 text-right">{handover.packageCount}</td>

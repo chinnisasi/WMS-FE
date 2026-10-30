@@ -32,6 +32,7 @@ import {
   type NoteLine,
   type ParsedConsignment,
 } from '@/lib/consignment-capture';
+import { ewayDispatchRefusal, parseDeclaredValue } from '@/lib/consignment';
 import { formatCount, formatQuantity, parseQuantityInput } from '@/lib/format-quantity';
 import { gstinStateName } from '@/lib/gst-states';
 import { parseGstinField } from '@/lib/gstin';
@@ -39,7 +40,6 @@ import { formatRupees } from '@/lib/invoices';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { formatIstDate, istDateOf } from '@/lib/rate-cards';
 import { DISPOSITION_REASON_LABEL, RETURN_CONDITION_LABEL, type DispositionReasonCode } from '@/lib/returns';
-import { parseRupees } from '@/lib/rupees';
 import type { StatusTone } from '@/lib/status-tone';
 import { addressLines, keyForBody, lineQuantityLabel, stampLabel, summaryQuantityLabel, summaryWhenLabel } from '@/lib/vendor-returns';
 
@@ -191,6 +191,9 @@ export function rtcReason(error: unknown, action: RtcAction = 'create'): string 
   const x = error.extensions;
   const status = str(x['rtcStatus']);
   const now = status === null ? '' : ` (it is ${clientReturnStatusLabel(status).toLowerCase()} now)`;
+  // Story 4-6a (A22) — the declared value judged against the e-way threshold.
+  const eway = ewayDispatchRefusal(error);
+  if (eway !== null) return eway;
   switch (error.code) {
     // ── create ──
     case 'exceeds-awaiting': {
@@ -660,15 +663,10 @@ export function parseRtcDispatch(
   if (!parsed.ok) return { ok: false, field: parsed.field, problem: parsed.problem };
   const consignee = parseGstinField(extra.consigneeGstin, 'The consignee GSTIN');
   if (consignee.problem !== null) return { ok: false, extra: 'consigneeGstin', problem: consignee.problem };
-  let declaredValuePaise: number | undefined;
-  if (extra.declaredValue.trim() !== '') {
-    const rupees = parseRupees(extra.declaredValue);
-    if ('problem' in rupees) return { ok: false, extra: 'declaredValue', problem: rupees.problem };
-    if (rupees.paise > RTC_LIMITS.declaredValuePaiseMax) {
-      return { ok: false, extra: 'declaredValue', problem: `The declared value is at most ${formatRupees(RTC_LIMITS.declaredValuePaiseMax)}.` };
-    }
-    declaredValuePaise = rupees.paise;
-  }
+  // Story 4-6a (A25) — required on the web: the e-way threshold is judged from it.
+  const value = parseDeclaredValue(extra.declaredValue);
+  if (value.problem !== null) return { ok: false, extra: 'declaredValue', problem: value.problem };
+  const declaredValuePaise = value.paise;
   const { debitNoteNumber: _dropped, ...capture } = parsed.body;
   void _dropped;
   return {
@@ -676,7 +674,7 @@ export function parseRtcDispatch(
     body: {
       ...capture,
       ...(consignee.gstin === undefined ? {} : { consigneeGstin: consignee.gstin }),
-      ...(declaredValuePaise === undefined ? {} : { declaredValuePaise }),
+      declaredValuePaise,
     },
   };
 }

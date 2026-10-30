@@ -128,6 +128,8 @@ function stubRouter(): void {
     if (match !== undefined) return json(routes[match]![0], routes[match]![1]);
     // Story 4-4a — an order's Shipping read a test did not route: an API without the route.
     if (pathname.endsWith('/shipping')) return json(404, { code: 'not-found', status: 404, title: 'Not found' });
+    // Story 4-6a — likewise an order's Tax documents read.
+    if (pathname.endsWith('/consignment')) return json(404, { code: 'not-found', status: 404, title: 'Not found' });
     return json(200, { items: [], nextCursor: null });
   }) as unknown as typeof fetch);
 }
@@ -2336,6 +2338,131 @@ describe('story 4-4a review — FB9 canRecord, FV5 the ?order= deep link', () =>
     await settle();
     expect(view.container.querySelector('[data-testid="order-deep-link"]')?.textContent).toContain('This order is not available');
     expect(urls.some((u) => u.includes('/shipping'))).toBe(false);
+    setURL('http://localhost/portal/orders');
+  });
+});
+
+describe('story 4-6a — the portal Tax documents section and banner (A18, A26, A45)', () => {
+  beforeEach(() => {
+    writeSession(PORTAL_SESSION);
+  });
+  const today = new Date(Date.now() + 19_800_000).toISOString().slice(0, 10);
+  const created = new Date(Date.now() - 86_400_000).toISOString();
+  const row = { id: ORDER_ID, status: 'ready_to_dispatch', source: 'manual', externalRef: null, clientOrderRef: 'SO-9', orderType: 'b2b', priority: 'normal', shipByDate: null, codAmountPaise: null, warehouseName: 'Whitefield', destinationName: 'Asha', destinationCity: 'Bengaluru', destinationPincode: '560001', lineCount: 1, createdAt: created };
+  const gate = { state: 'missing', blocking: true, requiredBecause: 'policy-b2b', valueFloorPaise: null, nationalThresholdPaise: 5_000_000, expiresToday: false };
+  const setURL = (url: string) => (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL(url);
+  const setValue = (input: HTMLInputElement, value: string) =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+  test('the gate in the client’s words; Record posts the brand’s numbers to the portal route under a key', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [row], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row, lines: [] }],
+      [`/portal/orders/${ORDER_ID}/consignment`]: [200, { gate, live: null, history: [] }],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Lines'));
+    await settle();
+    const section = view.container.querySelector<HTMLElement>('[data-testid="portal-consignment"]')!;
+    expect(section.querySelector('[data-testid="portal-consignment-gate"]')!.textContent).toBe('We need your tax invoice (or challan) before this order can leave.');
+    click(section.querySelector('[data-testid="portal-consignment-record"]')!);
+    await settle();
+    const form = section.querySelector<HTMLFormElement>('[data-testid="portal-consignment-form"]')!;
+    // The portal may record an exemption (A46 binds staff only).
+    expect(form.querySelector<HTMLInputElement>('[data-testid="consignment-eway-exempt"]')!.disabled).toBe(false);
+    setValue(form.querySelector<HTMLInputElement>('[data-testid="consignment-document-number"]')!, 'INV/26-27/0042');
+    setValue(form.querySelector<HTMLInputElement>('[data-testid="consignment-declared-value"]')!, '118000');
+    setValue(form.querySelector<HTMLInputElement>('[data-testid="consignment-eway-number"]')!, '123456789012');
+    setValue(form.querySelector<HTMLInputElement>('[data-testid="consignment-eway-date"]')!, today);
+    setValue(form.querySelector<HTMLInputElement>('[data-testid="consignment-eway-until"]')!, '2099-01-01');
+    postReplies = [[201, { consignment: { id: 'r-1', seq: 1, brandDocument: { type: 'invoice', number: 'INV/26-27/0042', date: today } } }]];
+    await act(async () => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.path).toBe(`/api/v1/tenants/${TENANT_ID}/portal/orders/${ORDER_ID}/consignment`);
+    expect(posts[0]!.key).not.toBeNull();
+    expect(posts[0]!.body).toEqual({
+      brandDocument: { type: 'invoice', number: 'INV/26-27/0042', date: today },
+      declaredValuePaise: 11_800_000,
+      ewayBill: { number: '123456789012', date: today, validUntil: '2099-01-01' },
+    });
+    expect(section.textContent).toContain('Recorded');
+  });
+
+  test('the banner counts the orders waiting and lists them; a viewer without orders.place is offered no Record', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [row], nextCursor: null }],
+      '/portal/consignments/needed': [200, { items: [{ orderId: ORDER_ID, orderLabel: 'O-1', clientOrderRef: 'SO-9', stage: 'packed', state: 'eway-required', requiredBecause: null, ewayValidUntil: null }] }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row, lines: [] }],
+      [`/portal/orders/${ORDER_ID}/consignment`]: [200, { gate: { ...gate, state: 'eway-required' }, live: null, history: [] }],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    const banner = view.container.querySelector<HTMLElement>('[data-testid="portal-needed-banner"]')!;
+    expect(banner.textContent).toContain('1 order is waiting for your invoice or e-way bill');
+    click(banner.querySelector('[data-testid="portal-needed-toggle"]')!);
+    await settle();
+    expect(banner.querySelector('[data-testid="portal-needed-list"]')!.textContent).toContain('SO-9');
+    click(banner.querySelector('[data-testid="portal-needed-open"]')!);
+    await settle();
+    const link = view.container.querySelector<HTMLElement>('[data-testid="order-deep-link"]')!;
+    // Opened from the banner, a blocked order's form is open at once.
+    expect(link.querySelector('[data-testid="portal-consignment-form"]')).not.toBeNull();
+  });
+
+  test('recording from the banner-opened order re-reads the waiting list: the banner goes when nothing waits', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [], nextCursor: null }],
+      '/portal/consignments/needed': [200, { items: [{ orderId: ORDER_ID, orderLabel: 'O-1', clientOrderRef: 'SO-9', stage: 'packed', state: 'missing', requiredBecause: 'policy-b2b', ewayValidUntil: null }] }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row, lines: [] }],
+      [`/portal/orders/${ORDER_ID}/consignment`]: [200, { gate, live: null, history: [] }],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    const banner = view.container.querySelector<HTMLElement>('[data-testid="portal-needed-banner"]')!;
+    click(banner.querySelector('[data-testid="portal-needed-toggle"]')!);
+    await settle();
+    click(banner.querySelector('[data-testid="portal-needed-open"]')!);
+    await settle();
+    const form = view.container.querySelector<HTMLFormElement>('[data-testid="portal-consignment-form"]')!;
+    setValue(form.querySelector<HTMLInputElement>('[data-testid="consignment-document-number"]')!, 'INV-1');
+    setValue(form.querySelector<HTMLInputElement>('[data-testid="consignment-declared-value"]')!, '1000');
+    routes['/portal/consignments/needed'] = [200, { items: [] }];
+    postReplies = [[201, { consignment: { id: 'r-1', seq: 1, brandDocument: { type: 'invoice', number: 'INV-1', date: today } } }]];
+    await act(async () => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(posts).toHaveLength(1);
+    expect(urls.filter((u) => u.includes('/portal/consignments/needed')).length).toBeGreaterThanOrEqual(2);
+    expect(view.container.querySelector('[data-testid="portal-needed-banner"]')).toBeNull();
+  });
+
+  test('?order=&tab=documents opens the order on its Tax documents; an unknown order says it is not available', async () => {
+    setURL(`http://localhost/portal/orders?order=${ORDER_ID}&tab=documents`);
+    routes = {
+      '/portal/orders': [200, { items: [], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row, lines: [] }],
+      [`/portal/orders/${ORDER_ID}/consignment`]: [200, { gate, live: null, history: [] }],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    const link = view.container.querySelector<HTMLElement>('[data-testid="order-deep-link"]')!;
+    expect(link.querySelector('[data-testid="portal-consignment-form"]')).not.toBeNull();
+    click(buttonNamed(link, 'All orders'));
+    await settle();
+    expect(window.location.search).toBe('');
+    view.unmount();
+    setURL(`http://localhost/portal/orders?order=${ORDER_ID}&tab=documents`);
+    routes = {
+      '/portal/orders': [200, { items: [], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [404, { code: 'not-found', status: 404, title: 'Not found' }],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    expect(view.container.querySelector('[data-testid="order-deep-link-not-found"]')?.textContent).toContain('This order is not available');
     setURL('http://localhost/portal/orders');
   });
 });

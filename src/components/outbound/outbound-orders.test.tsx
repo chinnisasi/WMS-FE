@@ -58,6 +58,8 @@ let allocates: { pathname: string; key: string | null }[] = [];
 let allocateAnswer: { status: number; body: unknown } = { status: 200, body: null };
 /** Story 4-3b — the customer shelf-life read's answer (null → the read 404s: an older backend). */
 let shelfLifeBody: Record<string, unknown> | null = null;
+/** Story 4-6a — the order's consignment read (null → 404, an API without the route). */
+let consignmentBody: Record<string, unknown> | null = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -181,6 +183,9 @@ function stubRouter(): void {
     if (method === 'GET' && /\/outbound\/orders\/[^/]+\/shelf-life$/.test(pathname) && shelfLifeBody !== null) {
       return json(200, { orderShelfLife: shelfLifeBody });
     }
+    if (method === 'GET' && /\/outbound\/orders\/[^/]+\/consignment$/.test(pathname) && consignmentBody !== null) {
+      return json(200, consignmentBody);
+    }
     if (method === 'GET' && /\/outbound\/orders\/[^/]+\/restock-plan$/.test(pathname)) {
       const orderId = pathname.split('/')[pathname.split('/').length - 2]!;
       return json(200, { orderId, orderStatus: order?.status ?? 'accepted', shipment: null, lines: [], restocked: restockedBody });
@@ -236,6 +241,7 @@ beforeEach(() => {
   allocates = [];
   allocateAnswer = { status: 200, body: null };
   shelfLifeBody = null;
+  consignmentBody = null;
   stubRouter();
   writeSession(SESSION);
 });
@@ -1874,5 +1880,32 @@ describe('OrderDetailPanel: customer shelf life (story 4-3b)', () => {
     await settle();
     expect(shelfReads()).toBe(0);
     expect(view.container.querySelector('[data-testid="customer-shelf-life"]')).toBeNull();
+  });
+});
+
+describe('story 4-6a — the orders list chip and the Tax documents panel (A16, A24)', () => {
+  test('a row whose documents block it carries the chip; a ready row none', async () => {
+    ordersResponder = () => ({
+      items: [
+        { ...entry('0198f7a2-1b3c-7d4e-8f90-0000000c0001', 'c-self'), consignmentState: 'missing' },
+        { ...entry('0198f7a2-1b3c-7d4e-8f90-0000000c0002', 'c-self'), consignmentState: 'ready' },
+      ],
+      nextCursor: null,
+    });
+    view = await mountForm();
+    const chips = [...view.container.querySelectorAll('[data-testid="order-docs-chip"]')];
+    expect(chips.map((c) => c.textContent)).toEqual(['Invoice needed']);
+  });
+
+  test('the order detail mounts the panel when the read answers', async () => {
+    const ORDER_ID = '0198f7a2-1b3c-7d4e-8f90-00000000c101';
+    order = { ...entry(ORDER_ID, 'c-self'), status: 'accepted', lines: [] };
+    consignmentBody = {
+      gate: { state: 'missing', blocking: true, requiredBecause: 'policy-b2b', valueFloorPaise: null, nationalThresholdPaise: 5_000_000, expiresToday: false },
+      live: null, history: [], dispatchedRecordId: null, duplicates: [], consignorStateMismatch: false, ewayUsedByOtherClient: null, scans: [], complianceException: null,
+    };
+    view = await mount(ORDER_ID);
+    expect(view.container.querySelector('[data-testid="consignment-panel"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-testid="consignment-gate-line"]')!.textContent).toBe('Required — B2B order. Not recorded.');
   });
 });

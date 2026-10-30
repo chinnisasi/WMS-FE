@@ -35,7 +35,7 @@ describe('the consignment capture (story 2-8b, shared with 4-7c)', () => {
     expect(BRAND_DOCUMENT_TYPES).toEqual(['challan', 'invoice']);
     expect(BRAND_DOCUMENT_LABEL.challan).toBe('Delivery challan');
     expect(EWAY_THRESHOLD_HINT).toBe(
-      "The WMS records the brand's e-way bill; it does not know the consignment value, so it cannot judge the ₹50,000 threshold.",
+      "Above the e-way threshold (₹50,000, or the state's intra-state limit) an e-way bill number is required — the WMS judges the declared value",
     );
   });
 

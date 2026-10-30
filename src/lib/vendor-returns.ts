@@ -11,6 +11,7 @@
 import { ApiProblem } from '@/lib/api/client';
 import type {
   CreateVendorReturnDto,
+  DispatchVendorReturnDto,
   PartnerAddressDto,
   PartnerDto,
   ReturnableArmDto,
@@ -30,6 +31,7 @@ import {
   type NoteLine,
   type ParsedConsignment,
 } from '@/lib/consignment-capture';
+import { ewayDispatchRefusal, parseDeclaredValue } from '@/lib/consignment';
 
 export type { DispatchNoteModel, NoteLine, NoteParty } from '@/lib/consignment-capture';
 import { formatCount, formatQuantity, parseQuantityInput } from '@/lib/format-quantity';
@@ -179,6 +181,9 @@ export function rtvReason(error: unknown, action: RtvAction = 'create'): string 
   const x = error.extensions;
   const status = str(x['rtvStatus']);
   const now = status === null ? '' : ` (it is ${vendorReturnStatusLabel(status).toLowerCase()} now)`;
+  // Story 4-6a (A22) — the declared value judged against the e-way threshold.
+  const eway = ewayDispatchRefusal(error);
+  if (eway !== null) return eway;
   switch (error.code) {
     // ── create ──
     case 'rtv-sku-unsupported':
@@ -600,8 +605,21 @@ export function keyForBody(
 // ── the dispatch ─────────────────────────────────────────────────────────────
 
 /** The dispatch capture for this RTV: the shared parser, its 30-day window counted from the RTV's creation. */
-export function parseRtvDispatch(draft: ConsignmentDraft, rtv: Pick<VendorReturnDto, 'created'>, nowMs: number): ParsedConsignment {
-  return parseConsignmentDraft(draft, { createdAt: rtv.created.at, nowMs });
+export type ParsedRtvDispatch =
+  | { readonly ok: true; readonly body: DispatchVendorReturnDto }
+  | { readonly ok: false; readonly field: Exclude<ParsedConsignment, { ok: true }>['field'] | 'declaredValue'; readonly problem: string };
+
+/**
+ * The RTV's dispatch body: the shared capture, then (story 4-6a, A22, A25)
+ * the declared value — required on the web, judged by the server against the
+ * e-way threshold.
+ */
+export function parseRtvDispatch(draft: ConsignmentDraft, rtv: Pick<VendorReturnDto, 'created'>, nowMs: number, declaredValue: string): ParsedRtvDispatch {
+  const parsed = parseConsignmentDraft(draft, { createdAt: rtv.created.at, nowMs });
+  if (!parsed.ok) return parsed;
+  const value = parseDeclaredValue(declaredValue);
+  if (value.problem !== null) return { ok: false, field: 'declaredValue', problem: value.problem };
+  return { ok: true, body: { ...parsed.body, declaredValuePaise: value.paise } };
 }
 
 // ── the printable note's model (kind-neutral, `return-dispatch-note.tsx`) ────

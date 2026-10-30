@@ -471,6 +471,13 @@ describe('cartons at the handover builder', () => {
   test('the two carton refusals have words', () => {
     expect(HANDOVER_REFUSAL_WORD['package-count-mismatch']).toBe('The parcel count is not the order’s carton count');
     expect(HANDOVER_REFUSAL_WORD['carton-not-current']).toContain('reprint');
-    expect(Object.keys(HANDOVER_REFUSAL_WORD).slice(-2)).toEqual(['package-count-mismatch', 'carton-not-current']);
+    // Story 4-6a (D4) — the three consignment codes come after the carton ones, last.
+    expect(Object.keys(HANDOVER_REFUSAL_WORD).slice(-5)).toEqual([
+      'package-count-mismatch',
+      'carton-not-current',
+      'consignment-documents-missing',
+      'eway-bill-required',
+      'eway-bill-expired',
+    ]);
   });
 });

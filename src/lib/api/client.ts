@@ -352,6 +352,16 @@ import {
   dockControllerWindow,
   portalControllerAdviseAwb,
   portalControllerOrderShipping,
+  // Story 4-6a — the consignment record (the brand's documents and e-way bill).
+  consignmentControllerRead,
+  consignmentControllerRecord,
+  consignmentControllerWithdraw,
+  consignmentControllerWorklist,
+  clientsControllerGetConsignmentPolicy,
+  clientsControllerUpdateConsignmentPolicy,
+  portalControllerConsignmentsNeeded,
+  portalControllerOrderConsignment,
+  portalControllerRecordConsignment,
   portalControllerUploadClientLabel,
   portalControllerUploadOrderDocument,
   shippingControllerHandOver,
@@ -738,6 +748,16 @@ import type {
   HandoverResponse,
   HandoversResponse,
   OrderShippingResponse,
+  OrderConsignmentResponse,
+  ConsignmentRecordResponse,
+  ConsignmentWithdrawResponse,
+  ConsignmentWorklistResponse,
+  ConsignmentPolicyResponse,
+  ConsignmentPolicyDto,
+  RecordConsignmentDto,
+  PortalOrderConsignmentResponse,
+  PortalConsignmentRecordResponse,
+  PortalConsignmentsNeededResponse,
   PortalAwbAdviceDto,
   PortalControllerUploadOrderDocumentData,
   PortalOrderShippingResponse,
@@ -7592,6 +7612,135 @@ export async function fetchApiPortalUploadOrderDocument(
     body: { file, kind },
     headers: { 'Idempotency-Key': idempotencyKey },
   });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+// ── Story 4-6a — the client consignment record ─────────────────────────────
+
+/** Story 4-6a (A16) — one order's consignment: the gate today, the live version, its history, the warnings and the scans (any staff session). */
+export async function fetchApiOrderConsignment(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<OrderConsignmentResponse> {
+  const { data, error, response } = await consignmentControllerRead({ path: { tenantId, orderId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/**
+ * Story 4-6a (A9) — record or amend the brand's document and e-way bill on a
+ * client order (`dispatch.execute`; an exemption or an amendment after
+ * dispatch `orders.manage`). 201 a new version; 200 `unchanged: true` when
+ * the body equals the live version.
+ */
+export async function fetchApiRecordConsignment(
+  tenantId: string,
+  orderId: string,
+  body: RecordConsignmentDto,
+  idempotencyKey: string,
+): Promise<ConsignmentRecordResponse> {
+  const { data, error, response } = await consignmentControllerRecord({
+    path: { tenantId, orderId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-6a (A10) — withdraw the live record before dispatch, with a reason (`orders.manage`). */
+export async function fetchApiWithdrawConsignment(
+  tenantId: string,
+  orderId: string,
+  reason: string,
+  idempotencyKey: string,
+): Promise<ConsignmentWithdrawResponse> {
+  const { data, error, response } = await consignmentControllerWithdraw({
+    path: { tenantId, orderId },
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-6a (A16) — the warehouse's Documents worklist: `needed` (default) or `exceptions`; `clientId` only when set. */
+export async function fetchApiConsignmentWorklist(
+  tenantId: string,
+  warehouseId: string,
+  options?: { clientId?: string; view?: 'needed' | 'exceptions'; signal?: AbortSignal },
+): Promise<ConsignmentWorklistResponse> {
+  const { data, error, response } = await consignmentControllerWorklist({
+    path: { tenantId, warehouseId },
+    query: definedQuery({ clientId: options?.clientId, view: options?.view }),
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-6a (A11) — a client's consignment documents rule (any staff session). */
+export async function fetchApiGetClientConsignmentPolicy(
+  tenantId: string,
+  clientId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ConsignmentPolicyResponse> {
+  const { data, error, response } = await clientsControllerGetConsignmentPolicy({ path: { tenantId, clientId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** Story 4-6a (A11) — set a client's documents rule (`clients.manage`). Answers the client. */
+export async function fetchApiUpdateClientConsignmentPolicy(
+  tenantId: string,
+  clientId: string,
+  body: ConsignmentPolicyDto,
+  idempotencyKey: string,
+): Promise<ClientDto> {
+  const { data, error, response } = await clientsControllerUpdateConsignmentPolicy({
+    path: { tenantId, clientId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data.client;
+}
+
+/** Story 4-6a (A18) — the portal's view of one of its orders' tax documents. */
+export async function fetchApiPortalOrderConsignment(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalOrderConsignmentResponse> {
+  const { data, error } = await portalControllerOrderConsignment({ path: { tenantId, orderId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 4-6a (A18) — the brand records (or amends) its tax document and e-way bill on one of its orders (portal, `orders.place`). */
+export async function fetchApiPortalRecordConsignment(
+  tenantId: string,
+  orderId: string,
+  body: RecordConsignmentDto,
+  idempotencyKey: string,
+): Promise<PortalConsignmentRecordResponse> {
+  const { data, error } = await portalControllerRecordConsignment({
+    path: { tenantId, orderId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 4-6a (A18) — the client's open orders waiting for its invoice or e-way bill (portal, at most 500). */
+export async function fetchApiPortalConsignmentsNeeded(
+  tenantId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalConsignmentsNeededResponse> {
+  const { data, error } = await portalControllerConsignmentsNeeded({ path: { tenantId }, signal: options?.signal });
   if (error || !data) throw portalError(error);
   return data;
 }

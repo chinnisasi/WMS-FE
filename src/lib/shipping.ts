@@ -23,6 +23,7 @@ import { istLocalToIso, normalizePhone, normalizeVehicleNo, PHONE_RE, VEHICLE_NO
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { DISPATCH_VIA_HANDOVER_REASON } from '@/lib/outbound-pack-dispatch';
 import { parseCartonCode } from '@/lib/carton-code';
+import { CONSIGNMENT_REFUSAL_WORD, consignmentBlockerWord } from '@/lib/consignment';
 import { parcelTagCode, parcelTagOrderSuffix } from '@/lib/parcel-tag';
 import { prepareImageForUpload, sniffImage } from '@/lib/receipt-photos';
 import type { StatusTone } from '@/lib/status-tone';
@@ -323,6 +324,8 @@ export const HANDOVER_REFUSAL_WORD: Readonly<Record<HandoverRefusalCode, string>
   'order-holds-recalled-batch': 'Holds a recalled lot — it cannot ship',
   'package-count-mismatch': 'The parcel count is not the order’s carton count',
   'carton-not-current': 'An old or foreign carton label — reprint this order’s labels',
+  // Story 4-6a (A14, D4) — the brand's documents, appended last (classified last).
+  ...CONSIGNMENT_REFUSAL_WORD,
 };
 
 export interface RefusedParcel {
@@ -552,8 +555,11 @@ export function rowOf(draft: HandoverDraft, orderId: string): HandoverRowDraft {
  * Why a candidate row cannot go as it stands, or null when it can (A20's
  * "Rows show why they cannot go"). The server re-checks every parcel.
  */
-export function candidateBlocker(candidate: Pick<HandoverCandidateDto, 'shipment'>, row: HandoverRowDraft): string | null {
+export function candidateBlocker(candidate: Pick<HandoverCandidateDto, 'shipment' | 'consignment'>, row: HandoverRowDraft): string | null {
   const shipment = candidate.shipment;
+  // Story 4-6a (A24) — the brand's documents: a blocking candidate cannot be ticked at all.
+  const documents = consignmentBlocker(candidate);
+  if (documents !== null) return documents;
   const scanned = normalizeAwb(row.awb);
   if (shipment !== null && shipment.kind === 'carrier') return HANDOVER_REFUSAL_WORD['shipment-not-client-arranged'];
   if (scanned !== '') {
@@ -568,6 +574,17 @@ export function candidateBlocker(candidate: Pick<HandoverCandidateDto, 'shipment
   if (shipment === null || shipment.kind === 'courier-label') return HANDOVER_REFUSAL_WORD['awb-required'];
   if (shipment.kind === 'client-label' && !shipment.labelVerified) return HANDOVER_REFUSAL_WORD['label-not-verified'];
   return null;
+}
+
+/**
+ * Story 4-6a (A16, A24) — why a candidate cannot leave by its documents gate
+ * ("Invoice not recorded — record it first"), or null. An older API sends no
+ * `consignment` key: nothing to say (the server still refuses per parcel).
+ */
+export function consignmentBlocker(candidate: Pick<HandoverCandidateDto, 'consignment'>): string | null {
+  const gate = candidate.consignment;
+  if (gate === undefined || !gate.blocking) return null;
+  return consignmentBlockerWord(gate.state) ?? 'The brand’s documents are not recorded — record them first';
 }
 
 export type ScanMatch =

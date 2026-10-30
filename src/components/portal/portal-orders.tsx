@@ -36,7 +36,15 @@ import {
   skuLabel,
 } from '@/lib/portal';
 import { ulid } from '@/lib/ulid';
-import { usePortalOrder, usePortalOrders, usePortalTenantId, usePortalSkuOptions, usePortalStockRows, usePortalWarehouses } from '@/lib/use-portal';
+import {
+  usePortalConsignmentsNeeded,
+  usePortalOrder,
+  usePortalOrders,
+  usePortalTenantId,
+  usePortalSkuOptions,
+  usePortalStockRows,
+  usePortalWarehouses,
+} from '@/lib/use-portal';
 import { roleHasCapability } from '@/lib/users';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
@@ -52,6 +60,8 @@ import { OrderImport } from '@/components/shared/order-import';
 import { StatusChip } from '@/components/shared/status-chip';
 import { StatusTimeline } from '@/components/shared/status-timeline';
 import { PortalShipping } from '@/components/portal/portal-shipping';
+import { PortalConsignment, PortalNeededList } from '@/components/portal/portal-consignment';
+import { portalNeededBanner } from '@/lib/consignment';
 import { orderStatusTone } from '@/lib/status-tone';
 
 /**
@@ -87,11 +97,22 @@ export function PortalOrders() {
   // order's detail, read by id — independent of the paginated list (the
   // 2-9a `?grn=` pattern). Read from the live URL after mount.
   const [deepLink, setDeepLink] = useState<string | null>(null);
+  // Story 4-6a (A45) — `&tab=documents` (the documents-needed email) opens the order on its Tax documents.
+  const [deepLinkDocuments, setDeepLinkDocuments] = useState(false);
   useEffect(() => {
-    const raw = new URLSearchParams(window.location.search).get('order');
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the live URL is read once, after hydration
-    if (raw !== null) setDeepLink(raw);
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('order');
+    if (raw !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the live URL is read once, after hydration
+      setDeepLink(raw);
+      setDeepLinkDocuments(params.get('tab') === 'documents');
+    }
   }, []);
+  // Story 4-6a (A26) — the orders waiting for this client's invoice or e-way bill.
+  const needed = usePortalConsignmentsNeeded();
+  const [neededOpen, setNeededOpen] = useState(false);
+  const neededItems = needed.state === 'ready' ? needed.data.items : [];
+  const neededWord = portalNeededBanner(neededItems.length);
 
   const columns: readonly DataTableColumn<PortalOrderRowDto>[] = [
     {
@@ -184,14 +205,43 @@ export function PortalOrders() {
         />
       )}
       {placed !== null && <FeedbackBanner tone="accepted" {...placedOrderBanner(placed)} />}
+      {neededWord !== null && (
+        <div data-testid="portal-needed-banner" className="flex flex-col gap-2">
+          <FeedbackBanner
+            tone="warning"
+            word={neededWord}
+            reason="Open the list to record each order’s documents."
+            action={
+              <button type="button" className={buttonClass} aria-expanded={neededOpen} onClick={() => setNeededOpen((v) => !v)} data-testid="portal-needed-toggle">
+                {neededOpen ? 'Hide them' : 'Show them'}
+              </button>
+            }
+          />
+          {neededOpen && (
+            <PortalNeededList
+              items={neededItems}
+              onOpen={(orderId) => {
+                setDeepLink(orderId);
+                setDeepLinkDocuments(true);
+                setNeededOpen(false);
+              }}
+            />
+          )}
+        </div>
+      )}
       {deepLink !== null && (
         <OrderDeepLink
+          key={deepLink}
           raw={deepLink}
           canWrite={canPlace}
+          focusDocuments={deepLinkDocuments}
+          onRecorded={() => void needed.refresh()}
           onClose={() => {
             setDeepLink(null);
+            setDeepLinkDocuments(false);
             const url = new URL(window.location.href);
             url.searchParams.delete('order');
+            url.searchParams.delete('tab');
             window.history.replaceState(null, '', `${url.pathname}${url.search}`);
           }}
         />
@@ -239,7 +289,7 @@ export function PortalOrders() {
               <EmptyState kind="filtered">{`None of your orders has the order number or channel reference "${reference}".`}</EmptyState>
             )
           }
-          renderExpanded={(row) => (row.id === openId ? <OrderLines orderId={row.id} canWrite={canPlace} /> : null)}
+          renderExpanded={(row) => (row.id === openId ? <OrderLines orderId={row.id} canWrite={canPlace} onRecorded={() => void needed.refresh()} /> : null)}
           loading={orders.state === 'loading' ? 'Loading your orders…' : undefined}
         />
       </div>
@@ -501,7 +551,19 @@ function PlaceOrderForm({
 const ORDER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Story 4-4a (A23) — `?order=<id>`: one order's detail and Shipping, read by id; malformed or not yours → "not available". */
-function OrderDeepLink({ raw, canWrite, onClose }: { raw: string; canWrite: boolean; onClose: () => void }) {
+function OrderDeepLink({
+  raw,
+  canWrite,
+  focusDocuments = false,
+  onRecorded,
+  onClose,
+}: {
+  raw: string;
+  canWrite: boolean;
+  focusDocuments?: boolean;
+  onRecorded?: () => void;
+  onClose: () => void;
+}) {
   const orderId = ORDER_ID_RE.test(raw.trim()) ? raw.trim().toLowerCase() : null;
   return (
     <div className="flex flex-col gap-2 rounded-md border border-(--border) p-3" data-testid="order-deep-link">
@@ -514,16 +576,38 @@ function OrderDeepLink({ raw, canWrite, onClose }: { raw: string; canWrite: bool
       {orderId === null ? (
         <FeedbackBanner tone="rejected" word="This order is not available" reason="The link is wrong, or the order is not your company’s." />
       ) : (
-        <OrderLines orderId={orderId} canWrite={canWrite} />
+        <OrderLines orderId={orderId} canWrite={canWrite} focusDocuments={focusDocuments} onRecorded={onRecorded} notFoundAsUnavailable />
       )}
     </div>
   );
 }
 
-function OrderLines({ orderId, canWrite = false }: { orderId: string; canWrite?: boolean }) {
+function OrderLines({
+  orderId,
+  canWrite = false,
+  focusDocuments = false,
+  onRecorded,
+  notFoundAsUnavailable = false,
+}: {
+  orderId: string;
+  canWrite?: boolean;
+  focusDocuments?: boolean;
+  onRecorded?: () => void;
+  /** Story 4-6a (A45) — a deep link to an unknown order (or another client's) says so, not "Retry". */
+  notFoundAsUnavailable?: boolean;
+}) {
   const order = usePortalOrder(orderId);
   if (order.state === 'loading') return <div className="text-(--muted-foreground)">Loading lines…</div>;
-  if (order.state === 'failed') return <ReadFailure word="Lines not loaded" reason={order.reason} onRetry={order.reload} />;
+  if (order.state === 'failed') {
+    if (notFoundAsUnavailable && order.notFound) {
+      return (
+        <div data-testid="order-deep-link-not-found">
+          <FeedbackBanner tone="rejected" word="This order is not available" reason="The link is wrong, or the order is not your company’s." />
+        </div>
+      );
+    }
+    return <ReadFailure word="Lines not loaded" reason={order.reason} onRetry={order.reload} />;
+  }
   // Story 4-2c — where this order sits in a backorder chain, in the client's words.
   const followOnOf = portalFollowOnOfText(order.data);
   const shippedShort = portalShippedShortText(order.data);
@@ -569,6 +653,16 @@ function OrderLines({ orderId, canWrite = false }: { orderId: string; canWrite?:
           ))}
         </ul>
       </div>
+      {/* Story 4-6a (A26) — the brand's tax document and e-way bill. */}
+      <PortalConsignment
+        orderId={orderId}
+        orderReference={orderReference(order.data)}
+        status={order.data.status}
+        createdAt={order.data.createdAt}
+        canWrite={canWrite}
+        focus={focusDocuments}
+        onRecorded={onRecorded}
+      />
       {/* Story 4-4a (A21) — who carries it, the label and the documents. */}
       <PortalShipping orderId={orderId} orderLabel={orderReference(order.data)} canWrite={canWrite} />
     </div>

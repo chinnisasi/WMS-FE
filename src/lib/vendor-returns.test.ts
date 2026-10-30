@@ -319,8 +319,8 @@ describe('the dispatch is bound to the return', () => {
     const rtv = pickedReturn();
     const now = Date.parse('2026-10-28T04:30:00.000Z');
     const base = { ...emptyConsignmentDraft(rtv.client.gstin, now), documentNumber: 'CH-1', vehicleNumber: 'KA01AB1234', packageCount: '1' };
-    expect(parseRtvDispatch({ ...base, documentDate: '2026-09-20' }, rtv, now).ok).toBe(true);
-    expect(parseRtvDispatch({ ...base, documentDate: '2026-09-19' }, rtv, now)).toMatchObject({ ok: false, field: 'documentDate' });
+    expect(parseRtvDispatch({ ...base, documentDate: '2026-09-20' }, rtv, now, '75000').ok).toBe(true);
+    expect(parseRtvDispatch({ ...base, documentDate: '2026-09-19' }, rtv, now, '75000')).toMatchObject({ ok: false, field: 'documentDate' });
   });
 });
 
@@ -378,5 +378,13 @@ describe('the printable note model', () => {
     const rtv = dispatchedReturn();
     const model = vendorReturnNoteModel({ ...rtv, dispatch: { ...rtv.dispatch!, consignorGstin: '27GLOWC1234G1Z5' } });
     expect(model.consignor.facts[0]!.value).toBe('27GLOWC1234G1Z5 (Maharashtra)');
+  });
+});
+
+describe('story 4-6a (A22) — the declared value judged at dispatch', () => {
+  test('eway-bill-required is worded with the server’s figures', () => {
+    expect(rtvReason(problem('eway-bill-required', 409, { declaredValuePaise: 7_500_000, thresholdPaise: 5_000_000, thresholdRule: 'national' }), 'dispatch')).toBe(
+      'The declared value ₹75,000 is above the e-way threshold ₹50,000 (national) — enter the brand’s e-way bill number and its date.',
+    );
   });
 });

@@ -63,9 +63,13 @@ export const CONSIGNMENT_LIMITS = {
   documentDateLookbackDays: 30,
 } as const;
 
-/** The e-way bill line under its inputs (decision 9 — recorded, never generated, never judged). */
+/**
+ * The e-way bill line under its inputs. Story 4-6a (A49) — the declared
+ * value is now judged: the old words ("does not know the consignment value")
+ * became false.
+ */
 export const EWAY_THRESHOLD_HINT =
-  "The WMS records the brand's e-way bill; it does not know the consignment value, so it cannot judge the ₹50,000 threshold.";
+  "Above the e-way threshold (₹50,000, or the state's intra-state limit) an e-way bill number is required — the WMS judges the declared value";
 
 /** Why a carrier identity is required, in words (the form's hint and its problem). */
 export const CARRIER_IDENTITY_RULE = 'Name who carries the goods — a transporter, a carrier name or a vehicle number (at least one).';

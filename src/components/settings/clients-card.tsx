@@ -51,6 +51,7 @@ import { ClientContactsPanel } from '@/components/settings/client-contacts';
 import { ClientAddressesPanel } from '@/components/settings/client-addresses';
 import { ClientReceivingPolicyPanel } from '@/components/settings/client-receiving-policy';
 import { ClientAllocationPolicyPanel } from '@/components/settings/client-allocation-policy';
+import { ClientConsignmentPolicyPanel } from '@/components/settings/client-consignment-policy';
 import { ClientWebhooksPanel } from '@/components/settings/client-webhooks';
 import { ClientEmailsPanel } from '@/components/settings/client-emails';
 
@@ -76,6 +77,8 @@ type Panel =
   | { kind: 'receiving'; client: ClientDto }
   // Story 4-3a — the outbound allocation policy, beside the receiving policy.
   | { kind: 'allocation'; client: ClientDto }
+  // Story 4-6a — the consignment documents rule (never the self client).
+  | { kind: 'documents'; client: ClientDto }
   // Story 5-2a — the client's outbound webhooks (owner-only).
   | { kind: 'webhooks'; client: ClientDto }
   // Story 5-2b — the client's receipt and dispatch emails (any staff; Reply-To owner-only).
@@ -93,6 +96,8 @@ function panelName(panel: Panel): string {
       return `${panel.client.code}'s receiving policy`;
     case 'allocation':
       return `${panel.client.code}'s allocation policy`;
+    case 'documents':
+      return `${panel.client.code}'s documents rule`;
     case 'webhooks':
       return `${panel.client.code}'s webhook endpoint`;
     case 'emails':
@@ -215,6 +220,8 @@ function ClientsCardSessioned() {
             {rowButton('Addresses', `Addresses of ${client.code}`, { kind: 'addresses', client })}
             {rowButton('Receiving', `Receiving policy of ${client.code}`, { kind: 'receiving', client })}
             {rowButton('Allocation', `Allocation policy of ${client.code}`, { kind: 'allocation', client })}
+            {/* Story 4-6a — every staff session reads it; hidden for the self client (invoiced by the WMS). */}
+            {client.systemOwned ? null : rowButton('Documents', `Consignment documents of ${client.code}`, { kind: 'documents', client })}
             {/* Story 5-2a — owner-only, never on the warehouse's own client. */}
             {canManage && !client.systemOwned ? rowButton('Webhooks', `Webhooks of ${client.code}`, { kind: 'webhooks', client }) : null}
             {statusActions.includes('suspend') ? rowButton('Suspend', `Suspend ${client.code}`, { kind: 'suspend', client }) : null}
@@ -330,6 +337,17 @@ function ClientsCardSessioned() {
 
       {panel?.kind === 'allocation' ? (
         <ClientAllocationPolicyPanel
+          key={panel.client.id}
+          client={panel.client}
+          canManage={canManage}
+          onClose={() => show(null)}
+          onSaved={() => notifyClientsChanged()}
+          onDirtyChange={onDirtyChange}
+        />
+      ) : null}
+
+      {panel?.kind === 'documents' && !panel.client.systemOwned ? (
+        <ClientConsignmentPolicyPanel
           key={panel.client.id}
           client={panel.client}
           canManage={canManage}

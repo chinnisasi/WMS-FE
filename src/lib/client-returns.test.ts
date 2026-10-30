@@ -257,10 +257,14 @@ describe('the dispatch', () => {
     });
   });
 
-  test('blank extras stay absent; a bad GSTIN or value names its field', () => {
-    const blank = parseRtcDispatch(capture, { consigneeGstin: '', declaredValue: '' }, rtc, now);
-    expect(blank.ok && 'consigneeGstin' in blank.body).toBe(false);
-    expect(blank.ok && 'declaredValuePaise' in blank.body).toBe(false);
+  test('a blank GSTIN stays absent; story 4-6a (A25) — the declared value is required; a bad GSTIN or value names its field', () => {
+    const blankGstin = parseRtcDispatch(capture, { consigneeGstin: '', declaredValue: '42000' }, rtc, now);
+    expect(blankGstin.ok).toBe(true);
+    expect(blankGstin.ok && 'consigneeGstin' in blankGstin.body).toBe(false);
+    expect(blankGstin.ok && blankGstin.body.declaredValuePaise).toBe(4_200_000);
+    const blankValue = parseRtcDispatch(capture, { consigneeGstin: '', declaredValue: ' ' }, rtc, now);
+    expect(blankValue).toMatchObject({ ok: false, extra: 'declaredValue' });
+    expect(!blankValue.ok && blankValue.problem).toContain('the e-way threshold is judged from it');
     expect(parseRtcDispatch(capture, { consigneeGstin: 'XX', declaredValue: '' }, rtc, now)).toMatchObject({ ok: false, extra: 'consigneeGstin' });
     expect(parseRtcDispatch(capture, { consigneeGstin: '', declaredValue: '1.234' }, rtc, now)).toMatchObject({ ok: false, extra: 'declaredValue' });
     expect(parseRtcDispatch(capture, { consigneeGstin: '', declaredValue: '10000000001' }, rtc, now)).toMatchObject({ ok: false, extra: 'declaredValue' });
@@ -363,5 +367,13 @@ describe('code review — source-aware floor copy, the pruned draft, the consign
     expect(consigneeStateLabel({ state: null, stateCode: '29' })).toBe('29 Karnataka');
     expect(consigneeStateLabel({ state: 'Karnataka', stateCode: null })).toBe('Karnataka');
     expect(consigneeStateLabel({ state: null, stateCode: null })).toBeNull();
+  });
+});
+
+describe('story 4-6a (A22) — the declared value judged at dispatch', () => {
+  test('eway-bill-required is worded with the server’s figures (a state’s intra-state limit named)', () => {
+    expect(rtcReason(problem('eway-bill-required', { declaredValuePaise: 12_000_000, thresholdPaise: 10_000_000, thresholdRule: 'state:29' }), 'dispatch')).toBe(
+      'The declared value ₹1,20,000 is above the e-way threshold ₹1,00,000 (Karnataka intra-state limit) — enter the brand’s e-way bill number and its date.',
+    );
   });
 });

@@ -18,7 +18,9 @@ import { ulid } from '@/lib/ulid';
 import { useTransporterOptions } from '@/lib/use-gate-ins';
 import { keyForBody, parseRtvDispatch, rtvReason, rtvRefusalReloads, rtvTransporterRefusal } from '@/lib/vendor-returns';
 
+import { Field } from '@/components/shared/field';
 import { ReturnDispatchForm, type TransporterChoices } from '@/components/shared/return-dispatch-form';
+import { inputClass } from '@/components/shared/surface';
 
 /**
  * Story 2-8b — Dispatch a picked return to vendor (`dispatch.execute`): the
@@ -44,6 +46,9 @@ export function VendorReturnDispatchDialog({
   const [nowMs] = useState(() => Date.now());
   const [draft, setDraft] = useState<ConsignmentDraft>(() => emptyConsignmentDraft(rtv.client.gstin, nowMs));
   const [fieldError, setFieldError] = useState<{ field: ConsignmentField; problem: string } | null>(null);
+  // Story 4-6a (A22, A25) — the declared value, required on the web; the server judges the e-way threshold from it.
+  const [declaredValue, setDeclaredValue] = useState('');
+  const [valueError, setValueError] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -61,6 +66,7 @@ export function VendorReturnDispatchDialog({
   function onEdit(patch: Partial<ConsignmentDraft>) {
     setDraft((current) => ({ ...current, ...patch }));
     setFieldError(null);
+    setValueError(null);
     setProblem(null);
   }
 
@@ -71,9 +77,10 @@ export function VendorReturnDispatchDialog({
       return;
     }
     if (inFlight.current) return;
-    const parsed = parseRtvDispatch(draft, rtv, Date.now());
+    const parsed = parseRtvDispatch(draft, rtv, Date.now(), declaredValue);
     if (!parsed.ok) {
-      setFieldError({ field: parsed.field, problem: parsed.problem });
+      if (parsed.field === 'declaredValue') setValueError(parsed.problem);
+      else setFieldError({ field: parsed.field, problem: parsed.problem });
       return;
     }
     keyRef.current = keyForBody(keyRef.current, JSON.stringify(parsed.body), ulid);
@@ -137,6 +144,32 @@ export function VendorReturnDispatchDialog({
         busyLabel="Dispatching…"
         onSubmit={() => void submit()}
         onDiscard={onClose}
+        extra={
+          <fieldset className="grid min-w-0 gap-3 rounded-md border border-(--border) p-3 sm:grid-cols-2">
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-(--muted-foreground)">Value</legend>
+            <Field
+              label="Declared value (₹)"
+              hint="The value on the brand's document, including tax — above the e-way threshold an e-way bill is required."
+              error={valueError}
+            >
+              {(control) => (
+                <input
+                  {...control}
+                  type="text"
+                  inputMode="decimal"
+                  value={declaredValue}
+                  onChange={(event) => {
+                    setDeclaredValue(event.target.value);
+                    setValueError(null);
+                    setProblem(null);
+                  }}
+                  className={`${inputClass} data w-40`}
+                  data-testid="rtv-declared-value"
+                />
+              )}
+            </Field>
+          </fieldset>
+        }
       />
     </div>
   );

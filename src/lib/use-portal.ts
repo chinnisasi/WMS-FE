@@ -15,6 +15,8 @@ import {
   fetchApiPortalInvoices,
   fetchApiPortalOrder,
   fetchApiPortalOrderShipping,
+  fetchApiPortalOrderConsignment,
+  fetchApiPortalConsignmentsNeeded,
   fetchApiPortalOrders,
   fetchApiPortalPurchaseOrder,
   fetchApiPortalPurchaseOrders,
@@ -31,6 +33,8 @@ import {
 } from '@/lib/api/client';
 import type {
   PortalOrderShippingResponse,
+  PortalOrderConsignmentResponse,
+  PortalConsignmentsNeededResponse,
   PortalAsnDetailResponse,
   PortalAsnRowDto,
   PortalGoodsReceiptDetailDto,
@@ -231,13 +235,29 @@ export function usePortalOrders(status: PortalOrderRowDto['status'] | null, refe
   );
 }
 
-export function usePortalOrder(orderId: string | null): ResourceState<PortalOrderDetailResponse> & Reloadable {
+export function usePortalOrder(orderId: string | null): ResourceState<PortalOrderDetailResponse> & Reloadable & { readonly notFound: boolean } {
   return usePortalDetail(orderId, 'This order', fetchApiPortalOrder);
 }
 
 /** Story 4-4a (A17) — one order's Shipping section; `refresh()` re-reads quietly (an expired link, an upload). */
 export function usePortalOrderShipping(orderId: string | null) {
   return usePortalDetail<PortalOrderShippingResponse>(orderId, 'This order’s shipping', fetchApiPortalOrderShipping);
+}
+
+/** Story 4-6a (A18, A26) — one order's Tax documents section; `refresh()` re-reads quietly after a record. */
+export function usePortalOrderConsignment(orderId: string | null) {
+  return usePortalDetail<PortalOrderConsignmentResponse>(orderId, 'This order’s tax documents', fetchApiPortalOrderConsignment);
+}
+
+/**
+ * Story 4-6a (A18, A26) — the client's open orders waiting for its invoice or
+ * e-way bill (at most 500, packed first): the Orders page's banner. One
+ * unpaged read, held through the detail shape under a fixed id.
+ */
+export function usePortalConsignmentsNeeded() {
+  return usePortalDetail<PortalConsignmentsNeededResponse>('needed', 'The orders waiting for your documents', (tenantId) =>
+    fetchApiPortalConsignmentsNeeded(tenantId),
+  );
 }
 
 export function usePortalAsns() {

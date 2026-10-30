@@ -3788,3 +3788,78 @@ describe('client-arranged shipping wrappers (story 4-4a)', () => {
     clearSession();
   });
 });
+
+describe('story 4-6a — the consignment wrappers', () => {
+  const ORDER = '0198f7a2-1b3c-7d4e-8f90-0000000000b1';
+  const W = '0198f7a2-1b3c-7d4e-8f90-0000000000b2';
+  const C = '0198f7a2-1b3c-7d4e-8f90-0000000000b3';
+  const KEY = '01HZZZZZZZZZZZZZZZZZZZZZZZ';
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}`;
+  const body = {
+    brandDocument: { type: 'invoice' as const, number: 'INV/26-27/0042', date: '2026-10-30' },
+    declaredValuePaise: 11_800_000,
+    ewayBill: { number: '123456789012', date: '2026-10-30', validUntil: '2026-11-01' },
+  };
+
+  test('record, withdraw and the policy PUT carry their bodies under the key', async () => {
+    writeSession(SESSION);
+    stubFetch(201, { consignment: {} });
+    await shipping.fetchApiRecordConsignment(SESSION.tenant.id, ORDER, body, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/consignment`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual(body);
+    stubFetch(200, { consignment: null, history: [] });
+    await shipping.fetchApiWithdrawConsignment(SESSION.tenant.id, ORDER, 'Wrong order', KEY);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/consignment/withdraw`);
+    expect(await lastRequest!.json()).toEqual({ reason: 'Wrong order' });
+    stubFetch(200, { client: { id: C } });
+    await shipping.fetchApiUpdateClientConsignmentPolicy(SESSION.tenant.id, C, { documentRule: 'all' }, KEY);
+    expect(lastRequest!.method).toBe('PUT');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/clients/${C}/consignment-policy`);
+    expect(await lastRequest!.json()).toEqual({ documentRule: 'all' });
+    clearSession();
+  });
+
+  test('the reads: the order, the worklist (query only when set), the policy', async () => {
+    writeSession(SESSION);
+    stubFetch(200, {});
+    await shipping.fetchApiOrderConsignment(SESSION.tenant.id, ORDER);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/outbound/orders/${ORDER}/consignment`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    await shipping.fetchApiConsignmentWorklist(SESSION.tenant.id, W);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/warehouses/${W}/outbound/consignments`);
+    expect(new URL(lastRequest!.url).search).toBe('');
+    await shipping.fetchApiConsignmentWorklist(SESSION.tenant.id, W, { clientId: C, view: 'exceptions' });
+    expect(new URL(lastRequest!.url).searchParams.get('clientId')).toBe(C);
+    expect(new URL(lastRequest!.url).searchParams.get('view')).toBe('exceptions');
+    await shipping.fetchApiGetClientConsignmentPolicy(SESSION.tenant.id, C);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/clients/${C}/consignment-policy`);
+    clearSession();
+  });
+
+  test('a gate refusal keeps its extensions', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { type: 'about:blank', title: 'x', status: 409, code: 'eway-bill-in-use', orderId: ORDER, orderLabel: 'SO-9' });
+    await expect(shipping.fetchApiRecordConsignment(SESSION.tenant.id, ORDER, body, KEY)).rejects.toMatchObject({
+      code: 'eway-bill-in-use',
+      extensions: { orderId: ORDER, orderLabel: 'SO-9' },
+    });
+    clearSession();
+  });
+
+  test('the portal routes', async () => {
+    writeSession(SESSION);
+    stubFetch(200, {});
+    await shipping.fetchApiPortalOrderConsignment(SESSION.tenant.id, ORDER);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/orders/${ORDER}/consignment`);
+    await shipping.fetchApiPortalConsignmentsNeeded(SESSION.tenant.id);
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/consignments/needed`);
+    stubFetch(201, { consignment: {} });
+    await shipping.fetchApiPortalRecordConsignment(SESSION.tenant.id, ORDER, body, KEY);
+    expect(lastRequest!.method).toBe('POST');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/portal/orders/${ORDER}/consignment`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    clearSession();
+  });
+});
