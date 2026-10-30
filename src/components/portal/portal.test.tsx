@@ -126,6 +126,8 @@ function stubRouter(): void {
       .sort((a, b) => b.length - a.length)
       .find((suffix) => pathname.endsWith(suffix));
     if (match !== undefined) return json(routes[match]![0], routes[match]![1]);
+    // Story 4-4a — an order's Shipping read a test did not route: an API without the route.
+    if (pathname.endsWith('/shipping')) return json(404, { code: 'not-found', status: 404, title: 'Not found' });
     return json(200, { items: [], nextCursor: null });
   }) as unknown as typeof fetch);
 }
@@ -2050,5 +2052,161 @@ describe('Import orders from a file (4-1c)', () => {
     view = render(<PortalOrders />);
     await settle();
     expect([...view.container.querySelectorAll('button')].some((b) => b.textContent === 'Import from file')).toBe(false);
+  });
+});
+
+describe('story 4-4a — the portal order Shipping section (A21)', () => {
+  beforeEach(() => {
+    writeSession(PORTAL_SESSION);
+  });
+
+  const row = (status: string, extra: Record<string, unknown> = {}) => ({
+    id: ORDER_ID,
+    status,
+    source: 'manual',
+    externalRef: null,
+    clientOrderRef: 'SO-9',
+    orderType: 'b2c',
+    priority: 'normal',
+    shipByDate: null,
+    codAmountPaise: null,
+    warehouseName: 'Whitefield',
+    destinationName: 'Asha',
+    destinationCity: 'Bengaluru',
+    destinationPincode: '560001',
+    lineCount: 1,
+    createdAt: '2026-10-08T10:00:00.000Z',
+    ...extra,
+  });
+  const shipping = (over: Record<string, unknown> = {}) => ({
+    status: 'no-label-yet',
+    courierName: null,
+    awb: null,
+    packageCount: null,
+    handedOverAt: null,
+    vehicleNumber: null,
+    handoverCode: null,
+    pickupPersonName: null,
+    label: null,
+    documents: [],
+    handoverSheet: [],
+    ...over,
+  });
+  const file = (over: Record<string, unknown>) => ({
+    id: 'f-1',
+    kind: 'pod',
+    fileName: 'SO-9-pod-1.jpg',
+    contentType: 'image/jpeg',
+    pageCount: null,
+    uploadedAt: '2026-10-30T10:40:00.000Z',
+    uploadedByYou: false,
+    url: 'https://files.example/pod?sig=1',
+    urlExpiresAt: '2099-01-01T00:00:00.000Z',
+    ...over,
+  });
+
+  async function expand(): Promise<HTMLElement> {
+    view = render(<PortalOrders />);
+    await settle();
+    click(buttonNamed(view.container, 'Lines'));
+    await settle();
+    const section = view.container.querySelector<HTMLElement>('[data-testid="portal-shipping"]');
+    expect(section).not.toBeNull();
+    return section!;
+  }
+
+  test('awaiting a label: the status in client words, Upload label and Send AWB only, the AWB column', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [row('accepted')], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row('accepted'), lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [200, shipping()],
+    };
+    const section = await expand();
+    expect(section.textContent).toContain('No label yet — upload one, send the AWB, or your courier brings it');
+    expect(section.querySelector('[data-testid="portal-open-label"]')?.textContent).toBe('Upload label');
+    expect(section.querySelector('[data-testid="portal-open-awb"]')?.textContent).toBe('Send AWB only');
+    expect(section.querySelector('[data-testid="portal-document-upload"]')).not.toBeNull();
+    // The upload form offers no POD.
+    const kinds = [...section.querySelectorAll('[data-testid="portal-document-upload"] option')].map((o) => o.getAttribute('value'));
+    expect(kinds).toEqual(['invoice', 'challan', 'eway-bill', 'other']);
+  });
+
+  test('handed over: the courier, AWB and IST time; documents are explicit downloads; no label forms', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [row('dispatched', { awb: '123456789012', courierName: 'Delhivery' })], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row('dispatched'), lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [
+        200,
+        shipping({
+          status: 'handed-over',
+          courierName: 'Delhivery',
+          awb: '123456789012',
+          packageCount: 1,
+          handedOverAt: '2026-10-30T10:35:00.000Z',
+          vehicleNumber: 'KA01AB1234',
+          handoverCode: 'HO-0001',
+          pickupPersonName: 'Ravi',
+          documents: [file({})],
+          handoverSheet: [file({ id: 'f-2', kind: 'signed-sheet', fileName: 'HO-0001-sheet-1.jpg' })],
+        }),
+      ],
+    };
+    const section = await expand();
+    expect(section.textContent).toContain('Handed over to Delhivery — AWB 123456789012, 30 Oct 2026, 16:05 IST');
+    expect(section.textContent).toContain('Handover HO-0001 · collected by Ravi · vehicle KA01AB1234');
+    expect(section.querySelector('[data-testid="portal-open-label"]')).toBeNull();
+    const links = [...section.querySelectorAll('a')];
+    expect(links.map((a) => a.textContent)).toEqual([
+      'Download Signed handover sheet · HO-0001-sheet-1.jpg',
+      'Download Proof of delivery · SO-9-pod-1.jpg',
+    ]);
+    expect(links.every((a) => a.hasAttribute('download'))).toBe(true);
+    expect(view!.container.textContent).toContain('Delhivery 123456789012');
+  });
+
+  test('Send AWB only posts the normalised AWB under a key; a bad AWB sends nothing', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [row('accepted')], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row('accepted'), lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [200, shipping()],
+    };
+    const section = await expand();
+    click(section.querySelector('[data-testid="portal-open-awb"]')!);
+    await settle();
+    const form = section.querySelector<HTMLFormElement>('[data-testid="portal-shipment-form"]')!;
+    const inputs = form.querySelectorAll<HTMLInputElement>('input');
+    const set = (input: HTMLInputElement, value: string) =>
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    set(inputs[0]!, '12');
+    set(inputs[1]!, 'Delhivery');
+    await act(async () => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(posts).toHaveLength(0);
+    expect(form.textContent).toContain('4–50');
+    set(inputs[0]!, '7700-1234');
+    postReplies = [[201, { shipment: { id: 's-1', orderId: ORDER_ID, kind: 'courier-label', status: 'labelled', courierName: 'Delhivery', awb: '77001234', packageCount: null, recordedAt: 'x' } }]];
+    await act(async () => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.path).toBe(`/api/v1/tenants/${TENANT_ID}/portal/orders/${ORDER_ID}/shipment/awb`);
+    expect(posts[0]!.body).toEqual({ awb: '77001234', courierName: 'Delhivery' });
+    expect(posts[0]!.key).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+  });
+
+  test('a viewer without orders.place reads everything and is offered no write', async () => {
+    writeSession({ ...PORTAL_SESSION, user: { ...PORTAL_SESSION.user, role: 'viewer' as never } });
+    routes = {
+      '/portal/orders': [200, { items: [row('accepted')], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row('accepted'), lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [200, shipping({ status: 'label-received', courierName: 'Delhivery', awb: '123456789012', label: file({ id: 'l-1', kind: 'label', fileName: 'SO-9-label.pdf' }) })],
+    };
+    const section = await expand();
+    expect(section.textContent).toContain('Label received — Delhivery AWB 123456789012');
+    expect(section.querySelector('[data-testid="portal-open-label"]')).toBeNull();
+    expect(section.querySelector('[data-testid="portal-document-upload"]')).toBeNull();
+    expect(section.textContent).toContain('Your label · SO-9-label.pdf');
   });
 });

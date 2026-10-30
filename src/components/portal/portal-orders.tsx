@@ -5,7 +5,7 @@ import { OrderFieldsFieldset } from '@/components/shared/order-fields-fieldset';
 import { BackorderChip, OrderFieldChips } from '@/components/shared/order-chips';
 import { emptyOrderFieldsDraft, type OrderFieldsDraft } from '@/lib/order-fields-form';
 import { orderTypeLabel } from '@/lib/order-fields';
-import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { ApiProblem, fetchApiPortalImportOrders, fetchApiPortalPlaceOrder } from '@/lib/api/client';
 import type { PortalOrderRowDto, PortalPlacedOrderResponse } from '@/lib/api/generated';
@@ -51,6 +51,7 @@ import { WarehousesFailure } from '@/components/shared/warehouses-failure';
 import { OrderImport } from '@/components/shared/order-import';
 import { StatusChip } from '@/components/shared/status-chip';
 import { StatusTimeline } from '@/components/shared/status-timeline';
+import { PortalShipping } from '@/components/portal/portal-shipping';
 import { orderStatusTone } from '@/lib/status-tone';
 
 /**
@@ -82,6 +83,15 @@ export function PortalOrders() {
   const [placed, setPlaced] = useState<PortalPlacedOrderResponse | null>(null);
   // Remounts the table on success, so its Prev/Next state starts on page one.
   const [pageEpoch, setPageEpoch] = useState(0);
+  // Story 4-4a (A23) — `?order=<id>` (a shipping email's link) opens THAT
+  // order's detail, read by id — independent of the paginated list (the
+  // 2-9a `?grn=` pattern). Read from the live URL after mount.
+  const [deepLink, setDeepLink] = useState<string | null>(null);
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get('order');
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the live URL is read once, after hydration
+    if (raw !== null) setDeepLink(raw);
+  }, []);
 
   const columns: readonly DataTableColumn<PortalOrderRowDto>[] = [
     {
@@ -118,6 +128,8 @@ export function PortalOrders() {
     { key: 'warehouse', header: 'Warehouse', priority: 2, render: (row) => row.warehouseName },
     { key: 'destination', header: 'Destination', priority: 3, render: (row) => orderDestination(row) },
     { key: 'lines', header: 'Lines', numeric: true, priority: 3, render: (row) => lineCountLabel(row.lineCount) },
+    // Story 4-4a (A17) — the courier and AWB of the live shipment, when there is one.
+    { key: 'awb', header: 'AWB', priority: 2, render: (row) => (row.awb === undefined ? '—' : `${row.courierName ?? ''} ${row.awb}`.trim()) },
     { key: 'created', header: 'Placed', render: (row) => portalDate(row.createdAt) },
   ];
 
@@ -172,6 +184,18 @@ export function PortalOrders() {
         />
       )}
       {placed !== null && <FeedbackBanner tone="accepted" {...placedOrderBanner(placed)} />}
+      {deepLink !== null && (
+        <OrderDeepLink
+          raw={deepLink}
+          canWrite={canPlace}
+          onClose={() => {
+            setDeepLink(null);
+            const url = new URL(window.location.href);
+            url.searchParams.delete('order');
+            window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+          }}
+        />
+      )}
       {importing && !placing && (
         <PortalOrderImport
           onClose={() => setImporting(false)}
@@ -215,7 +239,7 @@ export function PortalOrders() {
               <EmptyState kind="filtered">{`None of your orders has the order number or channel reference "${reference}".`}</EmptyState>
             )
           }
-          renderExpanded={(row) => (row.id === openId ? <OrderLines orderId={row.id} /> : null)}
+          renderExpanded={(row) => (row.id === openId ? <OrderLines orderId={row.id} canWrite={canPlace} /> : null)}
           loading={orders.state === 'loading' ? 'Loading your orders…' : undefined}
         />
       </div>
@@ -474,7 +498,29 @@ function PlaceOrderForm({
   );
 }
 
-function OrderLines({ orderId }: { orderId: string }) {
+const ORDER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Story 4-4a (A23) — `?order=<id>`: one order's detail and Shipping, read by id; malformed or not yours → "not available". */
+function OrderDeepLink({ raw, canWrite, onClose }: { raw: string; canWrite: boolean; onClose: () => void }) {
+  const orderId = ORDER_ID_RE.test(raw.trim()) ? raw.trim().toLowerCase() : null;
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-(--border) p-3" data-testid="order-deep-link">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">Order from your email</span>
+        <button type="button" className={buttonClass} onClick={onClose}>
+          All orders
+        </button>
+      </div>
+      {orderId === null ? (
+        <FeedbackBanner tone="rejected" word="This order is not available" reason="The link is wrong, or the order is not your company’s." />
+      ) : (
+        <OrderLines orderId={orderId} canWrite={canWrite} />
+      )}
+    </div>
+  );
+}
+
+function OrderLines({ orderId, canWrite = false }: { orderId: string; canWrite?: boolean }) {
   const order = usePortalOrder(orderId);
   if (order.state === 'loading') return <div className="text-(--muted-foreground)">Loading lines…</div>;
   if (order.state === 'failed') return <ReadFailure word="Lines not loaded" reason={order.reason} onRetry={order.reload} />;
@@ -523,6 +569,8 @@ function OrderLines({ orderId }: { orderId: string }) {
           ))}
         </ul>
       </div>
+      {/* Story 4-4a (A21) — who carries it, the label and the documents. */}
+      <PortalShipping orderId={orderId} canWrite={canWrite} />
     </div>
   );
 }

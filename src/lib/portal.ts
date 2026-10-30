@@ -10,6 +10,8 @@ import { groupIndianDigits } from '@/lib/format-quantity';
 import { GST_STATE_NAMES } from '@/lib/gst-states';
 import { ApiProblem } from '@/lib/api/client';
 import type {
+  PortalFileDto,
+  PortalOrderShippingResponse,
   PortalCreateAsnDto,
   PortalCreateOrderDto,
   PortalPlacedOrderResponse,
@@ -38,6 +40,7 @@ import {
   type LineOption,
 } from '@/lib/asns';
 import { parseQuantityInput } from '@/lib/format-quantity';
+import { shippingReason, type ShippingAction } from '@/lib/shipping';
 import { parseGstinField } from '@/lib/gstin';
 import { istDateOf } from '@/lib/rate-cards';
 import { clientOrderRefBody, parseClientOrderRef } from '@/lib/orders';
@@ -923,4 +926,125 @@ export function portalConsigneeState(address: { readonly state: string | null; r
   if (address.stateCode === null) return null;
   const name = GST_STATE_NAMES[address.stateCode];
   return name === undefined ? address.stateCode : `${address.stateCode} ${name}`;
+}
+
+// ── story 4-4a: the order's Shipping section (A17, A21, A44) ───────────────
+
+export type PortalShippingStatus = PortalOrderShippingResponse['status'];
+
+/** The status line's words, in the client's language — a `Record` over the generated union. */
+export const PORTAL_SHIPPING_STATUS_LABEL: Readonly<Record<PortalShippingStatus, string>> = {
+  cancelled: 'Cancelled — nothing will ship',
+  'no-label-yet': 'No label yet — upload one, send the AWB, or your courier brings it',
+  'label-received': 'Label received',
+  'awb-received': 'AWB received — your courier brings its labels',
+  'ready-for-pickup': 'Ready for pickup',
+  'handed-over': 'Handed over',
+  shipped: 'Shipped',
+  'shipped-no-courier-record': 'Shipped — no courier details recorded',
+};
+
+export const PORTAL_SHIPPING_STATUS_TONE: Readonly<Record<PortalShippingStatus, 'neutral' | 'success' | 'warning' | 'info'>> = {
+  cancelled: 'neutral',
+  'no-label-yet': 'warning',
+  'label-received': 'info',
+  'awb-received': 'info',
+  'ready-for-pickup': 'info',
+  'handed-over': 'success',
+  shipped: 'success',
+  'shipped-no-courier-record': 'success',
+};
+
+/**
+ * A44 — the portal shipping status, a byte-for-byte mirror of wms-be's
+ * `portalShippingStatus` (shipping.read.ts, as built — SC2: a dispatched
+ * order with a carrier dispatch record reads `shipped`, and a live carrier
+ * label before dispatch `awb-received`). The section renders the server's own
+ * `status`; this mirror is the documented rule, pinned by `portal.test.ts`.
+ */
+export function portalShippingStatus(
+  orderStatus: string,
+  live: { readonly kind: string; readonly status: string; readonly labelVerified: boolean } | null,
+  hasDispatchRecord: boolean,
+): PortalShippingStatus {
+  if (orderStatus === 'cancelled') return 'cancelled';
+  if (orderStatus === 'dispatched') {
+    if (live === null) return hasDispatchRecord ? 'shipped' : 'shipped-no-courier-record';
+    if (live.status === 'handed_over') return 'handed-over';
+    return 'shipped';
+  }
+  if (live === null) return 'no-label-yet';
+  if (live.kind === 'courier-label' || live.kind === 'carrier') return 'awb-received';
+  if (live.kind === 'client-label' && live.labelVerified && orderStatus === 'ready_to_dispatch') return 'ready-for-pickup';
+  return 'label-received';
+}
+
+/**
+ * The status line (A21): "Handed over to Delhivery — AWB 123456789012, 30
+ * Oct 2026, 16:05 IST"; with the courier and AWB for the other states that
+ * have them.
+ */
+export function portalShippingLine(shipping: Pick<PortalOrderShippingResponse, 'status' | 'courierName' | 'awb' | 'handedOverAt'>): string {
+  if (shipping.status === 'handed-over' || shipping.status === 'shipped') {
+    const courier = shipping.courierName === null ? '' : ` to ${shipping.courierName}`;
+    const awb = shipping.awb === null ? '' : ` — AWB ${shipping.awb}`;
+    const when = shipping.handedOverAt === null ? '' : `, ${portalDateTime(shipping.handedOverAt)}`;
+    return `${shipping.status === 'handed-over' ? 'Handed over' : 'Shipped'}${courier}${awb}${when}`;
+  }
+  const base = PORTAL_SHIPPING_STATUS_LABEL[shipping.status];
+  if (shipping.awb === null) return base;
+  return `${base} — ${shipping.courierName ?? 'courier'} AWB ${shipping.awb}`;
+}
+
+/** Whether the client may still upload or replace its label / AWB (before the handover; not cancelled or shipped). */
+export function portalCanRecordShipment(status: PortalShippingStatus): boolean {
+  return status === 'no-label-yet' || status === 'label-received' || status === 'awb-received' || status === 'ready-for-pickup';
+}
+
+/** The portal's document kinds (never a POD — the warehouse's record of delivery). */
+export const PORTAL_DOC_KIND_LABEL: Readonly<Record<'invoice' | 'challan' | 'eway-bill' | 'other', string>> = {
+  invoice: 'Invoice',
+  challan: 'Delivery challan',
+  'eway-bill': 'E-way bill',
+  other: 'Other document',
+};
+
+/** A portal file's line: "E-way bill · SO-1-eway-bill-1.pdf · 2 pages · uploaded by you". */
+export function portalFileLine(file: Pick<PortalFileDto, 'kind' | 'fileName' | 'pageCount' | 'uploadedByYou'>): string {
+  const kindWord =
+    (PORTAL_DOC_KIND_LABEL as Readonly<Record<string, string>>)[file.kind] ??
+    ({ pod: 'Proof of delivery', label: 'Your label', 'signed-sheet': 'Signed handover sheet' } as Readonly<Record<string, string>>)[file.kind] ??
+    'Document';
+  const parts = [kindWord, file.fileName];
+  if (file.pageCount !== null) parts.push(`${file.pageCount} ${file.pageCount === 1 ? 'page' : 'pages'}`);
+  if (file.uploadedByYou) parts.push('uploaded by you');
+  return parts.join(' · ');
+}
+
+/** The portal's shipping refusals: the session codes in portal words, the rest as the staff copy. */
+export function portalShippingReason(error: unknown, action: ShippingAction): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'client-suspended':
+        return PORTAL_SUSPENDED_MESSAGE;
+      case 'client-departed':
+        return PORTAL_DEPARTED_MESSAGE;
+      case 'unauthenticated':
+        return PORTAL_SESSION_EXPIRED;
+      case 'not-found':
+        return 'This order could not be found — it may not belong to your company.';
+      case 'role-denied':
+      case 'permission-denied':
+        return 'Your portal role cannot change this order’s shipping.';
+      case 'shipment-handed-over':
+        return 'The parcel was already handed over to the courier — the label can no longer change.';
+      case 'shipment-exists':
+        return error.extensions['kind'] === 'carrier'
+          ? 'The warehouse already labelled this order with a carrier — ask the warehouse before sending your own label.'
+          : 'This order already has your label or AWB — use Replace to send another.';
+      default:
+        return shippingReason(error, action);
+    }
+  }
+  return UNREACHABLE_REASON;
 }
