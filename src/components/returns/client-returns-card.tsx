@@ -50,6 +50,7 @@ import { DataTable, expandedRowId, type DataTableColumn } from '@/components/dat
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ClientReturnCreateDialog } from '@/components/returns/client-return-create-dialog';
 import { ClientReturnDispatchDialog } from '@/components/returns/client-return-dispatch-dialog';
+import { canPrintPackageLabels, PackageLabelsDialog } from '@/components/shared/package-labels-dialog';
 import { ClientReturnNote } from '@/components/returns/client-return-note';
 import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -94,6 +95,8 @@ export function ClientReturnsCard({ warehouseId, warehouseLabel }: { warehouseId
   );
   const canManage = roleHasCapability(role, 'returns.manage');
   const canDispatch = roleHasCapability(role, 'dispatch.execute');
+  // Story 4-5a (A27) — package labels are a station print (labels.execute, the 2-10b precedent).
+  const canPrintLabels = roleHasCapability(role, 'labels.execute');
 
   const [creating, setCreating] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -238,6 +241,7 @@ export function ClientReturnsCard({ warehouseId, warehouseLabel }: { warehouseId
                 clients={clients}
                 canManage={canManage}
                 canDispatch={canDispatch}
+                canPrintLabels={canPrintLabels}
                 precisionOf={precisionOf}
                 onOutcome={(outcome) => setBanner({ outcome, hidden: null })}
               />
@@ -275,6 +279,7 @@ function ClientReturnDetail({
   clients,
   canManage,
   canDispatch,
+  canPrintLabels = false,
   precisionOf,
   onOutcome,
 }: {
@@ -282,17 +287,19 @@ function ClientReturnDetail({
   clients: readonly ClientDto[] | null;
   canManage: boolean;
   canDispatch: boolean;
+  canPrintLabels?: boolean;
   precisionOf: (skuId: string) => number | null;
   onOutcome: (outcome: Outcome) => void;
 }) {
   const detail = useClientReturn(id);
-  const [mode, setMode] = useState<'view' | 'dispatch' | 'cancel'>('view');
+  const [mode, setMode] = useState<'view' | 'dispatch' | 'cancel' | 'labels'>('view');
 
   if (detail.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading the return…</div>;
   if (detail.state === 'failed') return <ReadFailure word="Return not loaded" reason={detail.reason} onRetry={detail.reload} />;
   const rtc = detail.data;
   const offerDispatch = canDispatch && canDispatchClientReturn(rtc.status);
   const offerCancel = canManage && canCancelClientReturn(rtc.status);
+  const offerLabels = canPrintLabels && canPrintPackageLabels(rtc.status);
   const clientStatus = clients?.find((entry) => entry.id === rtc.clientId)?.status ?? null;
   const address = rtc.consigneeAddress;
 
@@ -312,6 +319,11 @@ function ClientReturnDetail({
           {offerCancel && mode !== 'cancel' && (
             <button type="button" className={buttonClass} onClick={() => setMode('cancel')}>
               Cancel return
+            </button>
+          )}
+          {offerLabels && mode !== 'labels' && (
+            <button type="button" className={buttonClass} onClick={() => setMode('labels')} data-testid="rtc-package-labels">
+              Print package labels
             </button>
           )}
           <button type="button" className={buttonClass} onClick={() => window.print()}>
@@ -408,6 +420,16 @@ function ClientReturnDetail({
           </tbody>
         </table>
       </div>
+
+      {mode === 'labels' && offerLabels && (
+        <PackageLabelsDialog
+          kind="rtc"
+          documentId={rtc.id}
+          documentCode={rtc.code}
+          dispatchedCount={rtc.dispatch?.packageCount ?? null}
+          onClose={() => setMode('view')}
+        />
+      )}
 
       {mode === 'dispatch' && offerDispatch && (
         <ClientReturnDispatchDialog

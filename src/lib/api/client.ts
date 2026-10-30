@@ -135,6 +135,8 @@ import {
   outboundControllerRecartonOrder,
   outboundControllerPackingSlip,
   outboundControllerCartonLabels,
+  vendorReturnsControllerPackageLabels,
+  clientReturnsControllerPackageLabels,
   outboundControllerListWavePolicies,
   outboundControllerListWaves,
   outboundControllerReleaseWave,
@@ -4433,6 +4435,47 @@ export async function fetchApiCartonLabels(tenantId: string, orderId: string, qu
   const { data, error, response } = await outboundControllerCartonLabels({
     path: { tenantId, orderId },
     query: packFileQuery(query),
+    parseAs: 'blob',
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data as unknown as Blob;
+}
+
+/** Story 4-5a (A22) — a return's package-label query: format, layout, count and an optional slice. */
+export interface PackageLabelsQuery {
+  format: 'zpl' | 'pdf';
+  layout: 'label' | 'a4';
+  count?: number;
+  from?: number;
+  to?: number;
+}
+
+function packageLabelsQuery(query: PackageLabelsQuery): { format: 'zpl' | 'pdf'; layout: 'label' | 'a4'; count?: string; from?: string; to?: string } {
+  return {
+    format: query.format,
+    layout: query.layout,
+    ...(query.count === undefined ? {} : { count: String(query.count) }),
+    ...(query.from === undefined ? {} : { from: String(query.from) }),
+    ...(query.to === undefined ? {} : { to: String(query.to) }),
+  };
+}
+
+/** Story 4-5a (A22) — a return to vendor's package labels as a file (`labels.execute`). */
+export async function fetchApiVendorReturnPackageLabels(tenantId: string, vendorReturnId: string, query: PackageLabelsQuery): Promise<Blob> {
+  const { data, error, response } = await vendorReturnsControllerPackageLabels({
+    path: { tenantId, vendorReturnId },
+    query: packageLabelsQuery(query),
+    parseAs: 'blob',
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data as unknown as Blob;
+}
+
+/** Story 4-5a (A22) — a return to client's package labels as a file (`labels.execute`). */
+export async function fetchApiClientReturnPackageLabels(tenantId: string, clientReturnId: string, query: PackageLabelsQuery): Promise<Blob> {
+  const { data, error, response } = await clientReturnsControllerPackageLabels({
+    path: { tenantId, clientReturnId },
+    query: packageLabelsQuery(query),
     parseAs: 'blob',
   });
   if (error || !data) throw unwrapError(error, response?.status ?? 400);

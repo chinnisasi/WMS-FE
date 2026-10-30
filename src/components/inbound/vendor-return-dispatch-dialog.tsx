@@ -13,6 +13,7 @@ import {
   type ConsignmentField,
 } from '@/lib/consignment-capture';
 import { formatCount } from '@/lib/format-quantity';
+import { lastPrintedPackageLabelCount, packageCountDiffersWarning } from '@/lib/cartons';
 import { ulid } from '@/lib/ulid';
 import { useTransporterOptions } from '@/lib/use-gate-ins';
 import { keyForBody, parseRtvDispatch, rtvReason, rtvRefusalReloads, rtvTransporterRefusal } from '@/lib/vendor-returns';
@@ -126,6 +127,10 @@ export function VendorReturnDispatchDialog({
         problem={problem}
         consignorHint={consignorHint}
         consignorWarning={consignorStateWarning(draft.consignorGstin, rtv.warehouse.gstin)}
+        packageCountWarning={packageCountDiffersWarning(
+          /^\d+$/.test(draft.packageCount.trim()) ? Number(draft.packageCount.trim()) : undefined,
+          lastPrintedPackageLabelCount(rtv.id),
+        )}
         dateWindow={brandDocumentDateWindow(rtv.created.at, nowMs)}
         busy={busy}
         submitLabel="Dispatch to vendor"
