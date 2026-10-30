@@ -297,6 +297,14 @@ export interface NoteLine {
   readonly quantity: string;
   readonly uom: string;
   readonly reason: string;
+  /**
+   * Story 4-7c (A9) — the group the line prints under (an RMA, or the
+   * DAMAGED stock); a heading row opens each new group. Absent — no heading
+   * (the RTV's note is unchanged).
+   */
+  readonly group?: string;
+  /** Story 4-7c (A9) — a second line under the description (the received grade, the serial). */
+  readonly detail?: string;
 }
 
 export interface DispatchNoteModel {

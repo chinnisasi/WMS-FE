@@ -1,13 +1,15 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiDisposeReturn } from '@/lib/api/client';
-import type { BinResponse, ReturnDispositionResultDto, SkuResponse } from '@/lib/api/generated';
+import type { AwaitingDispositionDto, BinResponse, ReturnDispositionResultDto, SkuResponse } from '@/lib/api/generated';
 import { clientFilterKey } from '@/lib/active-client';
 import { istDateTimeLabel } from '@/lib/audit-exports';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { clientCell, showClients } from '@/lib/clients';
+import { limitSelectionToOneClient, rtcCreatedOutcome, rtcSelectable } from '@/lib/client-returns';
 import {
   DISPOSITION_OUTCOME_HINT,
   DISPOSITION_OUTCOME_LABEL,
@@ -40,6 +42,7 @@ import {
   type ReturnCondition,
 } from '@/lib/returns';
 import { parseQuantityInput } from '@/lib/format-quantity';
+import { RETURNS_PAGE_TABS } from '@/lib/page-tabs';
 import { useActiveClient } from '@/lib/use-active-client';
 import { useWarehouseBins } from '@/lib/use-inventory';
 import { useOutboundSkus } from '@/lib/use-outbound-orders';
@@ -52,6 +55,7 @@ import { DataTable, expandedRowId, type DataTableColumn } from '@/components/dat
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { buttonClass, inputClass, primaryClass, ReadFailure, rowButtonClass, Section, selectClass } from '@/components/shared/surface';
+import { ClientReturnCreateDialog } from '@/components/returns/client-return-create-dialog';
 
 /** The destructive confirm (Scrap) — the destructive token, never a new hue. */
 const destructiveClass =
@@ -66,7 +70,7 @@ const CONDITION_TONE: Readonly<Record<ReturnCondition, string>> = {
 };
 
 type QueueRow = AwaitingReturnLine & { readonly id: string };
-type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string };
+type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string; link?: { href: string; label: string } };
 
 /**
  * Story 4-7a — the Returns page's "Awaiting disposition" tab: every received
@@ -82,6 +86,10 @@ type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string };
  * answer, returns the queue to page one and fires the disposition event
  * (the RMA detail's epoch, A7). Refreshes on `RETURNS_CHANGED_EVENT`; no
  * polling.
+ *
+ * Story 4-7c (decision 14, A12) — `returns.manage` also selects lines (one
+ * client's — the queue is one warehouse's; a returned case is not offered)
+ * and **Return to client (n)** opens the create dialog with them preselected.
  */
 export function AwaitingDispositions({
   tenantId,
@@ -114,12 +122,24 @@ export function AwaitingDispositions({
   // queue to page one by remounting it.
   const [pageEpoch, setPageEpoch] = useState(0);
   const trigger = useRef<HTMLButtonElement | null>(null);
+  // Story 4-7c — the selection for a return to client, and the lines the open dialog was started with.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [returning, setReturning] = useState<readonly AwaitingDispositionDto[] | null>(null);
+  // The selection belongs to one page under one client filter: a filter change clears it (a guarded set-state).
+  const filterKey = clientFilterKey(active.filter);
+  const [selectionScope, setSelectionScope] = useState(filterKey);
+  if (selectionScope !== filterKey) {
+    setSelectionScope(filterKey);
+    setSelected(new Set());
+  }
 
   const { onCursor } = queue;
   useEffect(() => {
     const onChange = () => {
       onCursor(null);
       setPageEpoch((epoch) => epoch + 1);
+      // Story 4-7c — a selection is one page's: the re-read starts a new one.
+      setSelected(new Set());
     };
     window.addEventListener(RETURNS_CHANGED_EVENT, onChange);
     return () => window.removeEventListener(RETURNS_CHANGED_EVENT, onChange);
@@ -132,6 +152,9 @@ export function AwaitingDispositions({
   if (openId !== null && queue.state === 'ready' && !rows.some((row) => row.id === openId)) {
     setOpenId(null);
   }
+
+  // A12 — one client per return: once a line is selected, only that client's lines can join it.
+  const selectedClient = rows.find((row) => selected.has(row.id))?.clientId ?? null;
 
   const skuOf = (line: AwaitingReturnLine): SkuResponse | null => skuMap?.[line.skuId] ?? null;
   const precisionOf = (line: AwaitingReturnLine): number | null => skuOf(line)?.uomPrecision ?? null;
@@ -264,11 +287,36 @@ export function AwaitingDispositions({
       <div className="max-w-3xl text-(--muted-foreground)">
         {`${warehouseLabel === null ? 'Returned units' : `${warehouseLabel} — returned units`} still in the Returns bin, longest wait first. `}
         {canManage
-          ? 'Decide each one: restock it to a storage bin, quarantine it for QC, or scrap it.'
+          ? 'Decide each one: restock it to a storage bin, quarantine it for QC, or scrap it — or select lines of one client and send them back to it (Return to client).'
           : 'An owner or operations manager decides each one: restock, quarantine or scrap.'}
       </div>
       <ClientFilterChip active={active} tenantName={active.tenantName} />
       {outcome !== null && <FeedbackBanner tone={outcome.tone} word={outcome.word} reason={outcome.reason} />}
+      {outcome?.link !== undefined && (
+        <Link href={outcome.link.href} className="text-xs text-(--primary) underline underline-offset-2" data-testid="rtc-created-link">
+          {outcome.link.label}
+        </Link>
+      )}
+      {canManage && returning !== null && returning.length > 0 && (
+        <ClientReturnCreateDialog
+          warehouseId={warehouseId}
+          warehouseLabel={warehouseLabel ?? 'this warehouse'}
+          clientId={returning[0]!.clientId}
+          preselected={returning}
+          clients={clients}
+          tenantName={active.tenantName}
+          precisionOf={(skuId) => skuMap?.[skuId]?.uomPrecision ?? null}
+          onCancel={() => setReturning(null)}
+          onCreated={(rtc) => {
+            setReturning(null);
+            setSelected(new Set());
+            const created = rtcCreatedOutcome(rtc);
+            setOutcome({ tone: 'accepted', word: created.word, reason: created.reason, link: { href: RETURNS_PAGE_TABS.href('to-client'), label: 'Open it under the To client tab' } });
+            // The claimed lines leave the queue (their open quantity fell); an open RMA's split moves.
+            notifyReturnsDisposed();
+          }}
+        />
+      )}
       {queue.state === 'failed' ? (
         <ReadFailure word="Returns awaiting a decision unavailable" reason={queue.reason} onRetry={queue.reload} />
       ) : (
@@ -277,8 +325,36 @@ export function AwaitingDispositions({
           columns={columns}
           rows={rows}
           nextCursor={queue.state === 'ready' ? queue.data.nextCursor : null}
-          onCursor={queue.onCursor}
+          onCursor={(cursor) => {
+            // A page move clears the selection: its count, client and the dialog's lines are this page's.
+            setSelected(new Set());
+            queue.onCursor(cursor);
+          }}
           emptyMessage={emptyMessage}
+          selection={
+            canManage
+              ? {
+                  selected,
+                  onChange: (next) => setSelected(limitSelectionToOneClient(rows, selected, next)),
+                  canSelect: (row) => rtcSelectable(row) && (selectedClient === null || row.clientId === selectedClient),
+                  rowLabel: (row) => `Select ${row.skuCode} on ${row.rmaCode}`,
+                  noun: { one: 'line', many: 'lines' },
+                  busy: returning !== null,
+                  actions: (
+                    <button
+                      type="button"
+                      className={`${primaryClass} py-1`}
+                      onClick={() => {
+                        setOutcome(null);
+                        setReturning(rows.filter((row) => selected.has(row.id)));
+                      }}
+                    >
+                      Return to client ({rows.filter((row) => selected.has(row.id)).length})
+                    </button>
+                  ),
+                }
+              : undefined
+          }
           renderExpanded={(row) =>
             canManage && row.id === openId ? (
               <DispositionPanel
@@ -305,6 +381,7 @@ export function AwaitingDispositions({
                   setOpenId(null);
                   setOutcome({ tone: 'rejected', word: 'Not recorded', reason });
                   // Back to page one with a fresh cursor stack (the RETURNS_CHANGED reset).
+                  setSelected(new Set());
                   onCursor(null);
                   setPageEpoch((epoch) => epoch + 1);
                   queue.reload();

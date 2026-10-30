@@ -626,6 +626,8 @@ export function rejectedOpGuidance(
   if (entry.opType === 'return.restock') return [returnRestockGuidance(binCode)];
   // Story 2-8b — a refused handheld RTV pick: Discard only; the pick moved nothing.
   if (entry.opType === 'rtv.pick') return [rtvPickGuidance(entry.problemCode)];
+  // Story 4-7c — a refused handheld RTC pick: Discard only; the pick moved nothing.
+  if (entry.opType === 'rtc.pick') return [rtcPickGuidance(entry.problemCode)];
   // Story 4-7b — an unannounced parcel's refused units: Discard only; they are booked nowhere.
   if (entry.opType === 'return.receive_blind') return blindReceiveGuidance(entry);
   // Story 4-2b (A7) — a bench pack of an order cancelled while the parcel was at the bench: Discard only.
@@ -885,6 +887,7 @@ export function rejectedOpSummary(
   if (entry.opType === 'receipt-photo.stage') return receiptPhotoSummary(entry);
   if (entry.opType === 'return.restock') return returnRestockSummary(entry, skuCode);
   if (entry.opType === 'rtv.pick') return rtvPickSummary(entry);
+  if (entry.opType === 'rtc.pick') return rtcPickSummary(entry);
   if (entry.opType === 'return.receive_blind') return blindReceiveSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
@@ -1311,6 +1314,8 @@ export const STOCK_ADJUST_PROBLEM_WORDS: Readonly<Record<string, string>> = {
   'damaged-bin-write-off-only': 'the Damaged bin takes only a write-off',
   // Story 2-8b (A2) — open returns to vendor claim the damaged units.
   'damaged-claimed-by-rtv': 'the damaged units are claimed by a return to vendor',
+  // Story 4-7c (D3) — open returns to client claim the damaged units.
+  'damaged-claimed-by-rtc': 'the damaged units are claimed by a return to client',
   'kit-cannot-hold-stock': 'a kit holds no stock',
   'client-departed': "the SKU's client has departed",
   'not-found': 'a bin, SKU or batch no longer exists',
@@ -1543,4 +1548,61 @@ export function rtvPickSummary(entry: Pick<RejectedOpResponse, 'payload' | 'prob
   if (typeof occurredAt === 'string' && !Number.isNaN(Date.parse(occurredAt))) parts.push(`at ${istDateTimeLabel(occurredAt)} IST`);
   const problem = RTV_PICK_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
   return { heading: `${rtv} — pick not recorded`, lines: [`${parts.join(' · ')} — ${problem}`] };
+}
+
+// ── story 4-7c: a refused handheld return-to-client pick (an rtc.pick row) ──
+
+/**
+ * The remedy an `rtc.pick` row's reviewer reads (Discard only): the pick
+ * moved no stock, so only the floor has anything to undo — the staged units
+ * go back to the Returns or Damaged area, or the return is picked again.
+ */
+export const RTC_REJECTED_PICK_GUIDANCE =
+  'The pick moved nothing in the system. Return the staged units to the Returns or Damaged area, or pick the return again on the handheld (Returns out tab), then discard this row.';
+
+/** A return to client that is no longer a draft: nothing to pick again. */
+export const RTC_PICK_CLOSED_GUIDANCE =
+  'The return to client is no longer awaiting a pick (cancelled, or picked elsewhere) — the pick moved nothing. Return the staged units to the Returns or Damaged area, then discard this row.';
+
+export function rtcPickGuidance(problemCode: string): string {
+  return problemCode === 'rtc-not-draft' || problemCode === 'not-found' ? RTC_PICK_CLOSED_GUIDANCE : RTC_REJECTED_PICK_GUIDANCE;
+}
+
+/** Why the RTC pick was refused, in words (the row's whole-op `problemCode`); an unknown code reads as itself. */
+export const RTC_PICK_PROBLEM_WORDS: Readonly<Record<string, string>> = {
+  'rtc-not-draft': 'the return to client was no longer a draft',
+  'rtc-pick-mismatch': "the pick did not match the return's lines",
+  'rtc-pick-empty': 'every line was picked 0',
+  'not-found': "the return no longer exists, or it is another warehouse's",
+  'role-denied': 'the operator may not pick',
+  'validation-failed': 'the pick was malformed',
+  'operator-mismatch': 'captured by another operator',
+  'device-revoked': 'the device was revoked',
+};
+
+/**
+ * An `rtc.pick` row's summary: the return (a short form of its id — the
+ * payload carries no code), the lines and units picked, the device time in
+ * IST, then the refusal in words. Read defensively (a stored row is data).
+ */
+export function rtcPickSummary(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): { heading: string; lines: readonly string[] } {
+  const payload = entry.payload;
+  const id = typeof payload['clientReturnId'] === 'string' ? payload['clientReturnId'] : null;
+  const rtc = id === null ? 'unknown return to client' : `return to client …${shortIdTail(id)}`;
+  const lines = Array.isArray(payload['lines']) ? (payload['lines'] as unknown[]) : [];
+  let picked = 0;
+  let counted = 0;
+  for (const line of lines) {
+    const qty = typeof line === 'object' && line !== null ? (line as Record<string, unknown>)['pickedQty'] : undefined;
+    if (typeof qty === 'number' && Number.isFinite(qty)) {
+      picked += Math.round(qty * 1000);
+      counted += 1;
+    }
+  }
+  const parts = [`${lines.length} line${lines.length === 1 ? '' : 's'}`];
+  if (counted > 0) parts.push(`${picked / 1000} units picked`);
+  const occurredAt = payload['occurredAt'];
+  if (typeof occurredAt === 'string' && !Number.isNaN(Date.parse(occurredAt))) parts.push(`at ${istDateTimeLabel(occurredAt)} IST`);
+  const problem = RTC_PICK_PROBLEM_WORDS[entry.problemCode] ?? entry.problemCode;
+  return { heading: `${rtc} — pick not recorded`, lines: [`${parts.join(' · ')} — ${problem}`] };
 }

@@ -1678,6 +1678,9 @@ describe('story 4-7a — the portal Returns', () => {
               failedInspectionQty: 0,
               scrappedQty: 1,
               openQty: 0,
+              // Story 4-7c — units on their way back to the brand, and shipped back.
+              returningToClientQty: 1,
+              returnedToClientQty: 3,
             },
           ],
           dispositions: [
@@ -1711,6 +1714,8 @@ describe('story 4-7a — the portal Returns', () => {
     expect(detail).toContain('TEE-RED-M');
     expect(detail).toContain('4 of 4 received');
     expect(detail).toContain('returned as Wrong item');
+    expect(detail).toContain('1 being returned to you');
+    expect(detail).toContain('3 shipped back to you');
     expect(detail).toContain('Restocked 2');
     expect(detail).toContain('Scrapped 1 · Damaged');
     expect(detail).toContain('IST');

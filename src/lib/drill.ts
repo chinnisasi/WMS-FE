@@ -92,6 +92,8 @@ export const LEDGER_EVENT_TYPES = [
   'return.reversed',
   // Story 2-8b — a return to vendor's dispatched units, out of DAMAGED.
   'rtv.dispatched',
+  // Story 4-7c — a return to client's dispatched units, out of RETURNS or DAMAGED.
+  'rtc.dispatched',
 ] as const satisfies readonly LedgerEventType[];
 
 /** Record-typed: a new registry type must be labelled to compile. */
@@ -117,6 +119,7 @@ export const LEDGER_TYPE_LABEL: Readonly<Record<LedgerEventType, string>> = {
   'return.scrapped': 'Return scrapped',
   'return.reversed': 'Return reversed',
   'rtv.dispatched': 'Returned to vendor',
+  'rtc.dispatched': 'Returned to client',
 };
 
 /** A ledger event's type as words; an unregistered type prints as itself. */

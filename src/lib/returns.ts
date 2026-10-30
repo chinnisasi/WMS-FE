@@ -88,6 +88,13 @@ export const AWAITING_DISPOSITION_BADGE = '↩ Awaiting disposition';
 /** Story 4-7a — the badge once every received unit of the line is decided (restocked, scrapped or out of a settled hold). */
 export const DISPOSITIONED_BADGE = '✓ Dispositioned';
 
+/**
+ * Story 4-7c (A5) — the badge of a line whose remaining units sit on a draft or
+ * picked return to client: still awaiting (the goods are on the dock), never
+ * "Dispositioned" until the shipment leaves.
+ */
+export const RETURNING_TO_CLIENT_BADGE = '⇢ Returning to client';
+
 /** Story 4-7b — the badge of an unannounced return's line before its review is decided (amber, word-first). */
 export const AWAITING_REVIEW_BADGE = '◷ Awaiting review';
 
@@ -100,13 +107,13 @@ export const REVERSED_BADGE = '⟲ Reversed';
  * is `pending-review` until its review is decided (its `openQty` is 0, which
  * would otherwise read "Dispositioned"), and `reversed` once rejected.
  */
-export type LineDispositionState = 'none' | 'pending-review' | 'reversed' | 'awaiting' | 'dispositioned';
+export type LineDispositionState = 'none' | 'pending-review' | 'reversed' | 'awaiting' | 'returning-to-client' | 'dispositioned';
 
 type ReceiptLineSplit = Pick<
   ReturnReceiptLineViewDto,
   'rmaLineId' | 'qty' | 'openQty' | 'restockedQty' | 'scrappedQty' | 'onHoldQty' | 'failedInspectionQty'
 > &
-  Partial<Pick<ReturnReceiptLineViewDto, 'pendingReviewQty' | 'reversedQty'>>;
+  Partial<Pick<ReturnReceiptLineViewDto, 'pendingReviewQty' | 'reversedQty' | 'returningToClientQty' | 'returnedToClientQty'>>;
 
 /** One RMA line's received units across its receipts, split by what became of them (base units). */
 export interface LineDispositionSplit {
@@ -120,6 +127,10 @@ export interface LineDispositionSplit {
   readonly pendingReview: number;
   /** Story 4-7b — units of an unannounced return reversed at review (0 on an authorized return). */
   readonly reversed: number;
+  /** Story 4-7c — units on a draft or picked return to client (absent before 4-7c and when 0 — reads 0). */
+  readonly returningToClient: number;
+  /** Story 4-7c — units shipped back to the client on a dispatched return to client. */
+  readonly returnedToClient: number;
 }
 
 /** A figure an older payload did not carry reads as undecided — never as a silent 0 (A7: a stale badge must not claim "Dispositioned"). */
@@ -140,7 +151,18 @@ export function lineDispositionSplit(
   const lines = receipts.flatMap((receipt) => receipt.lines).filter((line) => line.rmaLineId === rmaLineId);
   if (lines.length === 0) return null;
   let undecided = false;
-  const sum = { received: 0, open: 0, restocked: 0, onHold: 0, failedInspection: 0, scrapped: 0, pendingReview: 0, reversed: 0 };
+  const sum = {
+    received: 0,
+    open: 0,
+    restocked: 0,
+    onHold: 0,
+    failedInspection: 0,
+    scrapped: 0,
+    pendingReview: 0,
+    reversed: 0,
+    returningToClient: 0,
+    returnedToClient: 0,
+  };
   for (const line of lines) {
     const open = figure(line.openQty);
     const onHold = figure(line.onHoldQty);
@@ -154,6 +176,9 @@ export function lineDispositionSplit(
     // Story 4-7b — absent on an authorized return's line (reads 0).
     sum.pendingReview += figure(line.pendingReviewQty) ?? 0;
     sum.reversed += figure(line.reversedQty) ?? 0;
+    // Story 4-7c (A6) — optional on the stored snapshot: absent reads 0.
+    sum.returningToClient += figure(line.returningToClientQty) ?? 0;
+    sum.returnedToClient += figure(line.returnedToClientQty) ?? 0;
   }
   return { ...sum, undecided };
 }
@@ -174,7 +199,9 @@ export function lineDispositionState(
   // (openQty 0) and must never read "Dispositioned"; a rejected one was reversed.
   if (split.pendingReview > 0) return 'pending-review';
   if (split.reversed > 0 && split.reversed >= split.received) return 'reversed';
-  return split.undecided ? 'awaiting' : 'dispositioned';
+  if (split.undecided) return 'awaiting';
+  // Story 4-7c (A5) — units on a draft or picked return to client still await the shipment.
+  return split.returningToClient > 0 ? 'returning-to-client' : 'dispositioned';
 }
 
 /** The awaiting badge's rule (A7): true while any received unit of the line is open or on hold. */
@@ -182,7 +209,8 @@ export function lineAwaitsDisposition(
   rmaLineId: string,
   receipts: readonly { readonly lines: readonly ReceiptLineSplit[] }[],
 ): boolean {
-  return lineDispositionState(rmaLineId, receipts) === 'awaiting';
+  const state = lineDispositionState(rmaLineId, receipts);
+  return state === 'awaiting' || state === 'returning-to-client';
 }
 
 /**
@@ -197,6 +225,8 @@ export function lineDispositionText(split: LineDispositionSplit, uom: QuantityUo
   if (split.onHold > 0) parts.push(`${q(split.onHold)} on hold`);
   if (split.failedInspection > 0) parts.push(`${q(split.failedInspection)} failed inspection`);
   if (split.scrapped > 0) parts.push(`${q(split.scrapped)} scrapped`);
+  if (split.returningToClient > 0) parts.push(`${q(split.returningToClient)} returning to client`);
+  if (split.returnedToClient > 0) parts.push(`${q(split.returnedToClient)} returned to client`);
   if (parts.length === 0) return null;
   if (split.open > 0) parts.push(`${q(split.open)} awaiting`);
   return parts.join(' · ');

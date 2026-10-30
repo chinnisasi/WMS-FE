@@ -78,6 +78,9 @@ export function ledgerReferenceLabel(doc: LedgerReferenceDocDto | null): string 
   // Story 2-8b — the return to vendor (and its line) a `rtv.dispatched` draw belongs to.
   if (doc.vendorReturnId !== undefined) parts.push(`return to vendor ${shortId(doc.vendorReturnId)}`);
   if (doc.grnLineId !== undefined && doc.vendorReturnId !== undefined) parts.push(`GRN line ${shortId(doc.grnLineId)}`);
+  // Story 4-7c — the return to client (and, for a RETURNS line, its RMA) a `rtc.dispatched` draw belongs to.
+  if (doc.clientReturnId !== undefined) parts.push(`return to client ${shortId(doc.clientReturnId)}`);
+  if (doc.rmaId !== undefined && doc.clientReturnId !== undefined) parts.push(`RMA ${shortId(doc.rmaId)}`);
   if (doc.note !== undefined) parts.push(`“${doc.note}”`);
   return parts.join(' · ');
 }

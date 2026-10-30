@@ -138,7 +138,11 @@ describe('page-tabs — the pages', () => {
       ['awaiting', 'Awaiting disposition'],
       // Story 4-7b — the unannounced parcels awaiting review.
       ['unannounced', 'Unannounced'],
+      // Story 4-7c — returns to client.
+      ['to-client', 'To client'],
     ]);
+    expect(RETURNS_PAGE_TABS.href('to-client')).toBe('/returns?tab=to-client');
+    expect(RETURNS_PAGE_TABS.parse({ tab: 'to-client' })).toBe('to-client');
     expect(RETURNS_PAGE_TABS.href('unannounced')).toBe('/returns?tab=unannounced');
     expect(RETURNS_PAGE_TABS.parse({ tab: 'unannounced' })).toBe('unannounced');
     expect(RETURNS_PAGE_TABS.href('authorizations')).toBe('/returns');

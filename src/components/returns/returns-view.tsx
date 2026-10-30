@@ -14,6 +14,7 @@ import {
   DISPOSITIONED_BADGE,
   RETURN_ORIGIN_LABEL,
   REVERSED_BADGE,
+  RETURNING_TO_CLIENT_BADGE,
   isBlindReturn,
   lineDispositionState,
   reviewBadge,
@@ -66,6 +67,7 @@ import { StatusChip } from '@/components/shared/status-chip';
 import { PageTabPanel, PageTabStrip, usePageTab } from '@/components/shared/page-tabs';
 import { AwaitingDispositions } from '@/components/returns/awaiting-dispositions';
 import { BlindReviewQueue } from '@/components/returns/blind-review';
+import { ClientReturnsCard } from '@/components/returns/client-returns-card';
 
 /** Story 4-7b — the tabs a role sees: Unannounced only with `returns.manage` (the review is theirs). */
 export function returnsVisibleTabs(canManage: boolean): readonly ReturnsTab[] {
@@ -92,6 +94,9 @@ const STATUS_OPTIONS: readonly ReturnStatus[] = ['open', 'partially_received', '
  * only, with a count of the parcels awaiting review): the review cards of
  * unannounced parcels received on the handheld with no RMA — Accept (link an
  * order, or none) or Reject (reverse the booking).
+ *
+ * Story 4-7c — a fourth tab, To client (`?tab=to-client`, every role reads
+ * it): the returns to client, with Cancel, Dispatch and Print.
  */
 export function ReturnsView({ initialTab = null }: { initialTab?: ReturnsTab | null } = {}) {
   // `null` = unknown (server render) → render nothing, no hydration mismatch.
@@ -221,6 +226,8 @@ function ReturnsSessioned({ initialTab }: { initialTab: ReturnsTab | null }) {
               </div>
             </Section>
           )
+        ) : tab === 'to-client' ? (
+          <ClientReturnsCard key={warehouseId} warehouseId={warehouseId} warehouseLabel={warehouse === undefined ? null : `${warehouse.code} ${warehouse.name}`} />
         ) : tab === 'awaiting' ? (
           <AwaitingDispositions
             key={warehouseId}
@@ -580,6 +587,7 @@ function ReturnDetail({
                 {state === 'pending-review' && <StatusChip tone="warning">{AWAITING_REVIEW_BADGE}</StatusChip>}
                 {state === 'reversed' && <StatusChip tone="neutral">{REVERSED_BADGE}</StatusChip>}
                 {state === 'awaiting' && <StatusChip tone="warning">{AWAITING_DISPOSITION_BADGE}</StatusChip>}
+                {state === 'returning-to-client' && <StatusChip tone="warning">{RETURNING_TO_CLIENT_BADGE}</StatusChip>}
                 {state === 'dispositioned' && <StatusChip tone="success">{DISPOSITIONED_BADGE}</StatusChip>}
                 {splitText !== null && <span className="data text-(--muted-foreground)">{splitText}</span>}
               </div>

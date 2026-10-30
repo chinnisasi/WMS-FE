@@ -19,6 +19,8 @@ import {
   fetchApiPortalPurchaseOrders,
   fetchApiPortalRecall,
   fetchApiPortalRecalls,
+  fetchApiPortalClientReturn,
+  fetchApiPortalClientReturns,
   fetchApiPortalReturn,
   fetchApiPortalReturns,
   fetchApiPortalService,
@@ -39,6 +41,8 @@ import type {
   PortalPurchaseOrderRowDto,
   PortalRecallDetailResponse,
   PortalRecallListEntryDto,
+  PortalClientReturnDetailResponse,
+  PortalClientReturnRowDto,
   PortalReturnDetailResponse,
   PortalReturnRowDto,
   PortalSkuDto,
@@ -279,6 +283,18 @@ export function usePortalRecall(recallId: string | null): ResourceState<PortalRe
 
 export function usePortalReturn(rmaId: string | null): ResourceState<PortalReturnDetailResponse> & Reloadable {
   return usePortalDetail(rmaId, 'This return', fetchApiPortalReturn);
+}
+
+/** Story 4-7c — this client's shipments back to it (returns to client), newest first. */
+export function usePortalClientReturns() {
+  return usePortalList<PortalClientReturnRowDto>('client-returns', 'your return shipments', (tenantId, cursor) =>
+    fetchApiPortalClientReturns(tenantId, cursorOption(cursor)),
+  );
+}
+
+/** Story 4-7c — one shipment back to this client (no bin, user, note or cancel reason). */
+export function usePortalClientReturn(clientReturnId: string | null): ResourceState<PortalClientReturnDetailResponse> & Reloadable {
+  return usePortalDetail(clientReturnId, 'This return shipment', fetchApiPortalClientReturn);
 }
 
 export function usePortalInvoices() {
