@@ -46,11 +46,15 @@ import { DetailDrawer } from '@/components/shared/detail-drawer';
  * web): a `handover-parcels-refused` answer marks each refused row with its
  * reason and keeps the draft. One key per draft, bound to its body.
  */
+/** The wall clock, read in the confirm handler (never during render). */
+const clockNow = (): number => Date.now();
+
 export function HandoverBuilder({
   tenantId,
   warehouseId,
   initialClientId,
   initialOrderId,
+  requestedOrderIds = [],
   onClose,
   onCreated,
 }: {
@@ -59,20 +63,33 @@ export function HandoverBuilder({
   initialClientId: string | null;
   /** "Hand over" on a row opens the builder with that order ticked. */
   initialOrderId: string | null;
+  /** FE14 — orders asked for by "Hand over" on further rows while the builder is open: ticked unless the draft says otherwise. */
+  requestedOrderIds?: readonly string[];
   onClose: () => void;
   onCreated: (response: HandoverResponse) => void;
 }) {
   const clients = useClients();
   const transporters = useTransporterOptions();
-  const [draft, setDraft] = useState<HandoverDraft>(() => {
+  const [ownDraft, setDraft] = useState<HandoverDraft>(() => {
     const base = emptyHandoverDraft(initialClientId ?? '');
     return initialOrderId === null ? base : { ...base, rows: { [initialOrderId]: { ...EMPTY_ROW, selected: true } } };
   });
+  // FE14 — a requested order joins the draft ticked (derived at render, never a reset effect — guide §1.5).
+  const draft: HandoverDraft = {
+    ...ownDraft,
+    rows: {
+      ...Object.fromEntries(requestedOrderIds.filter((id) => !(id in ownDraft.rows)).map((id) => [id, { ...EMPTY_ROW, selected: true }])),
+      ...ownDraft.rows,
+    },
+  };
   const candidates = useHandoverCandidates(warehouseId, draft.clientId === '' ? null : draft.clientId);
   const items: readonly HandoverCandidateDto[] = candidates.state === 'ready' ? candidates.data.items : [];
+  const truncated = candidates.state === 'ready' && candidates.data.truncated;
   const [scan, setScan] = useState('');
   const [scanNote, setScanNote] = useState<{ tone: 'accepted' | 'warning' | 'rejected'; text: string } | null>(null);
-  const [awaitingAwbFor, setAwaitingAwbFor] = useState<string | null>(null);
+  const [awaitingRaw, setAwaitingAwbFor] = useState<string | null>(null);
+  // FE13 — a row that left the list (a reload) no longer awaits its AWB.
+  const awaitingAwbFor = awaitingRaw !== null && items.some((c) => c.orderId === awaitingRaw) ? awaitingRaw : null;
   const [ambiguous, setAmbiguous] = useState<readonly string[] | null>(null);
   const [bound, setBound] = useState<{ key: string; body: string } | null>(null);
   const [pending, setPending] = useState(false);
@@ -94,13 +111,15 @@ export function HandoverBuilder({
   }
 
   function editRow(orderId: string, patch: Partial<HandoverRowDraft>) {
-    setDraft((current) => ({ ...current, rows: { ...current.rows, [orderId]: { ...rowOf(current, orderId), ...patch } } }));
+    setDraft((current) => ({ ...current, rows: { ...current.rows, [orderId]: { ...(current.rows[orderId] ?? rowOf(draft, orderId)), ...patch } } }));
     setRefused((current) => {
       if (!current.has(orderId)) return current;
       const next = new Map(current);
       next.delete(orderId);
       return next;
     });
+    // FE15 — editing or unticking a row clears its other-client alert too.
+    setForeign((current) => (current.includes(orderId) ? current.filter((id) => id !== orderId) : current));
   }
 
   function pickClient(clientId: string) {
@@ -121,10 +140,14 @@ export function HandoverBuilder({
     setScan('');
     setAmbiguous(null);
     if (result.kind === 'unknown') {
-      setScanNote({ tone: 'warning', text: result.problem });
+      // FE12 — with a truncated list the parcel may be past the oldest 500.
+      setScanNote({
+        tone: 'warning',
+        text: truncated && awaitingAwbFor === null ? `Not in the oldest ${MAX_HANDOVER_CANDIDATES} listed — hand these over first, then refresh.` : result.problem,
+      });
     } else if (result.kind === 'ambiguous') {
       setAmbiguous(result.orderIds);
-      setScanNote({ tone: 'warning', text: 'This tag matches two parcels — tick the right one below.' });
+      setScanNote({ tone: 'warning', text: 'This code matches two parcels — tick the right one below.' });
     } else if (result.kind === 'awb-for') {
       editRow(result.orderId, { selected: true, awb: result.awb });
       setAwaitingAwbFor(null);
@@ -146,7 +169,7 @@ export function HandoverBuilder({
   async function onConfirm(event: React.FormEvent) {
     event.preventDefault();
     if (inFlight.current) return;
-    const parsed = parseHandoverDraft(draft, warehouseId, items, Date.now());
+    const parsed = parseHandoverDraft(draft, warehouseId, items, clockNow());
     if (parsed.body === null) {
       setProblem(parsed.problem);
       return;
@@ -254,6 +277,12 @@ export function HandoverBuilder({
           </div>
         ) : (
           <div className="flex flex-col gap-2">
+            {/* FB14 — re-read the list (a parcel packed since it opened). */}
+            <div>
+              <button type="button" className={buttonClass} onClick={candidates.reload} data-testid="handover-refresh">
+                Refresh the list
+              </button>
+            </div>
             {candidates.data.truncated && (
               <FeedbackBanner
                 tone="warning"

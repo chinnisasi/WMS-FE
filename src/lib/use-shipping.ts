@@ -99,8 +99,16 @@ export function useOrderShipping(
     try {
       const data = await fetchApiOrderShipping(tenantId, orderId);
       if (mine === seq.current) setResult({ tenantId, orderId, state: { state: 'ready', data } });
-    } catch {
-      // A failed quiet refresh keeps the last-good record (guide §1.3).
+    } catch (error) {
+      // A failed quiet refresh keeps the last-good record (guide §1.3) — but when it superseded the
+      // first load there is none, so it settles the state rather than leaving Loading forever (FE4).
+      if (mine !== seq.current) return;
+      if (error instanceof ApiProblem && error.status === 404) {
+        setResult((prev) => (prev !== null && prev.tenantId === tenantId && prev.orderId === orderId ? prev : { tenantId, orderId, state: { state: 'ready', data: null } }));
+        return;
+      }
+      const failed = { state: 'failed', reason: shippingReason(error, 'read') } as const;
+      setResult((prev) => (prev !== null && prev.tenantId === tenantId && prev.orderId === orderId ? prev : { tenantId, orderId, state: failed }));
     }
   }, [tenantId, orderId]);
 
@@ -111,22 +119,23 @@ export function useOrderShipping(
 /**
  * The live shipment of each given order (4.6c's per-order read, which since
  * 4-4a carries `kind` and `labelVerifiedAt`) — the pipeline page's Shipping
- * cell and the manifest builder read the same map. A 404 is "none"; a real
- * failure fails the whole arm (a terminal manifest built from a part-read
- * page would silently omit shipments).
+ * cell and the manifest builder read the same map. A 404 is "none". A failed
+ * read is recorded PER ORDER (`failures`, FB4): the cell shows it with a
+ * Retry, and the manifest builder fails only when one of ITS orders failed
+ * (a terminal manifest built from a part-read page would silently omit one).
  */
 export function useOrderShipments(
   tenantId: string,
   orderIds: readonly string[],
 ): (
   | { state: 'loading' }
-  | { state: 'ready'; data: ReadonlyMap<string, ShipmentDto | null> }
-  | { state: 'failed'; reason: string }
+  | { state: 'ready'; data: ReadonlyMap<string, ShipmentDto | null>; failures: ReadonlyMap<string, string> }
 ) & { reload: () => void } {
   const [revision, bump] = useOutboundRevision();
   const [result, setResult] = useState<{
     orderKey: string;
-    state: { state: 'ready'; data: ReadonlyMap<string, ShipmentDto | null> } | { state: 'failed'; reason: string };
+    data: ReadonlyMap<string, ShipmentDto | null>;
+    failures: ReadonlyMap<string, string>;
   } | null>(null);
   const orderKey = `${tenantId}|${orderIds.join(',')}`;
 
@@ -137,18 +146,18 @@ export function useOrderShipments(
       const settled = await Promise.allSettled(
         orderIds.map(async (orderId) => {
           const response = await fetchApiGetShipment(tenantId, orderId);
-          return [orderId, response === null ? null : response.shipment] as const;
+          return response === null ? null : response.shipment;
         }),
       );
       if (cancelled) return;
-      const failure = settled.find((entry): entry is PromiseRejectedResult => entry.status === 'rejected');
-      if (failure !== undefined) {
-        setResult({ orderKey, state: { state: 'failed', reason: readReason(failure.reason, 'the shipments') } });
-        return;
-      }
-      const map = new Map<string, ShipmentDto | null>();
-      for (const entry of settled) if (entry.status === 'fulfilled') map.set(entry.value[0], entry.value[1]);
-      setResult({ orderKey, state: { state: 'ready', data: map } });
+      const data = new Map<string, ShipmentDto | null>();
+      const failures = new Map<string, string>();
+      settled.forEach((entry, index) => {
+        const orderId = orderIds[index]!;
+        if (entry.status === 'fulfilled') data.set(orderId, entry.value);
+        else failures.set(orderId, readReason(entry.reason, 'the shipment'));
+      });
+      setResult({ orderKey, data, failures });
     })();
     return () => {
       cancelled = true;
@@ -157,9 +166,13 @@ export function useOrderShipments(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderKey, revision]);
 
-  if (orderIds.length === 0) return { state: 'ready', data: new Map(), reload: bump };
-  if (result === null || result.orderKey !== orderKey) return { state: 'loading', reload: bump };
-  return { ...result.state, reload: bump };
+  const reload = useCallback(() => {
+    setResult(null);
+    bump();
+  }, [bump]);
+  if (orderIds.length === 0) return { state: 'ready', data: new Map(), failures: new Map(), reload };
+  if (result === null || result.orderKey !== orderKey) return { state: 'loading', reload };
+  return { state: 'ready', data: result.data, failures: result.failures, reload };
 }
 
 export interface HandoverCandidates {
@@ -307,8 +320,12 @@ export function useHandoverDetail(
     try {
       const { handover } = await fetchApiHandover(tenantId, handoverId);
       if (mine === seq.current) setResult({ key: `${tenantId}|${handoverId}`, state: { state: 'ready', data: handover } });
-    } catch {
-      // Keep the last-good sheet.
+    } catch (error) {
+      // Keep the last-good sheet; with none yet (the refresh superseded the first load) settle as failed (FE4).
+      if (mine !== seq.current) return;
+      const scope = `${tenantId}|${handoverId}`;
+      const failed = { state: 'failed', reason: shippingReason(error, 'read') } as const;
+      setResult((prev) => (prev !== null && prev.key === scope ? prev : { key: scope, state: failed }));
     }
   }, [tenantId, handoverId]);
   const stale = tenantId === null || handoverId === null || result === null || result.key !== key;

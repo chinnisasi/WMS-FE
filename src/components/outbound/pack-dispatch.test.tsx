@@ -1380,6 +1380,35 @@ describe('the label step (4.6c)', () => {
 /* ------------------------------------------------------------------ */
 
 describe('the manifest section (4.6c)', () => {
+  test('story 4-4a (FV2) — a mixed page: the builder lists and posts only the carrier shipment, never a client label', async () => {
+    orderStatuses['order-5'] = 'ready_to_dispatch';
+    shipmentsByOrder['order-2'] = shipmentFixture('order-2');
+    shipmentsByOrder['order-5'] = {
+      ...(shipmentFixture('order-5') as Record<string, unknown>),
+      id: 'sh-5',
+      kind: 'client-label',
+      // Even carrying a connection id, a client label never manifests: the KIND decides.
+      carrierConnectionId: 'conn-1',
+      carrierCode: null,
+      labelDocumentRef: null,
+      carrierName: 'Delhivery',
+      trackingNumber: '123456789012',
+      labelVerifiedAt: null,
+    };
+    connectionRows = [connectionFixture()];
+    view = await mount('operator');
+    // The client label offers no connection to manifest onto.
+    const options = [...view.container.querySelectorAll('option')].map((o) => o.getAttribute('value'));
+    expect(options).toContain('conn-1');
+    await selectOption(view, 'Manifest onto', 'conn-1');
+    await settle();
+    const checkboxes = [...view.container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
+    expect(checkboxes).toHaveLength(1);
+    await pressButton(view, 'Create manifest');
+    await settle();
+    expect(mutations()[0]!.body).toEqual({ shipmentIds: ['sh-1'] });
+  });
+
   test('the closure sends the labelled shipments and states the terminality', async () => {
     shipmentsByOrder['order-2'] = shipmentFixture('order-2');
     connectionRows = [connectionFixture()];
@@ -1536,20 +1565,28 @@ describe('the label and manifest gates (4.6c)', () => {
  * the Retry affordance recovers it.
  */
 describe('the 4.6c read failures', () => {
-  test('a failed shipment read inside the expanded row renders Label unavailable and Retry recovers', async () => {
+  test('a failed shipment read inside the expanded row renders Shipment unavailable — never the carrier path — and Retry recovers', async () => {
     failShipment = true;
     connectionRows = [connectionFixture()];
     view = await mount('operator');
     await expand(view, 'order-2');
 
-    expect(text(view)).toContain('Label unavailable');
+    // Story 4-4a (FB5) — the panel's own shipment read failed: say so, and offer neither the
+    // label form nor Dispatch (the order may be client-arranged, which only a handover dispatches).
+    expect(text(view)).toContain('Shipment unavailable');
     expect(text(view)).toContain('The shipment read is down.');
-    // Never blank, never an endless "Loading…": the record is simply not
-    // claimed to exist.
     expect(text(view)).not.toContain('Loading label…');
+    expect(buttonLabels(view)).not.toContain('Dispatch this order');
+    expect(buttonLabels(view)).not.toContain('Generate label');
+    // FB3 — the page's Shipping cells say "Not loaded" with a Retry, never an endless "…".
+    expect(view.container.querySelectorAll('[data-testid="shipping-cell-failed"]').length).toBeGreaterThan(0);
 
     failShipment = false;
-    await pressButton(view, 'Retry');
+    const retry = [...view.container.querySelectorAll('[role="alert"], div')]
+      .find((el) => el.textContent?.startsWith('!Shipment unavailable'))
+      ?.querySelector('button');
+    expect(retry).toBeDefined();
+    await act(async () => retry!.click());
     await settle();
     expect(text(view)).toContain('Generate label');
   });

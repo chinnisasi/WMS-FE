@@ -3762,6 +3762,15 @@ describe('client-arranged shipping wrappers (story 4-4a)', () => {
     clearSession();
   });
 
+  test('FB17 — a refused parcel tag (parseAs blob) still yields a coded ApiProblem', async () => {
+    writeSession(SESSION);
+    stubFetch(409, { type: 'about:blank', title: 'Order not open', status: 409, code: 'order-not-open', detail: 'Dispatched.' });
+    await expect(shipping.fetchApiParcelTag(SESSION.tenant.id, ORDER, 'pdf')).rejects.toMatchObject({ code: 'order-not-open', status: 409 });
+    const error = await shipping.fetchApiParcelTag(SESSION.tenant.id, ORDER, 'pdf').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(shipping.ApiProblem);
+    clearSession();
+  });
+
   test('the portal routes', async () => {
     writeSession(SESSION);
     stubFetch(201, {});

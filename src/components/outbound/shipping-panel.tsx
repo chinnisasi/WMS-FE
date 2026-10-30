@@ -74,6 +74,9 @@ export function ShippingPanel({
   canRemove: boolean;
 }) {
   const read = useOrderShipping(orderId);
+  // FB15 — the verify's result outlives the form (the re-read unmounts it); it clears on the next action.
+  const [verifiedNotice, setVerifiedNotice] = useState(false);
+  const clearNotice = () => setVerifiedNotice(false);
 
   if (read.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading shipping…</div>;
   if (read.state === 'failed') return <ReadFailure word="Shipping unavailable" reason={read.reason} onRetry={read.reload} />;
@@ -98,10 +101,14 @@ export function ShippingPanel({
         <LiveShipment shipment={live} />
       )}
 
-      {data.label !== null && liveOpen && <LabelLink file={data.label} />}
+      {data.label !== null && liveOpen && <LabelLink file={data.label} onExpired={read.refresh} />}
+
+      {verifiedNotice && (
+        <FeedbackBanner tone="accepted" word="Label verified" reason="The label on the parcel carries this order’s AWB." />
+      )}
 
       {canPack && open && live !== null && live.kind === 'client-label' && live.status === 'labelled' && live.labelVerifiedAt === null && (
-        <VerifyLabelForm tenantId={tenantId} orderId={orderId} />
+        <VerifyLabelForm tenantId={tenantId} orderId={orderId} onVerified={() => setVerifiedNotice(true)} />
       )}
 
       {open && (
@@ -109,7 +116,7 @@ export function ShippingPanel({
       )}
 
       {canLabel && open && (live === null || liveOpen) && data.storageEnabled !== false && (
-        <ShipmentForms tenantId={tenantId} orderId={orderId} replacing={liveOpen ? live : null} />
+        <ShipmentForms tenantId={tenantId} orderId={orderId} replacing={liveOpen ? live : null} onAction={clearNotice} />
       )}
 
       {canLabel && open && liveOpen && <VoidShipment tenantId={tenantId} orderId={orderId} />}
@@ -141,7 +148,7 @@ export function ShippingPanel({
           <FileList files={data.documents} tenantId={tenantId} canRemove={canRemove} onExpired={read.refresh} />
         )}
         {canDispatch && status !== 'cancelled' && data.storageEnabled !== false && (
-          <DocumentUpload tenantId={tenantId} orderId={orderId} dispatched={status === 'dispatched'} />
+          <DocumentUpload tenantId={tenantId} orderId={orderId} dispatched={status === 'dispatched'} onAction={clearNotice} />
         )}
         {data.storageEnabled === false && (
           <div className="text-(--muted-foreground)">This server has no file storage configured, so files cannot be added.</div>
@@ -183,13 +190,26 @@ function LiveShipment({ shipment }: { shipment: ClientShipmentViewDto }) {
 }
 
 /** "Print client label" — the presigned PDF in a new tab; the browser's viewer prints it at its own size. */
-function LabelLink({ file }: { file: FileViewDto }) {
+function LabelLink({ file, onExpired }: { file: FileViewDto; onExpired: () => Promise<void> }) {
   if (file.url === null) {
     return <div className="text-(--muted-foreground)">The client label is stored, but its link could not be signed — refresh to try again.</div>;
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <a href={file.url} target="_blank" rel="noopener noreferrer" className={rowButtonClass} data-testid="print-client-label">
+      <a
+        href={file.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={rowButtonClass}
+        data-testid="print-client-label"
+        onClick={(event) => {
+          // FB16 — an expired presigned link re-reads the record instead of opening a 403.
+          if (file.urlExpiresAt !== null && Date.parse(file.urlExpiresAt) < Date.now() + 5_000) {
+            event.preventDefault();
+            void onExpired();
+          }
+        }}
+      >
         Print client label
       </a>
       <span className="text-(--muted-foreground)">{fileLine(file)} — print at 100 %, stick it on the parcel, then scan it.</span>
@@ -213,13 +233,13 @@ function useMounted() {
  * "Type the AWB" (method `typed`). The key is bound to the body (code +
  * method): a retry of the same scan replays, a new scan mints a new key.
  */
-function VerifyLabelForm({ tenantId, orderId }: { tenantId: string; orderId: string }) {
+function VerifyLabelForm({ tenantId, orderId, onVerified }: { tenantId: string; orderId: string; onVerified: () => void }) {
   const [code, setCode] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
   const [method, setMethod] = useState<'scan' | 'typed'>('scan');
   const [bound, setBound] = useState<{ key: string; body: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [verified, setVerified] = useState(false);
   const inFlight = useRef(false);
   const mounted = useMounted();
 
@@ -227,6 +247,9 @@ function VerifyLabelForm({ tenantId, orderId }: { tenantId: string; orderId: str
     event.preventDefault();
     if (inFlight.current) return;
     const scanned = normalizeAwb(code);
+    // FB2 — the field clears and keeps focus after every submit, so the next wedge scan is never appended.
+    setCode('');
+    inputRef.current?.focus();
     if (scanned === '') {
       setError('Scan the printed label’s barcode, or type its AWB.');
       return;
@@ -241,8 +264,7 @@ function VerifyLabelForm({ tenantId, orderId }: { tenantId: string; orderId: str
       await fetchApiVerifyClientLabel(tenantId, orderId, { scannedCode: scanned, method }, next.key);
       notifyOutboundChanged();
       if (!mounted.current) return;
-      setVerified(true);
-      setCode('');
+      onVerified();
       setBound(null);
     } catch (caught) {
       if (mounted.current) setError(shippingReason(caught, 'verify'));
@@ -257,6 +279,8 @@ function VerifyLabelForm({ tenantId, orderId }: { tenantId: string; orderId: str
       <label className="flex flex-col gap-1 sm:w-80">
         <span className={labelClass}>{method === 'scan' ? 'Scan the printed client label' : 'Type the AWB on the label'}</span>
         <input
+          ref={inputRef}
+          autoFocus
           className={inputClass}
           value={code}
           onChange={(e) => setCode(e.target.value)}
@@ -276,7 +300,6 @@ function VerifyLabelForm({ tenantId, orderId }: { tenantId: string; orderId: str
           {method === 'scan' ? 'Type the AWB instead' : 'Scan instead'}
         </button>
       </div>
-      {verified && <FeedbackBanner tone="accepted" word="Label verified" reason="The label on the parcel carries this order’s AWB." />}
       {error !== null && <FeedbackBanner tone="rejected" word="Not verified" reason={error} />}
     </form>
   );
@@ -329,12 +352,14 @@ function ShipmentForms({
   tenantId,
   orderId,
   replacing,
+  onAction,
 }: {
   tenantId: string;
   orderId: string;
   replacing: ClientShipmentViewDto | null;
+  onAction: () => void;
 }) {
-  const [mode, setMode] = useState<'closed' | 'label' | 'awb'>('closed');
+  const [mode, setModeState] = useState<'closed' | 'label' | 'awb'>('closed');
   const transporters = useTransporterOptions();
   const [file, setFile] = useState<File | null>(null);
   const [fields, setFields] = useState({ awb: '', transporterId: '', courierName: '', packageCount: '' });
@@ -349,22 +374,35 @@ function ShipmentForms({
     setFields((current) => ({ ...current, ...patch }));
   }
 
+  /** FB1 — every mode change starts a clean draft: no invisible stale PDF, fields, problem or key. */
+  function setMode(next: 'closed' | 'label' | 'awb') {
+    setModeState(next);
+    setFile(null);
+    setFields({ awb: '', transporterId: '', courierName: '', packageCount: '' });
+    setProblem(null);
+    setBound(null);
+    if (next !== 'closed') {
+      setOutcome(null);
+      onAction();
+    }
+  }
+
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (inFlight.current) return;
+    // FE5 — set before the first await (the file check), so a double submit cannot mint two keys.
+    inFlight.current = true;
     const parsed = parseLabelDraft(fields);
     if (parsed.problem !== null) {
+      inFlight.current = false;
       setProblem(parsed.problem);
       return;
     }
     if (mode === 'label') {
-      if (file === null) {
-        setProblem('Choose the client’s label PDF.');
-        return;
-      }
-      const fileIssue = await shippingFileProblem(file, 'label');
+      const fileIssue = file === null ? 'Choose the client’s label PDF.' : await shippingFileProblem(file, 'label');
       if (fileIssue !== null) {
-        setProblem(fileIssue);
+        inFlight.current = false;
+        if (mounted.current) setProblem(fileIssue);
         return;
       }
     }
@@ -373,7 +411,6 @@ function ShipmentForms({
     const fileNow = mode === 'label' ? file : null;
     const next = bound !== null && bound.body === body && bound.file === fileNow ? bound : { key: ulid(), body, file: fileNow };
     setBound(next);
-    inFlight.current = true;
     setPending(true);
     setProblem(null);
     try {
@@ -389,11 +426,8 @@ function ShipmentForms({
           : await fetchApiRecordAwbAdvice(tenantId, orderId, shared, next.key);
       notifyOutboundChanged();
       if (!mounted.current) return;
-      setOutcome(`${mode === 'label' ? 'Client label recorded' : 'AWB recorded'} — ${clientShipmentLine(shipment)}.`);
       setMode('closed');
-      setFile(null);
-      setFields({ awb: '', transporterId: '', courierName: '', packageCount: '' });
-      setBound(null);
+      setOutcome(`${mode === 'label' ? 'Client label recorded' : 'AWB recorded'} — ${clientShipmentLine(shipment)}.`);
     } catch (caught) {
       if (mounted.current) setProblem(shippingReason(caught, mode === 'label' ? 'label' : 'awb'));
     } finally {
@@ -648,7 +682,7 @@ function RemoveFile({ tenantId, file, onClose }: { tenantId: string; file: FileV
 }
 
 /** Upload document (A14): a kind and a file; the key per prepared file and kind. */
-function DocumentUpload({ tenantId, orderId, dispatched }: { tenantId: string; orderId: string; dispatched: boolean }) {
+function DocumentUpload({ tenantId, orderId, dispatched, onAction }: { tenantId: string; orderId: string; dispatched: boolean; onAction: () => void }) {
   const [kind, setKind] = useState<DocKind>(dispatched ? 'pod' : 'invoice');
   const [prepared, setPrepared] = useState<{ file: File; key: string; kind: DocKind } | null>(null);
   const [pending, setPending] = useState(false);
@@ -658,15 +692,20 @@ function DocumentUpload({ tenantId, orderId, dispatched }: { tenantId: string; o
   const mounted = useMounted();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // FE9 — only the newest pick may land.
+  const pickSeq = useRef(0);
+
   async function onPick(picked: File | null) {
+    const mine = ++pickSeq.current;
     setProblem(null);
     setOutcome(null);
+    onAction();
     if (picked === null) {
       setPrepared(null);
       return;
     }
     const result = await prepareShippingFile(picked);
-    if (!mounted.current) return;
+    if (!mounted.current || mine !== pickSeq.current) return;
     if (!result.ok) {
       setPrepared(null);
       setProblem(result.problem);

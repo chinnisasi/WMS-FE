@@ -134,7 +134,8 @@ export function HandoverSheet({ handover }: { handover: HandoverDetailDto }) {
               <td className="py-1 pr-2 font-mono">{parcel.orderLabel}</td>
               <td className="py-1 pr-2 font-mono">{parcel.awb}</td>
               <td className="py-1 pr-2">{parcel.destinationCity ?? '—'}</td>
-              <td className="data py-1 pr-2 text-right">{parcel.packageCount ?? 1}</td>
+              {/* FB18 — the server's own per-parcel count (the total below is the server's too). */}
+              <td className="data py-1 pr-2 text-right">{parcel.packageCount ?? '—'}</td>
               <td className="data py-1 pr-2 text-right">{weightLabel(parcel.weightGrams)}</td>
               <td className="data py-1 text-right">{parcel.codAmountPaise === null ? 'Prepaid' : rupees(parcel.codAmountPaise)}</td>
             </tr>
@@ -185,7 +186,11 @@ function SheetUpload({ tenantId, handoverId }: { tenantId: string; handoverId: s
     };
   }, []);
 
+  // FE9 — only the newest pick may land.
+  const pickSeq = useRef(0);
+
   async function onPick(picked: File | null) {
+    const mine = ++pickSeq.current;
     setProblem(null);
     setOutcome(null);
     if (picked === null) {
@@ -193,7 +198,7 @@ function SheetUpload({ tenantId, handoverId }: { tenantId: string; handoverId: s
       return;
     }
     const result = await prepareShippingFile(picked);
-    if (!mounted.current) return;
+    if (!mounted.current || mine !== pickSeq.current) return;
     if (!result.ok) {
       setPrepared(null);
       setProblem(result.problem);

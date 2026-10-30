@@ -140,6 +140,9 @@ let candidates: unknown[] = [];
 let handoverReply: { status: number; body: unknown } = { status: 503, body: { code: 'unavailable', status: 503, title: 'Down' } };
 let verifyReply: { status: number; body: unknown } = { status: 503, body: { code: 'unavailable', status: 503, title: 'Down' } };
 let handoverRows: unknown[] = [];
+/** POST replies by path suffix (the panel's forms). */
+let postReplies: Record<string, { status: number; body: unknown }> = {};
+let handoverDetail: unknown = null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -151,10 +154,22 @@ function stubRouter(): void {
     const url = new URL(request.url);
     const { pathname } = url;
     const method = request.method.toUpperCase();
-    const raw = method === 'GET' ? '' : await request.text();
-    requests.push({ method, pathname, search: url.search, key: request.headers.get('Idempotency-Key'), body: raw === '' ? null : JSON.parse(raw) });
+    let body: unknown = null;
+    if (method !== 'GET') {
+      if ((request.headers.get('content-type') ?? '').includes('multipart/form-data')) {
+        body = Object.fromEntries([...(await request.formData()).entries()].map(([k, v]) => [k, typeof v === 'string' ? v : `file:${(v as File).name}`]));
+      } else {
+        const raw = await request.text();
+        body = raw === '' ? null : JSON.parse(raw);
+      }
+    }
+    requests.push({ method, pathname, search: url.search, key: request.headers.get('Idempotency-Key'), body });
     if (method === 'POST' && pathname.endsWith('/outbound/handovers')) return json(handoverReply.status, handoverReply.body);
     if (method === 'POST' && pathname.endsWith('/shipment/verify')) return json(verifyReply.status, verifyReply.body);
+    if (method === 'POST') {
+      const suffix = Object.keys(postReplies).find((k) => pathname.endsWith(k));
+      if (suffix !== undefined) return json(postReplies[suffix]!.status, postReplies[suffix]!.body);
+    }
     if (method === 'POST') return json(503, { code: 'unavailable', status: 503, title: 'Unrouted POST' });
     if (pathname.endsWith('/outbound/orders')) {
       return json(200, { items: Object.entries(orderStatuses).map(([id, status]) => orderRow(id, status)), nextCursor: null });
@@ -174,6 +189,7 @@ function stubRouter(): void {
     }
     if (pathname.endsWith('/outbound/handover-candidates')) return json(200, { items: candidates, nextCursor: null });
     if (pathname.endsWith(`/warehouses/${WAREHOUSE_ID}/outbound/handovers`)) return json(200, { items: handoverRows, nextCursor: null });
+    if (/\/outbound\/handovers\/[^/]+$/.test(pathname) && handoverDetail !== null) return json(200, { handover: handoverDetail });
     if (pathname.endsWith(`/tenants/${TENANT_ID}/clients`)) {
       return json(200, { items: [{ id: CLIENT_A, code: 'BRAND-A', name: 'Brand A', status: 'active', systemOwned: false }] });
     }
@@ -194,6 +210,8 @@ beforeEach(() => {
   shippingReads = {};
   candidates = [];
   handoverRows = [];
+  postReplies = {};
+  handoverDetail = null;
   handoverReply = { status: 503, body: { code: 'unavailable', status: 503, title: 'Down' } };
   verifyReply = { status: 503, body: { code: 'unavailable', status: 503, title: 'Down' } };
   stubRouter();
@@ -460,5 +478,175 @@ describe('the Handovers tab', () => {
     await settle();
     expect(byTestId(view.container, 'new-handover')).toBeNull();
     expect(view.container.textContent).toContain('HO-0001');
+  });
+});
+
+describe('story 4-4a review — FV1 Hand over opens the builder on the order', () => {
+  test('the order’s client is selected and the order ticked', async () => {
+    writeSession(session('operator'));
+    shipments = { [ORDER_A]: shipment(ORDER_A, { labelVerifiedAt: '2026-10-30T10:05:00.000Z' }) };
+    shippingReads = { [ORDER_A]: shippingRead(ORDER_A) };
+    candidates = [
+      {
+        orderId: ORDER_A, orderLabel: 'SO-1', clientOrderRef: 'SO-1', externalEventId: null, followOnSeq: null, parcelTagCode: 'O8F90000000000001',
+        destinationCity: null, codAmountPaise: null, packedAt: null,
+        shipment: { kind: 'client-label', awb: '123456789012', courierName: 'Delhivery', packageCount: 1, labelVerified: true },
+      },
+    ];
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    await expand('SO-1');
+    await click(byTestId(view.container, 'open-hand-over')!);
+    const builder = byTestId(view.container, 'handover-builder')!;
+    expect(builder).not.toBeNull();
+    expect(byTestId<HTMLSelectElement>(builder, 'handover-client')!.value).toBe(CLIENT_A);
+    const row = builder.querySelector(`[data-order-id="${ORDER_A}"] input[type="checkbox"]`) as HTMLInputElement;
+    expect(row.checked).toBe(true);
+    expect(byTestId(builder, 'handover-confirm')?.textContent).toBe('Hand over 1 parcel');
+  });
+});
+
+describe('story 4-4a review — FV3 the panel forms for a permitted role', () => {
+  async function openPanel(read: Record<string, unknown>): Promise<HTMLElement> {
+    writeSession(session('operator'));
+    shipments = read.shipment === null ? {} : { [ORDER_A]: shipment(ORDER_A) };
+    shippingReads = { [ORDER_A]: read };
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    await expand('SO-1');
+    return byTestId(view.container, 'shipping-panel')!;
+  }
+  const posts = () => requests.filter((r) => r.method === 'POST');
+
+  test('the forms render; Replace posts the label with replace: true', async () => {
+    const panel = await openPanel(shippingRead(ORDER_A));
+    for (const id of ['open-client-label', 'open-record-awb', 'open-void-shipment', 'document-upload', 'verify-label']) expect(byTestId(panel, id)).not.toBeNull();
+    expect(byTestId(panel, 'open-client-label')?.textContent).toBe('Replace client label');
+    await click(byTestId(panel, 'open-client-label')!);
+    const form = byTestId<HTMLFormElement>(panel, 'shipment-form')!;
+    const fileInput = byTestId<HTMLInputElement>(form, 'client-label-file')!;
+    Object.defineProperty(fileInput, 'files', { value: [new File(['%PDF-1.7 label'], 'label.pdf', { type: 'application/pdf' })], configurable: true });
+    await act(async () => void fileInput.dispatchEvent(new Event('change', { bubbles: true })));
+    const inputs = form.querySelectorAll<HTMLInputElement>('input:not([type="file"])');
+    setValue(inputs[0]!, '5555 6666 7777');
+    setValue(inputs[1]!, 'Delhivery');
+    postReplies = { '/shipment/client-label': { status: 201, body: { shipment: clientShipmentView(ORDER_A, { awb: '555566667777' }) } } };
+    await submit(form);
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]!.pathname).toEndWith(`/outbound/orders/${ORDER_A}/shipment/client-label`);
+    expect(posts()[0]!.body).toEqual({ file: 'file:label.pdf', awb: '555566667777', courierName: 'Delhivery', replace: 'true' });
+  });
+
+  test('FB1 — Discard then reopen starts clean: no stale file is uploaded', async () => {
+    const panel = await openPanel(shippingRead(ORDER_A, { shipment: null, label: null }));
+    await click(byTestId(panel, 'open-client-label')!);
+    let form = byTestId<HTMLFormElement>(panel, 'shipment-form')!;
+    const fileInput = byTestId<HTMLInputElement>(form, 'client-label-file')!;
+    Object.defineProperty(fileInput, 'files', { value: [new File(['%PDF-1.7'], 'stale.pdf')], configurable: true });
+    await act(async () => void fileInput.dispatchEvent(new Event('change', { bubbles: true })));
+    await click([...form.querySelectorAll('button')].find((b) => b.textContent === 'Discard')!);
+    await click(byTestId(panel, 'open-client-label')!);
+    form = byTestId<HTMLFormElement>(panel, 'shipment-form')!;
+    const inputs = form.querySelectorAll<HTMLInputElement>('input:not([type="file"])');
+    expect(inputs[0]!.value).toBe('');
+    setValue(inputs[0]!, '77001');
+    setValue(inputs[1]!, 'Delhivery');
+    await submit(form);
+    expect(posts()).toHaveLength(0);
+    expect(form.textContent).toContain('Choose the client’s label PDF.');
+  });
+
+  test('Record AWB: an unchanged retry reuses the key; an edit mints a new one', async () => {
+    const panel = await openPanel(shippingRead(ORDER_A, { shipment: null, label: null }));
+    await click(byTestId(panel, 'open-record-awb')!);
+    const form = byTestId<HTMLFormElement>(panel, 'shipment-form')!;
+    const inputs = form.querySelectorAll<HTMLInputElement>('input');
+    setValue(inputs[0]!, '77001');
+    setValue(inputs[1]!, 'Delhivery');
+    postReplies = { '/shipment/awb': { status: 503, body: { code: 'file-storage-busy', status: 503, title: 'Busy' } } };
+    await submit(form);
+    await submit(form);
+    setValue(inputs[0]!, '77002');
+    await submit(form);
+    const sent = posts();
+    expect(sent).toHaveLength(3);
+    expect(sent[0]!.body).toEqual({ awb: '77001', courierName: 'Delhivery' });
+    expect(sent[1]!.key).toBe(sent[0]!.key);
+    expect(sent[2]!.key).not.toBe(sent[0]!.key);
+  });
+
+  test('Void posts {reason}; a document upload posts its kind', async () => {
+    const panel = await openPanel(shippingRead(ORDER_A));
+    await click(byTestId(panel, 'open-void-shipment')!);
+    const voidForm = byTestId<HTMLFormElement>(panel, 'void-shipment')!;
+    setValue(voidForm.querySelector('input')!, ' Wrong AWB ');
+    postReplies = { '/shipment/void': { status: 200, body: { shipment: clientShipmentView(ORDER_A, { status: 'voided' }) } }, '/documents': { status: 201, body: { file: { id: 'f-1' } } } };
+    await submit(voidForm);
+    expect(posts()[0]!.pathname).toEndWith(`/outbound/orders/${ORDER_A}/shipment/void`);
+    expect(posts()[0]!.body).toEqual({ reason: 'Wrong AWB' });
+
+    const upload = byTestId<HTMLFormElement>(view!.container, 'document-upload')!;
+    setValue(upload.querySelector('select')!, 'eway-bill');
+    const docInput = byTestId<HTMLInputElement>(upload, 'document-file')!;
+    Object.defineProperty(docInput, 'files', { value: [new File(['%PDF-1.7 ewb'], 'ewb.pdf', { type: 'application/pdf' })], configurable: true });
+    await act(async () => void docInput.dispatchEvent(new Event('change', { bubbles: true })));
+    await settle();
+    await submit(upload);
+    const doc = posts().find((r) => r.pathname.endsWith('/documents'))!;
+    expect(doc.pathname).toEndWith(`/outbound/orders/${ORDER_A}/documents`);
+    expect(doc.body).toEqual({ file: 'file:ewb.pdf', kind: 'eway-bill' });
+    expect(doc.key).toMatch(KEY_RE);
+  });
+});
+
+describe('story 4-4a review — FV4 the handover sheet', () => {
+  const detail = (sheetPages: number) => ({
+    id: 'ho-1', code: 'HO-0001', warehouseId: WAREHOUSE_ID, clientId: CLIENT_A, courierName: 'Delhivery', transporterId: null,
+    pickupPersonName: 'Ravi', pickupPersonPhone: '+919876543210', vehicleNumber: 'KA01AB1234', handedOverAt: '2026-10-30T10:35:00.000Z',
+    shipmentCount: 2, packageCount: 3, codShipmentCount: 1, codTotalPaise: 125000, source: 'web', note: null,
+    clientSnapshot: { v: 1, code: 'BRAND-A', name: 'Brand A', legalName: 'Brand A Apparel Pvt Ltd', gstin: '29ABCDE1234F1Z5', registeredAddress: null },
+    warehouseSnapshot: { code: 'WH1', name: 'Main DC', gstin: null, originAddress: { line1: '1 Dock Rd', line2: null, city: 'Chennai', stateCode: '33', pincode: '600001' } },
+    courierSnapshot: null, createdBy: 'u-1',
+    parcels: [
+      { orderId: ORDER_A, orderLabel: 'SO-1', shipmentId: 'sh-1', kind: 'client-label', awb: '123456789012', packageCount: 2, weightGrams: 1250, codAmountPaise: 125000, destinationCity: 'Pune' },
+      { orderId: ORDER_B, orderLabel: 'SO-2', shipmentId: 'sh-2', kind: 'courier-label', awb: '77001', packageCount: 1, weightGrams: null, codAmountPaise: null, destinationCity: null },
+    ],
+    sheet: Array.from({ length: sheetPages }, (_, i) => ({
+      id: `s-${i}`, purpose: 'handover-sheet', docKind: null, fileName: `HO-0001-sheet-${i + 1}.jpg`, contentType: 'image/jpeg', byteSize: 1024, pageCount: null,
+      source: 'web', uploadedAt: '2026-10-30T11:00:00.000Z', uploadedBy: 'u-1', url: null, urlExpiresAt: null,
+    })),
+  });
+
+  async function openSheet(role: StoredSession['user']['role'], sheetPages: number): Promise<HTMLElement> {
+    writeSession(session(role));
+    handoverDetail = detail(sheetPages);
+    handoverRows = [{ id: 'ho-1', code: 'HO-0001', clientId: CLIENT_A, clientCode: 'BRAND-A', courierName: 'Delhivery', shipmentCount: 2, packageCount: 3, handedOverAt: '2026-10-30T10:35:00.000Z', sheetPageCount: sheetPages, source: 'web' }];
+    view = render(<HandoversCard tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role={role} />);
+    await settle();
+    await expand('HO-0001');
+    return byTestId(view.container, 'handover-detail')!;
+  }
+
+  test('the frozen parties, one row per parcel with the server’s counts, never the pickup phone', async () => {
+    const root = await openSheet('operator', 0);
+    const sheet = root.querySelector('[data-print-root]')!;
+    expect(sheet.textContent).toContain('Brand A Apparel Pvt Ltd');
+    expect(sheet.textContent).toContain('Main DC');
+    expect(sheet.textContent).toContain('1 Dock Rd');
+    expect(sheet.textContent).toContain('Ravi');
+    expect(sheet.textContent).not.toContain('9876543210');
+    const rows = sheet.querySelectorAll('[data-testid="sheet-parcel"]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.querySelectorAll('td')[3]!.textContent).toBe('2');
+    expect(byTestId(root, 'sheet-upload')).not.toBeNull();
+  });
+
+  test('the sheet upload is hidden at 10 pages and without dispatch.execute', async () => {
+    let root = await openSheet('operator', 10);
+    expect(byTestId(root, 'sheet-upload')).toBeNull();
+    view!.unmount();
+    view = undefined;
+    root = await openSheet('accountant', 0);
+    expect(byTestId(root, 'sheet-upload')).toBeNull();
   });
 });

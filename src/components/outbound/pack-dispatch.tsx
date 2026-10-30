@@ -199,7 +199,20 @@ function PackDispatchTable({
     .map((order) => order.id);
   const shipments = useOrderShipments(tenantId, openOrderIds);
   // Story 4-4a (A20) — the handover builder, opened from a row's "Hand over".
-  const [handover, setHandover] = useState<{ clientId: string | null; orderId: string } | null>(null);
+  const [handover, setHandover] = useState<{ clientId: string | null; orderId: string; more: readonly string[] } | null>(null);
+  // FE14 — Hand over on another row while the builder is open: joins the open draft for the same client, else says why not.
+  const [handoverNote, setHandoverNote] = useState<string | null>(null);
+  function requestHandover(orderId: string, clientId: string | null) {
+    if (handover === null) {
+      setHandoverNote(null);
+      setHandover({ orderId, clientId, more: [] });
+    } else if (handover.clientId === clientId) {
+      setHandoverNote(null);
+      if (orderId !== handover.orderId && !handover.more.includes(orderId)) setHandover({ ...handover, more: [...handover.more, orderId] });
+    } else {
+      setHandoverNote('The handover builder is open for another client — confirm or discard it, then hand this order over.');
+    }
+  }
   const [handedOver, setHandedOver] = useState<HandoverResponse | null>(null);
 
   const columns: readonly DataTableColumn<OrderEntryDto>[] = [
@@ -252,6 +265,18 @@ function PackDispatchTable({
       header: 'Shipping',
       render: (order) => {
         if (order.status !== 'accepted' && order.status !== 'ready_to_dispatch') return null;
+        // FB3 — a failed read says so, with a Retry; never an endless "…".
+        const failure = shipments.state === 'ready' ? shipments.failures.get(order.id) : undefined;
+        if (failure !== undefined) {
+          return (
+            <span className="flex items-center gap-1 text-xs" data-testid="shipping-cell-failed" title={failure}>
+              <StatusChip tone="danger">Not loaded</StatusChip>
+              <button type="button" className={rowButtonClass} onClick={shipments.reload}>
+                Retry
+              </button>
+            </span>
+          );
+        }
         const cell = shipments.state === 'ready' ? shippingCell(shipments.data.get(order.id)) : null;
         return cell === null ? (
           <span className="text-xs text-(--muted-foreground)">…</span>
@@ -298,13 +323,18 @@ function PackDispatchTable({
       </div>
 
       {handedOver !== null && <FeedbackBanner tone="accepted" {...handoverOutcome(handedOver)} />}
+      {handoverNote !== null && <FeedbackBanner tone="warning" word="Builder open for another client" reason={handoverNote} />}
       {handover !== null && (
         <HandoverBuilder
           tenantId={tenantId}
           warehouseId={warehouseId}
           initialClientId={handover.clientId}
           initialOrderId={handover.orderId}
-          onClose={() => setHandover(null)}
+          requestedOrderIds={handover.more}
+          onClose={() => {
+            setHandover(null);
+            setHandoverNote(null);
+          }}
           onCreated={(response) => {
             setHandover(null);
             setHandedOver(response);
@@ -339,7 +369,7 @@ function PackDispatchTable({
                 canDispatch={canDispatch}
                 canLabel={canLabel}
                 canCancel={canCancel}
-                onHandOver={canDispatch ? (orderId, clientId) => setHandover((open) => open ?? { orderId, clientId }) : undefined}
+                onHandOver={canDispatch ? requestHandover : undefined}
                 // One dialog at a time; the button stays mounted so focus can return to it on close.
                 onCancel={canCancel ? (target) => setCancelTarget((open) => open ?? target) : undefined}
               />
@@ -543,8 +573,12 @@ function PackDispatchPanel({
           <ReadOnlyLines lines={order.lines} skuMap={skuMap} />
           {status === 'ready_to_dispatch' && (
             <>
-              {!viaHandover && <LabelSection tenantId={tenantId} orderId={orderId} canLabel={canLabel} />}
-              {shipmentRead.state === 'loading' ? null : viaHandover ? (
+              {/* FB5 — a failed shipment read is shown, never the carrier path (a Dispatch button on a client-arranged order). */}
+              {shipmentRead.state === 'failed' && (
+                <ReadFailure word="Shipment unavailable" reason={shipmentRead.reason} onRetry={shipmentRead.reload} />
+              )}
+              {shipmentRead.state === 'ready' && !viaHandover && <LabelSection tenantId={tenantId} orderId={orderId} canLabel={canLabel} />}
+              {shipmentRead.state !== 'ready' ? null : viaHandover ? (
                 // The 4.6c Dispatch button gives way to Hand over (A20).
                 onHandOver !== undefined ? (
                   <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="hand-over-row">
@@ -1581,6 +1615,9 @@ function carrierLabelled(
   reload: () => void;
 } {
   if (shipments.state !== 'ready') return shipments;
+  // FB4 — only the READY orders' reads matter here: a failed read of an accepted order never fails the builder.
+  const failed = readyOrderIds.find((orderId) => shipments.failures.has(orderId));
+  if (failed !== undefined) return { state: 'failed', reason: shipments.failures.get(failed)!, reload: shipments.reload };
   const data = readyOrderIds.flatMap((orderId) => {
     const shipment = shipments.data.get(orderId) ?? null;
     return shipment !== null &&
