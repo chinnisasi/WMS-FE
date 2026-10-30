@@ -4267,6 +4267,10 @@ export type OrderEntryDto = {
      * ISO-8601 UTC last update
      */
     updatedAt: string;
+    /**
+     * Story 4-6a — the consignment gate today (the brand's tax document and e-way bill): the Docs cell. Optional
+     */
+    consignmentState?: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
 };
 
 export type OrderListResponse = {
@@ -5139,11 +5143,15 @@ export type HandoverParcelResultDto = {
     awb: string;
     dispatched: true;
     followOnOrderId: string | null;
+    /**
+     * Story 4-6a (A14) — a handheld parcel that left without the brand's documents (a stale snapshot): handed over and flagged, never refused. Absent otherwise
+     */
+    complianceException?: 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired';
 };
 
 export type HandoverRefusedParcelDto = {
     orderId: string;
-    code: 'order-not-found' | 'warehouse-mismatch' | 'order-not-ready' | 'order-already-dispatched' | 'shipment-not-client-arranged' | 'label-not-verified' | 'awb-mismatch' | 'awb-required' | 'awb-in-use' | 'order-holds-recalled-batch' | 'package-count-mismatch' | 'carton-not-current';
+    code: 'order-not-found' | 'warehouse-mismatch' | 'order-not-ready' | 'order-already-dispatched' | 'shipment-not-client-arranged' | 'label-not-verified' | 'awb-mismatch' | 'awb-required' | 'awb-in-use' | 'order-holds-recalled-batch' | 'package-count-mismatch' | 'carton-not-current' | 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired';
     detail: string;
     /**
      * The order’s status as read under its lock (e.g. cancelled vs accepted for order-not-ready); absent when the order was not found
@@ -5190,6 +5198,22 @@ export type HandoverDetailCartonsDto = {
     staleCartonLabels: boolean;
 };
 
+export type ConsignmentDocumentViewDto = {
+    type: 'invoice' | 'challan' | 'bill-of-supply';
+    number: string;
+    /**
+     * YYYY-MM-DD
+     */
+    date: string;
+};
+
+export type HandoverLateRecordDto = {
+    seq: number;
+    brandDocument: ConsignmentDocumentViewDto;
+    ewayBillNumber: string | null;
+    recordedAt: string;
+};
+
 export type HandoverDetailParcelDto = {
     orderId: string;
     orderLabel: string;
@@ -5204,6 +5228,26 @@ export type HandoverDetailParcelDto = {
      * Story 4-5a (A21, A34, A37, A44) — the order’s cartons at this handover
      */
     cartons: HandoverDetailCartonsDto;
+    /**
+     * Story 4-6a (A19) — the brand’s document the parcel LEFT under (the stamped version); null when none was recorded
+     */
+    taxDocument?: ConsignmentDocumentViewDto | null;
+    /**
+     * Story 4-6a — the stamped version’s e-way bill number
+     */
+    ewayBillNumber?: string | null;
+    /**
+     * Story 4-6a — the stamped version’s e-way validity (YYYY-MM-DD)
+     */
+    ewayValidUntil?: string | null;
+    /**
+     * Story 4-6a (A14) — a handheld parcel that left without its documents
+     */
+    complianceException?: 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired' | null;
+    /**
+     * Story 4-6a (A39) — the live version recorded after the dispatch (it clears an exception)
+     */
+    lateRecord?: HandoverLateRecordDto | null;
 };
 
 export type HandoverDetailDto = {
@@ -5264,6 +5308,13 @@ export type HandoverCandidateShipmentDto = {
     labelVerified: boolean;
 };
 
+export type ParcelConsignmentDto = {
+    state: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
+    blocking: boolean;
+    ewayBillNumber: string | null;
+    ewayValidUntil: string | null;
+};
+
 export type HandoverCandidateDto = {
     orderId: string;
     orderLabel: string;
@@ -5287,6 +5338,10 @@ export type HandoverCandidateDto = {
      * Story 4-5a (A33) — the handover’s weight default: the live pack’s gross when ≤ 1,000,000 g (null above it), else the last pack measurement
      */
     defaultWeightGrams?: number | null;
+    /**
+     * Story 4-6a (A16) — the brand's documents gate today; a blocking candidate cannot be ticked
+     */
+    consignment?: ParcelConsignmentDto;
 };
 
 export type HandoverCandidatesResponse = {
@@ -5310,6 +5365,283 @@ export type HandoverListItemDto = {
 export type HandoversResponse = {
     items: Array<HandoverListItemDto>;
     nextCursor: string | null;
+};
+
+export type WithdrawConsignmentDto = {
+    /**
+     * Why the record is withdrawn (1–200)
+     */
+    reason: string;
+};
+
+export type ConsignorViewDto = {
+    name: string | null;
+    legalName: string | null;
+};
+
+export type ConsignmentEwayViewDto = {
+    status: 'recorded' | 'pending' | 'not-required' | 'exempt';
+    number: string | null;
+    date: string | null;
+    validUntil: string | null;
+    exemptionReason: 'exempt-goods' | 'non-motorised' | 'customs' | 'other' | null;
+    exemptionNote: string | null;
+};
+
+export type ConsignmentViewDto = {
+    id: string;
+    orderId: string;
+    /**
+     * 1–99
+     */
+    seq: number;
+    status: 'live' | 'superseded' | 'withdrawn';
+    brandDocument: ConsignmentDocumentViewDto;
+    consignorGstin: string;
+    /**
+     * The brand as frozen when recorded
+     */
+    consignor: ConsignorViewDto;
+    declaredValuePaise: number;
+    /**
+     * The ship-to state code; null when unknown
+     */
+    destinationStateCode: string | null;
+    supplyType: 'intra' | 'inter' | null;
+    /**
+     * The threshold in force on the document date (null: no bill required)
+     */
+    thresholdPaise: number | null;
+    /**
+     * national | state:NN
+     */
+    thresholdRule: string;
+    ewayRequired: boolean;
+    eway: ConsignmentEwayViewDto;
+    recordedAfterDispatch: boolean;
+    /**
+     * Set on the version the goods left under (immutable)
+     */
+    dispatchedAt: string | null;
+    source: 'web' | 'portal';
+    recordedBy: string;
+    recordedAt: string;
+    endedAt: string | null;
+    endedBy: string | null;
+    endReason: string | null;
+    /**
+     * A40 — the declared value is below the order's own rated value (a warning)
+     */
+    declaredBelowRatedValue?: boolean;
+};
+
+export type ConsignmentWithdrawResponse = {
+    /**
+     * Always null
+     */
+    consignment: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Every version, newest first
+     */
+    history: Array<ConsignmentViewDto>;
+};
+
+export type ConsignmentBrandDocumentDto = {
+    /**
+     * The brand's tax invoice, delivery challan or bill of supply
+     */
+    type: 'invoice' | 'challan' | 'bill-of-supply';
+    /**
+     * The document number (1–40 characters)
+     */
+    number: string;
+    /**
+     * The document date (YYYY-MM-DD, IST) — no later than today and no earlier than 30 days before the order's creation day
+     */
+    date: string;
+};
+
+export type ConsignmentEwayBillInputDto = {
+    /**
+     * The brand's e-way bill number (12 digits) — recorded, never generated
+     */
+    number: string;
+    /**
+     * The e-way bill date (YYYY-MM-DD, IST): not before the document, not after today
+     */
+    date: string;
+    /**
+     * Its last valid day (YYYY-MM-DD) — required: the goods move, so Part B is filled (A34)
+     */
+    validUntil: string;
+};
+
+export type ConsignmentExemptionInputDto = {
+    /**
+     * Why no e-way bill is needed above the threshold (an office role on the staff surface — A46)
+     */
+    reason: 'exempt-goods' | 'non-motorised' | 'customs' | 'other';
+    /**
+     * Required for "other" (1–200)
+     */
+    note?: string | null;
+};
+
+export type RecordConsignmentDto = {
+    /**
+     * Required — the brand's tax document the goods travel under
+     */
+    brandDocument: ConsignmentBrandDocumentDto;
+    /**
+     * The brand registration the document names (defaults to the client's GSTIN)
+     */
+    consignorGstin?: string | null;
+    /**
+     * Required — the consignment value on the brand's document, including tax, in paise (0–10^12); the e-way threshold is judged from it
+     */
+    declaredValuePaise: number;
+    ewayBill?: ConsignmentEwayBillInputDto | null;
+    /**
+     * Instead of an e-way bill — never both
+     */
+    ewayExemption?: ConsignmentExemptionInputDto | null;
+    /**
+     * Why it is amended (1–200) — required once the order is dispatched
+     */
+    reason?: string | null;
+};
+
+export type ConsignmentRecordResponse = {
+    consignment: ConsignmentViewDto;
+    /**
+     * Present (true) on the 200 no-op: the body equals the live version — nothing written, the key stored
+     */
+    unchanged?: true;
+};
+
+export type ConsignmentGateDto = {
+    state: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
+    blocking: boolean;
+    requiredBecause: 'policy-all' | 'policy-b2b' | 'value' | null;
+    /**
+     * max(the order's rated value, its COD amount) — null when it carries neither
+     */
+    valueFloorPaise: number | null;
+    nationalThresholdPaise: number;
+    expiresToday: boolean;
+};
+
+export type ConsignmentOrderRefDto = {
+    orderId: string;
+    orderLabel: string;
+};
+
+export type ConsignmentOtherClientDto = {
+    clientCode: string;
+    orderLabel: string;
+};
+
+export type ConsignmentScanDto = {
+    id: string;
+    purpose: string;
+    docKind: string | null;
+    fileName: string;
+    contentType: string | null;
+    byteSize: number | null;
+    pageCount: number | null;
+    source: string;
+    uploadedAt: string | null;
+    uploadedBy: string | null;
+    url: string | null;
+    urlExpiresAt: string | null;
+};
+
+export type OrderConsignmentResponse = {
+    /**
+     * The gate judged today (IST)
+     */
+    gate: ConsignmentGateDto;
+    live: ConsignmentViewDto | null;
+    /**
+     * Superseded and withdrawn versions, newest first
+     */
+    history: Array<ConsignmentViewDto>;
+    /**
+     * The version the goods left under
+     */
+    dispatchedRecordId: string | null;
+    /**
+     * Other live records of the client with the same document (a warning)
+     */
+    duplicates: Array<ConsignmentOrderRefDto>;
+    /**
+     * The consignor's state differs from the warehouse GSTIN's (a warning; false when the warehouse's state is unknown)
+     */
+    consignorStateMismatch: boolean;
+    /**
+     * The same e-way number is live under another client (staff only)
+     */
+    ewayUsedByOtherClient: ConsignmentOtherClientDto | null;
+    /**
+     * 4-4a's shipping documents of kinds invoice, challan and eway-bill
+     */
+    scans: Array<ConsignmentScanDto>;
+    /**
+     * A device handover that left without the documents
+     */
+    complianceException: string | null;
+};
+
+export type ConsignmentWorklistEwayDto = {
+    number: string | null;
+    validUntil: string | null;
+};
+
+export type ConsignmentWorklistRowDto = {
+    orderId: string;
+    orderLabel: string;
+    clientId: string;
+    clientCode: string;
+    orderType: 'b2b' | 'b2c' | null;
+    stage: 'accepted' | 'packed';
+    state: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
+    requiredBecause: 'policy-all' | 'policy-b2b' | 'value' | null;
+    valueFloorPaise: number | null;
+    eway: ConsignmentWorklistEwayDto | null;
+    declaredBelowRatedValue: boolean;
+    createdAt: string;
+    packedAt: string | null;
+};
+
+export type ConsignmentExceptionRowDto = {
+    orderId: string;
+    orderLabel: string;
+    clientId: string;
+    clientCode: string;
+    shipmentId: string;
+    handoverId: string | null;
+    handoverCode: string | null;
+    handedOverAt: string | null;
+    code: 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired';
+    /**
+     * Re-judged on the handover day
+     */
+    state: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
+};
+
+export type ConsignmentWorklistResponse = {
+    view: 'needed' | 'exceptions';
+    /**
+     * Packed orders first; at most 5,000 scanned
+     */
+    needed: Array<ConsignmentWorklistRowDto>;
+    /**
+     * At most 500
+     */
+    exceptions: Array<ConsignmentExceptionRowDto>;
+    truncated: boolean;
 };
 
 export type GrnLineInputDto = {
@@ -6544,6 +6876,16 @@ export type CatalogDispatchParcelShipmentDto = {
     labelVerified: boolean;
 };
 
+export type CatalogDispatchParcelConsignmentDto = {
+    state: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
+    blocking: boolean;
+    ewayBillNumber: string | null;
+    /**
+     * YYYY-MM-DD — the last valid day
+     */
+    ewayValidUntil: string | null;
+};
+
 export type CatalogDispatchParcelDto = {
     orderId: string;
     clientId: string;
@@ -6566,6 +6908,10 @@ export type CatalogDispatchParcelDto = {
      */
     codAmountPaise?: number;
     shipment: CatalogDispatchParcelShipmentDto | null;
+    /**
+     * Story 4-6a (A23, additive): the brand's documents gate today — a blocking parcel is refused at the handover scan; the device recomputes expiry from ewayValidUntil. Absent from an older server (read as unknown)
+     */
+    consignment?: CatalogDispatchParcelConsignmentDto;
 };
 
 export type CatalogSnapshotResponse = {
@@ -11387,6 +11733,10 @@ export type ClientAllocationPolicyDto = {
     minOutboundShelfLifeDays: number | null;
 };
 
+export type ClientConsignmentPolicyDto = {
+    documentRule: 'b2b' | 'all' | 'high-value';
+};
+
 export type ClientDto = {
     id: string;
     tenantId: string;
@@ -11431,6 +11781,10 @@ export type ClientDto = {
      * Story 4-3a — the outbound allocation policy. Optional: a mutation answer stored before 4-3a replays without it; every fresh read carries it
      */
     allocationPolicy?: ClientAllocationPolicyDto;
+    /**
+     * Story 4-6a — the consignment documents rule. Optional: a mutation answer stored before 4-6a replays without it; every fresh read carries it
+     */
+    consignmentPolicy?: ClientConsignmentPolicyDto;
     /**
      * Story 5-2b — the Reply-To of the client’s receipt and dispatch emails; null = the server’s default
      */
@@ -11582,6 +11936,18 @@ export type ClientAllocationPolicyResponse = {
     undatedBatchesOnHand: number;
 };
 
+export type ConsignmentPolicyResponse = {
+    clientId: string;
+    documentRule: 'b2b' | 'all' | 'high-value';
+};
+
+export type ConsignmentPolicyDto = {
+    /**
+     * b2b: B2B orders (the default); all: every order; high-value: only the order’s own value above the e-way threshold
+     */
+    documentRule: 'b2b' | 'all' | 'high-value';
+};
+
 export type UpdateClientAllocationPolicyDto = {
     allocationRule: 'fefo' | 'fifo';
     /**
@@ -11630,7 +11996,7 @@ export type ClientContactListItemDto = {
     /**
      * Story 5-2b — the client emails this contact receives, in vocabulary order; empty = none
      */
-    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents'>;
+    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed'>;
     /**
      * The latest receipt or dispatch email to this address for this client; null when none
      */
@@ -11664,7 +12030,7 @@ export type CreateClientContactDto = {
     /**
      * Story 5-2b — the client emails this contact receives: receipt.recorded (each GRN), order.dispatched (each order), and (story 4-4a) shipment.documents (each shipping document and signed handover sheet). Omitted = none. No event twice; refused on the warehouse’s own (self) client
      */
-    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents'>;
+    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed'>;
 };
 
 export type ClientContactDto = {
@@ -11695,7 +12061,7 @@ export type ClientContactDto = {
     /**
      * Story 5-2b — the client emails this contact receives, in vocabulary order; empty = none
      */
-    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents'>;
+    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed'>;
 };
 
 export type ClientContactResponse = {
@@ -11720,7 +12086,7 @@ export type UpdateClientContactDto = {
     /**
      * Story 5-2b — omitted = unchanged; [] = none. Dropping an event cancels its still-queued emails to this contact
      */
-    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents'>;
+    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents' | 'consignment.documents-needed'>;
 };
 
 export type UpdateClientEmailSettingsDto = {
@@ -13774,6 +14140,61 @@ export type PortalOrderShippingResponse = {
      * Story 4-5a — the packing slip can be downloaded (packed or dispatched)
      */
     packingSlipAvailable: boolean;
+};
+
+export type PortalConsignmentNeededRowDto = {
+    orderId: string;
+    orderLabel: string;
+    clientOrderRef: string | null;
+    stage: 'accepted' | 'packed';
+    state: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
+    requiredBecause: 'policy-all' | 'policy-b2b' | 'value' | null;
+    ewayValidUntil: string | null;
+};
+
+export type PortalConsignmentsNeededResponse = {
+    /**
+     * At most 500, packed first
+     */
+    items: Array<PortalConsignmentNeededRowDto>;
+};
+
+export type PortalConsignmentViewDto = {
+    id: string;
+    orderId: string;
+    seq: number;
+    status: 'live' | 'superseded' | 'withdrawn';
+    brandDocument: ConsignmentDocumentViewDto;
+    consignorGstin: string;
+    consignor: ConsignorViewDto;
+    declaredValuePaise: number;
+    destinationStateCode: string | null;
+    supplyType: 'intra' | 'inter' | null;
+    thresholdPaise: number | null;
+    thresholdRule: string;
+    ewayRequired: boolean;
+    eway: ConsignmentEwayViewDto;
+    recordedAfterDispatch: boolean;
+    dispatchedAt: string | null;
+    source: 'web' | 'portal';
+    recordedByYou: boolean;
+    recordedAt: string;
+    endedAt: string | null;
+    endReason: string | null;
+};
+
+export type PortalOrderConsignmentResponse = {
+    gate: ConsignmentGateDto;
+    live: PortalConsignmentViewDto | null;
+    history: Array<PortalConsignmentViewDto>;
+};
+
+export type PortalConsignmentRecordResponse = {
+    consignment: PortalConsignmentViewDto;
+    /**
+     * Present (true) on the 200 no-op: the body equals the live version — nothing written, the key stored
+     */
+    unchanged?: true;
 };
 
 export type PortalShipmentViewDto = {
@@ -16481,6 +16902,14 @@ export type RtvDispatchDto = {
      * ISO-8601 UTC
      */
     at: string;
+    /**
+     * Story 4-6a — the declared consignment value in paise, judged against the e-way threshold; null when none was sent
+     */
+    declaredValuePaise?: number | null;
+    /**
+     * Story 4-6a — true when no value was sent, so the e-way threshold was not judged (an older caller)
+     */
+    ewayUnjudged?: boolean;
     brandDocument: RtvBrandDocumentDto;
     /**
      * The GSTIN the challan names — as entered at dispatch, else the brand's frozen GSTIN (null when it has none)
@@ -16703,6 +17132,14 @@ export type BrandDocumentDto = {
     date: string;
 };
 
+export type EwayExemptionDto = {
+    reason: 'exempt-goods' | 'non-motorised' | 'customs' | 'other';
+    /**
+     * Required for "other" (1–200)
+     */
+    note?: string | null;
+};
+
 export type DispatchVendorReturnDto = {
     /**
      * Required — goods cannot travel without the brand's challan or invoice
@@ -16748,6 +17185,14 @@ export type DispatchVendorReturnDto = {
      * Required — the number of packages (1–9999)
      */
     packageCount?: number;
+    /**
+     * Story 4-6a — the consignment value on the brand's document in paise, judged against the e-way threshold (above it an e-way bill number or an exemption is required). Optional on the API for older callers; the web always sends it
+     */
+    declaredValuePaise?: number | null;
+    /**
+     * Story 4-6a — instead of an e-way bill above the threshold
+     */
+    ewayExemption?: EwayExemptionDto | null;
 };
 
 export type CancelVendorReturnDto = {
@@ -16913,6 +17358,10 @@ export type ClientReturnDispatchDto = {
      * The declared value in paise, as entered
      */
     declaredValuePaise: number | null;
+    /**
+     * Story 4-6a — true when no value was sent, so the e-way threshold was not judged (an older caller)
+     */
+    ewayUnjudged?: boolean;
     ewayBill: RtvEwayBillDto | null;
     transporterId: string | null;
     /**
@@ -17106,9 +17555,13 @@ export type DispatchClientReturnDto = {
      */
     consigneeGstin?: string | null;
     /**
-     * A9 — the consignor's declared value in paise, printed "declared by the consignor" and never judged
+     * A9 — the consignor's declared value in paise, printed "declared by the consignor" and judged against the e-way threshold (4-6a): above it an e-way bill number or an exemption is required. Optional on the API for older callers; the web always sends it
      */
     declaredValuePaise?: number | null;
+    /**
+     * Story 4-6a — instead of an e-way bill above the threshold
+     */
+    ewayExemption?: EwayExemptionDto | null;
     /**
      * The e-way bill number (12 digits) — recorded, never generated; its date is required with it
      */
@@ -22632,7 +23085,7 @@ export type OutboundControllerDispatchOrderErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The order is already dispatched under a different key, or is not packed — it reads accepted or cancelled (conflict, naming the status); story 3-7a — its picks drew a lot that is on an OPEN LIVE recall: release the lot from the recall (close it with the lot in releaseBatchIds) or cancel the order with restock (order-holds-recalled-batch, members batchCodes and recallCodes); a lot blocked for any other reason still ships; or a concurrent idempotent request (conflict). Nothing is written
+     * The order is already dispatched under a different key, or is not packed — it reads accepted or cancelled (conflict, naming the status); story 3-7a — its picks drew a lot that is on an OPEN LIVE recall: release the lot from the recall (close it with the lot in releaseBatchIds) or cancel the order with restock (order-holds-recalled-batch, members batchCodes and recallCodes); a lot blocked for any other reason still ships; story 4-6a — a client order without the brand’s documents its rule or its own value requires (consignment-documents-missing), its e-way bill owed (eway-bill-required) or expired (eway-bill-expired), extensions orderId, state, requiredBecause, valueFloorPaise, thresholdPaise; no e-way threshold in force (eway-threshold-missing); or a concurrent idempotent request (conflict). Nothing is written
      */
     409: ProblemDetailsDto;
     /**
@@ -24454,6 +24907,218 @@ export type ShippingControllerHandoversResponses = {
 };
 
 export type ShippingControllerHandoversResponse = ShippingControllerHandoversResponses[keyof ShippingControllerHandoversResponses];
+
+export type ConsignmentControllerWithdrawData = {
+    body: WithdrawConsignmentDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/consignment/withdraw';
+};
+
+export type ConsignmentControllerWithdrawErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed orderId, or a reason outside 1–200 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), a client-portal session, or missing orders.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown order (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * No live record (consignment-not-found); the order is dispatched — amend instead (order-dispatched)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The key reused with another body (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ConsignmentControllerWithdrawError = ConsignmentControllerWithdrawErrors[keyof ConsignmentControllerWithdrawErrors];
+
+export type ConsignmentControllerWithdrawResponses = {
+    200: ConsignmentWithdrawResponse;
+};
+
+export type ConsignmentControllerWithdrawResponse = ConsignmentControllerWithdrawResponses[keyof ConsignmentControllerWithdrawResponses];
+
+export type ConsignmentControllerReadData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/consignment';
+};
+
+export type ConsignmentControllerReadErrors = {
+    /**
+     * A malformed orderId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown order (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * No national e-way threshold in force (eway-threshold-missing)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type ConsignmentControllerReadError = ConsignmentControllerReadErrors[keyof ConsignmentControllerReadErrors];
+
+export type ConsignmentControllerReadResponses = {
+    200: OrderConsignmentResponse;
+};
+
+export type ConsignmentControllerReadResponse = ConsignmentControllerReadResponses[keyof ConsignmentControllerReadResponses];
+
+export type ConsignmentControllerRecordData = {
+    body: RecordConsignmentDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/consignment';
+};
+
+export type ConsignmentControllerRecordErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed orderId, a malformed field, a date outside its window, a missing consignor GSTIN, or an amendment after dispatch without a reason (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied); a client-portal session or missing dispatch.execute (role-denied); orders.manage (an office role) is required for an e-way exemption, any amendment after dispatch, or a declared value that turns a required e-way bill into not-required (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown order (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is cancelled (order-not-open); the tenant’s own goods (own-goods-invoiced); the e-way number is live on another of the client’s orders (eway-bill-in-use, extensions.orderId/orderLabel); 99 versions (consignment-version-limit); no national e-way threshold in force (eway-threshold-missing)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The declared value is below the COD amount (declared-value-below-order-value); the key reused (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ConsignmentControllerRecordError = ConsignmentControllerRecordErrors[keyof ConsignmentControllerRecordErrors];
+
+export type ConsignmentControllerRecordResponses = {
+    /**
+     * The body equals the live version — nothing written, the key stored (unchanged: true; a replay of the key is 200 too)
+     */
+    200: ConsignmentRecordResponse;
+    /**
+     * A new version (a replay re-serves it)
+     */
+    201: ConsignmentRecordResponse;
+};
+
+export type ConsignmentControllerRecordResponse = ConsignmentControllerRecordResponses[keyof ConsignmentControllerRecordResponses];
+
+export type ConsignmentControllerWorklistData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        /**
+         * One client's orders (the shell's client switcher)
+         */
+        clientId?: string;
+        /**
+         * needed (default): open orders waiting for documents; exceptions: device handovers that left without them
+         */
+        view?: 'needed' | 'exceptions';
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/consignments';
+};
+
+export type ConsignmentControllerWorklistErrors = {
+    /**
+     * A malformed warehouseId, clientId or view (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * No national e-way threshold in force (eway-threshold-missing)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type ConsignmentControllerWorklistError = ConsignmentControllerWorklistErrors[keyof ConsignmentControllerWorklistErrors];
+
+export type ConsignmentControllerWorklistResponses = {
+    200: ConsignmentWorklistResponse;
+};
+
+export type ConsignmentControllerWorklistResponse = ConsignmentControllerWorklistResponses[keyof ConsignmentControllerWorklistResponses];
 
 export type ReceivingControllerListGoodsReceiptsData = {
     body?: never;
@@ -31625,6 +32290,100 @@ export type ClientsControllerUpdateAllocationPolicyResponses = {
 
 export type ClientsControllerUpdateAllocationPolicyResponse = ClientsControllerUpdateAllocationPolicyResponses[keyof ClientsControllerUpdateAllocationPolicyResponses];
 
+export type ClientsControllerGetConsignmentPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/consignment-policy';
+};
+
+export type ClientsControllerGetConsignmentPolicyErrors = {
+    /**
+     * A malformed clientId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientsControllerGetConsignmentPolicyError = ClientsControllerGetConsignmentPolicyErrors[keyof ClientsControllerGetConsignmentPolicyErrors];
+
+export type ClientsControllerGetConsignmentPolicyResponses = {
+    200: ConsignmentPolicyResponse;
+};
+
+export type ClientsControllerGetConsignmentPolicyResponse = ClientsControllerGetConsignmentPolicyResponses[keyof ClientsControllerGetConsignmentPolicyResponses];
+
+export type ClientsControllerUpdateConsignmentPolicyData = {
+    body: ConsignmentPolicyDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/consignment-policy';
+};
+
+export type ClientsControllerUpdateConsignmentPolicyErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, an unknown rule, or the self client (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerUpdateConsignmentPolicyError = ClientsControllerUpdateConsignmentPolicyErrors[keyof ClientsControllerUpdateConsignmentPolicyErrors];
+
+export type ClientsControllerUpdateConsignmentPolicyResponses = {
+    200: ClientResponse;
+};
+
+export type ClientsControllerUpdateConsignmentPolicyResponse = ClientsControllerUpdateConsignmentPolicyResponses[keyof ClientsControllerUpdateConsignmentPolicyResponses];
+
 export type ClientsControllerListContactsData = {
     body?: never;
     path: {
@@ -35045,6 +35804,138 @@ export type PortalControllerOrderShippingResponses = {
 
 export type PortalControllerOrderShippingResponse = PortalControllerOrderShippingResponses[keyof PortalControllerOrderShippingResponses];
 
+export type PortalControllerConsignmentsNeededData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/consignments/needed';
+};
+
+export type PortalControllerConsignmentsNeededErrors = {
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+};
+
+export type PortalControllerConsignmentsNeededError = PortalControllerConsignmentsNeededErrors[keyof PortalControllerConsignmentsNeededErrors];
+
+export type PortalControllerConsignmentsNeededResponses = {
+    200: PortalConsignmentsNeededResponse;
+};
+
+export type PortalControllerConsignmentsNeededResponse = PortalControllerConsignmentsNeededResponses[keyof PortalControllerConsignmentsNeededResponses];
+
+export type PortalControllerOrderConsignmentData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders/{orderId}/consignment';
+};
+
+export type PortalControllerOrderConsignmentErrors = {
+    /**
+     * Malformed orderId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such order of this client — unknown, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerOrderConsignmentError = PortalControllerOrderConsignmentErrors[keyof PortalControllerOrderConsignmentErrors];
+
+export type PortalControllerOrderConsignmentResponses = {
+    200: PortalOrderConsignmentResponse;
+};
+
+export type PortalControllerOrderConsignmentResponse = PortalControllerOrderConsignmentResponses[keyof PortalControllerOrderConsignmentResponses];
+
+export type PortalControllerRecordConsignmentData = {
+    body: RecordConsignmentDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders/{orderId}/consignment';
+};
+
+export type PortalControllerRecordConsignmentErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed orderId or field, a date outside its window, a missing consignor GSTIN, or an amendment after dispatch without a reason (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such order of this client (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * order-not-open, client-departed, eway-bill-in-use (one of your own orders), consignment-version-limit, eway-threshold-missing
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The declared value is below the COD amount (declared-value-below-order-value); the key reused (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PortalControllerRecordConsignmentError = PortalControllerRecordConsignmentErrors[keyof PortalControllerRecordConsignmentErrors];
+
+export type PortalControllerRecordConsignmentResponses = {
+    /**
+     * The body equals the live version — nothing written, the key stored (unchanged: true; a replay of the key is 200 too)
+     */
+    200: PortalConsignmentRecordResponse;
+    /**
+     * A new version (a replay re-serves it)
+     */
+    201: PortalConsignmentRecordResponse;
+};
+
+export type PortalControllerRecordConsignmentResponse = PortalControllerRecordConsignmentResponses[keyof PortalControllerRecordConsignmentResponses];
+
 export type PortalControllerOrderPackingSlipData = {
     body?: never;
     path: {
@@ -37802,7 +38693,7 @@ export type VendorReturnsControllerDispatchErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The return to vendor is not picked — member status (rtv-not-picked); the partner is not a transporter or is inactive (partner-not-transporter, transporter-inactive); a reconcile quarantine on DAMAGED (disposition-scope-quarantined); DAMAGED no longer holds the picked units — members onHandQty, pickedQty (rtv-damaged-short); a user location occupies the DAMAGED code (damaged-bin-conflict); or a concurrent idempotent request (conflict)
+     * The return to vendor is not picked — member status (rtv-not-picked); the partner is not a transporter or is inactive (partner-not-transporter, transporter-inactive); a reconcile quarantine on DAMAGED (disposition-scope-quarantined); DAMAGED no longer holds the picked units — members onHandQty, pickedQty (rtv-damaged-short); a user location occupies the DAMAGED code (damaged-bin-conflict); story 4-6a — a declared value above the e-way threshold without an e-way bill or exemption (eway-bill-required, extensions declaredValuePaise/thresholdPaise/thresholdRule), an expired bill (eway-bill-expired), no threshold in force (eway-threshold-missing); or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
@@ -38234,7 +39125,7 @@ export type ClientReturnsControllerDispatchErrors = {
      */
     404: ProblemDetailsDto;
     /**
-     * The return to client is not picked — member rtcStatus (rtc-not-picked); the partner is not a transporter or is inactive (partner-not-transporter, transporter-inactive); a reconcile quarantine on RETURNS or DAMAGED (disposition-scope-quarantined); DAMAGED no longer holds the picked units — members onHandQty, pickedQty (rtc-damaged-short); a user location occupies the RETURNS or DAMAGED code (returns-bin-conflict, damaged-bin-conflict); or a concurrent idempotent request (conflict)
+     * The return to client is not picked — member rtcStatus (rtc-not-picked); the partner is not a transporter or is inactive (partner-not-transporter, transporter-inactive); a reconcile quarantine on RETURNS or DAMAGED (disposition-scope-quarantined); DAMAGED no longer holds the picked units — members onHandQty, pickedQty (rtc-damaged-short); a user location occupies the RETURNS or DAMAGED code (returns-bin-conflict, damaged-bin-conflict); story 4-6a — a declared value above the e-way threshold without an e-way bill or exemption (eway-bill-required, extensions declaredValuePaise/thresholdPaise/thresholdRule), an expired bill (eway-bill-expired), no threshold in force (eway-threshold-missing); or a concurrent idempotent request (conflict)
      */
     409: ProblemDetailsDto;
     /**
