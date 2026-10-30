@@ -244,6 +244,8 @@ import {
   clientsControllerAddContact,
   clientsControllerEditContact,
   clientsControllerRemoveContact,
+  clientsControllerUpdateEmailSettings,
+  clientsControllerListEmails,
   clientWebhooksControllerList,
   clientWebhooksControllerCreate,
   clientWebhooksControllerUpdate,
@@ -418,6 +420,9 @@ import type {
   ClientAllocationPolicyResponse,
   ReleaseReceiptHoldsResponse,
   ClientContactDto,
+  ClientContactListItemDto,
+  ClientEmailLogResponse,
+  UpdateClientEmailSettingsDto,
   AddLicenceDto,
   CoverageGapsResponse,
   LicencePolicyResponse,
@@ -1806,12 +1811,15 @@ export async function fetchApiWithdrawLicence(tenantId: string, licenceId: strin
   return data.licence;
 }
 
-/** Story 1-2a — a client's contacts, the primary first (any staff session). */
+/**
+ * Story 1-2a — a client's contacts, the primary first (any staff session).
+ * Story 5-2b — each carries its `emailEvents` and the list-only `lastEmail`.
+ */
 export async function fetchApiListClientContacts(
   tenantId: string,
   clientId: string,
   options?: { signal?: AbortSignal },
-): Promise<ClientContactDto[]> {
+): Promise<ClientContactListItemDto[]> {
   const { data, error } = await clientsControllerListContacts({
     path: { tenantId, clientId },
     signal: options?.signal,
@@ -1874,6 +1882,52 @@ export async function fetchApiRemoveClientContact(
     throw unwrapError(error, 400);
   }
   return data.contact;
+}
+
+/**
+ * Story 5-2b — set a client's Reply-To for its receipt and dispatch emails
+ * (owner-only, `clients.manage`); `replyTo: null` clears it. An unchanged
+ * value is a keyed no-op. Answers the client.
+ */
+export async function fetchApiUpdateClientEmailSettings(
+  tenantId: string,
+  clientId: string,
+  body: UpdateClientEmailSettingsDto,
+  idempotencyKey: string,
+): Promise<ClientDto> {
+  const { data, error } = await clientsControllerUpdateEmailSettings({
+    path: { tenantId, clientId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) {
+    throw unwrapError(error, 400);
+  }
+  return data.client;
+}
+
+/**
+ * Story 5-2b — a client's receipt and dispatch emails, newest first (any
+ * staff session), with the server's mail switches and today's cap flags.
+ * `problems` is sent only when true; the cursor only past page one.
+ */
+export async function fetchApiListClientEmails(
+  tenantId: string,
+  clientId: string,
+  query: { problems?: boolean; cursor?: string | null; limit?: number },
+  options?: { signal?: AbortSignal },
+): Promise<ClientEmailLogResponse> {
+  const { data, error } = await clientsControllerListEmails({
+    path: { tenantId, clientId },
+    query: {
+      ...(query.problems === true ? { problems: 'true' as const } : {}),
+      ...(query.cursor === undefined || query.cursor === null ? {} : { cursor: query.cursor }),
+      ...(query.limit === undefined ? {} : { limit: query.limit }),
+    },
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
 }
 
 /* ------------------------------------------------------------------ */

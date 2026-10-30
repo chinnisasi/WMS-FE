@@ -7,7 +7,7 @@ import {
   fetchApiEditClientContact,
   fetchApiRemoveClientContact,
 } from '@/lib/api/client';
-import type { ClientContactDto, ClientDto } from '@/lib/api/generated';
+import type { ClientContactDto, ClientContactListItemDto, ClientDto } from '@/lib/api/generated';
 import { readSession } from '@/lib/auth';
 import {
   CONTACT_ROLES,
@@ -25,11 +25,23 @@ import {
   type ContactFields,
   type ContactRole,
 } from '@/lib/clients';
+import {
+  CLIENT_EMAIL_EVENTS,
+  CLIENT_EMAIL_EVENT_HINT,
+  CLIENT_EMAIL_EVENT_LABEL,
+  CLIENT_EMAILS_FIELDSET_HINT,
+  SELF_CLIENT_EMAILS_NOTE,
+  contactEmailBadge,
+  contactEmailEventsBody,
+  contactEmailsLabel,
+  type ClientEmailEvent,
+} from '@/lib/client-emails';
 import { ulid } from '@/lib/ulid';
 import { useClientContacts } from '@/lib/use-client-contacts';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ReadFailure } from '@/components/shared/surface';
+import { StatusChip } from '@/components/shared/status-chip';
 import { ConfirmRow } from '@/components/settings/confirm-row';
 
 const inputClass =
@@ -43,7 +55,7 @@ const primaryButtonClass =
 type Mode =
   | { kind: 'list' }
   | { kind: 'add' }
-  | { kind: 'edit'; contact: ClientContactDto }
+  | { kind: 'edit'; contact: ClientContactListItemDto }
   | { kind: 'remove'; contact: ClientContactDto }
   | { kind: 'primary'; contact: ClientContactDto };
 
@@ -56,7 +68,9 @@ type Outcome = { tone: 'accepted' | 'rejected'; word: string; reason: string } |
  * Roles are checkboxes in a `fieldset`/`legend`. Focus moves to the panel's
  * heading when it opens, and the region is labelled by it (it names the
  * client code). The add/edit draft reports whether it is dirty, so the card
- * asks before another panel replaces it.
+ * asks before another panel replaces it. Story 5-2b — each row says which
+ * client emails the contact receives and warns when its last one was not
+ * sent; the form's "Emails" fieldset opts in (disabled on `self`).
  */
 export function ClientContactsPanel({
   client,
@@ -116,16 +130,7 @@ export function ClientContactsPanel({
         <ul aria-label={`Contacts of ${client.code}`} className="flex flex-col gap-1">
           {rows.map((contact) => (
             <li key={contact.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-(--border) py-1 last:border-b-0">
-              <div className="flex min-w-48 flex-col">
-                <span className="font-medium">
-                  {contact.name}
-                  {contact.isPrimary ? <span className="ml-2 rounded-sm border border-(--border) px-1 text-xs">Primary</span> : null}
-                </span>
-                <span className="text-xs text-(--muted-foreground)">
-                  {contact.email}
-                  {contact.phone === null ? '' : ` · ${contact.phone}`} · {contactRolesLabel(contact.roles)}
-                </span>
-              </div>
+              <ContactRow contact={contact} />
               {canManage ? (
                 <div className="flex flex-wrap gap-1">
                   <button type="button" className={rowButtonClass} aria-label={`Edit ${contact.name}`} onClick={() => show({ kind: 'edit', contact })}>
@@ -174,6 +179,7 @@ export function ClientContactsPanel({
         <ContactForm
           key="add"
           clientCode={client.code}
+          systemOwned={client.systemOwned}
           initial={emptyContactFields()}
           submitLabel="Add contact"
           onDirtyChange={onDirtyChange}
@@ -194,6 +200,7 @@ export function ClientContactsPanel({
         <ContactForm
           key={`edit-${mode.contact.id}`}
           clientCode={client.code}
+          systemOwned={client.systemOwned}
           initial={contactFieldsOf(mode.contact)}
           submitLabel="Save contact"
           onDirtyChange={onDirtyChange}
@@ -237,14 +244,45 @@ export function ClientContactsPanel({
   );
 }
 
+/** A contact's lines: name (Primary), email · phone · roles, its client emails and the last email's problem. */
+function ContactRow({ contact }: { contact: ClientContactListItemDto }) {
+  const emails = contactEmailsLabel(contact.emailEvents ?? []);
+  const badge = contactEmailBadge(contact.lastEmail ?? null);
+  return (
+    <div className="flex min-w-48 flex-col">
+      <span className="font-medium">
+        {contact.name}
+        {contact.isPrimary ? <span className="ml-2 rounded-sm border border-(--border) px-1 text-xs">Primary</span> : null}
+      </span>
+      <span className="text-xs text-(--muted-foreground)">
+        {contact.email}
+        {contact.phone === null ? '' : ` · ${contact.phone}`} · {contactRolesLabel(contact.roles)}
+      </span>
+      {emails !== null || badge !== null ? (
+        <span className="flex flex-wrap items-center gap-2 text-xs">
+          {emails !== null ? <span className="text-(--muted-foreground)">{emails}</span> : null}
+          {badge !== null ? (
+            <StatusChip tone="warning" glyph="!">
+              {badge}
+            </StatusChip>
+          ) : null}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * The add / edit form. Per-draft Idempotency-Key (`keyRef.current ??=
  * ulid()`): reused across retries of the unchanged draft, cleared on any
  * edit and on success. An edit sends the whole contact (an unchanged one is
- * a server-side no-op).
+ * a server-side no-op) — except `emailEvents`, sent only when the ticked set
+ * differs from the one the form was seeded with, so a stale form never
+ * overwrites (and cancels the queued mail of) another owner's opt-in.
  */
 function ContactForm({
   clientCode,
+  systemOwned,
   initial,
   submitLabel,
   onDirtyChange,
@@ -254,12 +292,14 @@ function ContactForm({
   onRejected,
 }: {
   clientCode: string;
+  /** Story 5-2b — the warehouse's own client: the Emails fieldset is disabled and `emailEvents` never sent. */
+  systemOwned: boolean;
   initial: ContactFields;
   submitLabel: string;
   onDirtyChange: (dirty: boolean) => void;
   onCancel: () => void;
   save: (
-    body: { name: string; email: string; phone: string | null; roles: ContactRole[] },
+    body: { name: string; email: string; phone: string | null; roles: ContactRole[]; emailEvents?: ClientEmailEvent[] },
     idempotencyKey: string,
     tenantId: string,
   ) => Promise<ClientContactDto>;
@@ -272,6 +312,8 @@ function ContactForm({
   const keyRef = useRef<string | null>(null);
   const inFlight = useRef(false);
   const legendId = useId();
+  const emailsLegendId = useId();
+  const emailsNoteId = useId();
 
   const edit = (next: ContactFields) => {
     keyRef.current = null;
@@ -294,7 +336,15 @@ function ContactForm({
     setBusy(true);
     keyRef.current ??= ulid();
     try {
-      const contact = await save({ ...parsed.body, roles: [...(parsed.body.roles ?? [])] }, keyRef.current, session.tenant.id);
+      const contact = await save(
+        {
+          ...parsed.body,
+          roles: [...(parsed.body.roles ?? [])],
+          ...(sameEmailEvents(fields.emailEvents, initial.emailEvents) ? {} : contactEmailEventsBody(fields.emailEvents, systemOwned)),
+        },
+        keyRef.current,
+        session.tenant.id,
+      );
       keyRef.current = null;
       onSaved(contact);
     } catch (error) {
@@ -361,6 +411,32 @@ function ContactForm({
           </label>
         ))}
       </fieldset>
+      <fieldset className="flex flex-col gap-1" aria-labelledby={emailsLegendId} aria-describedby={emailsNoteId} disabled={systemOwned}>
+        <legend id={emailsLegendId} className={labelClass}>
+          Emails
+        </legend>
+        <span id={emailsNoteId} className="text-xs text-(--muted-foreground)">
+          {systemOwned ? SELF_CLIENT_EMAILS_NOTE : CLIENT_EMAILS_FIELDSET_HINT}
+        </span>
+        {CLIENT_EMAIL_EVENTS.map((event) => (
+          <label key={event} className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={!systemOwned && fields.emailEvents.includes(event)}
+              onChange={(change) =>
+                edit({
+                  ...fields,
+                  emailEvents: change.target.checked ? [...fields.emailEvents, event] : fields.emailEvents.filter((e) => e !== event),
+                })
+              }
+            />
+            <span className="flex flex-col">
+              <span>{CLIENT_EMAIL_EVENT_LABEL[event]}</span>
+              <span className="text-xs text-(--muted-foreground)">{CLIENT_EMAIL_EVENT_HINT[event]}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
       <div className="flex flex-wrap gap-2">
         <button type="submit" disabled={busy} className={primaryButtonClass}>
           {busy ? 'Saving…' : submitLabel}
@@ -376,4 +452,9 @@ function ContactForm({
       ) : null}
     </form>
   );
+}
+
+/** Story 5-2b — the same opt-ins, whatever the tick order. */
+function sameEmailEvents(a: readonly ClientEmailEvent[], b: readonly ClientEmailEvent[]): boolean {
+  return a.length === b.length && a.every((event) => b.includes(event));
 }

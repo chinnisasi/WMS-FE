@@ -937,20 +937,36 @@ export function contactEmailProblem(email: string): string | null {
   return null;
 }
 
-/** The contact form's text fields. */
+/** Story 5-2b — a client email a contact may opt into (the generated union; words in `lib/client-emails.ts`). */
+export type ContactEmailEvent = ClientContactDto['emailEvents'][number];
+
+/** The contact form's fields. */
 export interface ContactFields {
   readonly name: string;
   readonly email: string;
   readonly phone: string;
   readonly roles: readonly ContactRole[];
+  /** Story 5-2b — the client emails ticked (sent by the form through `contactEmailEventsBody`). */
+  readonly emailEvents: readonly ContactEmailEvent[];
 }
 
 export function emptyContactFields(): ContactFields {
-  return { name: '', email: '', phone: '', roles: [] };
+  return { name: '', email: '', phone: '', roles: [], emailEvents: [] };
 }
 
 export function contactFieldsOf(contact: ClientContactDto): ContactFields {
-  return { name: contact.name, email: contact.email, phone: contact.phone ?? '', roles: [...contact.roles] };
+  return {
+    name: contact.name,
+    email: contact.email,
+    phone: contact.phone ?? '',
+    roles: [...contact.roles],
+    // `?? []`: a contact answered before 5-2b (a replayed write) carries none.
+    emailEvents: [...(contact.emailEvents ?? [])],
+  };
+}
+
+function sameSet<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.length === b.length && a.every((item) => b.includes(item));
 }
 
 /** Whether a draft differs from where it started (the panel asks before discarding it). */
@@ -959,8 +975,8 @@ export function contactDraftDirty(fields: ContactFields, from: ContactFields): b
     fields.name !== from.name ||
     fields.email !== from.email ||
     fields.phone !== from.phone ||
-    fields.roles.length !== from.roles.length ||
-    fields.roles.some((role) => !from.roles.includes(role))
+    !sameSet(fields.roles, from.roles) ||
+    !sameSet(fields.emailEvents, from.emailEvents)
   );
 }
 

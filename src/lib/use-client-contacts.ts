@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { fetchApiListClientContacts } from '@/lib/api/client';
-import type { ClientContactDto } from '@/lib/api/generated';
+import type { ClientContactListItemDto } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { contactsReadReason } from '@/lib/clients';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
@@ -18,7 +18,7 @@ import type { Reloadable, ResourceState } from '@/lib/resource-state';
  */
 export function useClientContacts(
   clientId: string,
-): ResourceState<readonly ClientContactDto[]> & Reloadable & { refresh: () => void } {
+): ResourceState<readonly ClientContactListItemDto[]> & Reloadable & { refresh: () => void } {
   const tenantId = useSyncExternalStore(
     subscribeSession,
     () => readSession()?.tenant.id ?? null,
@@ -28,7 +28,7 @@ export function useClientContacts(
   const [result, setResult] = useState<{
     tenantId: string;
     clientId: string;
-    state: ResourceState<readonly ClientContactDto[]>;
+    state: ResourceState<readonly ClientContactListItemDto[]>;
   } | null>(null);
 
   useEffect(() => {

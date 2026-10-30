@@ -35,6 +35,7 @@ function client(over: Partial<ClientDto> = {}): ClientDto {
     taxDetails: { legalName: null, gstin: null, pan: null, placeOfSupply: null } as unknown as ClientDto['taxDetails'],
     registeredAddress: null,
     returnAddress: null,
+    emailReplyTo: null,
     ...over,
   };
 }

@@ -10525,6 +10525,10 @@ export type ClientDto = {
      * Story 4-3a — the outbound allocation policy. Optional: a mutation answer stored before 4-3a replays without it; every fresh read carries it
      */
     allocationPolicy?: ClientAllocationPolicyDto;
+    /**
+     * Story 5-2b — the Reply-To of the client’s receipt and dispatch emails; null = the server’s default
+     */
+    emailReplyTo: string | null;
 };
 
 export type ClientListResponse = {
@@ -10680,6 +10684,83 @@ export type UpdateClientAllocationPolicyDto = {
     minOutboundShelfLifeDays: number | null;
 };
 
+export type ClientContactLastEmailDto = {
+    status: 'pending' | 'sending' | 'sent' | 'failed' | 'skipped' | 'expired' | 'cancelled';
+    /**
+     * Why it was not sent (a provider code such as suppressed, or a local one such as expired or allowlist); null when sent or queued
+     */
+    errorCode: string | null;
+    /**
+     * ISO-8601 UTC — when its status last changed
+     */
+    at: string;
+};
+
+export type ClientContactListItemDto = {
+    id: string;
+    clientId: string;
+    name: string;
+    /**
+     * Lower-cased
+     */
+    email: string;
+    phone: string | null;
+    /**
+     * In vocabulary order; empty = a general contact
+     */
+    roles: Array<'operations' | 'billing' | 'returns'>;
+    /**
+     * Exactly one contact is primary while any exist — listed first, the default recipient of client notifications
+     */
+    isPrimary: boolean;
+    /**
+     * ISO-8601 UTC creation time
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC last update
+     */
+    updatedAt: string;
+    /**
+     * Story 5-2b — the client emails this contact receives, in vocabulary order; empty = none
+     */
+    emailEvents: Array<'receipt.recorded' | 'order.dispatched'>;
+    /**
+     * The latest receipt or dispatch email to this address for this client; null when none
+     */
+    lastEmail: ClientContactLastEmailDto | null;
+};
+
+export type ClientContactListResponse = {
+    /**
+     * The primary first, then by name, then by id (at most 20)
+     */
+    items: Array<ClientContactListItemDto>;
+};
+
+export type CreateClientContactDto = {
+    /**
+     * 1-120 characters (code points) once trimmed
+     */
+    name: string;
+    /**
+     * An ASCII address, stored trimmed and lower-cased; unique per client
+     */
+    email: string;
+    /**
+     * Omit, null or blank for none
+     */
+    phone?: string | null;
+    /**
+     * What the contact is for — none is a general contact. No role twice
+     */
+    roles?: Array<'operations' | 'billing' | 'returns'>;
+    /**
+     * Story 5-2b — the client emails this contact receives: receipt.recorded (each GRN), order.dispatched (each order). Omitted = none. No event twice; refused on the warehouse’s own (self) client
+     */
+    emailEvents?: Array<'receipt.recorded' | 'order.dispatched'>;
+};
+
 export type ClientContactDto = {
     id: string;
     clientId: string;
@@ -10705,32 +10786,10 @@ export type ClientContactDto = {
      * ISO-8601 UTC last update
      */
     updatedAt: string;
-};
-
-export type ClientContactListResponse = {
     /**
-     * The primary first, then by name, then by id (at most 20)
+     * Story 5-2b — the client emails this contact receives, in vocabulary order; empty = none
      */
-    items: Array<ClientContactDto>;
-};
-
-export type CreateClientContactDto = {
-    /**
-     * 1-120 characters (code points) once trimmed
-     */
-    name: string;
-    /**
-     * An ASCII address, stored trimmed and lower-cased; unique per client
-     */
-    email: string;
-    /**
-     * Omit, null or blank for none
-     */
-    phone?: string | null;
-    /**
-     * What the contact is for — none is a general contact. No role twice
-     */
-    roles?: Array<'operations' | 'billing' | 'returns'>;
+    emailEvents: Array<'receipt.recorded' | 'order.dispatched'>;
 };
 
 export type ClientContactResponse = {
@@ -10752,6 +10811,72 @@ export type UpdateClientContactDto = {
      * true makes this the primary contact (the previous primary is cleared). false is refused — make another contact primary instead
      */
     isPrimary?: boolean;
+    /**
+     * Story 5-2b — omitted = unchanged; [] = none. Dropping an event cancels its still-queued emails to this contact
+     */
+    emailEvents?: Array<'receipt.recorded' | 'order.dispatched'>;
+};
+
+export type UpdateClientEmailSettingsDto = {
+    /**
+     * The Reply-To of the client’s receipt and dispatch emails (stored trimmed and lower-cased); null or blank clears it — the server’s default Reply-To then applies. Required
+     */
+    replyTo: string | null;
+};
+
+export type ClientEmailLogItemDto = {
+    id: string;
+    kind: 'receipt' | 'dispatch';
+    /**
+     * The GRN code (a receipt) or the order reference (a dispatch)
+     */
+    subjectLabel: string;
+    /**
+     * The recipient
+     */
+    to: string;
+    status: 'pending' | 'sending' | 'sent' | 'failed' | 'skipped' | 'expired' | 'cancelled';
+    /**
+     * Why it was not sent, skipped or cancelled (e.g. suppressed, expired, allowlist, provider-off, unsubscribed)
+     */
+    errorCode: string | null;
+    attempts: number;
+    /**
+     * ISO-8601 UTC — when it was queued
+     */
+    createdAt: string;
+    /**
+     * ISO-8601 UTC — when its status last changed
+     */
+    updatedAt: string;
+};
+
+export type ClientEmailCapDto = {
+    /**
+     * Today’s receipt emails reached the daily limit (500) — later receipts today were not emailed
+     */
+    receipt: boolean;
+    /**
+     * Today’s dispatch emails reached the daily limit (500) — later dispatches today were not emailed
+     */
+    dispatch: boolean;
+};
+
+export type ClientEmailLogResponse = {
+    /**
+     * Newest first
+     */
+    items: Array<ClientEmailLogItemDto>;
+    nextCursor: string | null;
+    /**
+     * Mail is sent on this server at all (EMAIL_PROVIDER is not off)
+     */
+    mailEnabled: boolean;
+    /**
+     * Client emails are switched on on this server (CLIENT_EMAIL_ENABLED)
+     */
+    clientMailEnabled: boolean;
+    capReachedToday: ClientEmailCapDto;
 };
 
 export type WebhookEndpointListEntryDto = {
@@ -29683,6 +29808,110 @@ export type ClientsControllerEditContactResponses = {
 };
 
 export type ClientsControllerEditContactResponse = ClientsControllerEditContactResponses[keyof ClientsControllerEditContactResponses];
+
+export type ClientsControllerUpdateEmailSettingsData = {
+    body: UpdateClientEmailSettingsDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/clients/{clientId}/email-settings';
+};
+
+export type ClientsControllerUpdateEmailSettingsErrors = {
+    /**
+     * Missing or malformed Idempotency-Key, a malformed clientId, or a replyTo that is not an email address (validation-failed, naming replyTo)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or the caller lacks clients.manage — owner only (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A concurrent request with the same Idempotency-Key (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ClientsControllerUpdateEmailSettingsError = ClientsControllerUpdateEmailSettingsErrors[keyof ClientsControllerUpdateEmailSettingsErrors];
+
+export type ClientsControllerUpdateEmailSettingsResponses = {
+    200: ClientResponse;
+};
+
+export type ClientsControllerUpdateEmailSettingsResponse = ClientsControllerUpdateEmailSettingsResponses[keyof ClientsControllerUpdateEmailSettingsResponses];
+
+export type ClientsControllerListEmailsData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        clientId: string;
+    };
+    query?: {
+        /**
+         * `true`: only problems — not sent (failed, expired) or refused by the allowlist
+         */
+        problems?: 'true' | 'false';
+        /**
+         * The previous page’s nextCursor
+         */
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/tenants/{tenantId}/clients/{clientId}/emails';
+};
+
+export type ClientsControllerListEmailsErrors = {
+    /**
+     * A malformed clientId, cursor, limit or problems flag (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Session belongs to another tenant (permission-denied), or a client-portal session (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No client with this id exists in this tenant (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ClientsControllerListEmailsError = ClientsControllerListEmailsErrors[keyof ClientsControllerListEmailsErrors];
+
+export type ClientsControllerListEmailsResponses = {
+    200: ClientEmailLogResponse;
+};
+
+export type ClientsControllerListEmailsResponse = ClientsControllerListEmailsResponses[keyof ClientsControllerListEmailsResponses];
 
 export type ClientWebhooksControllerListData = {
     body?: never;

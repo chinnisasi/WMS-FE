@@ -52,6 +52,7 @@ import { ClientAddressesPanel } from '@/components/settings/client-addresses';
 import { ClientReceivingPolicyPanel } from '@/components/settings/client-receiving-policy';
 import { ClientAllocationPolicyPanel } from '@/components/settings/client-allocation-policy';
 import { ClientWebhooksPanel } from '@/components/settings/client-webhooks';
+import { ClientEmailsPanel } from '@/components/settings/client-emails';
 
 const inputClass =
   'w-full rounded-sm border border-(--input) bg-(--background) px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-(--ring)';
@@ -77,6 +78,8 @@ type Panel =
   | { kind: 'allocation'; client: ClientDto }
   // Story 5-2a — the client's outbound webhooks (owner-only).
   | { kind: 'webhooks'; client: ClientDto }
+  // Story 5-2b — the client's receipt and dispatch emails (any staff; Reply-To owner-only).
+  | { kind: 'emails'; client: ClientDto }
   | { kind: ClientStatusAction; client: ClientDto };
 
 /** The panel's name in the discard question. */
@@ -92,6 +95,8 @@ function panelName(panel: Panel): string {
       return `${panel.client.code}'s allocation policy`;
     case 'webhooks':
       return `${panel.client.code}'s webhook endpoint`;
+    case 'emails':
+      return `${panel.client.code}'s Reply-To`;
     default:
       return panel.client.code;
   }
@@ -205,6 +210,8 @@ function ClientsCardSessioned() {
             {canManage && !client.systemOwned ? rowButton('Rename', `Rename ${client.code}`, { kind: 'rename', client }) : null}
             {canInvoice && !client.systemOwned ? rowButton('Tax details', `Tax details of ${client.code}`, { kind: 'tax', client }) : null}
             {rowButton('Contacts', `Contacts of ${client.code}`, { kind: 'contacts', client })}
+            {/* Story 5-2b — every staff session; never on the warehouse's own client (it gets no client emails). */}
+            {client.systemOwned ? null : rowButton('Emails', `Emails of ${client.code}`, { kind: 'emails', client })}
             {rowButton('Addresses', `Addresses of ${client.code}`, { kind: 'addresses', client })}
             {rowButton('Receiving', `Receiving policy of ${client.code}`, { kind: 'receiving', client })}
             {rowButton('Allocation', `Allocation policy of ${client.code}`, { kind: 'allocation', client })}
@@ -323,6 +330,17 @@ function ClientsCardSessioned() {
 
       {panel?.kind === 'allocation' ? (
         <ClientAllocationPolicyPanel
+          key={panel.client.id}
+          client={panel.client}
+          canManage={canManage}
+          onClose={() => show(null)}
+          onSaved={() => notifyClientsChanged()}
+          onDirtyChange={onDirtyChange}
+        />
+      ) : null}
+
+      {panel?.kind === 'emails' ? (
+        <ClientEmailsPanel
           key={panel.client.id}
           client={panel.client}
           canManage={canManage}

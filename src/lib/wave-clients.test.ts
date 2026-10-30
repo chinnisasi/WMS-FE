@@ -16,6 +16,7 @@ function client(id: string, code: string, systemOwned = false): ClientDto {
     taxDetails: {} as ClientDto['taxDetails'],
     registeredAddress: null,
     returnAddress: null,
+    emailReplyTo: null,
   };
 }
 

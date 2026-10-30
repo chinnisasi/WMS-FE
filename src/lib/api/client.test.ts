@@ -91,6 +91,8 @@ import {
   fetchApiEditLicence,
   fetchApiWithdrawLicence,
   fetchApiAddClientContact,
+  fetchApiUpdateClientEmailSettings,
+  fetchApiListClientEmails,
   fetchApiEditClientContact,
   fetchApiRemoveClientContact,
   fetchApiUpdateClientStatus,
@@ -1819,6 +1821,53 @@ describe('client master record wrappers (story 1-2a)', () => {
       code: 'client-not-wound-down',
       extensions: { blockers: [{ kind: 'stock', count: 1 }] },
     });
+    clearSession();
+  });
+});
+
+describe('client email wrappers (story 5-2b)', () => {
+  const KEY = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+  const CLIENT_ID = '0198f7a2-1b3c-7d4e-8f90-000000000001';
+  const base = () => `/api/v1/tenants/${SESSION.tenant.id}/clients/${CLIENT_ID}`;
+  const LOG = { items: [], nextCursor: null, mailEnabled: true, clientMailEnabled: true, capReachedToday: { receipt: false, dispatch: false } };
+
+  test('the email log: GET, no key; problems and the cursor sent only when set', async () => {
+    writeSession(SESSION);
+    stubFetch(200, LOG);
+    const page = await fetchApiListClientEmails(SESSION.tenant.id, CLIENT_ID, { problems: false, cursor: null, limit: 25 });
+    const first = new URL(lastRequest!.url);
+    expect(first.pathname).toBe(`${base()}/emails`);
+    expect(lastRequest!.method).toBe('GET');
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBeNull();
+    expect(first.searchParams.has('problems')).toBe(false);
+    expect(first.searchParams.has('cursor')).toBe(false);
+    expect(first.searchParams.get('limit')).toBe('25');
+    expect(page.mailEnabled).toBe(true);
+
+    stubFetch(200, LOG);
+    await fetchApiListClientEmails(SESSION.tenant.id, CLIENT_ID, { problems: true, cursor: 'c-2' });
+    const next = new URL(lastRequest!.url);
+    expect(next.searchParams.get('problems')).toBe('true');
+    expect(next.searchParams.get('cursor')).toBe('c-2');
+    clearSession();
+  });
+
+  test('email settings: a keyed PATCH with the Reply-To (null clears), answering the client', async () => {
+    writeSession(SESSION);
+    stubFetch(200, { client: { id: CLIENT_ID, emailReplyTo: 'ops@3pl.in' } });
+    const client = await fetchApiUpdateClientEmailSettings(SESSION.tenant.id, CLIENT_ID, { replyTo: 'ops@3pl.in' }, KEY);
+    expect(lastRequest!.method).toBe('PATCH');
+    expect(new URL(lastRequest!.url).pathname).toBe(`${base()}/email-settings`);
+    expect(lastRequest!.headers.get('Idempotency-Key')).toBe(KEY);
+    expect(await lastRequest!.json()).toEqual({ replyTo: 'ops@3pl.in' });
+    expect(client.emailReplyTo).toBe('ops@3pl.in');
+
+    stubFetch(200, { client: { id: CLIENT_ID, emailReplyTo: null } });
+    await fetchApiUpdateClientEmailSettings(SESSION.tenant.id, CLIENT_ID, { replyTo: null }, KEY);
+    expect(await lastRequest!.json()).toEqual({ replyTo: null });
+
+    stubFetch(400, { type: 'about:blank', title: 'x', status: 400, code: 'validation-failed', detail: 'replyTo must be …' });
+    await expect(fetchApiUpdateClientEmailSettings(SESSION.tenant.id, CLIENT_ID, { replyTo: 'x' }, KEY)).rejects.toMatchObject({ code: 'validation-failed' });
     clearSession();
   });
 });

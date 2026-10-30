@@ -42,6 +42,7 @@ function client(over: Partial<ClientDto>): ClientDto {
     taxDetails: {} as ClientDto['taxDetails'],
     registeredAddress: null,
     returnAddress: null,
+    emailReplyTo: null,
     ...over,
   };
 }
