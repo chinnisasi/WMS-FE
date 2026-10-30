@@ -102,19 +102,25 @@ export function HandoverBuilder({
       ...pruned.draft.rows,
     },
   };
-  // Story 4-6a (A24) — a candidate the documents gate blocks is never ticked
-  // (derived at render, so "Hand over" on a blocked row, or a refresh that
-  // finds its record withdrawn, unticks it without a reset effect).
+  // Story 4-6a (A24) — a candidate the documents gate blocks is never ticked:
+  // "Hand over" on a blocked row, or a refresh that finds its record withdrawn,
+  // unticks it IN THE DRAFT (a state update during render, guarded — no reset
+  // effect), so it does not silently re-tick once its documents are recorded.
   const blockedIds = new Set(items.filter((c) => consignmentBlocker(c) !== null).map((c) => c.orderId));
+  const blockedTicked = Object.entries(joined.rows).filter(([id, row]) => row.selected && blockedIds.has(id)).map(([id]) => id);
+  if (blockedTicked.length > 0) {
+    setDraft((current) => ({
+      ...current,
+      rows: {
+        ...current.rows,
+        ...Object.fromEntries(blockedTicked.map((id) => [id, { ...(current.rows[id] ?? joined.rows[id] ?? EMPTY_ROW), selected: false }])),
+      },
+    }));
+  }
   const draft: HandoverDraft =
-    blockedIds.size === 0
+    blockedTicked.length === 0
       ? joined
-      : {
-          ...joined,
-          rows: Object.fromEntries(
-            Object.entries(joined.rows).map(([id, row]) => [id, blockedIds.has(id) && row.selected ? { ...row, selected: false } : row]),
-          ),
-        };
+      : { ...joined, rows: { ...joined.rows, ...Object.fromEntries(blockedTicked.map((id) => [id, { ...joined.rows[id]!, selected: false }])) } };
   const truncated = candidates.state === 'ready' && candidates.data.truncated;
   const [scan, setScan] = useState('');
   const [scanNote, setScanNote] = useState<{ tone: 'accepted' | 'warning' | 'rejected'; text: string } | null>(null);

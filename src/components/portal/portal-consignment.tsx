@@ -8,6 +8,7 @@ import {
   brandDocumentLine,
   CONSIGNMENT_STAGE_WORD,
   consignmentReason,
+  consignmentRefusalReloads,
   draftFromView,
   emptyConsignmentRecordDraft,
   ewayLine,
@@ -60,9 +61,11 @@ export function PortalConsignment({
   const [outcome, setOutcome] = useState<{ word: string; reason: string } | null>(null);
   const sectionRef = useRef<HTMLElement>(null);
 
+  // The section mounts only once the read is ready: scroll then, not while it loads (the ref is null).
+  const ready = read.state === 'ready';
   useEffect(() => {
-    if (focus) sectionRef.current?.scrollIntoView?.({ block: 'start' });
-  }, [focus]);
+    if (focus && ready) sectionRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [focus, ready]);
 
   if (read.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading tax documents…</div>;
   if (read.state === 'failed') {
@@ -114,7 +117,14 @@ export function PortalConsignment({
           reasonOf={consignmentReason}
           submit={async (body, key) => {
             if (tenantId === null) throw new Error(PORTAL_SESSION_EXPIRED);
-            const response = await fetchApiPortalRecordConsignment(tenantId, orderId, body, key);
+            let response;
+            try {
+              response = await fetchApiPortalRecordConsignment(tenantId, orderId, body, key);
+            } catch (error) {
+              // The order moved (left, cancelled, gone): re-read quietly — the form and its refusal stay.
+              if (consignmentRefusalReloads(error)) void read.refresh();
+              throw error;
+            }
             setOutcome(
               response.unchanged === true
                 ? { word: 'Nothing changed', reason: 'Your record already says this.' }

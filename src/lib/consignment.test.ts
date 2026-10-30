@@ -9,6 +9,8 @@ import {
   consignmentReason,
   consignmentRefusalReloads,
   draftFromView,
+  ewayDispatchRefusal,
+  parseDeclaredValue,
   emptyConsignmentRecordDraft,
   ewayLine,
   ewayValidityWarning,
@@ -30,7 +32,6 @@ import {
   thresholdRuleWords,
   type ConsignmentRecordDraft,
 } from './consignment';
-import { ewayDispatchRefusal, parseDeclaredValue } from './consignment-capture';
 import { dispatchReason } from './outbound-pack-dispatch';
 import { candidateBlocker, consignmentBlocker, EMPTY_ROW, HANDOVER_REFUSAL_WORD } from './shipping';
 import { UNREACHABLE_REASON } from './outbound-orders';
@@ -261,7 +262,7 @@ describe('story 4-6a — refusals by code', () => {
 
   test('a return dispatch’s e-way refusals carry the server’s figures (A22)', () => {
     expect(ewayDispatchRefusal(problem('eway-bill-required', 409, { declaredValuePaise: 7_500_000, thresholdPaise: 5_000_000, thresholdRule: 'national' }))).toBe(
-      'The declared value ₹75,000 is above the e-way threshold ₹50,000 (national) — enter the brand\'s e-way bill number and its date.',
+      'The declared value ₹75,000 is above the e-way threshold ₹50,000 (national) — enter the brand’s e-way bill number and its date.',
     );
     expect(ewayDispatchRefusal(problem('eway-bill-expired'))).toContain('validity ended');
     expect(ewayDispatchRefusal(problem('rtv-not-picked'))).toBeNull();

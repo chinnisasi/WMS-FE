@@ -222,6 +222,42 @@ describe('ConsignmentPanel (story 4-6a)', () => {
     expect(byTestId('consignment-reason')!.getAttribute('aria-invalid')).toBe('true');
   });
 
+  test('keep last good: a refetch that fails after a record keeps the panel, its live version and the outcome', async () => {
+    getAnswer = { status: 200, body: read({ gate: { ...GATE_MISSING, state: 'eway-required', requiredBecause: null }, live: LIVE }) };
+    await mount('operator');
+    getAnswer = { status: 503, body: { code: 'unavailable', status: 503, title: 'Down' } };
+    await click(byTestId('consignment-record'));
+    setValue(byTestId('consignment-declared-value') as HTMLInputElement, '42000');
+    await submit(byTestId('consignment-form'));
+    expect(posts).toHaveLength(1);
+    expect(view!.container.textContent).toContain('Recorded — v1');
+    expect(byTestId('consignment-live')).not.toBeNull();
+    expect(view!.container.textContent).not.toContain('Tax documents unavailable');
+  });
+
+  test('a refusal that means the order moved re-reads quietly: the form and its refusal stay on screen', async () => {
+    await mount('operator');
+    await click(byTestId('consignment-record'));
+    setValue(byTestId('consignment-document-number') as HTMLInputElement, 'INV-1');
+    setValue(byTestId('consignment-declared-value') as HTMLInputElement, '100');
+    postAnswer = { status: 409, body: { code: 'order-not-open', status: 409, title: 'Cancelled' } };
+    await submit(byTestId('consignment-form'));
+    expect(byTestId('consignment-form')).not.toBeNull();
+    expect(view!.container.textContent).toContain('The order is cancelled');
+  });
+
+  test('A46 — an operator amending an exempt record starts off the exemption and is told why', async () => {
+    getAnswer = {
+      status: 200,
+      body: read({ gate: { ...GATE_MISSING, state: 'ready', blocking: false, requiredBecause: null }, live: { ...LIVE, eway: { ...LIVE.eway, status: 'exempt', exemptionReason: 'customs' } } }),
+    };
+    await mount('operator');
+    await click(byTestId('consignment-record'));
+    expect((byTestId('consignment-eway-exempt') as HTMLInputElement).checked).toBe(false);
+    expect((byTestId('consignment-eway-none') as HTMLInputElement).checked).toBe(true);
+    expect(view!.container.textContent).toContain('Only an office role can keep or change the exemption.');
+  });
+
   test('an API without the route (404) renders nothing', async () => {
     getAnswer = { status: 404, body: { code: 'not-found', status: 404, title: 'Not found' } };
     await mount('ops_manager');

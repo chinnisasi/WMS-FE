@@ -24,15 +24,14 @@ import { istDateTimeLabel } from '@/lib/audit-exports';
 import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
 import {
   BRAND_DOCUMENT_LABEL,
-  ewayDispatchRefusal,
   parseConsignmentDraft,
-  parseDeclaredValue,
   stateCodeLabel,
   type ConsignmentDraft,
   type DispatchNoteModel,
   type NoteLine,
   type ParsedConsignment,
 } from '@/lib/consignment-capture';
+import { ewayDispatchRefusal, parseDeclaredValue } from '@/lib/consignment';
 
 export type { DispatchNoteModel, NoteLine, NoteParty } from '@/lib/consignment-capture';
 import { formatCount, formatQuantity, parseQuantityInput } from '@/lib/format-quantity';

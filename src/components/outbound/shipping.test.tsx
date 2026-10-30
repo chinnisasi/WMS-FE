@@ -485,6 +485,39 @@ describe('the handover builder (A20, A49)', () => {
     expect(rowB.querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(false);
   });
 
+  test('story 4-6a — a blocked parcel’s carton label is refused: rejected note, not ticked, no carton recorded', async () => {
+    writeSession(session('operator'));
+    const missing = { state: 'missing', blocking: true, ewayBillNumber: null, ewayValidUntil: null };
+    candidates = candidateRows().map((c, i) => ({ ...c, packSeq: 1, cartonCount: 2, ...(i === 0 ? { consignment: missing } : {}) }));
+    view = render(
+      <HandoverBuilder tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} initialClientId={CLIENT_A} initialOrderId={null} onClose={() => {}} onCreated={() => {}} />,
+    );
+    await settle();
+    const root = byTestId(view.container, 'handover-builder')!;
+    await scan(root, 'O8F90000000000001.1.1');
+    const note = byTestId(root, 'handover-scan-note')!;
+    expect(note.textContent).toBe('SO-1 — Invoice not recorded — record it first. It cannot leave yet.');
+    expect(note.className).toContain('destructive');
+    const rowA = root.querySelector(`[data-order-id="${ORDER_A}"]`)!;
+    expect(rowA.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(false);
+    expect(byTestId(rowA as HTMLElement, 'handover-carton-tally')?.textContent ?? '').not.toContain('1/2');
+  });
+
+  test('story 4-6a — a row unticked because it was blocked does not re-tick itself once its documents are recorded', async () => {
+    writeSession(session('operator'));
+    candidates = candidateRows().map((c, i) => (i === 0 ? { ...c, consignment: { state: 'missing', blocking: true, ewayBillNumber: null, ewayValidUntil: null } } : c));
+    view = render(
+      <HandoverBuilder tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} initialClientId={CLIENT_A} initialOrderId={ORDER_A} onClose={() => {}} onCreated={() => {}} />,
+    );
+    await settle();
+    const root = byTestId(view.container, 'handover-builder')!;
+    candidates = candidateRows().map((c, i) => (i === 0 ? { ...c, consignment: { state: 'ready', blocking: false, ewayBillNumber: null, ewayValidUntil: null } } : c));
+    await click(byTestId(root, 'handover-refresh')!);
+    const tick = root.querySelector(`[data-order-id="${ORDER_A}"] input[type="checkbox"]`) as HTMLInputElement;
+    expect(tick.disabled).toBe(false);
+    expect(tick.checked).toBe(false);
+  });
+
   test('a successful handover hands its response up', async () => {
     let created: unknown = null;
     const root = await openBuilder((r) => (created = r));
@@ -915,6 +948,27 @@ describe('story 4-6a — the Docs cell and the Documents tab (A16, A24)', () => 
     createdAt: '2026-10-30T10:00:00.000Z',
     packedAt: '2026-10-30T11:00:00.000Z',
   };
+
+  test('Pack & Dispatch mounts the Tax documents panel in the expanded row; never for an order found cancelled', async () => {
+    writeSession(session('operator'));
+    consignmentReads = {
+      [ORDER_A]: {
+        gate: { state: 'missing', blocking: true, requiredBecause: 'policy-b2b', valueFloorPaise: null, nationalThresholdPaise: 5_000_000, expiresToday: false },
+        live: null, history: [], dispatchedRecordId: null, duplicates: [], consignorStateMismatch: false, ewayUsedByOtherClient: null, scans: [], complianceException: null,
+      },
+    };
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    await expand('SO-1');
+    expect(byTestId(view.container, 'consignment-panel')).not.toBeNull();
+    view.unmount();
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    // The row still reads packed, but the order's own read (on expand) says it was cancelled.
+    orderStatuses = { ...orderStatuses, [ORDER_A]: 'cancelled' };
+    await expand('SO-1');
+    expect(byTestId(view.container, 'consignment-panel')).toBeNull();
+  });
 
   test('Needed: the word first, why, and Record opens the order’s Tax documents with its form', async () => {
     writeSession(session('operator'));

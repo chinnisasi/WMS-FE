@@ -2414,6 +2414,32 @@ describe('story 4-6a — the portal Tax documents section and banner (A18, A26, 
     expect(link.querySelector('[data-testid="portal-consignment-form"]')).not.toBeNull();
   });
 
+  test('recording from the banner-opened order re-reads the waiting list: the banner goes when nothing waits', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [], nextCursor: null }],
+      '/portal/consignments/needed': [200, { items: [{ orderId: ORDER_ID, orderLabel: 'O-1', clientOrderRef: 'SO-9', stage: 'packed', state: 'missing', requiredBecause: 'policy-b2b', ewayValidUntil: null }] }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row, lines: [] }],
+      [`/portal/orders/${ORDER_ID}/consignment`]: [200, { gate, live: null, history: [] }],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    const banner = view.container.querySelector<HTMLElement>('[data-testid="portal-needed-banner"]')!;
+    click(banner.querySelector('[data-testid="portal-needed-toggle"]')!);
+    await settle();
+    click(banner.querySelector('[data-testid="portal-needed-open"]')!);
+    await settle();
+    const form = view.container.querySelector<HTMLFormElement>('[data-testid="portal-consignment-form"]')!;
+    setValue(form.querySelector<HTMLInputElement>('[data-testid="consignment-document-number"]')!, 'INV-1');
+    setValue(form.querySelector<HTMLInputElement>('[data-testid="consignment-declared-value"]')!, '1000');
+    routes['/portal/consignments/needed'] = [200, { items: [] }];
+    postReplies = [[201, { consignment: { id: 'r-1', seq: 1, brandDocument: { type: 'invoice', number: 'INV-1', date: today } } }]];
+    await act(async () => void form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await settle();
+    expect(posts).toHaveLength(1);
+    expect(urls.filter((u) => u.includes('/portal/consignments/needed')).length).toBeGreaterThanOrEqual(2);
+    expect(view.container.querySelector('[data-testid="portal-needed-banner"]')).toBeNull();
+  });
+
   test('?order=&tab=documents opens the order on its Tax documents; an unknown order says it is not available', async () => {
     setURL(`http://localhost/portal/orders?order=${ORDER_ID}&tab=documents`);
     routes = {

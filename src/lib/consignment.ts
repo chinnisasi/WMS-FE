@@ -22,12 +22,12 @@ import type {
   ConsignmentEwayViewDto,
   ConsignmentExemptionInputDto,
   ConsignmentGateDto,
-  ConsignmentPolicyDto,
   ConsignmentViewDto,
   PortalConsignmentViewDto,
   RecordConsignmentDto,
 } from '@/lib/api/generated';
 import { CLIENT_DEPARTED_REASON } from '@/lib/client-departed';
+import type { ConsignmentDocumentRule, ConsignmentGateCode, ConsignmentGateState, ConsignmentRequiredBecause } from '@/lib/consignment-gate';
 import { brandDocumentDateWindow } from '@/lib/consignment-capture';
 import { GST_STATE_NAMES } from '@/lib/gst-states';
 import { parseGstinField } from '@/lib/gstin';
@@ -37,14 +37,11 @@ import { formatIstDate } from '@/lib/rate-cards';
 import { parseRupees } from '@/lib/rupees';
 import type { StatusTone } from '@/lib/status-tone';
 
-export type ConsignmentGateState = ConsignmentGateDto['state'];
-export type ConsignmentRequiredBecause = NonNullable<ConsignmentGateDto['requiredBecause']>;
 export type OrderBrandDocumentType = ConsignmentBrandDocumentDto['type'];
 export type EwayExemptionReason = ConsignmentExemptionInputDto['reason'];
 export type ConsignmentEwayStatus = ConsignmentEwayViewDto['status'];
-export type ConsignmentDocumentRule = ConsignmentPolicyDto['documentRule'];
-/** The three codes a blocking gate answers (409) and a device handover flags. */
-export type ConsignmentGateCode = 'consignment-documents-missing' | 'eway-bill-required' | 'eway-bill-expired';
+// One vocabulary: the gate's states, reasons, codes and rules are the mirrored gate's.
+export type { ConsignmentDocumentRule, ConsignmentGateCode, ConsignmentGateState, ConsignmentRequiredBecause } from '@/lib/consignment-gate';
 /** A version as either surface reads it (the portal's omits the staff user ids). */
 export type AnyConsignmentView = ConsignmentViewDto | PortalConsignmentViewDto;
 
@@ -133,6 +130,10 @@ export const CONSIGNMENT_STATUS_WORD: Readonly<Record<AnyConsignmentView['status
   superseded: 'Amended',
   withdrawn: 'Withdrawn',
 };
+
+/** A46 — why the Exempt choice is disabled on the staff form. */
+export const EXEMPTION_OFFICE_ONLY = 'Only an office role can record an e-way exemption.';
+export const EXEMPTION_KEEP_OFFICE_ONLY = 'Only an office role can keep or change the exemption.';
 
 export const EWAY_STATUS_WORD: Readonly<Record<ConsignmentEwayStatus, string>> = {
   recorded: 'E-way bill recorded',
@@ -406,9 +407,17 @@ function rupeesText(paise: number): string {
   return fraction === 0 ? String(whole) : `${whole}.${String(fraction).padStart(2, '0')}`;
 }
 
-/** An amendment's draft, prefilled from the live version (the reason starts blank). */
-export function draftFromView(view: AnyConsignmentView): ConsignmentRecordDraft {
+/**
+ * An amendment's draft, prefilled from the live version (the reason starts
+ * blank). A46 — a role that may not send an exemption (`canExempt: false`)
+ * never starts on one: an exempt version's draft opens on "not yet", so the
+ * amendment is not a guaranteed 403.
+ */
+export function draftFromView(view: AnyConsignmentView, options: { readonly canExempt?: boolean } = {}): ConsignmentRecordDraft {
   const eway = view.eway;
+  if (eway.status === 'exempt' && options.canExempt === false) {
+    return { ...draftFromView(view), ewayMode: 'none', exemptionReason: '', exemptionNote: '' };
+  }
   return {
     documentType: view.brandDocument.type,
     documentNumber: view.brandDocument.number,
@@ -470,12 +479,8 @@ export function parseConsignmentDraft(
     return fail('documentDate', `The document date is more than 30 days before the order was created — the earliest accepted is ${formatIstDate(window.earliest)}.`);
   }
 
-  if (draft.declaredValue.trim() === '') {
-    return fail('declaredValue', 'Enter the value on the brand’s document (including tax) — the e-way threshold is judged from it.');
-  }
-  const value = parseRupees(draft.declaredValue);
-  if ('problem' in value) return fail('declaredValue', value.problem);
-  if (value.paise > L.declaredValueMaxPaise) return fail('declaredValue', `The declared value is at most ${formatRupees(L.declaredValueMaxPaise)}.`);
+  const value = parseDeclaredValue(draft.declaredValue);
+  if (value.problem !== null) return fail('declaredValue', value.problem);
 
   const gstin = parseGstinField(draft.consignorGstin, 'The consignor GSTIN');
   if (gstin.problem !== null) return fail('consignorGstin', gstin.problem);
@@ -700,4 +705,73 @@ export function orderAgeWords(createdAt: string, nowMs: number): string {
 export function portalNeededBanner(count: number): string | null {
   if (count <= 0) return null;
   return count === 1 ? '1 order is waiting for your invoice or e-way bill' : `${count} orders are waiting for your invoice or e-way bill`;
+}
+
+/** Story 4-6a (A11) — the client documents rule's read and save refusals, by code. */
+export function consignmentPolicyReason(error: unknown): string {
+  if (!(error instanceof ApiProblem)) return UNREACHABLE_REASON;
+  switch (error.code) {
+    case 'not-found':
+      return 'This client no longer exists — refresh the list.';
+    case 'permission-denied':
+      return 'That client belongs to another workspace — sign in again.';
+    case 'role-denied':
+      return 'Your role cannot change a client’s documents rule.';
+    case 'unauthenticated':
+      return 'Your session expired — sign in again.';
+    case 'validation-failed':
+      return error.detail ?? 'The rule was refused as sent — pick one and save again.';
+    case 'idempotency-key-reuse':
+      return 'The rule changed after it was first sent — save it again.';
+    default:
+      return `Not saved (${error.code}).`;
+  }
+}
+
+// ── the return dispatches (A22, A25, A41) ──────────────────────────────────
+
+/**
+ * A declared value (₹ text) → paise, or a problem: required on the web (the
+ * order record, and both return dispatch forms — the API keeps it optional
+ * on the returns for older callers), at most `declaredValueMaxPaise`.
+ */
+export function parseDeclaredValue(text: string): { readonly paise: number; readonly problem: null } | { readonly paise: null; readonly problem: string } {
+  if (text.trim() === '') {
+    return { paise: null, problem: 'Enter the value on the brand’s document (including tax) — the e-way threshold is judged from it.' };
+  }
+  const parsed = parseRupees(text);
+  if ('problem' in parsed) return { paise: null, problem: parsed.problem };
+  if (parsed.paise > CONSIGNMENT_RECORD_LIMITS.declaredValueMaxPaise) {
+    return { paise: null, problem: `The declared value is at most ${formatRupees(CONSIGNMENT_RECORD_LIMITS.declaredValueMaxPaise)}.` };
+  }
+  return { paise: parsed.paise, problem: null };
+}
+
+/**
+ * A return dispatch's e-way refusals, worded with the server's figures
+ * (`extensions.declaredValuePaise`, `thresholdPaise`, `thresholdRule`). Null
+ * for any other problem.
+ */
+export function ewayDispatchRefusal(error: unknown): string | null {
+  if (!(error instanceof ApiProblem)) return null;
+  const x = error.extensions;
+  const value = num(x['declaredValuePaise']);
+  const threshold = num(x['thresholdPaise']);
+  const rule = str(x['thresholdRule']);
+  switch (error.code) {
+    case 'eway-bill-required': {
+      const ruleWords = rule === null ? '' : ` (${thresholdRuleWords(rule, null).replace(/, destination unknown$/, '')})`;
+      const figures =
+        value !== null && threshold !== null
+          ? `The declared value ${formatRupees(value)} is above the e-way threshold ${formatRupees(threshold)}${ruleWords}`
+          : 'The declared value is above the e-way threshold';
+      return `${figures} — enter the brand’s e-way bill number and its date.`;
+    }
+    case 'eway-bill-expired':
+      return 'The e-way bill’s validity ended before today — enter the extended bill’s validity, or its new number.';
+    case 'eway-threshold-missing':
+      return EWAY_THRESHOLD_MISSING_REASON;
+    default:
+      return null;
+  }
 }

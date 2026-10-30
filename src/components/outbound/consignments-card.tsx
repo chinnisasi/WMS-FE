@@ -16,6 +16,7 @@ import { orderLabel } from '@/lib/orders';
 import { useActiveClient } from '@/lib/use-active-client';
 import { useConsignmentWorklist, type ConsignmentWorklistView } from '@/lib/use-consignment';
 import { useOrderDetail } from '@/lib/use-outbound-orders';
+import { roleHasCapability } from '@/lib/users';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -41,7 +42,9 @@ const VIEW_LABEL: Readonly<Record<ConsignmentWorklistView, string>> = {
  * handed over without them. Honours the shell's client switcher. A row's
  * Record expands the order's Tax documents panel with the form open.
  */
-export function ConsignmentsCard({ warehouseId, warehouseLabel }: OutboundSurfaceProps) {
+export function ConsignmentsCard({ warehouseId, warehouseLabel, role }: OutboundSurfaceProps) {
+  // Record opens the form: shown only to a role that can record (dispatch.execute); every role reads.
+  const canRecord = roleHasCapability(role, 'dispatch.execute');
   const active = useActiveClient();
   const [view, setView] = useState<ConsignmentWorklistView>('needed');
   const worklist = useConsignmentWorklist(warehouseId, active.filter, view);
@@ -87,15 +90,19 @@ export function ConsignmentsCard({ warehouseId, warehouseLabel }: OutboundSurfac
     },
     { key: 'why', header: 'Why', priority: 2, render: (row) => <span data-testid="worklist-why">{requiredBecauseWords(row.requiredBecause, row.valueFloorPaise)}</span> },
     { key: 'age', header: 'Age', priority: 2, render: (row) => <time dateTime={row.createdAt}>{orderAgeWords(row.createdAt, nowMs)}</time> },
-    {
-      key: 'action',
-      header: '',
-      render: (row) => (
-        <button type="button" className={rowButtonClass} onClick={() => setExpandedId(row.id)} data-testid="worklist-record">
-          Record
-        </button>
-      ),
-    },
+    ...(canRecord
+      ? [
+          {
+            key: 'action',
+            header: '',
+            render: (row: NeededRow) => (
+              <button type="button" className={rowButtonClass} onClick={() => setExpandedId(row.id)} data-testid="worklist-record">
+                Record
+              </button>
+            ),
+          } satisfies DataTableColumn<NeededRow>,
+        ]
+      : []),
   ];
 
   const exceptionColumns: readonly DataTableColumn<ExceptionRow>[] = [
@@ -145,7 +152,12 @@ export function ConsignmentsCard({ warehouseId, warehouseLabel }: OutboundSurfac
       </div>
       <ClientFilterChip active={active} tenantName={active.tenantName} />
       {data !== null && data.truncated && (
-        <FeedbackBanner tone="warning" word="Showing the first 5,000 open orders" reason="Packed orders are listed first; record these, then refresh for the rest." />
+        <FeedbackBanner
+          tone="warning"
+          {...(view === 'needed'
+            ? { word: 'Showing the first 5,000 open orders', reason: 'Packed orders are listed first; record these, then refresh for the rest.' }
+            : { word: 'Showing the newest 500 parcels left without documents', reason: 'Record their documents to clear them, then refresh for older ones.' })}
+        />
       )}
       {worklist.state === 'failed' ? (
         <ReadFailure word="Documents worklist unavailable" reason={worklist.reason} onRetry={worklist.reload} />

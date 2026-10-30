@@ -48,7 +48,9 @@ function useOutboundRevision(): [number, () => void] {
  * keeps the last-good data on screen (a record just saved must not blank the
  * panel behind its banner); Retry clears first.
  */
-export function useOrderConsignment(orderId: string | null): ResourceState<OrderConsignmentResponse | null> & Reloadable {
+export function useOrderConsignment(
+  orderId: string | null,
+): ResourceState<OrderConsignmentResponse | null> & Reloadable & { readonly refresh: () => void } {
   const tenantId = useTenantId();
   const [revision, bump] = useOutboundRevision();
   const [result, setResult] = useState<{ tenantId: string; orderId: string; state: ResourceState<OrderConsignmentResponse | null> } | null>(null);
@@ -85,8 +87,10 @@ export function useOrderConsignment(orderId: string | null): ResourceState<Order
     setResult(null);
     bump();
   }, [bump]);
+  // A quiet refetch: the last-good read stays on screen (and a mounted form with its refusal) until the answer lands.
+  const refresh = bump;
   const stale = tenantId === null || orderId === null || result === null || result.tenantId !== tenantId || result.orderId !== orderId;
-  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+  return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload, refresh };
 }
 
 export type ConsignmentWorklistView = 'needed' | 'exceptions';

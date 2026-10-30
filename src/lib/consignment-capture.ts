@@ -19,8 +19,6 @@ import { GST_STATE_NAMES, gstinStateName } from '@/lib/gst-states';
 import { parseGstinField } from '@/lib/gstin';
 import { EWB_NO_RE, VEHICLE_NO_RE, VEHICLE_RULE, istToday, normalizeVehicleNo } from '@/lib/gate-ins';
 import { formatIstDate, istDateOf } from '@/lib/rate-cards';
-import { parseRupees } from '@/lib/rupees';
-import { ApiProblem } from '@/lib/api/client';
 
 /**
  * The capture body every goods-out dispatch sends. Structurally the RTV's
@@ -72,55 +70,6 @@ export const CONSIGNMENT_LIMITS = {
  */
 export const EWAY_THRESHOLD_HINT =
   "Above the e-way threshold (₹50,000, or the state's intra-state limit) an e-way bill number is required — the WMS judges the declared value";
-
-/** Story 4-6a (A22, A25) — the declared value's bound (the server's `declaredValueMaxPaise`). */
-export const DECLARED_VALUE_MAX_PAISE = 1_000_000_000_000;
-
-/**
- * Story 4-6a (A25) — the return dispatch's declared value (₹ text) → paise,
- * or a problem. Required on the web (the API keeps it optional for older
- * callers).
- */
-export function parseDeclaredValue(text: string): { readonly paise: number; readonly problem: null } | { readonly paise: null; readonly problem: string } {
-  if (text.trim() === '') {
-    return { paise: null, problem: "Enter the value on the brand's document (including tax) — the e-way threshold is judged from it." };
-  }
-  const parsed = parseRupees(text);
-  if ('problem' in parsed) return { paise: null, problem: parsed.problem };
-  if (parsed.paise > DECLARED_VALUE_MAX_PAISE) return { paise: null, problem: 'The declared value is at most ₹1,00,00,00,000.' };
-  return { paise: parsed.paise, problem: null };
-}
-
-function paiseWords(paise: number): string {
-  return `₹${(paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
-}
-
-/**
- * Story 4-6a (A22, A41, A45) — a return dispatch's e-way refusals, worded
- * with the server's figures (`extensions.declaredValuePaise`,
- * `thresholdPaise`, `thresholdRule`). Null for any other problem.
- */
-export function ewayDispatchRefusal(error: unknown): string | null {
-  if (!(error instanceof ApiProblem)) return null;
-  const x = error.extensions;
-  const value = typeof x['declaredValuePaise'] === 'number' ? x['declaredValuePaise'] : null;
-  const threshold = typeof x['thresholdPaise'] === 'number' ? x['thresholdPaise'] : null;
-  const rule = typeof x['thresholdRule'] === 'string' ? x['thresholdRule'] : null;
-  switch (error.code) {
-    case 'eway-bill-required': {
-      const ruleWords = rule === null ? '' : rule === 'national' ? ' (national)' : ` (${rule.replace('state:', 'state ')} intra-state limit)`;
-      const figures =
-        value !== null && threshold !== null ? `The declared value ${paiseWords(value)} is above the e-way threshold ${paiseWords(threshold)}${ruleWords}` : 'The declared value is above the e-way threshold';
-      return `${figures} — enter the brand's e-way bill number and its date.`;
-    }
-    case 'eway-bill-expired':
-      return "The e-way bill's validity ended before today — enter the extended bill's validity, or its new number.";
-    case 'eway-threshold-missing':
-      return 'No e-way threshold is configured for that date — contact support.';
-    default:
-      return null;
-  }
-}
 
 /** Why a carrier identity is required, in words (the form's hint and its problem). */
 export const CARRIER_IDENTITY_RULE = 'Name who carries the goods — a transporter, a carrier name or a vehicle number (at least one).';

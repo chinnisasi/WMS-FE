@@ -369,3 +369,11 @@ describe('code review — source-aware floor copy, the pruned draft, the consign
     expect(consigneeStateLabel({ state: null, stateCode: null })).toBeNull();
   });
 });
+
+describe('story 4-6a (A22) — the declared value judged at dispatch', () => {
+  test('eway-bill-required is worded with the server’s figures (a state’s intra-state limit named)', () => {
+    expect(rtcReason(problem('eway-bill-required', { declaredValuePaise: 12_000_000, thresholdPaise: 10_000_000, thresholdRule: 'state:29' }), 'dispatch')).toBe(
+      'The declared value ₹1,20,000 is above the e-way threshold ₹1,00,000 (Karnataka intra-state limit) — enter the brand’s e-way bill number and its date.',
+    );
+  });
+});

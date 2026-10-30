@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { fetchApiUpdateClientConsignmentPolicy } from '@/lib/api/client';
 import type { ClientDto } from '@/lib/api/generated';
 import { readSession } from '@/lib/auth';
-import { consignmentReason, DOCUMENT_RULE_LABEL, DOCUMENT_RULE_NOTE, DOCUMENT_RULES, type ConsignmentDocumentRule } from '@/lib/consignment';
+import { consignmentPolicyReason, DOCUMENT_RULE_LABEL, DOCUMENT_RULE_NOTE, DOCUMENT_RULES, type ConsignmentDocumentRule } from '@/lib/consignment';
 import { ulid } from '@/lib/ulid';
 import { useClientConsignmentPolicy } from '@/lib/use-client-consignment-policy';
 
@@ -112,7 +112,7 @@ function PolicyBody({
       setOutcome({ tone: 'accepted', word: 'Documents rule saved', reason: `${client.code}: ${DOCUMENT_RULE_LABEL[next].label}. Open orders are judged by it from now on.` });
       onSaved(saved);
     } catch (error) {
-      setOutcome({ tone: 'rejected', word: 'Documents rule not saved', reason: consignmentReason(error) });
+      setOutcome({ tone: 'rejected', word: 'Documents rule not saved', reason: consignmentPolicyReason(error) });
     } finally {
       inFlight.current = false;
       setBusy(false);

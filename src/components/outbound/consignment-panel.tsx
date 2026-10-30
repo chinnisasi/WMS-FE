@@ -17,6 +17,8 @@ import {
   ewayLine,
   ewayValidityWarning,
   ewayVerdictLine,
+  EXEMPTION_KEEP_OFFICE_ONLY,
+  EXEMPTION_OFFICE_ONLY,
   formatRupees,
   gateChip,
   gateLine,
@@ -147,11 +149,11 @@ export function ConsignmentPanel({
 
       {mode === 'form' && canRecord && (
         <ConsignmentForm
-          initial={live === null ? emptyConsignmentRecordDraft() : draftFromView(live)}
+          initial={live === null ? emptyConsignmentRecordDraft() : draftFromView(live, { canExempt: canManage })}
           createdAt={createdAt}
           reasonRequired={dispatched}
           canExempt={canManage}
-          exemptDisabledNote="Only an office role can record an e-way exemption."
+          exemptDisabledNote={live !== null && live.eway.status === 'exempt' ? EXEMPTION_KEEP_OFFICE_ONLY : EXEMPTION_OFFICE_ONLY}
           consignorHint="Leave blank to use the client’s GSTIN on file — or the registration the brand’s document names."
           submitLabel={live === null ? 'Record' : 'Save amendment'}
           reasonOf={consignmentReason}
@@ -168,7 +170,8 @@ export function ConsignmentPanel({
               setMode('view');
               notifyOutboundChanged();
             } catch (error) {
-              if (consignmentRefusalReloads(error)) read.reload();
+              // Quiet: the form and its refusal stay mounted while the read catches up.
+              if (consignmentRefusalReloads(error)) read.refresh();
               throw error;
             }
           }}
@@ -185,7 +188,7 @@ export function ConsignmentPanel({
             setMode('view');
           }}
           onCancel={() => setMode('view')}
-          onStale={read.reload}
+          onStale={read.refresh}
         />
       )}
 

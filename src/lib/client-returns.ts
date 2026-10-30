@@ -24,7 +24,6 @@ import type {
 } from '@/lib/api/generated';
 import {
   BRAND_DOCUMENT_LABEL,
-  ewayDispatchRefusal,
   parseConsignmentDraft,
   stateCodeLabel,
   type BrandDocumentType,
@@ -33,6 +32,7 @@ import {
   type NoteLine,
   type ParsedConsignment,
 } from '@/lib/consignment-capture';
+import { ewayDispatchRefusal, parseDeclaredValue } from '@/lib/consignment';
 import { formatCount, formatQuantity, parseQuantityInput } from '@/lib/format-quantity';
 import { gstinStateName } from '@/lib/gst-states';
 import { parseGstinField } from '@/lib/gstin';
@@ -40,7 +40,6 @@ import { formatRupees } from '@/lib/invoices';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { formatIstDate, istDateOf } from '@/lib/rate-cards';
 import { DISPOSITION_REASON_LABEL, RETURN_CONDITION_LABEL, type DispositionReasonCode } from '@/lib/returns';
-import { parseRupees } from '@/lib/rupees';
 import type { StatusTone } from '@/lib/status-tone';
 import { addressLines, keyForBody, lineQuantityLabel, stampLabel, summaryQuantityLabel, summaryWhenLabel } from '@/lib/vendor-returns';
 
@@ -665,15 +664,9 @@ export function parseRtcDispatch(
   const consignee = parseGstinField(extra.consigneeGstin, 'The consignee GSTIN');
   if (consignee.problem !== null) return { ok: false, extra: 'consigneeGstin', problem: consignee.problem };
   // Story 4-6a (A25) — required on the web: the e-way threshold is judged from it.
-  if (extra.declaredValue.trim() === '') {
-    return { ok: false, extra: 'declaredValue', problem: "Enter the value on the brand's document (including tax) — the e-way threshold is judged from it." };
-  }
-  const rupees = parseRupees(extra.declaredValue);
-  if ('problem' in rupees) return { ok: false, extra: 'declaredValue', problem: rupees.problem };
-  if (rupees.paise > RTC_LIMITS.declaredValuePaiseMax) {
-    return { ok: false, extra: 'declaredValue', problem: `The declared value is at most ${formatRupees(RTC_LIMITS.declaredValuePaiseMax)}.` };
-  }
-  const declaredValuePaise = rupees.paise;
+  const value = parseDeclaredValue(extra.declaredValue);
+  if (value.problem !== null) return { ok: false, extra: 'declaredValue', problem: value.problem };
+  const declaredValuePaise = value.paise;
   const { debitNoteNumber: _dropped, ...capture } = parsed.body;
   void _dropped;
   return {

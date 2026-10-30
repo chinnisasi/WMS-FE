@@ -210,7 +210,7 @@ export function PortalOrders() {
           <FeedbackBanner
             tone="warning"
             word={neededWord}
-            reason="They are ready to leave once your tax invoice (or challan) and, above ₹50,000, your e-way bill are recorded."
+            reason="Open the list to record each order’s documents."
             action={
               <button type="button" className={buttonClass} aria-expanded={neededOpen} onClick={() => setNeededOpen((v) => !v)} data-testid="portal-needed-toggle">
                 {neededOpen ? 'Hide them' : 'Show them'}

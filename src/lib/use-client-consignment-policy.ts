@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { fetchApiGetClientConsignmentPolicy } from '@/lib/api/client';
 import type { ConsignmentPolicyResponse } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { consignmentReason } from '@/lib/consignment';
+import { consignmentPolicyReason } from '@/lib/consignment';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
 
 function useTenantId(): string | null {
@@ -34,7 +34,7 @@ export function useClientConsignmentPolicy(clientId: string): ResourceState<Cons
         const policy = await fetchApiGetClientConsignmentPolicy(tenantId, clientId);
         if (!cancelled) setResult({ tenantId, clientId, state: { state: 'ready', data: policy } });
       } catch (error) {
-        if (!cancelled) setResult({ tenantId, clientId, state: { state: 'failed', reason: consignmentReason(error) } });
+        if (!cancelled) setResult({ tenantId, clientId, state: { state: 'failed', reason: consignmentPolicyReason(error) } });
       }
     })();
     return () => {

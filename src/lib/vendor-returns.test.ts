@@ -380,3 +380,11 @@ describe('the printable note model', () => {
     expect(model.consignor.facts[0]!.value).toBe('27GLOWC1234G1Z5 (Maharashtra)');
   });
 });
+
+describe('story 4-6a (A22) — the declared value judged at dispatch', () => {
+  test('eway-bill-required is worded with the server’s figures', () => {
+    expect(rtvReason(problem('eway-bill-required', 409, { declaredValuePaise: 7_500_000, thresholdPaise: 5_000_000, thresholdRule: 'national' }), 'dispatch')).toBe(
+      'The declared value ₹75,000 is above the e-way threshold ₹50,000 (national) — enter the brand’s e-way bill number and its date.',
+    );
+  });
+});
