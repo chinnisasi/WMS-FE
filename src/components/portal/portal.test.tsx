@@ -2211,6 +2211,63 @@ describe('story 4-4a — the portal order Shipping section (A21)', () => {
     expect(section.querySelector('[data-testid="portal-document-upload"]')).toBeNull();
     expect(section.textContent).toContain('Your label · SO-9-label.pdf');
   });
+  test('story 4-5a (A28): the cartons — count, weight, per-unit totals, never a code — and Download packing slip saves the client copy', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [row('ready_to_dispatch')], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row('ready_to_dispatch'), lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [
+        200,
+        shipping({
+          cartons: [
+            { seq: 1, weightGrams: 3200, totals: [{ uom: 'EA', qty: 6 }] },
+            { seq: 2, weightGrams: 2800, totals: [{ uom: 'EA', qty: 4 }, { uom: 'KG', qty: 2.5 }] },
+          ],
+          packingSlipAvailable: true,
+        }),
+      ],
+    };
+    const downloads: string[] = [];
+    const realClick = HTMLAnchorElement.prototype.click;
+    const realCreate = URL.createObjectURL;
+    const realRevoke = URL.revokeObjectURL;
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    };
+    URL.createObjectURL = () => 'blob:test';
+    URL.revokeObjectURL = () => undefined;
+    try {
+      const section = await expand();
+      const cartons = section.querySelector('[data-testid="portal-cartons"]')!;
+      expect(cartons.querySelector('[data-testid="portal-cartons-summary"]')?.textContent).toBe('2 cartons · 6 kg');
+      expect(cartons.textContent).toContain('Carton 1 of 2 — 3.2 kg — 6 EA');
+      expect(cartons.textContent).toContain('Carton 2 of 2 — 2.8 kg — 4 EA · 2.5 KG');
+      expect(cartons.textContent).not.toMatch(/O[0-9A-F]{16}\./);
+      routes[`/portal/orders/${ORDER_ID}/packing-slip`] = [200, { pdf: true }];
+      click(buttonNamed(section, 'Download packing slip (PDF)'));
+      await settle();
+      expect(urls).toContain(`/api/v1/tenants/${TENANT_ID}/portal/orders/${ORDER_ID}/packing-slip`);
+      expect(downloads).toEqual(['SO-9-packing-slip.pdf']);
+      routes[`/portal/orders/${ORDER_ID}/packing-slip`] = [404, { code: 'not-found', status: 404, title: 'Not found' }];
+      click(buttonNamed(section, 'Download packing slip (PDF)'));
+      await settle();
+      expect(section.textContent).toContain('The packing slip could not be found');
+      expect(downloads).toHaveLength(1);
+    } finally {
+      HTMLAnchorElement.prototype.click = realClick;
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    }
+  });
+
+  test('story 4-5a: an unpacked order (or an API before 4-5a) shows no cartons and no slip button', async () => {
+    routes = {
+      '/portal/orders': [200, { items: [row('accepted')], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row('accepted'), lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [200, shipping({ cartons: null, packingSlipAvailable: false })],
+    };
+    const section = await expand();
+    expect(section.querySelector('[data-testid="portal-cartons"]')).toBeNull();
+  });
 });
 
 describe('story 4-4a review — FB9 canRecord, FV5 the ?order= deep link', () => {

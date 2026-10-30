@@ -11,7 +11,10 @@ import type { PortalFileDto } from '@/lib/api/generated';
 import {
   PORTAL_DOC_KIND_LABEL,
   PORTAL_SHIPPING_STATUS_TONE,
+  portalCartonRow,
+  portalCartonsSummary,
   portalFileLine,
+  type PortalCarton,
   portalShippingLine,
   portalShippingReason,
 } from '@/lib/portal';
@@ -24,7 +27,7 @@ import {
   shippingFileProblem,
 } from '@/lib/shipping';
 import { ulid } from '@/lib/ulid';
-import { usePortalOrderShipping, usePortalTenantId } from '@/lib/use-portal';
+import { usePortalOrderShipping, usePortalPackingSlipDownload, usePortalTenantId } from '@/lib/use-portal';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { ReadFailure, buttonClass, inputClass, labelClass, primaryClass, rowButtonClass, selectClass } from '@/components/shared/surface';
@@ -40,7 +43,7 @@ type PortalDocKind = (typeof PORTAL_DOC_KINDS)[number];
  * downloads only — never a print fallback. The forms mirror the server's AWB
  * and file rules before a key is minted; each key is bound to its request.
  */
-export function PortalShipping({ orderId, canWrite }: { orderId: string; canWrite: boolean }) {
+export function PortalShipping({ orderId, orderLabel, canWrite }: { orderId: string; orderLabel: string; canWrite: boolean }) {
   const shipping = usePortalOrderShipping(orderId);
   const [form, setForm] = useState<'closed' | 'label' | 'awb'>('closed');
   const [notice, setNotice] = useState<{ word: string; reason: string } | null>(null);
@@ -86,6 +89,12 @@ export function PortalShipping({ orderId, canWrite }: { orderId: string; canWrit
       )}
       {notice !== null && <FeedbackBanner tone="accepted" word={notice.word} reason={notice.reason} />}
 
+      {/* Story 4-5a (A28) — the cartons and the packing slip. */}
+      {/* An API from before 4-5a omits both keys: read absent as none. */}
+      {((data.cartons ?? null) !== null || data.packingSlipAvailable === true) && (
+        <PortalCartons orderId={orderId} orderLabel={orderLabel} cartons={data.cartons ?? null} slipAvailable={data.packingSlipAvailable === true} />
+      )}
+
       {data.label !== null && <PortalFiles title="Your label" files={[data.label]} onExpired={shipping.refresh} />}
 
       {recordable && form === 'closed' && (
@@ -106,6 +115,51 @@ export function PortalShipping({ orderId, canWrite }: { orderId: string; canWrit
       <PortalFiles title="Documents" files={data.documents} onExpired={shipping.refresh} empty="No invoice, e-way bill or proof of delivery yet." />
       {canWrite && data.status !== 'cancelled' && <PortalDocumentUpload orderId={orderId} onDone={onDone} onStart={() => setNotice(null)} />}
     </section>
+  );
+}
+
+/**
+ * Story 4-5a (A28) — "3 cartons · 12.4 kg", the carton rows (number, weight,
+ * totals per unit) and Download packing slip (PDF): an explicit download,
+ * never a print fallback. Never a carton code, a case id or who packed (A19).
+ */
+function PortalCartons({
+  orderId,
+  orderLabel,
+  cartons,
+  slipAvailable,
+}: {
+  orderId: string;
+  orderLabel: string;
+  cartons: readonly PortalCarton[] | null;
+  slipAvailable: boolean;
+}) {
+  const slip = usePortalPackingSlipDownload(orderId, orderLabel);
+  return (
+    <div className="flex flex-col gap-1" data-testid="portal-cartons">
+      {cartons !== null && cartons.length > 0 && (
+        <>
+          <div className="font-medium" data-testid="portal-cartons-summary">
+            {portalCartonsSummary(cartons)}
+          </div>
+          <ul className="flex flex-col gap-0.5">
+            {cartons.map((carton) => (
+              <li key={carton.seq} className="data">
+                {portalCartonRow(carton, cartons.length)}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {slipAvailable && (
+        <div>
+          <button type="button" className={buttonClass} disabled={slip.busy} onClick={() => void slip.download()} data-testid="portal-packing-slip">
+            {slip.busy ? 'Preparing…' : 'Download packing slip (PDF)'}
+          </button>
+        </div>
+      )}
+      {slip.refused !== null && <FeedbackBanner tone="rejected" word="Not downloaded" reason={slip.refused} />}
+    </div>
   );
 }
 

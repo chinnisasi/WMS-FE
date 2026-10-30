@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import {
+  fetchApiCartonLabels,
   fetchApiParcelTag,
   fetchApiRecordAwbAdvice,
   fetchApiRecordClientLabel,
@@ -36,6 +37,8 @@ import {
 } from '@/lib/shipping';
 import { useTransporterOptions } from '@/lib/use-gate-ins';
 import { useOrderShipping } from '@/lib/use-shipping';
+import { useOrderCartons } from '@/lib/use-outbound-pack-dispatch';
+import { cartonLabelsFilename, cartonReason, clientLabelPagesWarning } from '@/lib/cartons';
 import { ulid } from '@/lib/ulid';
 
 import { FeedbackBanner } from '@/components/feedback/banner';
@@ -74,6 +77,9 @@ export function ShippingPanel({
   canRemove: boolean;
 }) {
   const read = useOrderShipping(orderId);
+  // Story 4-5a (A26, A40) — once packed, the cartons: the carton-label print and the client label's page check.
+  const cartons = useOrderCartons(tenantId, status === 'ready_to_dispatch' || status === 'dispatched' ? orderId : null);
+  const cartonCount = cartons.state === 'ready' && cartons.data !== null ? cartons.data.pack.cartonCount : null;
   // FB15 — the verify's result outlives the form (the re-read unmounts it); it clears on the next action.
   const [verifiedNotice, setVerifiedNotice] = useState(false);
   const clearNotice = () => setVerifiedNotice(false);
@@ -103,6 +109,13 @@ export function ShippingPanel({
 
       {data.label !== null && liveOpen && <LabelLink file={data.label} onExpired={read.refresh} />}
 
+      {/* A40 — warn, never refuse: one page can serve a multi-piece consignment. */}
+      {data.label !== null && liveOpen && clientLabelPagesWarning(data.label.pageCount, cartonCount) !== null && (
+        <div className="text-(--warning)" data-testid="client-label-pages-warning">
+          {clientLabelPagesWarning(data.label.pageCount, cartonCount)}
+        </div>
+      )}
+
       {verifiedNotice && (
         <FeedbackBanner tone="accepted" word="Label verified" reason="The label on the parcel carries this order’s AWB." />
       )}
@@ -111,8 +124,10 @@ export function ShippingPanel({
         <VerifyLabelForm tenantId={tenantId} orderId={orderId} onVerified={() => setVerifiedNotice(true)} />
       )}
 
-      {open && (
-        <ParcelTagButtons tenantId={tenantId} orderId={orderId} orderLabel={orderLabel} />
+      {/* Story 4-5a (A26) — the parcel tag before the pack; the carton labels once packed. */}
+      {status === 'accepted' && <ParcelTagButtons tenantId={tenantId} orderId={orderId} orderLabel={orderLabel} />}
+      {status === 'ready_to_dispatch' && canLabel && (
+        <CartonLabelButtons tenantId={tenantId} orderId={orderId} orderLabel={orderLabel} />
       )}
 
       {canLabel && open && (live === null || liveOpen) && data.storageEnabled !== false && (
@@ -302,6 +317,42 @@ function VerifyLabelForm({ tenantId, orderId, onVerified }: { tenantId: string; 
       </div>
       {error !== null && <FeedbackBanner tone="rejected" word="Not verified" reason={error} />}
     </form>
+  );
+}
+
+/** Story 4-5a (A26) — Print carton labels (4×6): ZPL for the pack station's thermal printer (D7), or the PDF. */
+function CartonLabelButtons({ tenantId, orderId, orderLabel }: { tenantId: string; orderId: string; orderLabel: string }) {
+  const [pending, setPending] = useState<'zpl' | 'pdf' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mounted = useMounted();
+
+  async function print(format: 'zpl' | 'pdf') {
+    if (pending !== null) return;
+    setPending(format);
+    setError(null);
+    try {
+      const blob = await fetchApiCartonLabels(tenantId, orderId, { format, layout: 'label' });
+      downloadBlob(cartonLabelsFilename(orderLabel, format), blob);
+    } catch (caught) {
+      if (mounted.current) setError(cartonReason(caught, 'carton-labels'));
+    } finally {
+      if (mounted.current) setPending(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-(--muted-foreground)">Carton labels (4×6):</span>
+        <button type="button" className={rowButtonClass} disabled={pending !== null} onClick={() => void print('zpl')} data-testid="carton-labels-zpl">
+          {pending === 'zpl' ? 'Preparing…' : 'Print carton labels'}
+        </button>
+        <button type="button" className={rowButtonClass} disabled={pending !== null} onClick={() => void print('pdf')} data-testid="carton-labels-pdf">
+          {pending === 'pdf' ? 'Preparing…' : 'Carton labels PDF'}
+        </button>
+      </div>
+      {error !== null && <FeedbackBanner tone="rejected" word="Not printed" reason={error} />}
+    </div>
   );
 }
 

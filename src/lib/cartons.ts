@@ -433,6 +433,17 @@ export function cartonSkusFromScanned(
   });
 }
 
+/**
+ * Does a split grid still describe this scan — the same SKUs with the same
+ * exact totals? A scan edit after "Split into cartons" makes it stale, and a
+ * stale split is never sent (its cartons would not add up to the scan).
+ */
+export function gridMatchesScan(grid: CartonGrid, scanned: readonly { readonly skuId: string; readonly qty: number }[]): boolean {
+  const key = (rows: readonly { readonly skuId: string; readonly packedQty: number }[]) =>
+    JSON.stringify(rows.map((r) => `${r.skuId}:${toMilli(r.packedQty)}`).sort());
+  return key(grid.skus) === key(cartonSkusFromScanned(scanned, () => undefined));
+}
+
 /** A re-carton reason: trimmed, 1–200 code points. */
 export function parseRecartonReason(text: string): { reason: string; problem: null } | { reason: null; problem: string } {
   const reason = text.trim();

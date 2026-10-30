@@ -10,6 +10,7 @@ import {
   canSplitAtPack,
   carrierMultiCartonWarning,
   cartonIsEmpty,
+  gridMatchesScan,
   cartonLabelsFilename,
   cartonLine,
   cartonReason,
@@ -352,5 +353,24 @@ describe('return package labels', () => {
     expect(packageCountDiffersWarning(3, 4)).toContain('4 package labels were printed, but 3 packages');
     expect(packageCountDiffersWarning(4, 4)).toBeNull();
     expect(packageCountDiffersWarning(3, null)).toBeNull();
+  });
+});
+
+describe('gridMatchesScan (4-5a A26 — a stale split is never sent)', () => {
+  const skus = cartonSkusFromScanned(
+    [
+      { skuId: 'a', qty: 10 },
+      { skuId: 'b', qty: 4 },
+    ],
+    () => undefined,
+  );
+  test('the split made from this scan matches it, in any order', () => {
+    const grid = splitGrid(skus);
+    expect(gridMatchesScan(grid, [{ skuId: 'b', qty: 4 }, { skuId: 'a', qty: 10 }])).toBe(true);
+  });
+  test('a changed count or a new SKU makes it stale', () => {
+    const grid = splitGrid(skus);
+    expect(gridMatchesScan(grid, [{ skuId: 'a', qty: 9 }, { skuId: 'b', qty: 4 }])).toBe(false);
+    expect(gridMatchesScan(grid, [{ skuId: 'a', qty: 10 }, { skuId: 'b', qty: 4 }, { skuId: 'c', qty: 1 }])).toBe(false);
   });
 });

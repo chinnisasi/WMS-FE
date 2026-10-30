@@ -143,6 +143,8 @@ let handoverRows: unknown[] = [];
 /** POST replies by path suffix (the panel's forms). */
 let postReplies: Record<string, { status: number; body: unknown }> = {};
 let handoverDetail: unknown = null;
+/** Story 4-5a — per-order cartons reads (absent → 404, an API without the route). */
+let cartonsReads: Record<string, unknown> = {};
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -174,6 +176,11 @@ function stubRouter(): void {
     if (pathname.endsWith('/outbound/orders')) {
       return json(200, { items: Object.entries(orderStatuses).map(([id, status]) => orderRow(id, status)), nextCursor: null });
     }
+    if (/\/outbound\/orders\/[^/]+\/cartons$/.test(pathname)) {
+      const orderId = pathname.split('/').at(-2)!;
+      return cartonsReads[orderId] === undefined ? json(404, { code: 'not-found', status: 404, title: 'None' }) : json(200, cartonsReads[orderId]);
+    }
+    if (/\/outbound\/orders\/[^/]+\/carton-labels$/.test(pathname)) return new Response('^XA^XZ', { status: 200, headers: { 'content-type': 'text/plain' } });
     if (/\/outbound\/orders\/[^/]+\/shipment$/.test(pathname)) {
       const orderId = pathname.split('/').at(-2)!;
       return shipments[orderId] === undefined ? json(404, { code: 'not-found', status: 404, title: 'No shipment' }) : json(200, { shipment: shipments[orderId] });
@@ -212,6 +219,7 @@ beforeEach(() => {
   handoverRows = [];
   postReplies = {};
   handoverDetail = null;
+  cartonsReads = {};
   handoverReply = { status: 503, body: { code: 'unavailable', status: 503, title: 'Down' } };
   verifyReply = { status: 503, body: { code: 'unavailable', status: 503, title: 'Down' } };
   stubRouter();
@@ -650,3 +658,57 @@ describe('story 4-4a review — FV4 the handover sheet', () => {
     expect(byTestId(root, 'sheet-upload')).toBeNull();
   });
 });
+
+describe('story 4-5a — the Shipping panel once packed (A26, A40)', () => {
+  const pack = (cartonCount: number) => ({
+    pack: {
+      packSeq: 1,
+      status: 'live',
+      legacy: false,
+      partiesFrozen: true,
+      cartonCount,
+      grossWeightGrams: null,
+      packedAt: '2026-10-30T10:00:00.000Z',
+      packedBy: 'u-1',
+      cartons: Array.from({ length: cartonCount }, (_, i) => ({
+        seq: i + 1,
+        code: `O8F90000000000001.1.${i + 1}`,
+        weightGrams: null,
+        dimensionsMm: null,
+        lineCount: 1,
+        totals: [{ uom: 'each', qty: 1 }],
+        lines: [{ skuId: 'sku-1', skuCode: 'A', skuName: 'A', uom: 'each', qty: 1, handlingUnitIds: null }],
+      })),
+    },
+    history: [],
+  });
+
+  async function openPanel(role: 'operator' | 'accountant'): Promise<HTMLElement> {
+    writeSession(session(role));
+    shipments = { [ORDER_A]: shipment(ORDER_A) };
+    shippingReads = { [ORDER_A]: shippingRead(ORDER_A) };
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role={role} />);
+    await settle();
+    await expand('SO-1');
+    return byTestId(view.container, 'shipping-panel')!;
+  }
+
+  test('a packed order offers Print carton labels instead of the parcel tag, and warns when the client label has fewer pages than cartons', async () => {
+    cartonsReads = { [ORDER_A]: pack(3) };
+    const panel = await openPanel('operator');
+    expect(byTestId(panel, 'parcel-tag-zpl')).toBeNull();
+    expect(byTestId(panel, 'carton-labels-zpl')?.textContent).toBe('Print carton labels');
+    expect(byTestId(panel, 'client-label-pages-warning')?.textContent).toBe('The client’s label has 1 page for 3 cartons.');
+    await click(byTestId(panel, 'carton-labels-zpl')!);
+    const read = requests.find((r) => r.pathname.endsWith('/carton-labels'));
+    expect(read?.search).toBe('?format=zpl&layout=label');
+  });
+
+  test('one carton and a one-page label: no warning; without labels.execute no carton-label print', async () => {
+    cartonsReads = { [ORDER_A]: pack(1) };
+    const panel = await openPanel('accountant');
+    expect(byTestId(panel, 'client-label-pages-warning')).toBeNull();
+    expect(byTestId(panel, 'carton-labels-zpl')).toBeNull();
+  });
+});
+

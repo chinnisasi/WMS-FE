@@ -131,6 +131,10 @@ import {
   outboundControllerListManifests,
   outboundControllerListOrders,
   outboundControllerPackOrder,
+  outboundControllerGetOrderCartons,
+  outboundControllerRecartonOrder,
+  outboundControllerPackingSlip,
+  outboundControllerCartonLabels,
   outboundControllerListWavePolicies,
   outboundControllerListWaves,
   outboundControllerReleaseWave,
@@ -292,6 +296,7 @@ import {
   portalControllerGoodsReceipts,
   portalControllerGoodsReceipt,
   portalControllerGoodsReceiptFile,
+  portalControllerOrderPackingSlip,
   portalControllerInvoice,
   portalControllerInvoiceNote,
   portalControllerInvoiceNotes,
@@ -556,6 +561,9 @@ import type {
   RestockPlanResponse,
   PackOrderDto,
   PackResponse,
+  OrderCartonsResponse,
+  RecartonOrderDto,
+  RecartonResponse,
   OverReceiptDecisionResponse,
   OverReceiptListResponse,
   PlaceQcHoldDto,
@@ -4356,6 +4364,82 @@ export async function fetchApiPackOrder(
 }
 
 /**
+ * Story 4-5a (A11) — the order's pack and its cartons (an ungated document
+ * read): the live pack, else the latest by seq; a legacy order answers its
+ * virtual pack (`legacy: true`). 409 `order-not-packed` when it was never packed.
+ */
+export async function fetchApiOrderCartons(
+  tenantId: string,
+  orderId: string,
+  options?: { signal?: AbortSignal },
+): Promise<OrderCartonsResponse> {
+  const { data, error, response } = await outboundControllerGetOrderCartons({ path: { tenantId, orderId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/**
+ * Story 4-5a (A8) — re-pack a packed order into a new split of the same goods
+ * (`pack.execute`, keyed). The old pack is superseded and its labels stop
+ * scanning; an unchanged split answers `unchanged: true` and changes nothing.
+ */
+export async function fetchApiRecartonOrder(
+  tenantId: string,
+  orderId: string,
+  body: RecartonOrderDto,
+  idempotencyKey: string,
+): Promise<RecartonResponse> {
+  const { data, error, response } = await outboundControllerRecartonOrder({
+    path: { tenantId, orderId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data;
+}
+
+/** The query both 4-5a file routes take; `cartons` is a sorted, comma-joined list of carton numbers. */
+export interface PackFileQuery {
+  format: 'pdf' | 'zpl';
+  layout: 'a4' | 'label';
+  cartons?: readonly number[];
+}
+
+function packFileQuery(query: PackFileQuery): { format: 'pdf' | 'zpl'; layout: 'a4' | 'label'; cartons?: string } {
+  return {
+    format: query.format,
+    layout: query.layout,
+    ...(query.cartons === undefined || query.cartons.length === 0 ? {} : { cartons: [...query.cartons].sort((a, b) => a - b).join(',') }),
+  };
+}
+
+/**
+ * Story 4-5a (A13) — the packing slip as a file: the A4 PDF, or the 4×6
+ * thermal slips per carton (ZPL or PDF). Ungated. As a Blob (the
+ * `fetchApiBinLabels` pattern); the caller names the file.
+ */
+export async function fetchApiPackingSlip(tenantId: string, orderId: string, query: PackFileQuery): Promise<Blob> {
+  const { data, error, response } = await outboundControllerPackingSlip({
+    path: { tenantId, orderId },
+    query: packFileQuery(query),
+    parseAs: 'blob',
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data as unknown as Blob;
+}
+
+/** Story 4-5a (A14) — the carton labels as a file (`labels.execute`): 4×6 ZPL, 4×6 PDF, or two per A4 sheet. */
+export async function fetchApiCartonLabels(tenantId: string, orderId: string, query: PackFileQuery): Promise<Blob> {
+  const { data, error, response } = await outboundControllerCartonLabels({
+    path: { tenantId, orderId },
+    query: packFileQuery(query),
+    parseAs: 'blob',
+  });
+  if (error || !data) throw unwrapError(error, response?.status ?? 400);
+  return data as unknown as Blob;
+}
+
+/**
  * Dispatches a packed order (capability `dispatch.execute`, story 4.6) — the
  * TERMINAL transition of the order state machine: every committed reservation
  * the order still owns is retired, which is the ATP correction, and there is
@@ -6198,6 +6282,13 @@ export async function fetchApiPortalGoodsReceipt(
   const { data, error } = await portalControllerGoodsReceipt({ path: { tenantId, grnId }, signal: options?.signal });
   if (error || !data) throw portalError(error);
   return data;
+}
+
+/** Story 4-5a (A19) — one of this client's packed orders as its packing slip (A4 PDF, the client copy). Another client's, or an unpacked one, is a 404. */
+export async function fetchApiPortalPackingSlip(tenantId: string, orderId: string): Promise<Blob> {
+  const { data, error } = await portalControllerOrderPackingSlip({ path: { tenantId, orderId }, parseAs: 'blob' });
+  if (error || !data) throw portalError(error);
+  return data as Blob;
 }
 
 /** Story 2-9a — one of this client's receipts as its GRN document file (PDF or CSV). Another client's is a 404. */
