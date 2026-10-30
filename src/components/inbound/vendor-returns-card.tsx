@@ -46,6 +46,7 @@ import { DataTable, expandedRowId, type DataTableColumn } from '@/components/dat
 import { FeedbackBanner } from '@/components/feedback/banner';
 import { VendorReturnCreateDialog } from '@/components/inbound/vendor-return-create-dialog';
 import { VendorReturnDispatchDialog } from '@/components/inbound/vendor-return-dispatch-dialog';
+import { canPrintPackageLabels, PackageLabelsDialog } from '@/components/shared/package-labels-dialog';
 import { VendorReturnNote } from '@/components/inbound/vendor-return-note';
 import { ClientFilterChip } from '@/components/shared/client-filter-chip';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -94,6 +95,8 @@ export function VendorReturnsCard({
   );
   const canManage = roleHasCapability(role, 'rtv.manage');
   const canDispatch = roleHasCapability(role, 'dispatch.execute');
+  // Story 4-5a (A27) — package labels are a station print (labels.execute, the 2-10b precedent).
+  const canPrintLabels = roleHasCapability(role, 'labels.execute');
 
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
   const creating = creatingFor !== null && creatingFor === warehouseId;
@@ -170,6 +173,7 @@ export function VendorReturnsCard({
         id={row.id}
         canManage={canManage}
         canDispatch={canDispatch}
+        canPrintLabels={canPrintLabels}
         onOutcome={(outcome) => show(outcome)}
       />
     );
@@ -290,23 +294,26 @@ function VendorReturnDetail({
   id,
   canManage,
   canDispatch,
+  canPrintLabels = false,
   onOutcome,
 }: {
   id: string;
   canManage: boolean;
   canDispatch: boolean;
+  canPrintLabels?: boolean;
   onOutcome: (outcome: Outcome) => void;
 }) {
   const detail = useVendorReturn(id);
   const skus = useSkuMap();
   const precisionOf = (skuId: string): number | null => skus?.[skuId]?.uomPrecision ?? null;
-  const [mode, setMode] = useState<'view' | 'dispatch' | 'cancel'>('view');
+  const [mode, setMode] = useState<'view' | 'dispatch' | 'cancel' | 'labels'>('view');
 
   if (detail.state === 'loading') return <div className="text-xs text-(--muted-foreground)">Loading the return…</div>;
   if (detail.state === 'failed') return <ReadFailure word="Return not loaded" reason={detail.reason} onRetry={detail.reload} />;
   const rtv = detail.data;
   const offerDispatch = canDispatch && canDispatchVendorReturn(rtv.status);
   const offerCancel = canManage && canCancelVendorReturn(rtv.status);
+  const offerLabels = canPrintLabels && canPrintPackageLabels(rtv.status);
   const p = (skuId: string) => precisionOf(skuId);
 
   return (
@@ -325,6 +332,11 @@ function VendorReturnDetail({
           {offerCancel && mode !== 'cancel' && (
             <button type="button" className={buttonClass} onClick={() => setMode('cancel')}>
               Cancel return
+            </button>
+          )}
+          {offerLabels && mode !== 'labels' && (
+            <button type="button" className={buttonClass} onClick={() => setMode('labels')} data-testid="rtv-package-labels">
+              Print package labels
             </button>
           )}
           <button type="button" className={buttonClass} onClick={() => window.print()}>
@@ -412,6 +424,16 @@ function VendorReturnDetail({
           </tbody>
         </table>
       </div>
+
+      {mode === 'labels' && offerLabels && (
+        <PackageLabelsDialog
+          kind="rtv"
+          documentId={rtv.id}
+          documentCode={rtv.code}
+          dispatchedCount={rtv.dispatch?.packageCount ?? null}
+          onClose={() => setMode('view')}
+        />
+      )}
 
       {mode === 'dispatch' && offerDispatch && (
         <VendorReturnDispatchDialog

@@ -1071,3 +1071,40 @@ export function portalShippingReason(error: unknown, action: 'label' | 'awb' | '
       return `${lead}. Try again, or contact the warehouse if it keeps happening.`;
   }
 }
+
+// ── Story 4-5a (A19, A28) — the cartons and the packing slip ───────────────
+
+/** One carton as the portal Shipping read returns it (never its code, A19). */
+export interface PortalCarton {
+  readonly seq: number;
+  readonly weightGrams: number | null;
+  readonly totals: readonly { readonly uom: string; readonly qty: number }[];
+}
+
+function portalQtyText(qty: number): string {
+  const [whole, fraction] = String(qty).split('.');
+  return `${groupIndianDigits(whole!)}${fraction === undefined ? '' : `.${fraction}`}`;
+}
+
+function kgText(grams: number): string {
+  return (grams / 1000).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+}
+
+/** "3 cartons · 12.4 kg" — the weight only when every carton was weighed. */
+export function portalCartonsSummary(cartons: readonly PortalCarton[]): string {
+  const count = `${cartons.length} ${cartons.length === 1 ? 'carton' : 'cartons'}`;
+  if (cartons.length === 0 || cartons.some((c) => c.weightGrams === null)) return count;
+  const grams = cartons.reduce((sum, c) => sum + (c.weightGrams ?? 0), 0);
+  // Grams under 1 kg ("900 g"), never "0 kg" or a rounded "1 kg".
+  if (grams < 1000) return `${count} · ${grams.toLocaleString('en-IN')} g`;
+  return `${count} · ${(grams / 1000).toLocaleString('en-IN', { maximumFractionDigits: 1 })} kg`;
+}
+
+/** "Carton 2 of 3 — 4.2 kg — 12 EA · 2.5 KG": totals per unit, never one figure across units (A36). */
+export function portalCartonRow(carton: PortalCarton, count: number): string {
+  const parts = [`Carton ${carton.seq} of ${count}`];
+  if (carton.weightGrams !== null) parts.push(`${kgText(carton.weightGrams)} kg`);
+  if (carton.totals.length > 0) parts.push(carton.totals.map((t) => `${portalQtyText(t.qty)} ${t.uom}`).join(' · '));
+  return parts.join(' — ');
+}
+

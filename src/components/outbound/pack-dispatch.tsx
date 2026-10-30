@@ -65,7 +65,17 @@ import { filterPage, lineQuantityLabel, orderStatusLabel, pageFilterCount } from
 import { orderLabel, shortOrderId } from '@/lib/orders';
 import { useCarrierConnections, useManifests, useOrderRates, useOrderShipment } from '@/lib/use-outbound-labels';
 import { useOrderDetail, useOutboundSkus } from '@/lib/use-outbound-orders';
-import { usePipelineOrders } from '@/lib/use-outbound-pack-dispatch';
+import { useOrderCartons, usePackedCartonSummaries, usePipelineOrders } from '@/lib/use-outbound-pack-dispatch';
+import {
+  buildPackBody,
+  canSplitAtPack,
+  carrierMultiCartonWarning,
+  CATCH_WEIGHT_PACK_NOTE,
+  cartonSkusFromScanned,
+  gridMatchesScan,
+  splitGrid,
+  type CartonGrid,
+} from '@/lib/cartons';
 import { dispatchesByHandover, handoverOutcome, shippingCell } from '@/lib/shipping';
 import { useOrderShipments } from '@/lib/use-shipping';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
@@ -92,6 +102,8 @@ import { orderStatusTone } from '@/lib/status-tone';
 import { CancelOrderDialog, PutBackSection, type CancelTarget } from '@/components/outbound/cancel-order-dialog';
 import { HandoverBuilder } from '@/components/outbound/handover-builder';
 import { ShippingPanel } from '@/components/outbound/shipping-panel';
+import { CartonGridEditor } from '@/components/outbound/carton-editor';
+import { PackCartonsPanel } from '@/components/outbound/print-pack-documents';
 
 /**
  * The Outbound pack & dispatch pipeline (story 4-2d) — the web consumer of
@@ -198,6 +210,9 @@ function PackDispatchTable({
     .filter((order) => order.status === 'accepted' || order.status === 'ready_to_dispatch')
     .map((order) => order.id);
   const shipments = useOrderShipments(tenantId, openOrderIds);
+  // Story 4-5a (A26) — the packed row's "3 cartons · 12.4 kg".
+  const packedOrderIds = pipeline.filter((order) => order.status === 'ready_to_dispatch').map((order) => order.id);
+  const cartonSummaries = usePackedCartonSummaries(tenantId, packedOrderIds);
   // Story 4-4a (A20) — the handover builder, opened from a row's "Hand over".
   const [handover, setHandover] = useState<{ clientId: string | null; orderId: string; more: readonly string[] } | null>(null);
   // FE14 — Hand over on another row while the builder is open: joins the open draft for the same client, else says why not.
@@ -250,7 +265,14 @@ function PackDispatchTable({
       key: 'status',
       header: 'Status',
       render: (order) => (
-        <StatusChip tone={orderStatusTone(order.status)}>{orderStatusLabel(order.status)}</StatusChip>
+        <span className="flex flex-col items-start gap-0.5">
+          <StatusChip tone={orderStatusTone(order.status)}>{orderStatusLabel(order.status)}</StatusChip>
+          {cartonSummaries.get(order.id) !== undefined && (
+            <span className="text-[11px] text-(--muted-foreground)" data-testid="packed-row-cartons">
+              {cartonSummaries.get(order.id)}
+            </span>
+          )}
+        </span>
       ),
     },
     {
@@ -487,6 +509,12 @@ function PackDispatchPanel({
               <time dateTime={slip.packedAt}>{new Date(slip.packedAt).toLocaleString()}</time> ·{' '}
               {parcelMeasurementLabel(slip)}
             </div>
+            {/* Story 4-5a — absent on a slip stored before 4-5a: one carton. */}
+            {slip.cartons !== undefined && slip.cartons.length > 1 && (
+              <div className="text-xs" data-testid="slip-cartons">
+                Packed in {slip.cartons.length} cartons — print the carton labels and slips below.
+              </div>
+            )}
             <ul className="flex flex-col gap-1">
               {slip.lines.map((line) => (
                 <li key={line.orderLineId} className="flex flex-wrap items-center gap-2 text-xs">
@@ -552,6 +580,25 @@ function PackDispatchPanel({
           canPack={canPack}
           canDispatch={canDispatch}
           canRemove={canCancel}
+        />
+      )}
+
+      {/* Story 4-5a (A26) — the packed order's cartons, the Print group and Re-pack into cartons. */}
+      {(status === 'ready_to_dispatch' || status === 'dispatched') && (
+        <PackCartonsPanel
+          tenantId={tenantId}
+          orderId={orderId}
+          orderLabel={orderLabel(order)}
+          status={status}
+          canPack={canPack}
+          canLabel={canLabel}
+          carrierLabelled={
+            shipmentRead.state === 'ready' &&
+            shipmentRead.data !== null &&
+            (shipmentRead.data.shipment.kind ?? 'carrier') === 'carrier' &&
+            shipmentRead.data.shipment.status !== 'voided'
+          }
+          skuMap={skuMap}
         />
       )}
 
@@ -737,6 +784,8 @@ function PackBench({
     packScanDraftFromLines(lines),
   );
   const [measurements, setMeasurements] = useState<PackMeasurements>(EMPTY_MEASUREMENTS);
+  // Story 4-5a (A26) — null: one carton (today's form and payload); else the split grid.
+  const [grid, setGrid] = useState<CartonGrid | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -768,10 +817,22 @@ function PackBench({
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const parsed = parsePackDraft(scans, measurements);
+    const parsed = parsePackDraft(scans, grid === null ? measurements : EMPTY_MEASUREMENTS);
     if (parsed.body === null) {
       // Nothing is requested that the backend would only answer 400 to.
       setProblem(parsed.problem);
+      return;
+    }
+    // Story 4-5a — one carton sends today's exact body; a split sends the
+    // scanned total plus the cartons, and no top-level measurements. A split
+    // made before the scan changed is refused here (it would not add up).
+    if (grid !== null && !gridMatchesScan(grid, parsed.body.scanned)) {
+      setProblem('The scanned counts changed after the split — split again from the new counts.');
+      return;
+    }
+    const built = buildPackBody(parsed.body, grid);
+    if (built.body === null) {
+      setProblem(built.problem);
       return;
     }
     setProblem(null);
@@ -781,7 +842,7 @@ function PackBench({
     setPending(true);
     setError(null);
     try {
-      const { pack } = await fetchApiPackOrder(tenantId, orderId, parsed.body, key);
+      const { pack } = await fetchApiPackOrder(tenantId, orderId, built.body, key);
       if (!mounted.current) {
         // The bench unmounted mid-flight (row collapsed, warehouse switched)
         // but the pack COMMITTED — the sibling outbound readers must still
@@ -837,6 +898,17 @@ function PackBench({
           </li>
         ))}
       </ul>
+      <CartonsFieldset
+        scans={scans}
+        skuMap={skuMap}
+        grid={grid}
+        onGrid={(next) => {
+          setIdempotencyKey(null);
+          setProblem(null);
+          setGrid(next);
+        }}
+      />
+      {grid === null && (
       <fieldset className="flex flex-col gap-2 rounded-sm border border-(--border) p-3">
         <legend className="px-1 text-xs text-(--muted-foreground)">Parcel measurements (optional)</legend>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -894,6 +966,7 @@ function PackBench({
           </label>
         </div>
       </fieldset>
+      )}
       {/* Story 4-2c (decision 4) — warned before it happens: a short COD parcel collects the full amount. */}
       {codShortWarning(codAmountPaise, benchIsShort(lines, scans)) !== null && (
         <FeedbackBanner
@@ -916,6 +989,76 @@ function PackBench({
     </form>
   );
 }
+
+/**
+ * Story 4-5a (A26) — the bench's Cartons fieldset: "One carton" by default
+ * (today's form and payload), or "Split into cartons" — the bench's per-line
+ * counts become a grid, SKUs × cartons, each row's total against the scan.
+ * A scan edit after splitting asks for the split again from the new counts
+ * (the split must add up to what is scanned). Catch-weight orders are packed
+ * on the handheld; the split is not offered for them.
+ */
+function CartonsFieldset({
+  scans,
+  skuMap,
+  grid,
+  onGrid,
+}: {
+  scans: readonly PackScanDraftLine[];
+  skuMap: Readonly<Record<string, SkuResponse>> | null;
+  grid: CartonGrid | null;
+  onGrid: (next: CartonGrid | null) => void;
+}) {
+  const parsed = parsePackDraft(scans, EMPTY_MEASUREMENTS);
+  const skus =
+    parsed.body === null
+      ? []
+      : cartonSkusFromScanned(parsed.body.scanned, (skuId) => {
+          const sku = skuMap?.[skuId];
+          return sku === undefined
+            ? undefined
+            : { skuCode: sku.code, skuName: sku.name, uom: { uom: sku.uom, uomPrecision: sku.uomPrecision }, catchWeight: sku.catchWeightTracked };
+        });
+  const stale = grid !== null && parsed.body !== null && !gridMatchesScan(grid, parsed.body.scanned);
+  const splittable = canSplitAtPack(skus);
+  return (
+    <fieldset className="flex flex-col gap-2 rounded-sm border border-(--border) p-3" data-testid="cartons-fieldset">
+      <legend className="px-1 text-xs text-(--muted-foreground)">Cartons</legend>
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <label className="flex items-center gap-1">
+          <input type="radio" name="cartons-mode" checked={grid === null} onChange={() => onGrid(null)} />
+          One carton
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="radio"
+            name="cartons-mode"
+            checked={grid !== null}
+            // Offered only once the SKUs are known — before that a catch-weight SKU looks plain.
+            disabled={skuMap === null || !splittable || skus.length === 0}
+            onChange={() => onGrid(splitGrid(skus))}
+          />
+          Split into cartons
+        </label>
+      </div>
+      {!splittable && <div className="text-xs text-(--muted-foreground)">{CATCH_WEIGHT_PACK_NOTE}</div>}
+      {grid !== null && stale && (
+        <FeedbackBanner
+          tone="warning"
+          word="Scan changed"
+          reason="The scanned counts changed after the split — start the split again from the new counts."
+          action={
+            <button type="button" className={buttonClass} onClick={() => onGrid(splitGrid(skus))}>
+              Split again
+            </button>
+          }
+        />
+      )}
+      {grid !== null && <CartonGridEditor grid={grid} mode="pack" onChange={onGrid} />}
+    </fieldset>
+  );
+}
+
 
 /* ------------------------------------------------------------------ */
 /* Dispatch                                                            */
@@ -1099,6 +1242,9 @@ function LabelSection({
   // connection picker and the measurements so the operator picks a carrier
   // with the prices in view.
   const rates = useOrderRates(orderId);
+  // Story 4-5a (A41) — one AWB covers every carton: said before buying.
+  const cartons = useOrderCartons(tenantId, canLabel ? orderId : null);
+  const multiCarton = carrierMultiCartonWarning(cartons.state === 'ready' && cartons.data !== null ? cartons.data.pack.cartonCount : null);
   // The label result is THIS panel's mutation result; the broadcaster's
   // refetch re-runs the shipment read, and the local state keeps rendering
   // through the flip.
@@ -1328,6 +1474,7 @@ function LabelSection({
           </label>
         </div>
       </fieldset>
+      {multiCarton !== null && <FeedbackBanner tone="warning" word="Several cartons" reason={multiCarton} />}
       <div>
         <button type="submit" disabled={pending} className={primaryClass}>
           {pending ? 'Generating…' : 'Generate label'}

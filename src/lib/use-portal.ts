@@ -27,6 +27,7 @@ import {
   fetchApiPortalService,
   fetchApiPortalStock,
   ApiProblem,
+  fetchApiPortalPackingSlip,
 } from '@/lib/api/client';
 import type {
   PortalOrderShippingResponse,
@@ -54,7 +55,9 @@ import type {
   ServiceReportDto,
 } from '@/lib/api/generated';
 import { readSession, subscribeSession } from '@/lib/auth';
-import { PORTAL_SKU_MAX_PAGES, PORTAL_SKU_PAGE_LIMIT, portalReadReason, portalReturnFilterQuery, type PortalReturnFilter } from '@/lib/portal';
+import { packingSlipFilename } from '@/lib/cartons';
+import { downloadBlob } from '@/lib/csv';
+import { PORTAL_SESSION_EXPIRED, PORTAL_SKU_MAX_PAGES, PORTAL_SKU_PAGE_LIMIT, portalReadReason, portalReturnFilterQuery, type PortalReturnFilter } from '@/lib/portal';
 import { portalServiceReason } from '@/lib/service-report';
 import type { Reloadable, ResourceState } from '@/lib/resource-state';
 
@@ -408,4 +411,31 @@ export function usePortalService(
     },
     portalServiceReason,
   );
+}
+
+/**
+ * Story 4-5a (A19, A28) — download one packed order's packing slip (the
+ * client copy, A4 PDF): an explicit download, never a print fallback (the
+ * 2-9a GRN download's shape). Another client's or an unpacked order is a 404.
+ */
+export function usePortalPackingSlipDownload(orderId: string, orderLabel: string) {
+  const tenantId = useTenantId();
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+  const download = useCallback(async () => {
+    if (tenantId === null) {
+      setRefused(PORTAL_SESSION_EXPIRED);
+      return;
+    }
+    setBusy(true);
+    setRefused(null);
+    try {
+      downloadBlob(packingSlipFilename(orderLabel), await fetchApiPortalPackingSlip(tenantId, orderId));
+    } catch (error) {
+      setRefused(portalReadReason(error, 'The packing slip'));
+    } finally {
+      setBusy(false);
+    }
+  }, [tenantId, orderId, orderLabel]);
+  return { download, busy, refused };
 }

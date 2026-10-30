@@ -26,6 +26,7 @@ import {
   type ConsignmentField,
 } from '@/lib/consignment-capture';
 import { formatCount } from '@/lib/format-quantity';
+import { lastPrintedPackageLabelCount, packageCountDiffersWarning } from '@/lib/cartons';
 import { ulid } from '@/lib/ulid';
 import { useTransporterOptions } from '@/lib/use-gate-ins';
 
@@ -174,6 +175,10 @@ export function ClientReturnDispatchDialog({
         problem={problem}
         consignorHint={consignorHint}
         consignorWarning={consignorStateWarning(draft.consignorGstin, rtc.warehouse.gstin)}
+        packageCountWarning={packageCountDiffersWarning(
+          /^\d+$/.test(draft.packageCount.trim()) ? Number(draft.packageCount.trim()) : undefined,
+          lastPrintedPackageLabelCount(rtc.id),
+        )}
         dateWindow={brandDocumentDateWindow(rtc.created.at, nowMs)}
         busy={busy}
         submitLabel="Dispatch to client"

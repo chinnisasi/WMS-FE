@@ -570,7 +570,7 @@ function OrderLines({ orderId, canWrite = false }: { orderId: string; canWrite?:
         </ul>
       </div>
       {/* Story 4-4a (A21) — who carries it, the label and the documents. */}
-      <PortalShipping orderId={orderId} canWrite={canWrite} />
+      <PortalShipping orderId={orderId} orderLabel={orderReference(order.data)} canWrite={canWrite} />
     </div>
   );
 }

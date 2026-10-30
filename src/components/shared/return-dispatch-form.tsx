@@ -61,6 +61,7 @@ export function ReturnDispatchForm({
   onDiscard,
   showDebitNote = true,
   extra,
+  packageCountWarning = null,
 }: {
   readonly ariaLabel: string;
   readonly draft: ConsignmentDraft;
@@ -80,6 +81,8 @@ export function ReturnDispatchForm({
   readonly onDiscard: () => void;
   readonly showDebitNote?: boolean;
   readonly extra?: ReactNode;
+  /** Story 4-5a (A43) — the packages differ from the package labels last printed: warn, never refuse. */
+  readonly packageCountWarning?: string | null;
 }) {
   const errorOf = (field: ConsignmentField): string | null => (fieldError !== null && fieldError.field === field ? fieldError.problem : null);
   const typed = draft.carrierMode === 'typed';
@@ -313,6 +316,11 @@ export function ReturnDispatchForm({
               />
             )}
           </Field>
+          {packageCountWarning !== null && (
+            <div role="status" className="text-xs text-(--warning)" data-testid="dispatch-package-count-warning">
+              ⚠ {packageCountWarning}
+            </div>
+          )}
         </fieldset>
         {extra}
       </fieldset>

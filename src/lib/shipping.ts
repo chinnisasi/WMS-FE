@@ -22,6 +22,7 @@ import { awbProblem, normalizeAwb } from '@/lib/awb';
 import { istLocalToIso, normalizePhone, normalizeVehicleNo, PHONE_RE, VEHICLE_NO_RE, VEHICLE_RULE } from '@/lib/gate-ins';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import { DISPATCH_VIA_HANDOVER_REASON } from '@/lib/outbound-pack-dispatch';
+import { parseCartonCode } from '@/lib/carton-code';
 import { parcelTagCode, parcelTagOrderSuffix } from '@/lib/parcel-tag';
 import { prepareImageForUpload, sniffImage } from '@/lib/receipt-photos';
 import type { StatusTone } from '@/lib/status-tone';
@@ -31,6 +32,7 @@ export { normalizeAwb, awbProblem, parcelTagCode };
 export type ShipmentKind = NonNullable<ShipmentDto['kind']>;
 export type ShipmentStatus = ShipmentDto['status'];
 export type DocKind = NonNullable<FileViewDto['docKind']>;
+/** Story 4-5a (A21, D5) — the server's union carries the two carton refusals, appended LAST. */
 export type HandoverRefusalCode = HandoverRefusedParcelDto['code'];
 
 // ── bounds (mirrored from wms-be, each named) ──────────────────────────────
@@ -319,6 +321,8 @@ export const HANDOVER_REFUSAL_WORD: Readonly<Record<HandoverRefusalCode, string>
   'awb-required': 'Scan the courier’s AWB',
   'awb-in-use': 'This AWB is on another open order',
   'order-holds-recalled-batch': 'Holds a recalled lot — it cannot ship',
+  'package-count-mismatch': 'The parcel count is not the order’s carton count',
+  'carton-not-current': 'An old or foreign carton label — reprint this order’s labels',
 };
 
 export interface RefusedParcel {
@@ -507,6 +511,8 @@ export interface HandoverRowDraft {
   readonly awb: string;
   readonly packageCount: string;
   readonly weightGrams: string;
+  /** Story 4-5a (A21) — the carton labels scanned for this order, canonical (trimmed, upper-cased). */
+  readonly cartonCodes?: readonly string[];
 }
 
 export interface HandoverDraft {
@@ -573,6 +579,22 @@ export type ScanMatch =
   | { readonly kind: 'awb-for'; readonly orderId: string; readonly awb: string }
   | { readonly kind: 'unknown'; readonly problem: string };
 
+/** Story 4-5a (A21) — a carton label scan: tick carton `seq` of that order, or say why not. */
+export type CartonScanMatch =
+  | { readonly kind: 'carton'; readonly orderId: string; readonly code: string; readonly seq: number; readonly needsAwb: boolean }
+  /** Two candidates share the tag prefix: `code` is kept so the row the user picks gets the carton. */
+  | { readonly kind: 'ambiguous'; readonly orderIds: readonly string[]; readonly code: string }
+  | { readonly kind: 'unknown'; readonly problem: string };
+
+/** Story 4-5a — the carton facts a candidate carries (the candidates read's optional `packSeq` / `cartonCount`). */
+export interface CartonFacts {
+  readonly packSeq?: number | null;
+  readonly cartonCount?: number | null;
+}
+
+/** A37 — the web refuses a superseded pack's label: the user is present and can reprint. */
+export const STALE_CARTON_LABEL = 'Old label — this order was re-packed; reprint its labels.';
+
 /**
  * One scan into the builder's list (A20): an AWB on record or a parcel tag
  * ticks its row; a tag on a row with no AWB on record asks for the courier's
@@ -607,6 +629,162 @@ export function matchScan(
   return { kind: 'unknown', problem: 'Not a parcel awaiting pickup for this client — scan its parcel tag first, then the courier’s label.' };
 }
 
+function rowNeedsAwb(shipment: HandoverCandidateDto['shipment']): boolean {
+  return shipment === null || shipment.kind === 'courier-label' || (shipment.kind === 'client-label' && !shipment.labelVerified);
+}
+
+/**
+ * A carton label (A21, A34, A37 web rules), or null when `raw` is not a
+ * carton code (then `matchScan` judges it as a tag or AWB): its parcel-tag
+ * prefix finds the order; a pack number below the live pack's is a stale
+ * label (refused — the user reprints); above it the list is older than the
+ * pack (refresh); a candidate without `packSeq` is a virtual pack (pack 1,
+ * one carton — A34).
+ */
+export function matchCartonScan(
+  raw: string,
+  candidates: readonly (Pick<HandoverCandidateDto, 'orderId' | 'parcelTagCode' | 'shipment'> & CartonFacts)[],
+): CartonScanMatch | null {
+  const carton = parseCartonCode(raw);
+  if (carton === null) return null;
+  const code = `${carton.parcelTag}.${carton.packSeq}.${carton.seq}`;
+  const hits = candidates.filter((c) => c.parcelTagCode.toUpperCase() === carton.parcelTag);
+  if (hits.length === 0) return { kind: 'unknown', problem: 'This carton is not a parcel awaiting pickup for this client — refresh, or check the label.' };
+  if (hits.length > 1) return { kind: 'ambiguous', orderIds: hits.map((h) => h.orderId), code };
+  const hit = hits[0]!;
+  const livePack = hit.packSeq ?? 1;
+  const count = hit.cartonCount ?? 1;
+  if (carton.packSeq < livePack) return { kind: 'unknown', problem: STALE_CARTON_LABEL };
+  if (carton.packSeq > livePack) return { kind: 'unknown', problem: 'This order was re-packed after the list was read — refresh, then scan again.' };
+  if (carton.seq > count) return { kind: 'unknown', problem: `This order has ${count} ${count === 1 ? 'carton' : 'cartons'} — there is no carton ${carton.seq}. Reprint its labels.` };
+  return { kind: 'carton', orderId: hit.orderId, code, seq: carton.seq, needsAwb: rowNeedsAwb(hit.shipment) };
+}
+
+/** Tick a scanned carton on its row (selects the row; a second scan of one carton is a no-op). */
+export function tickCarton(draft: HandoverDraft, orderId: string, code: string): HandoverDraft {
+  const row = rowOf(draft, orderId);
+  const parsed = parseCartonCode(code);
+  if (parsed === null) return draft;
+  const canonical = `${parsed.parcelTag}.${parsed.packSeq}.${parsed.seq}`;
+  const codes = row.cartonCodes ?? [];
+  const next = codes.includes(canonical) ? codes : [...codes, canonical];
+  return { ...draft, rows: { ...draft.rows, [orderId]: { ...row, selected: true, cartonCodes: next } } };
+}
+
+/**
+ * A candidates refresh (A37): a row's scanned carton codes of a pack that is
+ * no longer the order's live pack (re-packed since the scan) are dropped —
+ * those labels are stale. `dropped` names the orders, for a note.
+ */
+export function pruneStaleCartonCodes(
+  draft: HandoverDraft,
+  candidates: readonly (Pick<HandoverCandidateDto, 'orderId' | 'orderLabel'> & CartonFacts)[],
+): { readonly draft: HandoverDraft; readonly dropped: readonly string[] } {
+  const dropped: string[] = [];
+  let rows: Record<string, HandoverRowDraft> | null = null;
+  for (const candidate of candidates) {
+    const row = draft.rows[candidate.orderId];
+    const codes = row?.cartonCodes ?? [];
+    if (row === undefined || codes.length === 0) continue;
+    const livePack = candidate.packSeq ?? 1;
+    const kept = codes.filter((c) => parseCartonCode(c)?.packSeq === livePack);
+    if (kept.length === codes.length) continue;
+    rows ??= { ...draft.rows };
+    rows[candidate.orderId] = { ...row, cartonCodes: kept };
+    dropped.push(candidate.orderLabel);
+  }
+  return rows === null ? { draft, dropped } : { draft: { ...draft, rows }, dropped };
+}
+
+/** The note a refresh shows when it dropped stale carton scans. */
+export function staleCartonsDroppedNote(dropped: readonly string[]): string | null {
+  if (dropped.length === 0) return null;
+  return `${dropped.join(', ')}: re-packed since its cartons were scanned — the old carton scans were dropped; scan the new labels.`;
+}
+
+/** The server's `package-count-mismatch` words (A37), refused before sending: only for a stored pack (the candidate carries `packSeq`). */
+export function packageCountMismatch(
+  candidate: Pick<HandoverCandidateDto, 'orderLabel'> & CartonFacts,
+  typed: number | undefined,
+): string | null {
+  if (typed === undefined || candidate.packSeq === null || candidate.packSeq === undefined) return null;
+  const count = candidate.cartonCount;
+  if (count === null || count === undefined || typed === count) return null;
+  return `Order ${candidate.orderLabel} is packed in ${count} carton${count === 1 ? '' : 's'} — the parcel count reads ${typed}.`;
+}
+
+/** "2/3" — the cartons scanned of the order's count; null when the order carries no carton facts and none were scanned. */
+export function cartonTally(row: HandoverRowDraft, candidate: CartonFacts): string | null {
+  const scanned = row.cartonCodes?.length ?? 0;
+  const count = candidate.cartonCount ?? null;
+  if (count === null && scanned === 0) return null;
+  return `${scanned}/${count ?? 1}`;
+}
+
+/** The parcels field's prefill (A21, A40): the order's carton count. */
+export function defaultPackageCountText(candidate: CartonFacts): string {
+  return candidate.cartonCount === null || candidate.cartonCount === undefined ? '' : String(candidate.cartonCount);
+}
+
+/**
+ * The confirms the builder asks before submit (A24's web twin, A44): fewer
+ * cartons scanned than counted ("2 of 3 cartons scanned — hand over all
+ * 3?"), and a COD order whose carton 1 was not scanned while another was.
+ * Warnings, never refusals — the parcel may already be on the truck.
+ */
+export function handoverCartonConfirms(
+  draft: HandoverDraft,
+  candidates: readonly (Pick<HandoverCandidateDto, 'orderId' | 'orderLabel'> & CartonFacts & { readonly codAmountPaise?: number | null })[],
+): readonly string[] {
+  const out: string[] = [];
+  for (const candidate of candidates) {
+    const row = rowOf(draft, candidate.orderId);
+    if (!row.selected) continue;
+    const codes = row.cartonCodes ?? [];
+    if (codes.length === 0) continue;
+    const typed = parsePackageCount(row.packageCount).value;
+    // A stored pack's carton count is the truth (a typed count that differs is refused before this); else the typed count.
+    const stored = candidate.packSeq !== null && candidate.packSeq !== undefined && candidate.cartonCount !== null && candidate.cartonCount !== undefined;
+    const count = stored ? candidate.cartonCount! : (typed ?? candidate.cartonCount ?? codes.length);
+    if (codes.length < count) out.push(`${candidate.orderLabel}: ${codes.length} of ${count} cartons scanned — hand over all ${count}?`);
+    const cod = (candidate.codAmountPaise ?? 0) > 0;
+    if (cod && !codes.some((c) => parseCartonCode(c)?.seq === 1)) {
+      out.push(`${candidate.orderLabel}: Carton 1 carries the COD label and was not scanned — hand over anyway?`);
+    }
+  }
+  return out;
+}
+
+/** Story 4-5a (A21, A34, A37, A44) — one parcel's cartons at a handover, as the detail reads them. */
+export interface HandoverCartonsLine {
+  /** "3 cartons, 2 scanned" / "1 carton (packed before cartons were recorded)". */
+  readonly text: string;
+  /** Amber flags: a COD carton 1 left unscanned; a superseded pack's labels scanned on the handheld. */
+  readonly flags: readonly string[];
+}
+
+/** Null when the detail carries no cartons (a server before 4-5a). */
+export function handoverCartonsLine(
+  cartons:
+    | {
+        readonly cartonCount: number;
+        readonly scanned: number;
+        readonly legacy: boolean;
+        readonly codCartonScanned: boolean | null;
+        readonly staleCartonLabels: boolean;
+      }
+    | undefined,
+): HandoverCartonsLine | null {
+  if (cartons === undefined) return null;
+  const text = cartons.legacy
+    ? '1 carton (packed before cartons were recorded)'
+    : `${cartons.cartonCount} ${cartons.cartonCount === 1 ? 'carton' : 'cartons'}, ${cartons.scanned} scanned`;
+  const flags: string[] = [];
+  if (cartons.codCartonScanned === false) flags.push('Carton 1 (the COD label) was not scanned');
+  if (cartons.staleCartonLabels) flags.push('Stale carton labels — the order was re-packed; reprint its labels');
+  return { text, flags };
+}
+
 export type ParsedHandoverDraft = { readonly body: CreateHandoverDto; readonly problem: null } | { readonly body: null; readonly problem: string };
 
 /**
@@ -618,7 +796,7 @@ export type ParsedHandoverDraft = { readonly body: CreateHandoverDto; readonly p
 export function parseHandoverDraft(
   draft: HandoverDraft,
   warehouseId: string,
-  candidates: readonly Pick<HandoverCandidateDto, 'orderId' | 'orderLabel'>[],
+  candidates: readonly (Pick<HandoverCandidateDto, 'orderId' | 'orderLabel'> & CartonFacts)[],
   nowMs: number,
 ): ParsedHandoverDraft {
   const fail = (problem: string): ParsedHandoverDraft => ({ body: null, problem });
@@ -656,7 +834,7 @@ export function parseHandoverDraft(
   const parcels: CreateHandoverDto['parcels'] = [];
   for (const candidate of chosen) {
     const row = rowOf(draft, candidate.orderId);
-    const parcel: { orderId: string; awb?: string; packageCount?: number; weightGrams?: number } = { orderId: candidate.orderId };
+    const parcel: CreateHandoverDto['parcels'][number] = { orderId: candidate.orderId };
     const awb = normalizeAwb(row.awb);
     if (awb !== '') {
       const issue = awbProblem(awb);
@@ -668,10 +846,15 @@ export function parseHandoverDraft(
     }
     const count = parsePackageCount(row.packageCount);
     if (count.problem !== null) return fail(`${candidate.orderLabel}: ${count.problem}`);
+    const mismatch = packageCountMismatch(candidate, count.value);
+    if (mismatch !== null) return fail(mismatch);
     if (count.value !== undefined) parcel.packageCount = count.value;
     const weight = parseWeightGrams(row.weightGrams);
     if (weight.problem !== null) return fail(`${candidate.orderLabel}: ${weight.problem}`);
     if (weight.value !== undefined) parcel.weightGrams = weight.value;
+    // Story 4-5a (A21) — the scanned cartons, canonical and sorted; absent when none (a 4-4a body stays a 4-4a body).
+    const cartonCodes = [...new Set((row.cartonCodes ?? []).map((c) => c.trim().toUpperCase()))].sort();
+    if (cartonCodes.length > 0) parcel.cartonCodes = cartonCodes;
     parcels.push(parcel);
   }
   const body: CreateHandoverDto = {

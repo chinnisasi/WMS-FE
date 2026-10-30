@@ -4,6 +4,7 @@ import { act } from 'react';
 import { writeActiveClientId } from '../../lib/active-client';
 import { clearSession, writeSession, type StoredSession } from '../../lib/auth';
 import type { VendorReturnDto } from '../../lib/api/generated';
+import { rememberPackageLabelCount } from '../../lib/cartons';
 import { restoreGlobals, stubGlobal } from '../../lib/test/globals';
 import { render, type Rendered } from '../../lib/test/render';
 import {
@@ -414,6 +415,37 @@ describe('Returns to vendor — create', () => {
     const creates = writes('/vendor-returns');
     expect(creates).toHaveLength(2);
     expect(creates[0]!.key).not.toBe(creates[1]!.key);
+  });
+});
+
+describe('story 4-5a — package labels on a return to vendor (A27, A43)', () => {
+  test('an operator is offered Print package labels on a picked return; an accountant (no labels.execute) is not', async () => {
+    await mount('operator');
+    await expand('RTV-0002');
+    expect(button(detail('RTV-0002')!, 'Print package labels')).toBeDefined();
+    view!.unmount();
+    view = undefined;
+    await mount('accountant');
+    await expand('RTV-0002');
+    expect(button(detail('RTV-0002')!, 'Print package labels')).toBeUndefined();
+  });
+
+  test('a draft return offers no package labels', async () => {
+    await mount('owner');
+    await expand('RTV-0001');
+    expect(button(detail('RTV-0001')!, 'Print package labels')).toBeUndefined();
+  });
+
+  test('the dispatch dialog warns when its packages differ from the labels last printed', async () => {
+    rememberPackageLabelCount('0198f7a2-1b3c-7d4e-8f90-0000000000f2', 4);
+    await mount('owner');
+    await expand('RTV-0002');
+    await press(button(detail('RTV-0002')!, 'Dispatch'));
+    const dialog = detail('RTV-0002')!.querySelector<HTMLElement>('[role="dialog"][aria-label="Dispatch RTV-0002"]')!;
+    const packages = [...dialog.querySelectorAll('label')].find((l) => l.textContent === 'Packages')!.getAttribute('for')!;
+    setValue(dialog.querySelector<HTMLInputElement>(`#${CSS.escape(packages)}`)!, '3');
+    await settle();
+    expect(dialog.querySelector('[data-testid="dispatch-package-count-warning"]')?.textContent).toContain('4 package labels were printed, but 3 packages are recorded');
   });
 });
 
