@@ -1041,8 +1041,8 @@ export function portalFreightLine(freight: PortalFreightBlockDto): string {
     case 'planned':
       return 'Booked on a truck';
     case 'dispatched': {
-      const when = freight.dispatchedAt === undefined ? '' : ` on ${portalDateTime(freight.dispatchedAt)}`;
-      const parts = [freight.transporterName, freight.lrNumber == null ? null : `LR ${freight.lrNumber}`, freight.vehicleNumber === undefined ? null : `vehicle ${freight.vehicleNumber}`].filter(
+      const when = freight.dispatchedAt == null ? '' : ` on ${portalDateTime(freight.dispatchedAt)}`;
+      const parts = [freight.transporterName ?? null, freight.lrNumber == null ? null : `LR ${freight.lrNumber}`, freight.vehicleNumber == null ? null : `vehicle ${freight.vehicleNumber}`].filter(
         (p): p is string => p !== null && p !== undefined,
       );
       return `Left by truck${when}${parts.length === 0 ? '' : ` — ${parts.join(', ')}`}`;
@@ -1068,7 +1068,7 @@ export function portalExceptionCounts(short: number | null, damaged: number | nu
 
 /** "15 pallets, 2 cartons — 9,840 kg". */
 export function portalFreightPackages(freight: Pick<PortalFreightBlockDto, 'packageCount' | 'palletCount' | 'weightGrams'>): string | null {
-  if (freight.packageCount === undefined) return null;
+  if (freight.packageCount == null) return null;
   const pallets = freight.palletCount ?? 0;
   const cartons = freight.packageCount - pallets;
   const parts: string[] = [];
@@ -1086,6 +1086,13 @@ export function portalOrderFreightCell(freight: PortalOrderFreightDto | null | u
   const delivered =
     freight.outcome === 'delivered' ? 'Delivered' : freight.outcome === 'delivered-with-exceptions' ? 'Delivered with exceptions' : freight.outcome === 'refused' ? 'Refused' : null;
   return { text: freight.lrNumber === null ? `By truck — ${freight.transporterName}` : `LR ${freight.lrNumber}`, delivered };
+}
+
+/** The Truck block's facts in the list row's shape (the deep-link path has no row — its timeline reads these). */
+export function portalFreightFacts(block: PortalFreightBlockDto | null | undefined): PortalOrderFreightDto | null {
+  if (block == null) return null;
+  const outcome = block.status === 'delivered' || block.status === 'delivered-with-exceptions' || block.status === 'refused' ? block.status : null;
+  return { lrNumber: block.lrNumber ?? null, transporterName: block.transporterName ?? '', deliveredAt: block.deliveredAt ?? null, outcome };
 }
 
 export function portalFreightNoteFilename(orderLabel: string): string {

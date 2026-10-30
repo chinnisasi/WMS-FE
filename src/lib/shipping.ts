@@ -89,13 +89,13 @@ export const DOC_KIND_WORD: Readonly<Record<DocKind, string>> = {
   'eway-bill': 'E-way bill',
   pod: 'Proof of delivery',
   other: 'Other document',
-  // Story 4-9a (A5) — a scanned lorry receipt (a read-side kind; the staff upload route does not take it as built).
-  lr: 'Lorry receipt (LR)',
+  // Story 4-9a (A5) — a scanned lorry receipt (staff upload only).
+  lr: 'Lorry receipt',
 };
 
 /** The kinds staff may upload (all), and the portal's (never `pod` — the warehouse's record of delivery). */
-export type StaffUploadDocKind = Exclude<DocKind, 'lr'>;
-export const STAFF_DOC_KINDS: readonly StaffUploadDocKind[] = ['invoice', 'challan', 'eway-bill', 'pod', 'other'];
+export type StaffUploadDocKind = DocKind;
+export const STAFF_DOC_KINDS: readonly StaffUploadDocKind[] = ['invoice', 'challan', 'eway-bill', 'pod', 'lr', 'other'];
 export const PORTAL_DOC_KINDS = ['invoice', 'challan', 'eway-bill', 'other'] as const satisfies readonly DocKind[];
 
 /** A shipment the client arranged (a client label or a courier label) — dispatched only by a handover. */

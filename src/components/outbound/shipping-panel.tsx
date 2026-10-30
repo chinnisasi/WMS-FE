@@ -844,10 +844,14 @@ function FreightBlock({ freight }: { freight: OrderFreightBlockDto }) {
           {freight.loadException !== null && ` — ${(LOAD_EXCEPTION_WORD as Readonly<Record<string, string>>)[freight.loadException] ?? freight.loadException}`}
         </span>
       )}
-      {freight.lrDate !== null && (
+      {(freight.lrDate !== null || freight.freightTerms !== null) && (
         <span>
-          LR date {freight.lrDate}
-          {freight.freightTerms !== null && ` · ${(FREIGHT_TERMS_WORD as Readonly<Record<string, string>>)[freight.freightTerms] ?? freight.freightTerms}`}
+          {[
+            freight.lrDate === null ? null : `LR date ${freight.lrDate}`,
+            freight.freightTerms === null ? null : `Freight ${(FREIGHT_TERMS_WORD as Readonly<Record<string, string>>)[freight.freightTerms] ?? freight.freightTerms}`,
+          ]
+            .filter((part): part is string => part !== null)
+            .join(' · ')}
         </span>
       )}
       {freight.delivery !== null && <span data-testid="shipping-freight-delivery">{deliveryLine(freight.delivery)}</span>}

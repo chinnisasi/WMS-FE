@@ -4231,6 +4231,12 @@ export type OrderShelfLifeResponse = {
     orderShelfLife: OrderShelfLifeDto;
 };
 
+export type OrderEntryFreightDto = {
+    loadId: string;
+    loadCode: string;
+    stopSeq: number;
+};
+
 export type OrderEntryDto = {
     id: string;
     tenantId: string;
@@ -4295,6 +4301,10 @@ export type OrderEntryDto = {
      * Story 4-6a — the consignment gate today (the brand's tax document and e-way bill): the Docs cell. Optional
      */
     consignmentState?: 'not-applicable' | 'dispatched' | 'eway-required' | 'eway-expired' | 'ready' | 'missing' | 'not-required';
+    /**
+     * Story 4-9a (A30) — the truck the order is planned on (its load and stop), null when none: the Shipping cell reads "On truck LD-0007 (stop 3)". The list rows only; optional
+     */
+    freight?: OrderEntryFreightDto | null;
 };
 
 export type OrderListResponse = {
@@ -5010,7 +5020,7 @@ export type VerifyLabelResponse = {
 
 export type FileViewDto = {
     id: string;
-    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet';
+    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet' | 'loading-sheet';
     docKind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | 'lr' | null;
     /**
      * The server-built name (never the uploader’s)
@@ -5091,7 +5101,7 @@ export type OrderShippingResponse = {
 
 export type ShippingFileSnapshotDto = {
     id: string;
-    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet';
+    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet' | 'loading-sheet';
     docKind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | 'lr' | null;
     contentType: string | null;
     byteSize: number | null;
@@ -5604,6 +5614,10 @@ export type FreightConsignmentViewDto = {
     consignee: FreightConsigneeDto;
     lr: FreightLrDto;
     packages: FreightPackagesDto;
+    /**
+     * The live loaded package codes, sorted (≤ 200; empty once dispatched) — the expanded row’s per-package Load tick
+     */
+    loadedCodes?: Array<string>;
     weightGrams: number | null;
     /**
      * 4-6a’s gate before departure; absent when not judged
@@ -5664,8 +5678,7 @@ export type FreightLoadResponse = {
     load: FreightLoadViewDto;
 };
 
-export type FreightProgressDto = {
-    consignmentId: string;
+export type FreightLoadedTotalDto = {
     loaded: number;
     total: number;
 };
@@ -5684,7 +5697,7 @@ export type FreightLoadListRowDto = {
      */
     clientCodes: Array<string>;
     clientMore: number;
-    packages: FreightProgressDto;
+    packages: FreightLoadedTotalDto;
     palletCount: number;
     grossWeightGrams: number | null;
     capacityKg: number | null;
@@ -5760,6 +5773,12 @@ export type FreightScanViewDto = {
     packageCode: string;
     orderId: string;
     status: 'loaded' | 'unloaded';
+};
+
+export type FreightProgressDto = {
+    consignmentId: string;
+    loaded: number;
+    total: number;
 };
 
 export type FreightScanResponse = {
@@ -12952,7 +12971,7 @@ export type WebhookDeliveryDto = {
     eventId: string;
     eventType: 'receipt.recorded' | 'order.dispatched' | 'order.delivered';
     /**
-     * The receipt (GRN) id, the order id, or (order.delivered) the id of the recorded delivery version
+     * The receipt (GRN) id, the order id, or (order.delivered) an id derived from the consignment id and its deliverySeq — stable per recorded version, stored on no row (the body’s orderId names the order)
      */
     subjectId: string;
     status: 'pending' | 'sending' | 'held' | 'succeeded' | 'failed';
@@ -13012,7 +13031,7 @@ export type WebhookDeliveryDetailDto = {
     eventId: string;
     eventType: 'receipt.recorded' | 'order.dispatched' | 'order.delivered';
     /**
-     * The receipt (GRN) id, the order id, or (order.delivered) the id of the recorded delivery version
+     * The receipt (GRN) id, the order id, or (order.delivered) an id derived from the consignment id and its deliverySeq — stable per recorded version, stored on no row (the body’s orderId names the order)
      */
     subjectId: string;
     status: 'pending' | 'sending' | 'held' | 'succeeded' | 'failed';
@@ -25223,7 +25242,7 @@ export type ShippingControllerParcelTagResponse = ShippingControllerParcelTagRes
 export type ShippingControllerUploadOrderDocumentData = {
     body: {
         file: Blob | File;
-        kind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other';
+        kind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | 'lr';
     };
     headers: {
         /**

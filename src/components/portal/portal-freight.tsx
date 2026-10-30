@@ -27,11 +27,11 @@ export function PortalFreight({ orderId, orderLabel, freight }: { orderId: strin
   const note = usePortalFreightNoteDownload(orderId, orderLabel);
   const packages = portalFreightPackages(freight);
   const facts = [
-    freight.consignmentRef === undefined ? null : `Consignment ${freight.consignmentRef}`,
+    freight.consignmentRef == null ? null : `Consignment ${freight.consignmentRef}`,
     freight.lrDate == null ? null : `LR date ${portalDate(freight.lrDate)}`,
     freight.freightTerms == null ? null : `Freight ${PORTAL_FREIGHT_TERMS_LABEL[freight.freightTerms] ?? freight.freightTerms}`,
     freight.containerNumber == null ? null : `container ${freight.containerNumber}`,
-    freight.driverName === undefined ? null : `driver ${freight.driverName}`,
+    freight.driverName == null ? null : `driver ${freight.driverName}`,
     freight.seals == null || freight.seals.length === 0 ? null : `seal${freight.seals.length === 1 ? '' : 's'} ${freight.seals.join(', ')}`,
   ].filter((part): part is string => part !== null);
   return (

@@ -1252,7 +1252,7 @@ describe('story 4-9a — the freight review rows (A29, A41, A43, A50)', () => {
     expect(rejectedOpGuidance(entry)).toEqual([FREIGHT_DISPATCH_LEFT_GUIDANCE, FREIGHT_DISPATCH_RECALLED_GUIDANCE, FREIGHT_PHOTOS_KEPT_NOTE]);
     const summary = rejectedOpSummary(entry)!;
     expect(summary.heading).toBe('1 order left on LD-0007 (KA01AB1234) but not dispatched');
-    expect(summary.lines.at(-1)).toBe('1 loading-sheet photo kept');
+    expect(summary.lines.at(-1)).toBe('1 loading-sheet photo taken on the handheld');
   });
 
   test('a whole-op departure refusal and a photo row', () => {

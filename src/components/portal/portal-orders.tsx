@@ -20,6 +20,7 @@ import {
   orderStatusLabel,
   orderTimeline,
   portalOrderFreightCell,
+  portalFreightFacts,
   portalFollowOnOfText,
   portalLineShipped,
   portalShippedShortText,
@@ -40,6 +41,7 @@ import { ulid } from '@/lib/ulid';
 import {
   usePortalConsignmentsNeeded,
   usePortalOrder,
+  usePortalOrderShipping,
   usePortalOrders,
   usePortalTenantId,
   usePortalSkuOptions,
@@ -594,10 +596,27 @@ function OrderDeepLink({
       {orderId === null ? (
         <FeedbackBanner tone="rejected" word="This order is not available" reason="The link is wrong, or the order is not your company’s." />
       ) : (
-        <OrderLines orderId={orderId} canWrite={canWrite} focusDocuments={focusDocuments} onRecorded={onRecorded} notFoundAsUnavailable />
+        <DeepLinkOrderLines orderId={orderId} canWrite={canWrite} focusDocuments={focusDocuments} onRecorded={onRecorded} />
       )}
     </div>
   );
+}
+
+/** Story 4-9a — the deep link has no list row: its truck facts (the Delivered step) come from the shipping read. */
+function DeepLinkOrderLines({
+  orderId,
+  canWrite,
+  focusDocuments,
+  onRecorded,
+}: {
+  orderId: string;
+  canWrite: boolean;
+  focusDocuments: boolean;
+  onRecorded?: () => void;
+}) {
+  const shipping = usePortalOrderShipping(orderId);
+  const freight = shipping.state === 'ready' ? portalFreightFacts(shipping.data.freight) : null;
+  return <OrderLines orderId={orderId} freight={freight} canWrite={canWrite} focusDocuments={focusDocuments} onRecorded={onRecorded} notFoundAsUnavailable />;
 }
 
 function OrderLines({

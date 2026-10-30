@@ -14,6 +14,7 @@
  * remembered-format helpers, each in try/catch). Pinned by `cartons.test.ts`.
  */
 import { ApiProblem } from '@/lib/api/client';
+import { FREIGHT_LIMITS } from '@/lib/freight-primitives';
 import { formatCount, formatQuantity, parseQuantityInput, type QuantityUom } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
@@ -38,8 +39,8 @@ export const MAX_PACKAGE_LABELS = 9_999;
 /** A shipment's weight bound (0042 `shipments_weight_grams_range`, A33). */
 export const MAX_SHIPMENT_WEIGHT_GRAMS = 1_000_000;
 /** Story 4-9a (A4) — a pallet's weight bound in grams, and its "said to contain" count. */
-export const MAX_PALLET_WEIGHT_GRAMS = 3_000_000;
-export const MAX_PALLET_INNER_COUNT = 9_999;
+export const MAX_PALLET_WEIGHT_GRAMS = FREIGHT_LIMITS.palletMaxGrams;
+export const MAX_PALLET_INNER_COUNT = FREIGHT_LIMITS.innerCountMax;
 /** Story 4-9a (A47) — the pack's gross bound (`order_packs_gross_weight_range`). */
 export const MAX_PACK_GROSS_GRAMS = 200_000_000;
 
@@ -396,11 +397,12 @@ export function parseCartonGrid(grid: CartonGrid, mode: 'pack' | 'recarton'): Pa
       scanned.push({ skuId: sku.skuId, qty: fromMilli(milli) });
       totals.set(sku.skuId, (totals.get(sku.skuId) ?? 0) + milli);
     }
-    if (scanned.length === 0) return fail(`Carton ${n} is empty — remove it.`);
-    if (scanned.length > MAX_LINES_PER_CARTON) return fail(`Carton ${n} holds more than ${MAX_LINES_PER_CARTON} SKUs.`);
+    const packageNoun = carton.type === 'pallet' ? `Pallet ${n}` : `Carton ${n}`;
+    if (scanned.length === 0) return fail(`${packageNoun} is empty — remove it.`);
+    if (scanned.length > MAX_LINES_PER_CARTON) return fail(`${packageNoun} holds more than ${MAX_LINES_PER_CARTON} SKUs.`);
     lineCount += scanned.length;
     const pallet = carton.type === 'pallet';
-    const noun = pallet ? `Pallet ${n}` : `Carton ${n}`;
+    const noun = packageNoun;
     const weight = parseCartonWeightKg(carton.weightKg, pallet ? 'pallet' : 'carton');
     if (weight.problem !== null) return fail(`${noun}: ${weight.problem}`);
     const dims = parseCartonDimensionsCm(carton.lengthCm, carton.widthCm, carton.heightCm);

@@ -522,7 +522,7 @@ export function dispatchReason(error: unknown): string {
     // Story 4-4a (A13) — the client arranged the courier: only a handover dispatches it.
     if (error.code === 'dispatch-via-handover') return DISPATCH_VIA_HANDOVER_REASON;
     // Story 4-9a (A19) — the order is on an open truck: it leaves with the load.
-    if (error.code === 'dispatch-via-freight') return error.detail ?? DISPATCH_VIA_FREIGHT_REASON;
+    if (error.code === 'dispatch-via-freight') return DISPATCH_VIA_FREIGHT_REASON;
     // Story 4-6a (A13) — the brand's documents gate, worded by code from its extensions.
     const gate = gateRefusalSentence(error);
     if (gate !== null) return gate;

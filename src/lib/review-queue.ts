@@ -1680,6 +1680,15 @@ export const HANDOVER_REFUSAL_WORDS: Readonly<Record<string, string>> = {
   'awb-required': 'no AWB was scanned',
   'awb-in-use': 'the AWB is on another open order',
   'order-holds-recalled-batch': 'it holds a recalled lot',
+  // Story 4-5a — the carton codes.
+  'package-count-mismatch': 'the parcel count is not the order’s carton count',
+  'carton-not-current': 'an old carton label — the order was re-packed',
+  // Story 4-9a (D5) — the order is on a truck.
+  'order-on-freight-load': 'it is on a freight load — it leaves with the truck',
+  // Story 4-6a — the brand's documents.
+  'consignment-documents-missing': 'the brand’s invoice was not recorded',
+  'eway-bill-required': 'the e-way bill was not recorded',
+  'eway-bill-expired': 'the e-way bill had expired',
 };
 
 function handoverRefusalsOf(payload: Record<string, unknown>): { orderId: string | null; code: string; orderStatus: string | null }[] {
@@ -1836,7 +1845,7 @@ export const FREIGHT_DISPATCH_RECALLED_GUIDANCE = 'A recalled lot left on the tr
 export const FREIGHT_DISPATCH_WHOLE_OP_GUIDANCE =
   'Nothing in this departure was recorded. Record it on the web with the same vehicle and time (Outbound → Freight → the load → Dispatch), then discard this row.';
 export const FREIGHT_PHOTOS_KEPT_NOTE =
-  'The signed loading-sheet photos are kept while this row is open — upload the signed sheet on the web load, then discard this row.';
+  'The handheld photographed the signed loading sheet — upload the signed sheet from the load on the web (Outbound → Freight → the load), then discard this row.';
 
 export function freightDispatchGuidance(entry: Pick<RejectedOpResponse, 'payload' | 'problemCode'>): readonly string[] {
   const refusals = handoverRefusalsOf(entry.payload);
@@ -1866,7 +1875,7 @@ function freightDispatchSummary(entry: Pick<RejectedOpResponse, 'payload' | 'pro
   const vehicle = payloadString(payload, 'vehicleNumber');
   const refusals = handoverRefusalsOf(payload);
   const photos = photoRefCount(payload);
-  const photoLine = photos === 0 ? [] : [`${photos} loading-sheet ${photos === 1 ? 'photo' : 'photos'} kept`];
+  const photoLine = photos === 0 ? [] : [`${photos} loading-sheet ${photos === 1 ? 'photo' : 'photos'} taken on the handheld`];
   if (refusals.length > 0) {
     return {
       heading: `${refusals.length} ${refusals.length === 1 ? 'order' : 'orders'} left on ${load}${vehicle === null ? '' : ` (${vehicle})`} but not dispatched`,

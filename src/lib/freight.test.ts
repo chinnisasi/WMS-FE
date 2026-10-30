@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ApiProblem } from '@/lib/api/client';
+import { isoToIstLocal } from '@/lib/gate-ins';
 import { NOW, consignment, load } from '@/lib/test/freight-fixtures';
 import {
   EMPTY_FREIGHT_HEADER,
@@ -16,6 +17,7 @@ import {
   dispatchOutcome,
   emptyDispatchDraft,
   freightOrderRefusals,
+  headerDraftOf,
   freightReason,
   kgLabel,
   loadedWords,
@@ -106,6 +108,12 @@ describe('freight words and figures', () => {
 });
 
 describe('the load header', () => {
+  test('an unedited reported-at keeps the stored instant (seconds and all)', () => {
+    const draft = headerDraftOf(load({ vehicle: { ...load().vehicle, reportedAt: '2026-10-30T09:15:42.123Z' } }), (iso) => isoToIstLocal(iso));
+    expect(parseFreightHeader(draft, NOW).body?.vehicleReportedAt).toBe('2026-10-30T09:15:42.123Z');
+    expect(parseFreightHeader({ ...draft, reportedAt: '2026-10-30T14:50' }, NOW).body?.vehicleReportedAt).toBe('2026-10-30T09:20:00.000Z');
+  });
+
   test('a typed transporter, normalised vehicle and phone, blanks dropped', () => {
     const parsed = parseFreightHeader(
       { ...EMPTY_FREIGHT_HEADER, transporterKind: 'typed', transporterName: ' VRL Logistics ', vehicleNumber: 'ka-01 ab 1234', driverPhone: '98765 43210', capacityKg: '20000', dockDoor: 'd-3' },
@@ -180,12 +188,26 @@ describe('the departure draft', () => {
     expect(parseDispatchDraft(terms, load(), NOW).problem).toBe('SO-1: an LR date or freight terms need the LR number.');
     const late: DispatchDraft = { ...base, rows: { ...base.rows, 'o-1': { ...base.rows['o-1']!, lrNumber: '4410', lrDate: '2026-10-31' } } };
     expect(parseDispatchDraft(late, load(), NOW).problem).toContain('within 30 days before the departure (2026-10-30)');
-    const partB = load({ partB: { required: true, confirmedAt: null, confirmedBy: null } });
+    // Part B over the orders SENT: an EWB on a sent order asks for it; left on the dock, it does not.
+    const partB = load({ consignments: [consignment({ eway: { number: '331000000001', validUntil: null } }), load().consignments[1]!] });
     expect(parseDispatchDraft(emptyDispatchDraft(partB), partB, NOW).problem).toContain('Part B');
     expect(parseDispatchDraft({ ...emptyDispatchDraft(partB), ewayPartBConfirmed: true }, partB, NOW).body?.ewayPartBConfirmed).toBe(true);
-    const heavy = load({ totals: { ...load().totals, overCapacity: true } });
+    const leaveIt = emptyDispatchDraft(partB);
+    expect(parseDispatchDraft({ ...leaveIt, rows: { ...leaveIt.rows, 'o-1': { ...leaveIt.rows['o-1']!, decision: 'leave' } } }, partB, NOW).problem).toBeNull();
+    // The server's refusal forces it, whatever the view says.
+    expect(parseDispatchDraft({ ...emptyDispatchDraft(load()), partBForced: true }, load(), NOW).problem).toContain('Part B');
+    // Capacity over the sent rows' weights.
+    const heavy = load({ vehicle: { ...load().vehicle, capacityKg: 10_000 } });
     expect(parseDispatchDraft(emptyDispatchDraft(heavy), heavy, NOW).problem).toContain('over its stated capacity');
     expect(parseDispatchDraft({ ...emptyDispatchDraft(heavy), overCapacityAcknowledged: true }, heavy, NOW).body?.overCapacityAcknowledged).toBe(true);
+    const light = emptyDispatchDraft(heavy);
+    expect(parseDispatchDraft({ ...light, rows: { ...light.rows, 'o-3': { ...light.rows['o-3']!, decision: 'leave' } } }, heavy, NOW).problem).toBeNull();
+    // A cleared LR number with terms is refused even when an LR is recorded.
+    const recorded = load({ consignments: [consignment({ lr: { number: '4410', date: null, terms: null } }), load().consignments[1]!] });
+    const cleared = emptyDispatchDraft(recorded);
+    expect(
+      parseDispatchDraft({ ...cleared, rows: { ...cleared.rows, 'o-1': { ...cleared.rows['o-1']!, lrNumber: '', freightTerms: 'paid' } } }, recorded, NOW).problem,
+    ).toBe('SO-1: an LR date or freight terms need the LR number.');
   });
 
   test('the departure time: not in the future, not before the load was opened', () => {
@@ -253,7 +275,13 @@ describe('LR and delivery drafts', () => {
       problem: null,
     });
     expect(parseDeliveryDraft({ ...base, damaged: '16' }, facts, later).problem).toBe('Short and damaged together cannot pass the 15 packages sent.');
-    expect(parseDeliveryDraft({ ...base, outcome: 'delivered' }, facts, later).problem).toContain('no short or damaged');
+    // Switching to Delivered ignores the hidden counts.
+    expect(parseDeliveryDraft({ ...base, outcome: 'delivered' }, facts, later).body).toEqual({
+      outcome: 'delivered',
+      deliveredAt: '2026-11-02T05:50:00.000Z',
+      receiverName: 'A. Kumar',
+      note: 'crushed',
+    });
     expect(parseDeliveryDraft({ ...base, outcome: 'refused', note: '' }, facts, later).problem).toBe('Say why the consignee refused it.');
     expect(parseDeliveryDraft({ ...base, deliveredAt: '2026-10-30T15:00' }, facts, later).problem).toBe('Delivered at is before the truck left.');
     expect(parseDeliveryDraft(base, { ...facts, amending: true }, later).problem).toContain('amended');

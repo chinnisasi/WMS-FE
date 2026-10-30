@@ -2042,7 +2042,7 @@ export const shippingControllerParcelTag = <ThrowOnError extends boolean = false
 });
 
 /**
- * Story 4-4a — dispatch.execute: attaches a shipping document to an order (an image or a PDF; invoice, challan, eway-bill, pod or other). Shared with the client by email at once when the order is dispatched, else at its dispatch
+ * Story 4-4a — dispatch.execute: attaches a shipping document to an order (an image or a PDF; invoice, challan, eway-bill, pod, other or a scanned LR). Shared with the client by email at once when the order is dispatched, else at its dispatch
  */
 export const shippingControllerUploadOrderDocument = <ThrowOnError extends boolean = false>(options: Options<ShippingControllerUploadOrderDocumentData, ThrowOnError>): RequestResult<ShippingControllerUploadOrderDocumentResponses, ShippingControllerUploadOrderDocumentErrors, ThrowOnError> => (options.client ?? client).post<ShippingControllerUploadOrderDocumentResponses, ShippingControllerUploadOrderDocumentErrors, ThrowOnError>({
     ...formDataBodySerializer,

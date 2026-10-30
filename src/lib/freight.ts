@@ -34,6 +34,7 @@ import {
 } from '@/lib/freight-primitives';
 import { CONTAINER_NO_RE, PHONE_RE, VEHICLE_NO_RE, VEHICLE_RULE, istToday, normalizeContainerNo, normalizePhone, normalizeVehicleNo } from '@/lib/gate-ins';
 import { DISPATCH_VIA_FREIGHT_REASON } from '@/lib/outbound-pack-dispatch';
+import { MAX_SHEET_PAGES } from '@/lib/shipping';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import type { StatusTone } from '@/lib/status-tone';
 
@@ -203,6 +204,11 @@ export function moveStop<T>(list: readonly T[], index: number, direction: -1 | 1
   return next;
 }
 
+/** The live loaded package codes of a planned consignment (absent from an older API → null: unknown). */
+export function loadedCodesOf(consignment: Pick<FreightConsignmentViewDto, 'loadedCodes'>): ReadonlySet<string> | null {
+  return consignment.loadedCodes === undefined ? null : new Set(consignment.loadedCodes);
+}
+
 /** The planned consignments of a load, in stop order. */
 export function plannedConsignments(load: Pick<FreightLoadViewDto, 'consignments'>): FreightConsignmentViewDto[] {
   return load.consignments.filter((c) => c.status === 'planned').sort((a, b) => a.stopSeq - b.stopSeq);
@@ -313,6 +319,8 @@ export interface FreightHeaderDraft {
   readonly dockDoor: string;
   /** `datetime-local`, IST; blank → none. */
   readonly reportedAt: string;
+  /** The stored instant and its minute text: an unedited field sends the stored ISO (seconds kept, no false change). */
+  readonly reportedAtOriginal?: { readonly local: string; readonly iso: string };
   readonly note: string;
 }
 
@@ -350,6 +358,7 @@ export function headerDraftOf(load: FreightLoadViewDto, toLocal: (iso: string) =
     driverLicenceNumber: load.driver.licenceNumber !== null && DRIVER_LICENCE_RE.test(load.driver.licenceNumber) ? load.driver.licenceNumber : '',
     dockDoor: load.dockDoor ?? '',
     reportedAt: load.vehicle.reportedAt === null ? '' : (toLocal(load.vehicle.reportedAt) ?? ''),
+    ...(load.vehicle.reportedAt === null ? {} : { reportedAtOriginal: { local: toLocal(load.vehicle.reportedAt) ?? '', iso: load.vehicle.reportedAt } }),
     note: load.note ?? '',
   };
 }
@@ -416,7 +425,9 @@ export function parseFreightHeader(draft: FreightHeaderDraft, nowMs: number): Pa
   const dock = draft.dockDoor.trim().toUpperCase();
   if (dock !== '' && !DOCK_DOOR_RE.test(dock)) return bad('Dock door: up to 20 letters, digits and hyphens.');
   let reportedAt: string | null = null;
-  if (draft.reportedAt.trim() !== '') {
+  if (draft.reportedAtOriginal !== undefined && draft.reportedAt === draft.reportedAtOriginal.local) {
+    reportedAt = draft.reportedAtOriginal.iso;
+  } else if (draft.reportedAt.trim() !== '') {
     reportedAt = istLocalToIso(draft.reportedAt);
     if (reportedAt === null) return bad('Reported at: enter a date and time.');
     const ms = Date.parse(reportedAt);
@@ -480,6 +491,10 @@ export interface DispatchDraft {
   readonly departedAt: string;
   readonly ewayPartBConfirmed: boolean;
   readonly overCapacityAcknowledged: boolean;
+  /** Set by an `eway-part-b-unconfirmed` answer: the confirmation is required whatever the view says. */
+  readonly partBForced?: boolean;
+  /** Set by a `load-over-capacity` answer. */
+  readonly capacityForced?: boolean;
   readonly note: string;
   readonly rows: Readonly<Record<string, DispatchRowDraft>>;
 }
@@ -569,7 +584,9 @@ function parseLrFields(
   }
   const lrDate = row.lrDate.trim() === '' ? null : row.lrDate.trim();
   const freightTerms = row.freightTerms === '' ? null : row.freightTerms;
-  if (lrNumber === null && recorded === null && (lrDate !== null || freightTerms !== null)) {
+  // A blank number with a date or terms is refused even when an LR is recorded: the server would drop them silently.
+  void recorded;
+  if (lrNumber === null && (lrDate !== null || freightTerms !== null)) {
     return { problem: `${label}: an LR date or freight terms need the LR number.` };
   }
   if (lrDate !== null) {
@@ -610,6 +627,9 @@ export function parseDispatchDraft(draft: DispatchDraft, load: FreightLoadViewDt
   const consignments: DispatchFreightLoadDto['consignments'] = [];
   const clientsByLr = new Map<string, Set<string>>();
   let sending = 0;
+  let sentWithEway = 0;
+  let sentGrams = 0;
+  let sentWeightKnown = true;
   for (const c of plannedConsignments(load)) {
     const row = draft.rows[c.orderId];
     if (row === undefined || row.decision === null) return bad(`${c.orderLabel}: choose Send or Leave on the dock.`);
@@ -618,6 +638,9 @@ export function parseDispatchDraft(draft: DispatchDraft, load: FreightLoadViewDt
       continue;
     }
     sending += 1;
+    if (c.eway.number !== null) sentWithEway += 1;
+    if (c.weightGrams === null) sentWeightKnown = false;
+    else sentGrams += c.weightGrams;
     const lr = parseLrFields(c.orderLabel, row, c.lr.number, departureIstDate);
     if (lr.problem !== null) return bad(lr.problem);
     const partial = c.packages.packed && c.packages.loaded < c.packages.total;
@@ -640,10 +663,14 @@ export function parseDispatchDraft(draft: DispatchDraft, load: FreightLoadViewDt
   for (const [lr, clients] of clientsByLr) {
     if (clients.size > 1) return bad(`LR ${lr} is given to orders of ${clients.size} clients — an LR covers one client’s goods.`);
   }
-  if (load.partB.required && !draft.ewayPartBConfirmed) {
+  // Part B and capacity are judged over the orders being sent (the server's rule), or forced by its refusal.
+  const partBRequired = sentWithEway > 0 || draft.partBForced === true;
+  const overCapacity =
+    draft.capacityForced === true || (sentWeightKnown && load.vehicle.capacityKg !== null && sentGrams > load.vehicle.capacityKg * 1000);
+  if (partBRequired && !draft.ewayPartBConfirmed) {
     return bad(`Update the e-way bills’ Part B with vehicle ${vd.vehicleNumber} on the e-way portal, then tick the confirmation.`);
   }
-  if (load.totals.overCapacity && !draft.overCapacityAcknowledged) {
+  if (overCapacity && !draft.overCapacityAcknowledged) {
     return bad('The truck is over its stated capacity — acknowledge it to send.');
   }
   const body: DispatchFreightLoadDto = {
@@ -655,8 +682,8 @@ export function parseDispatchDraft(draft: DispatchDraft, load: FreightLoadViewDt
     ...(vd.driverLicenceNumber === null ? {} : { driverLicenceNumber: vd.driverLicenceNumber }),
     seals: [...draft.seals],
     ...(departedAt === null ? {} : { departedAt }),
-    ...(load.partB.required ? { ewayPartBConfirmed: true } : {}),
-    ...(load.totals.overCapacity ? { overCapacityAcknowledged: true } : {}),
+    ...(partBRequired ? { ewayPartBConfirmed: true } : {}),
+    ...(overCapacity ? { overCapacityAcknowledged: true } : {}),
     consignments,
     ...(note === '' ? {} : { note }),
   };
@@ -766,14 +793,15 @@ export function parseDeliveryDraft(
   if (consignment.dispatchedAt !== null && ms < Date.parse(consignment.dispatchedAt)) return bad('Delivered at is before the truck left.');
   const receiver = draft.receiverName.trim();
   if ([...receiver].length > FREIGHT_LIMITS.receiverName) return bad(`The receiver’s name is at most ${FREIGHT_LIMITS.receiverName} characters.`);
-  const short = parseCount(draft.short, 'Short');
+  // A clean delivery carries no counts: whatever a hidden field still holds is ignored.
+  const clean = draft.outcome === 'delivered';
+  const short = clean ? { value: null, problem: null } : parseCount(draft.short, 'Short');
   if (short.problem !== null) return bad(short.problem);
-  const damaged = parseCount(draft.damaged, 'Damaged');
+  const damaged = clean ? { value: null, problem: null } : parseCount(draft.damaged, 'Damaged');
   if (damaged.problem !== null) return bad(damaged.problem);
   const note = draft.note.trim();
   if ([...note].length > FREIGHT_LIMITS.note) return bad(`The note is at most ${FREIGHT_LIMITS.note} characters.`);
   const exceptions = (short.value ?? 0) + (damaged.value ?? 0);
-  if (draft.outcome === 'delivered' && exceptions > 0) return bad('A clean delivery has no short or damaged packages — choose “Delivered with exceptions”.');
   if (draft.outcome === 'delivered-with-exceptions') {
     if (exceptions === 0) return bad('Enter how many packages were short or damaged.');
     if (note === '') return bad('Describe the exceptions in the note.');
@@ -864,7 +892,7 @@ export function freightOrderRefusals(error: unknown): ReadonlyMap<string, Freigh
   return out;
 }
 
-/** The ids of `freight-members-changed`'s current list (the reload hint). */
+/** True for `freight-members-changed`: the load's orders changed meanwhile — re-read and rebase the draft. */
 export function membersChanged(error: unknown): boolean {
   return error instanceof ApiProblem && error.code === 'freight-members-changed';
 }
@@ -931,7 +959,7 @@ export function freightReason(error: unknown, action: FreightAction): string {
     case 'delivery-amend-limit':
       return `${lead} — this delivery has been amended too many times.`;
     case 'loading-sheet-limit':
-      return `${lead} — the load already has 10 sheet pages. Remove one first.`;
+      return `${lead} — the load already has ${MAX_SHEET_PAGES} sheet pages. Remove one first.`;
     case 'transporter-inactive':
       return `${lead} — that transporter is inactive. Pick another or reactivate it in Partners.`;
     case 'partner-not-transporter':

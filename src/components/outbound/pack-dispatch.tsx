@@ -18,6 +18,7 @@ import type {
   HandoverResponse,
   ManifestDto,
   OrderEntryDto,
+  OrderEntryFreightDto,
   OrderLineDto,
   PackDto,
   ShipmentDto,
@@ -77,8 +78,7 @@ import {
   type CartonGrid,
 } from '@/lib/cartons';
 import { dispatchesByHandover, handoverOutcome, shippingCell } from '@/lib/shipping';
-import { useOrderShipments, useOrderShipping } from '@/lib/use-shipping';
-import { useOrdersOnTrucks } from '@/lib/use-freight';
+import { useOrderShipments } from '@/lib/use-shipping';
 import { onTruckCell } from '@/lib/freight';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { roleHasCapability } from '@/lib/users';
@@ -217,8 +217,6 @@ function PackDispatchTable({
   // Story 4-5a (A26) — the packed row's "3 cartons · 12.4 kg".
   const packedOrderIds = pipeline.filter((order) => order.status === 'ready_to_dispatch').map((order) => order.id);
   const cartonSummaries = usePackedCartonSummaries(tenantId, packedOrderIds);
-  // Story 4-9a (A30) — the rows on an open truck: "On truck LD-0007 (stop 3)".
-  const onTrucks = useOrdersOnTrucks(tenantId, openOrderIds);
   // Story 4-4a (A20) — the handover builder, opened from a row's "Hand over".
   const [handover, setHandover] = useState<{ clientId: string | null; orderId: string; more: readonly string[] } | null>(null);
   // FE14 — Hand over on another row while the builder is open: joins the open draft for the same client, else says why not.
@@ -305,8 +303,9 @@ function PackDispatchTable({
             </span>
           );
         }
-        const truck = onTrucks.get(order.id);
-        if (truck !== undefined) {
+        // Story 4-9a (A30) — the row's own planned truck: "On truck LD-0007 (stop 3)".
+        const truck = order.freight ?? null;
+        if (truck !== null) {
           return (
             <span data-testid="shipping-cell-truck">
               <StatusChip tone="info">{onTruckCell(truck)}</StatusChip>
@@ -417,6 +416,7 @@ function PackDispatchTable({
               <PackDispatchPanel
                 tenantId={tenantId}
                 orderId={order.id}
+                truck={order.freight ?? null}
                 canPack={canPack}
                 canDispatch={canDispatch}
                 canLabel={canLabel}
@@ -468,6 +468,7 @@ const PIPELINE_STATUS_OPTIONS: readonly PipelineStatus[] = [...PIPELINE_STATUSES
 function PackDispatchPanel({
   tenantId,
   orderId,
+  truck = null,
   canPack,
   canDispatch,
   canLabel,
@@ -477,6 +478,8 @@ function PackDispatchPanel({
 }: {
   tenantId: string;
   orderId: string;
+  /** Story 4-9a (A30) — the list row's planned truck: Dispatch, Hand over and the labels give way to Open load. */
+  truck?: OrderEntryFreightDto | null;
   canPack: boolean;
   canDispatch: boolean;
   canLabel: boolean;
@@ -492,9 +495,6 @@ function PackDispatchPanel({
   const shipmentRead = useOrderShipment(orderId);
   const viaHandover =
     shipmentRead.state === 'ready' && shipmentRead.data !== null && dispatchesByHandover(shipmentRead.data.shipment);
-  // Story 4-9a (A30) — an order on an open truck leaves with the load: Dispatch and Hand over give way to "Open load".
-  const shippingRead = useOrderShipping(orderId);
-  const truck = shippingRead.state === 'ready' && shippingRead.data?.freight != null && shippingRead.data.freight.status === 'planned' ? shippingRead.data.freight : null;
   // The SKU map only decorates: it names each line's SKU code and unit, and a
   // line falls back to its raw `skuId` and the unit-agnostic quantity copy
   // when its SKU cannot be resolved — the pack flow is never blocked on it.
