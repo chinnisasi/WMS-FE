@@ -1590,7 +1590,7 @@ export type SyncReportRowDto = {
      * The mobile op's ULID (26 chars — the dedupe key)
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind' | 'rtc.pick';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind' | 'rtc.pick' | 'shipment.verify-label' | 'handover.create' | 'handover-photo.stage';
     /**
      * The replay fate the server refused with
      */
@@ -1666,7 +1666,7 @@ export type RejectedOpResponse = {
      * The mobile op's ULID
      */
     opId: string;
-    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind' | 'rtc.pick';
+    opType: 'grn.submit' | 'putaway.place' | 'pick.record' | 'pack.execute' | 'excursion.record' | 'transfer.confirm' | 'count.submit' | 'return.receive' | 'grn.lines-refused' | 'grn.shelf-life-refused' | 'grn.inactive-sku-received' | 'grn.licence-refused' | 'gate-in.unload' | 'stock.move' | 'stock.adjust' | 'receipt-photo.stage' | 'return.restock' | 'rtv.pick' | 'return.receive_blind' | 'rtc.pick' | 'shipment.verify-label' | 'handover.create' | 'handover-photo.stage';
     classification: 'rejected' | 'quarantined';
     problemCode: string;
     problemDetail: string | null;
@@ -3447,7 +3447,7 @@ export type CancelWithRestockResponse = {
 
 export type RestockPlanShipmentDto = {
     id: string;
-    status: 'labelled' | 'manifested' | 'voided';
+    status: 'labelled' | 'manifested' | 'voided' | 'handed_over';
     carrierName: string;
     trackingNumber: string;
     manifestId: string | null;
@@ -3771,17 +3771,17 @@ export type ShipmentDto = {
     tenantId: string;
     warehouseId: string;
     /**
-     * labelled, manifested, or (story 4-2b) voided — the label of an order cancelled with restock before it was manifested
+     * labelled, manifested, (story 4-2b) voided — the label of an order cancelled before it was manifested, or replaced — or (story 4-4a) handed_over — a client-arranged shipment closed by a courier handover
      */
-    status: 'labelled' | 'manifested' | 'voided';
+    status: 'labelled' | 'manifested' | 'voided' | 'handed_over';
     /**
-     * The connection the label generated through
+     * The connection the label generated through; null on a client-arranged shipment (story 4-4a)
      */
-    carrierConnectionId: string;
+    carrierConnectionId: string | null;
     /**
-     * The adapter code at label time
+     * The adapter code at label time; null on a client-arranged shipment (story 4-4a)
      */
-    carrierCode: string;
+    carrierCode: string | null;
     /**
      * The registry display name resolved at label time
      */
@@ -3791,9 +3791,9 @@ export type ShipmentDto = {
      */
     trackingNumber: string;
     /**
-     * The adapter’s opaque handle for the label document — never the bytes
+     * The adapter’s opaque handle for the label document — never the bytes; null on a client-arranged shipment (story 4-4a)
      */
-    labelDocumentRef: string;
+    labelDocumentRef: string | null;
     /**
      * Parcel weight in grams; null when unmeasured
      */
@@ -3826,6 +3826,26 @@ export type ShipmentDto = {
      * Story 4-2b — who voided it; null otherwise. Absent on a response stored before 4-2b.
      */
     voidedBy?: string | null;
+    /**
+     * Story 4-4a — carrier (an adapter label), client-label (the client’s label PDF) or courier-label (the courier brings the label). Absent on a label response (read absent as carrier).
+     */
+    kind?: 'carrier' | 'client-label' | 'courier-label';
+    /**
+     * Story 4-4a — parcels in the shipment (1–999); absent on a label response.
+     */
+    packageCount?: number | null;
+    /**
+     * Story 4-4a — when the client label was scanned onto the parcel; absent on a label response.
+     */
+    labelVerifiedAt?: string | null;
+    /**
+     * Story 4-4a — the courier handover that closed it; absent on a label response.
+     */
+    handoverId?: string | null;
+    /**
+     * Story 4-4a — when it was handed over; absent on a label response.
+     */
+    handedOverAt?: string | null;
 };
 
 export type ShipmentResponse = {
@@ -4661,6 +4681,378 @@ export type WaveEntryDto = {
 export type WaveListResponse = {
     items: Array<WaveEntryDto>;
     nextCursor?: string | null;
+};
+
+export type ClientShipmentViewDto = {
+    id: string;
+    orderId: string;
+    kind: 'carrier' | 'client-label' | 'courier-label';
+    status: 'labelled' | 'manifested' | 'voided' | 'handed_over';
+    courierName: string;
+    /**
+     * The AWB / LR number as stored (normalised)
+     */
+    awb: string;
+    packageCount: number | null;
+    transporterId: string | null;
+    labelAttachmentId: string | null;
+    labelVerifiedAt: string | null;
+    labelVerifyMethod: 'scan' | 'typed' | 'handover-scan' | null;
+    recordedSurface: 'web' | 'portal' | 'handheld' | null;
+    labelledAt: string;
+    labelledBy: string;
+    handoverId: string | null;
+    handedOverAt: string | null;
+    weightGrams: number | null;
+    voidedAt: string | null;
+    voidReason: string | null;
+};
+
+export type ClientShipmentResponse = {
+    shipment: ClientShipmentViewDto;
+};
+
+export type RecordAwbAdviceDto = {
+    /**
+     * The AWB / LR number, normalised (trimmed, upper-cased, spaces and hyphens stripped): 4–50 letters, digits or "/"
+     */
+    awb: string;
+    /**
+     * The courier by name (1–100 characters) — or name a transporter partner; exactly one
+     */
+    courierName?: string;
+    /**
+     * A transporter partner as the courier — or type its name; exactly one
+     */
+    transporterId?: string;
+    /**
+     * Parcels in the shipment, 1–999
+     */
+    packageCount?: number;
+    /**
+     * Replace the order’s live client label or AWB (before the handover)
+     */
+    replace?: boolean;
+};
+
+export type VoidShipmentDto = {
+    /**
+     * Why the shipment is voided, 1–200 characters
+     */
+    reason: string;
+};
+
+export type VerifyLabelDto = {
+    /**
+     * The scanned (or typed) AWB — compared normalised
+     */
+    scannedCode: string;
+    method: 'scan' | 'typed';
+    /**
+     * The handheld’s scan instant (required on the device; refused-as-ignored on the web — null there)
+     */
+    occurredAt?: string;
+};
+
+export type VerifyLabelResponse = {
+    shipment: ClientShipmentViewDto;
+    /**
+     * True when this request verified the label; false when it already was (a no-op that stores the key)
+     */
+    verified: boolean;
+};
+
+export type FileViewDto = {
+    id: string;
+    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet';
+    docKind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | null;
+    /**
+     * The server-built name (never the uploader’s)
+     */
+    fileName: string;
+    contentType: string | null;
+    byteSize: number | null;
+    pageCount: number | null;
+    source: 'web' | 'portal' | 'handheld';
+    uploadedAt: string | null;
+    uploadedBy: string | null;
+    /**
+     * A short-lived presigned URL; null when unsigned
+     */
+    url: string | null;
+    urlExpiresAt: string | null;
+};
+
+export type OrderShippingHandoverDto = {
+    id: string;
+    code: string;
+    courierName: string;
+    handedOverAt: string;
+    pickupPersonName: string;
+    pickupPersonPhoneMasked: string | null;
+    vehicleNumber: string | null;
+    sheet: Array<FileViewDto>;
+};
+
+export type OrderShippingResponse = {
+    shipment: ClientShipmentViewDto | null;
+    /**
+     * Voided shipments, newest first
+     */
+    history: Array<ClientShipmentViewDto>;
+    label: FileViewDto | null;
+    documents: Array<FileViewDto>;
+    handover: OrderShippingHandoverDto | null;
+    /**
+     * The parcel tag’s code (`O` + the order id’s last 16 hex digits)
+     */
+    parcelTagCode: string;
+    storageEnabled: boolean;
+};
+
+export type ShippingFileSnapshotDto = {
+    id: string;
+    purpose: 'shipping-label' | 'shipping-document' | 'handover-sheet';
+    docKind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other' | null;
+    contentType: string | null;
+    byteSize: number | null;
+    pageCount: number | null;
+    source: 'web' | 'portal' | 'handheld';
+    status: string;
+    uploadedAt: string | null;
+};
+
+export type ShippingFileResponse = {
+    file: ShippingFileSnapshotDto;
+};
+
+export type StagedPhotoResponse = {
+    ref: string;
+    status: 'staged' | 'attached' | 'removed';
+};
+
+export type RemoveShippingFileDto = {
+    /**
+     * Why, 1–200 characters
+     */
+    reason: string;
+};
+
+export type HandoverCourierDto = {
+    /**
+     * A transporter partner — or name it; exactly one
+     */
+    transporterId?: string;
+    /**
+     * The courier’s name, 1–100 characters
+     */
+    courierName?: string;
+};
+
+export type HandoverParcelDto = {
+    orderId: string;
+    /**
+     * The AWB scanned on the parcel (required with no verified client label)
+     */
+    awb?: string | null;
+    /**
+     * Parcels, 1–999 (default: the shipment’s, else 1)
+     */
+    packageCount?: number | null;
+    /**
+     * Weight in grams, 1–1,000,000 (default: the last pack measurement)
+     */
+    weightGrams?: number | null;
+};
+
+export type CreateHandoverDto = {
+    warehouseId: string;
+    /**
+     * One handover carries one client’s parcels
+     */
+    clientId: string;
+    courier: HandoverCourierDto;
+    /**
+     * Who collected the parcels, 1–100 characters
+     */
+    pickupPersonName: string;
+    pickupPersonPhone?: string | null;
+    /**
+     * Vehicle number (normalised: KA01AB1234)
+     */
+    vehicleNumber?: string | null;
+    /**
+     * The pickup time: on the web within the last 7 days (default now); required on the handheld
+     */
+    occurredAt?: string | null;
+    /**
+     * Up to 500 characters
+     */
+    note?: string | null;
+    /**
+     * 1–100 parcels
+     */
+    parcels: Array<HandoverParcelDto>;
+    /**
+     * The handheld’s signed-sheet photo refs (≤ 10; refused on the web)
+     */
+    photoRefs?: Array<string>;
+};
+
+export type HandoverViewDto = {
+    id: string;
+    /**
+     * HO-NNNN
+     */
+    code: string;
+    warehouseId: string;
+    clientId: string;
+    courierName: string;
+    transporterId: string | null;
+    pickupPersonName: string;
+    vehicleNumber: string | null;
+    handedOverAt: string;
+    shipmentCount: number;
+    packageCount: number;
+    codShipmentCount: number;
+    codTotalPaise: number;
+    source: 'web' | 'handheld';
+};
+
+export type HandoverParcelResultDto = {
+    orderId: string;
+    shipmentId: string;
+    awb: string;
+    dispatched: true;
+    followOnOrderId: string | null;
+};
+
+export type HandoverRefusedParcelDto = {
+    orderId: string;
+    code: 'order-not-found' | 'warehouse-mismatch' | 'order-not-ready' | 'order-already-dispatched' | 'shipment-not-client-arranged' | 'label-not-verified' | 'awb-mismatch' | 'awb-required' | 'awb-in-use' | 'order-holds-recalled-batch';
+    detail: string;
+};
+
+export type HandoverResponse = {
+    /**
+     * Null when every parcel of a handheld handover was refused (the review row holds them)
+     */
+    handover: HandoverViewDto | null;
+    parcels: Array<HandoverParcelResultDto>;
+    /**
+     * Handheld only: the parcels refused into one review row (Discard only)
+     */
+    refused: Array<HandoverRefusedParcelDto>;
+    /**
+     * The review row’s op id (derived from the key)
+     */
+    rejectedOpId: string | null;
+};
+
+export type HandoverDetailParcelDto = {
+    orderId: string;
+    orderLabel: string;
+    shipmentId: string;
+    kind: 'carrier' | 'client-label' | 'courier-label';
+    awb: string;
+    packageCount: number | null;
+    weightGrams: number | null;
+    codAmountPaise: number | null;
+    destinationCity: string | null;
+};
+
+export type HandoverDetailDto = {
+    id: string;
+    /**
+     * HO-NNNN
+     */
+    code: string;
+    warehouseId: string;
+    clientId: string;
+    courierName: string;
+    transporterId: string | null;
+    pickupPersonName: string;
+    vehicleNumber: string | null;
+    handedOverAt: string;
+    shipmentCount: number;
+    packageCount: number;
+    codShipmentCount: number;
+    codTotalPaise: number;
+    source: 'web' | 'handheld';
+    /**
+     * Unmasked for a dispatch.execute holder; masked otherwise
+     */
+    pickupPersonPhone: string | null;
+    note: string | null;
+    /**
+     * The client as frozen at the handover (ClientPartySnapshotV1)
+     */
+    clientSnapshot: {
+        [key: string]: unknown;
+    };
+    /**
+     * The warehouse as frozen at the handover
+     */
+    warehouseSnapshot: {
+        [key: string]: unknown;
+    };
+    /**
+     * The transporter as frozen (TransporterSnapshotV1), when one was named
+     */
+    courierSnapshot: {
+        [key: string]: unknown;
+    } | null;
+    createdBy: string;
+    parcels: Array<HandoverDetailParcelDto>;
+    sheet: Array<FileViewDto>;
+};
+
+export type HandoverDetailResponse = {
+    handover: HandoverDetailDto;
+};
+
+export type HandoverCandidateShipmentDto = {
+    kind: 'carrier' | 'client-label' | 'courier-label';
+    awb: string;
+    courierName: string;
+    packageCount: number | null;
+    labelVerified: boolean;
+};
+
+export type HandoverCandidateDto = {
+    orderId: string;
+    orderLabel: string;
+    clientOrderRef: string | null;
+    externalEventId: string | null;
+    followOnSeq: number | null;
+    parcelTagCode: string;
+    destinationCity: string | null;
+    codAmountPaise: number | null;
+    packedAt: string | null;
+    shipment: HandoverCandidateShipmentDto | null;
+};
+
+export type HandoverCandidatesResponse = {
+    items: Array<HandoverCandidateDto>;
+    nextCursor: string | null;
+};
+
+export type HandoverListItemDto = {
+    id: string;
+    code: string;
+    clientId: string;
+    clientCode: string | null;
+    courierName: string;
+    shipmentCount: number;
+    packageCount: number;
+    handedOverAt: string;
+    sheetPageCount: number;
+    source: 'web' | 'handheld';
+};
+
+export type HandoversResponse = {
+    items: Array<HandoverListItemDto>;
+    nextCursor: string | null;
 };
 
 export type GrnLineInputDto = {
@@ -5884,6 +6276,29 @@ export type CatalogAdjustReasonDto = {
     label: string;
 };
 
+export type CatalogDispatchParcelShipmentDto = {
+    shipmentId: string;
+    kind: 'client-label' | 'courier-label';
+    /**
+     * The AWB as stored (normalised)
+     */
+    awb: string;
+    courierName: string;
+    labelVerified: boolean;
+};
+
+export type CatalogDispatchParcelDto = {
+    orderId: string;
+    clientId: string;
+    orderLabel: string;
+    /**
+     * The parcel tag code (`O` + the order id’s last 16 hex digits)
+     */
+    parcelTagCode: string;
+    status: 'accepted' | 'ready_to_dispatch';
+    shipment: CatalogDispatchParcelShipmentDto | null;
+};
+
 export type CatalogSnapshotResponse = {
     /**
      * ISO-8601 UTC capture time
@@ -5975,6 +6390,14 @@ export type CatalogSnapshotResponse = {
      * Story 3-2b (additive): the stock adjustment's reason vocabulary with labels, in order — the handheld's Adjust reason chips (every reason needs the note the adjustment always carries). An older server omits it, and the handheld then offers no Adjust
      */
     adjustReasons: Array<CatalogAdjustReasonDto>;
+    /**
+     * Story 4-4a (additive): the parcels awaiting a courier — the warehouse's packed orders, plus its accepted orders holding a live client-arranged shipment (never one with a carrier shipment), at most 2000, oldest first. The pack bench verifies a client label against it; the handover matches scanned AWBs and parcel tags against it. An older server omits it (the device reads it as empty)
+     */
+    dispatchParcels: Array<CatalogDispatchParcelDto>;
+    /**
+     * Story 4-4a (additive): true when dispatchParcels was capped at 2000 — hand over newer parcels on the web, or refresh later
+     */
+    dispatchParcelsTruncated: boolean;
 };
 
 export type GoodsReceiptEntryDto = {
@@ -10543,7 +10966,7 @@ export type AuditExportRequestDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'courier_handover' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -10570,7 +10993,7 @@ export type AuditFilterBaseDto = {
     /**
      * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
      */
-    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+    targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'courier_handover' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
     /**
      * Only actions on this target
      */
@@ -10934,7 +11357,7 @@ export type ClientContactListItemDto = {
     /**
      * Story 5-2b — the client emails this contact receives, in vocabulary order; empty = none
      */
-    emailEvents: Array<'receipt.recorded' | 'order.dispatched'>;
+    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents'>;
     /**
      * The latest receipt or dispatch email to this address for this client; null when none
      */
@@ -10966,9 +11389,9 @@ export type CreateClientContactDto = {
      */
     roles?: Array<'operations' | 'billing' | 'returns'>;
     /**
-     * Story 5-2b — the client emails this contact receives: receipt.recorded (each GRN), order.dispatched (each order). Omitted = none. No event twice; refused on the warehouse’s own (self) client
+     * Story 5-2b — the client emails this contact receives: receipt.recorded (each GRN), order.dispatched (each order), and (story 4-4a) shipment.documents (each shipping document and signed handover sheet). Omitted = none. No event twice; refused on the warehouse’s own (self) client
      */
-    emailEvents?: Array<'receipt.recorded' | 'order.dispatched'>;
+    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents'>;
 };
 
 export type ClientContactDto = {
@@ -10999,7 +11422,7 @@ export type ClientContactDto = {
     /**
      * Story 5-2b — the client emails this contact receives, in vocabulary order; empty = none
      */
-    emailEvents: Array<'receipt.recorded' | 'order.dispatched'>;
+    emailEvents: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents'>;
 };
 
 export type ClientContactResponse = {
@@ -11024,7 +11447,7 @@ export type UpdateClientContactDto = {
     /**
      * Story 5-2b — omitted = unchanged; [] = none. Dropping an event cancels its still-queued emails to this contact
      */
-    emailEvents?: Array<'receipt.recorded' | 'order.dispatched'>;
+    emailEvents?: Array<'receipt.recorded' | 'order.dispatched' | 'shipment.documents'>;
 };
 
 export type UpdateClientEmailSettingsDto = {
@@ -11036,9 +11459,9 @@ export type UpdateClientEmailSettingsDto = {
 
 export type ClientEmailLogItemDto = {
     id: string;
-    kind: 'receipt' | 'dispatch';
+    kind: 'receipt' | 'dispatch' | 'shipment-document';
     /**
-     * The GRN code (a receipt) or the order reference (a dispatch)
+     * The GRN code (a receipt), the order reference (a dispatch), or the order or HO code with its page (a shipping document — story 4-4a)
      */
     subjectLabel: string;
     /**
@@ -11070,6 +11493,10 @@ export type ClientEmailCapDto = {
      * Today’s dispatch emails reached the daily limit (500) — later dispatches today were not emailed
      */
     dispatch: boolean;
+    /**
+     * Story 4-4a — today’s shipping-document emails reached the daily limit (500)
+     */
+    shipmentDocument: boolean;
 };
 
 export type ClientEmailLogResponse = {
@@ -12742,6 +13169,14 @@ export type PortalOrderRowDto = {
      */
     followOnOrderId?: string | null;
     createdAt: string;
+    /**
+     * Story 4-4a — the AWB of the order’s live shipment (your courier’s or ours); absent when it has none
+     */
+    awb?: string;
+    /**
+     * Story 4-4a — the courier of the order’s live shipment; absent when it has none
+     */
+    courierName?: string;
 };
 
 export type PortalOrderPageResponse = {
@@ -12990,7 +13425,81 @@ export type PortalOrderDetailResponse = {
      */
     followOnOrderId?: string | null;
     createdAt: string;
+    /**
+     * Story 4-4a — the AWB of the order’s live shipment (your courier’s or ours); absent when it has none
+     */
+    awb?: string;
+    /**
+     * Story 4-4a — the courier of the order’s live shipment; absent when it has none
+     */
+    courierName?: string;
     lines: Array<PortalOrderLineDto>;
+};
+
+export type PortalFileDto = {
+    id: string;
+    /**
+     * invoice, challan, eway-bill, pod, other, label or signed-sheet
+     */
+    kind: string;
+    fileName: string;
+    contentType: string | null;
+    pageCount: number | null;
+    uploadedAt: string | null;
+    uploadedByYou: boolean;
+    url: string | null;
+    urlExpiresAt: string | null;
+};
+
+export type PortalOrderShippingResponse = {
+    status: 'cancelled' | 'no-label-yet' | 'label-received' | 'awb-received' | 'ready-for-pickup' | 'handed-over' | 'shipped' | 'shipped-no-courier-record';
+    courierName: string | null;
+    awb: string | null;
+    packageCount: number | null;
+    handedOverAt: string | null;
+    vehicleNumber: string | null;
+    handoverCode: string | null;
+    /**
+     * Who collected the parcels — as on the signed sheet
+     */
+    pickupPersonName: string | null;
+    label: PortalFileDto | null;
+    documents: Array<PortalFileDto>;
+    handoverSheet: Array<PortalFileDto>;
+};
+
+export type PortalShipmentViewDto = {
+    id: string;
+    orderId: string;
+    kind: 'carrier' | 'client-label' | 'courier-label';
+    status: 'labelled' | 'manifested' | 'voided' | 'handed_over';
+    courierName: string;
+    awb: string;
+    packageCount: number | null;
+    recordedAt: string;
+};
+
+export type PortalShipmentResponse = {
+    shipment: PortalShipmentViewDto;
+};
+
+export type PortalAwbAdviceDto = {
+    /**
+     * The AWB / LR number (normalised: 4–50 letters, digits or "/")
+     */
+    awb: string;
+    /**
+     * The courier’s name, 1–100 characters
+     */
+    courierName: string;
+    /**
+     * Parcels, 1–999
+     */
+    packageCount?: number;
+    /**
+     * Replace your label or AWB (before the handover)
+     */
+    replace?: boolean;
 };
 
 export type PortalAsnRowDto = {
@@ -22764,6 +23273,651 @@ export type OutboundControllerListWavesResponses = {
 
 export type OutboundControllerListWavesResponse = OutboundControllerListWavesResponses[keyof OutboundControllerListWavesResponses];
 
+export type ShippingControllerRecordClientLabelData = {
+    body: {
+        /**
+         * The label PDF (≤ 10 MB, 1–50 pages, not password-protected)
+         */
+        file: Blob | File;
+        awb: string;
+        courierName?: string;
+        transporterId?: string;
+        /**
+         * 1–999
+         */
+        packageCount?: string;
+        replace?: 'true';
+    };
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/shipment/client-label';
+};
+
+export type ShippingControllerRecordClientLabelErrors = {
+    /**
+     * A malformed AWB, courier (exactly one of a transporter and a name), parcel count, key or part (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * The caller lacks labels.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown order or transporter (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not open (order-not-open); it has a carrier label or a live client label without replace (shipment-exists, naming the AWB); its parcel was handed over (shipment-handed-over); the AWB is on another open order of this client (awb-in-use); the partner is not an active transporter
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a PDF (attachment-type-unsupported)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * Password-protected or unreadable (pdf-unreadable), over 50 pages (pdf-too-many-pages), over 10 MB (attachment-too-large), or the key reused (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+    /**
+     * No file storage (file-storage-unavailable), the store failed (file-storage-failed), or too many uploads (file-storage-busy)
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ShippingControllerRecordClientLabelError = ShippingControllerRecordClientLabelErrors[keyof ShippingControllerRecordClientLabelErrors];
+
+export type ShippingControllerRecordClientLabelResponses = {
+    201: ClientShipmentResponse;
+};
+
+export type ShippingControllerRecordClientLabelResponse = ShippingControllerRecordClientLabelResponses[keyof ShippingControllerRecordClientLabelResponses];
+
+export type ShippingControllerRecordAwbAdviceData = {
+    body: RecordAwbAdviceDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/shipment/awb';
+};
+
+export type ShippingControllerRecordAwbAdviceErrors = {
+    /**
+     * A malformed AWB, courier, count or key (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Unknown order or transporter (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * order-not-open, shipment-exists, shipment-handed-over, awb-in-use
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ShippingControllerRecordAwbAdviceError = ShippingControllerRecordAwbAdviceErrors[keyof ShippingControllerRecordAwbAdviceErrors];
+
+export type ShippingControllerRecordAwbAdviceResponses = {
+    201: ClientShipmentResponse;
+};
+
+export type ShippingControllerRecordAwbAdviceResponse = ShippingControllerRecordAwbAdviceResponses[keyof ShippingControllerRecordAwbAdviceResponses];
+
+export type ShippingControllerVoidShipmentData = {
+    body: VoidShipmentDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/shipment/void';
+};
+
+export type ShippingControllerVoidShipmentErrors = {
+    /**
+     * A reason outside 1–200 characters (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Unknown order, or no live shipment (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A carrier label (shipment-not-client-arranged), or handed over (shipment-handed-over)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type ShippingControllerVoidShipmentError = ShippingControllerVoidShipmentErrors[keyof ShippingControllerVoidShipmentErrors];
+
+export type ShippingControllerVoidShipmentResponses = {
+    200: ClientShipmentResponse;
+};
+
+export type ShippingControllerVoidShipmentResponse = ShippingControllerVoidShipmentResponses[keyof ShippingControllerVoidShipmentResponses];
+
+export type ShippingControllerVerifyLabelData = {
+    body: VerifyLabelDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/shipment/verify';
+};
+
+export type ShippingControllerVerifyLabelErrors = {
+    /**
+     * A blank scan, an unknown method, or (device) no occurredAt (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token, or a device token without a badge-in session (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * Unknown order (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not open (order-not-open); no client label to verify (no-client-label)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * The label reads another AWB (label-mismatch, extensions.scanned), or the key reused (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ShippingControllerVerifyLabelError = ShippingControllerVerifyLabelErrors[keyof ShippingControllerVerifyLabelErrors];
+
+export type ShippingControllerVerifyLabelResponses = {
+    200: VerifyLabelResponse;
+};
+
+export type ShippingControllerVerifyLabelResponse = ShippingControllerVerifyLabelResponses[keyof ShippingControllerVerifyLabelResponses];
+
+export type ShippingControllerOrderShippingData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/shipping';
+};
+
+export type ShippingControllerOrderShippingErrors = {
+    /**
+     * Unknown order (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ShippingControllerOrderShippingError = ShippingControllerOrderShippingErrors[keyof ShippingControllerOrderShippingErrors];
+
+export type ShippingControllerOrderShippingResponses = {
+    200: OrderShippingResponse;
+};
+
+export type ShippingControllerOrderShippingResponse = ShippingControllerOrderShippingResponses[keyof ShippingControllerOrderShippingResponses];
+
+export type ShippingControllerParcelTagData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: {
+        format?: 'zpl' | 'pdf';
+    };
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/parcel-tag';
+};
+
+export type ShippingControllerParcelTagErrors = {
+    /**
+     * Unknown order (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * The order is not accepted or ready to dispatch (order-not-open)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type ShippingControllerParcelTagError = ShippingControllerParcelTagErrors[keyof ShippingControllerParcelTagErrors];
+
+export type ShippingControllerParcelTagResponses = {
+    /**
+     * The tag file
+     */
+    200: Blob | File;
+};
+
+export type ShippingControllerParcelTagResponse = ShippingControllerParcelTagResponses[keyof ShippingControllerParcelTagResponses];
+
+export type ShippingControllerUploadOrderDocumentData = {
+    body: {
+        file: Blob | File;
+        kind: 'invoice' | 'challan' | 'eway-bill' | 'pod' | 'other';
+    };
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/orders/{orderId}/documents';
+};
+
+export type ShippingControllerUploadOrderDocumentErrors = {
+    /**
+     * Missing file or an unknown kind (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Unknown order (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A cancelled order (order-not-open), or 20 live warehouse documents already (document-limit)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a JPEG, PNG, WebP or PDF (attachment-type-unsupported)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * attachment-too-large, attachment-content-invalid, pdf-unreadable, pdf-too-many-pages, idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+    /**
+     * file-storage-unavailable, file-storage-failed, file-storage-busy
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ShippingControllerUploadOrderDocumentError = ShippingControllerUploadOrderDocumentErrors[keyof ShippingControllerUploadOrderDocumentErrors];
+
+export type ShippingControllerUploadOrderDocumentResponses = {
+    201: ShippingFileResponse;
+};
+
+export type ShippingControllerUploadOrderDocumentResponse = ShippingControllerUploadOrderDocumentResponses[keyof ShippingControllerUploadOrderDocumentResponses];
+
+export type ShippingControllerUploadHandoverSheetData = {
+    body: {
+        file: Blob | File;
+    };
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        handoverId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/handovers/{handoverId}/sheet';
+};
+
+export type ShippingControllerUploadHandoverSheetErrors = {
+    /**
+     * Unknown handover (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * 10 live pages already (handover-sheet-limit)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not an image or a PDF (attachment-type-unsupported)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * attachment-too-large, attachment-content-invalid, pdf-unreadable, pdf-too-many-pages, idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+    /**
+     * file-storage-unavailable, file-storage-failed, file-storage-busy
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ShippingControllerUploadHandoverSheetError = ShippingControllerUploadHandoverSheetErrors[keyof ShippingControllerUploadHandoverSheetErrors];
+
+export type ShippingControllerUploadHandoverSheetResponses = {
+    201: ShippingFileResponse;
+};
+
+export type ShippingControllerUploadHandoverSheetResponse = ShippingControllerUploadHandoverSheetResponses[keyof ShippingControllerUploadHandoverSheetResponses];
+
+export type ShippingControllerStageHandoverPhotoData = {
+    body: {
+        capturedAt: string;
+        file: Blob | File;
+    };
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+        /**
+         * The capturing operator’s user id
+         */
+        'x-op-operator': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/handover-photos';
+};
+
+export type ShippingControllerStageHandoverPhotoErrors = {
+    /**
+     * Missing or malformed key, x-op-operator, capturedAt or file (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * The ref is stored with different bytes or another purpose (attachment-ref-conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a JPEG, PNG or WebP (attachment-type-unsupported)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * attachment-too-large, attachment-content-invalid, idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+    /**
+     * 200 photos waiting on this device (attachment-staging-limit)
+     */
+    429: ProblemDetailsDto;
+    /**
+     * file-storage-unavailable, file-storage-failed, file-storage-busy
+     */
+    503: ProblemDetailsDto;
+};
+
+export type ShippingControllerStageHandoverPhotoError = ShippingControllerStageHandoverPhotoErrors[keyof ShippingControllerStageHandoverPhotoErrors];
+
+export type ShippingControllerStageHandoverPhotoResponses = {
+    201: StagedPhotoResponse;
+};
+
+export type ShippingControllerStageHandoverPhotoResponse = ShippingControllerStageHandoverPhotoResponses[keyof ShippingControllerStageHandoverPhotoResponses];
+
+export type ShippingControllerRemoveShippingFileData = {
+    body: RemoveShippingFileDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        attachmentId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/shipping-files/{attachmentId}/remove';
+};
+
+export type ShippingControllerRemoveShippingFileErrors = {
+    /**
+     * Unknown file (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A live client label (label-in-use), or already removed (attachment-not-attached)
+     */
+    409: ProblemDetailsDto;
+};
+
+export type ShippingControllerRemoveShippingFileError = ShippingControllerRemoveShippingFileErrors[keyof ShippingControllerRemoveShippingFileErrors];
+
+export type ShippingControllerRemoveShippingFileResponses = {
+    200: ShippingFileResponse;
+};
+
+export type ShippingControllerRemoveShippingFileResponse = ShippingControllerRemoveShippingFileResponses[keyof ShippingControllerRemoveShippingFileResponses];
+
+export type ShippingControllerHandOverData = {
+    body: CreateHandoverDto;
+    headers: {
+        /**
+         * Client-generated ULID (26 chars, Crockford base32) — replays return the original result
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/handovers';
+};
+
+export type ShippingControllerHandOverErrors = {
+    /**
+     * A duplicate order or AWB, a malformed AWB, phone, vehicle, weight, count or time, more than 100 parcels, photoRefs on the web, a pickup time outside the last 7 days on the web (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing or invalid session token, or a device token without a badge-in session (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * The caller lacks dispatch.execute (role-denied)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * Unknown warehouse, client or transporter (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A parcel of another client (handover-client-mismatch, extensions.orderIds); the client departed (client-departed); web: refused parcels (handover-parcels-refused, extensions.parcels[{orderId, code, detail}]); an AWB taken concurrently, or a concurrent idempotent request (conflict)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type ShippingControllerHandOverError = ShippingControllerHandOverErrors[keyof ShippingControllerHandOverErrors];
+
+export type ShippingControllerHandOverResponses = {
+    201: HandoverResponse;
+};
+
+export type ShippingControllerHandOverResponse = ShippingControllerHandOverResponses[keyof ShippingControllerHandOverResponses];
+
+export type ShippingControllerHandoverData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        handoverId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/outbound/handovers/{handoverId}';
+};
+
+export type ShippingControllerHandoverErrors = {
+    /**
+     * Unknown handover (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ShippingControllerHandoverError = ShippingControllerHandoverErrors[keyof ShippingControllerHandoverErrors];
+
+export type ShippingControllerHandoverResponses = {
+    200: HandoverDetailResponse;
+};
+
+export type ShippingControllerHandoverResponse = ShippingControllerHandoverResponses[keyof ShippingControllerHandoverResponses];
+
+export type ShippingControllerHandoverCandidatesData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query: {
+        /**
+         * The client whose packed orders are listed
+         */
+        clientId: string;
+        cursor?: string;
+        /**
+         * 1–200 (default 100)
+         */
+        limit?: string;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/handover-candidates';
+};
+
+export type ShippingControllerHandoverCandidatesErrors = {
+    /**
+     * A missing clientId or a malformed cursor (validation-failed, invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Unknown warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ShippingControllerHandoverCandidatesError = ShippingControllerHandoverCandidatesErrors[keyof ShippingControllerHandoverCandidatesErrors];
+
+export type ShippingControllerHandoverCandidatesResponses = {
+    200: HandoverCandidatesResponse;
+};
+
+export type ShippingControllerHandoverCandidatesResponse = ShippingControllerHandoverCandidatesResponses[keyof ShippingControllerHandoverCandidatesResponses];
+
+export type ShippingControllerHandoversData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        warehouseId: string;
+    };
+    query?: {
+        clientId?: string;
+        from?: string;
+        to?: string;
+        cursor?: string;
+        /**
+         * 1–100 (default 50)
+         */
+        limit?: string;
+    };
+    url: '/tenants/{tenantId}/warehouses/{warehouseId}/outbound/handovers';
+};
+
+export type ShippingControllerHandoversErrors = {
+    /**
+     * A malformed date, client or cursor (validation-failed, invalid-cursor)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Unknown warehouse (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type ShippingControllerHandoversError = ShippingControllerHandoversErrors[keyof ShippingControllerHandoversErrors];
+
+export type ShippingControllerHandoversResponses = {
+    200: HandoversResponse;
+};
+
+export type ShippingControllerHandoversResponse = ShippingControllerHandoversResponses[keyof ShippingControllerHandoversResponses];
+
 export type ReceivingControllerListGoodsReceiptsData = {
     body?: never;
     path: {
@@ -29265,7 +30419,7 @@ export type ReportingControllerAuditData = {
         /**
          * Only actions on this kind of target (`vendor` matches the rows written before story 1-3 — no writer stores it now)
          */
-        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
+        targetType?: 'advance_shipment_notice' | 'attachment' | 'asn_import' | 'audit_export' | 'batch' | 'batch_alert' | 'batch_recall' | 'courier_handover' | 'bin' | 'bin_move' | 'carrier_connection' | 'catalog_import' | 'channel_connection' | 'client' | 'client_charge' | 'client_charge_policy' | 'client_invoice' | 'client_invoice_note' | 'client_invoice_note_policy' | 'client_return' | 'count_task' | 'count_variance' | 'count_variance_policy' | 'device' | 'dock_appointment' | 'dock_door' | 'eway_bill' | 'eway_gstin_setting' | 'eway_state_threshold' | 'expiry_alert_policy' | 'gate_in' | 'goods_receipt' | 'kit' | 'ledger_chain_break' | 'licence' | 'licence_policy' | 'ledger_event' | 'lpn' | 'manifest' | 'order' | 'order_import' | 'over_receipt' | 'partner' | 'partner_link' | 'pick' | 'picklist_line' | 'product' | 'purchase_order' | 'putaway_placement' | 'qc_hold' | 'rate_card' | 'rejected_op' | 'reorder_breach' | 'reorder_policy' | 'return_authorization' | 'return_receipt' | 'return_disposition' | 'sku' | 'stock_adjustment_pending' | 'stock_adjustment_policy' | 'suggested_po' | 'temperature_excursion' | 'stock_take' | 'tenant' | 'transfer_order' | 'user' | 'vendor_return' | 'warehouse' | 'wave' | 'wave_policy' | 'webhook_endpoint' | 'zone' | 'vendor';
         /**
          * Only actions on this target
          */
@@ -33313,6 +34467,233 @@ export type PortalControllerOrderResponses = {
 };
 
 export type PortalControllerOrderResponse = PortalControllerOrderResponses[keyof PortalControllerOrderResponses];
+
+export type PortalControllerOrderShippingData = {
+    body?: never;
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders/{orderId}/shipping';
+};
+
+export type PortalControllerOrderShippingErrors = {
+    /**
+     * Malformed orderId (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such order of this client — unknown, or another client's (not-found)
+     */
+    404: ProblemDetailsDto;
+};
+
+export type PortalControllerOrderShippingError = PortalControllerOrderShippingErrors[keyof PortalControllerOrderShippingErrors];
+
+export type PortalControllerOrderShippingResponses = {
+    200: PortalOrderShippingResponse;
+};
+
+export type PortalControllerOrderShippingResponse = PortalControllerOrderShippingResponses[keyof PortalControllerOrderShippingResponses];
+
+export type PortalControllerUploadClientLabelData = {
+    body: {
+        file: Blob | File;
+        awb: string;
+        courierName: string;
+        packageCount?: string;
+        replace?: 'true';
+    };
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders/{orderId}/shipment/client-label';
+};
+
+export type PortalControllerUploadClientLabelErrors = {
+    /**
+     * A malformed AWB, courier name, count, key or part (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such order of this client (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * order-not-open, shipment-exists (naming the AWB), shipment-handed-over, awb-in-use (naming your own order)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not a PDF (attachment-type-unsupported)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * pdf-unreadable, pdf-too-many-pages, attachment-too-large, idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+    /**
+     * file-storage-unavailable, file-storage-failed, file-storage-busy
+     */
+    503: ProblemDetailsDto;
+};
+
+export type PortalControllerUploadClientLabelError = PortalControllerUploadClientLabelErrors[keyof PortalControllerUploadClientLabelErrors];
+
+export type PortalControllerUploadClientLabelResponses = {
+    201: PortalShipmentResponse;
+};
+
+export type PortalControllerUploadClientLabelResponse = PortalControllerUploadClientLabelResponses[keyof PortalControllerUploadClientLabelResponses];
+
+export type PortalControllerAdviseAwbData = {
+    body: PortalAwbAdviceDto;
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders/{orderId}/shipment/awb';
+};
+
+export type PortalControllerAdviseAwbErrors = {
+    /**
+     * A malformed AWB, courier name, count or key (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such order of this client (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * order-not-open, shipment-exists, shipment-handed-over, awb-in-use
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Idempotency key reused with a different payload (idempotency-key-reuse)
+     */
+    422: ProblemDetailsDto;
+};
+
+export type PortalControllerAdviseAwbError = PortalControllerAdviseAwbErrors[keyof PortalControllerAdviseAwbErrors];
+
+export type PortalControllerAdviseAwbResponses = {
+    201: PortalShipmentResponse;
+};
+
+export type PortalControllerAdviseAwbResponse = PortalControllerAdviseAwbResponses[keyof PortalControllerAdviseAwbResponses];
+
+export type PortalControllerUploadOrderDocumentData = {
+    body: {
+        file: Blob | File;
+        kind: 'invoice' | 'challan' | 'eway-bill' | 'other';
+    };
+    headers: {
+        /**
+         * Client-generated ULID key; replays return the original response
+         */
+        'Idempotency-Key': string;
+    };
+    path: {
+        /**
+         * Owning tenant (must match the session)
+         */
+        tenantId: string;
+        orderId: string;
+    };
+    query?: never;
+    url: '/tenants/{tenantId}/portal/orders/{orderId}/documents';
+};
+
+export type PortalControllerUploadOrderDocumentErrors = {
+    /**
+     * Missing file, or a kind outside invoice, challan, eway-bill, other (validation-failed)
+     */
+    400: ProblemDetailsDto;
+    /**
+     * Missing, invalid or expired session token — or the user is no longer an active client-portal user of this client (unauthenticated)
+     */
+    401: ProblemDetailsDto;
+    /**
+     * An operator session — "This is a client-portal surface." (role-denied); the session belongs to another tenant (permission-denied); or the client is suspended (client-suspended) or has departed (client-departed, story 1-2a)
+     */
+    403: ProblemDetailsDto;
+    /**
+     * No such order of this client (not-found)
+     */
+    404: ProblemDetailsDto;
+    /**
+     * A cancelled order (order-not-open), or 10 of your documents already (document-limit)
+     */
+    409: ProblemDetailsDto;
+    /**
+     * Not an image or a PDF (attachment-type-unsupported)
+     */
+    415: ProblemDetailsDto;
+    /**
+     * attachment-too-large, attachment-content-invalid, pdf-unreadable, pdf-too-many-pages, idempotency-key-reuse
+     */
+    422: ProblemDetailsDto;
+    /**
+     * file-storage-unavailable, file-storage-failed, file-storage-busy
+     */
+    503: ProblemDetailsDto;
+};
+
+export type PortalControllerUploadOrderDocumentError = PortalControllerUploadOrderDocumentErrors[keyof PortalControllerUploadOrderDocumentErrors];
+
+export type PortalControllerUploadOrderDocumentResponses = {
+    201: ShippingFileResponse;
+};
+
+export type PortalControllerUploadOrderDocumentResponse = PortalControllerUploadOrderDocumentResponses[keyof PortalControllerUploadOrderDocumentResponses];
 
 export type PortalControllerAsnsData = {
     body?: never;
