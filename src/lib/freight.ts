@@ -9,6 +9,7 @@ import type {
   FreightLoadListRowDto,
   FreightLoadViewDto,
   FreightRefusedEntryDto,
+  FreightScanResponse,
   OrderFreightBlockDto,
   RecordFreightDeliveryDto,
   RecordFreightLrDto,
@@ -956,6 +957,18 @@ export function freightReason(error: unknown, action: FreightAction): string {
       if (error.code.startsWith('file-storage')) return `${lead} — file storage is unavailable. Try again shortly.`;
       return error.detail ?? `${lead} (${error.code}).`;
   }
+}
+
+/** A web scan's answer (A13), built from the response: green when loaded, amber when it already was. */
+export function scanOutcome(
+  response: Pick<FreightScanResponse, 'scan' | 'alreadyLoaded' | 'progress'>,
+  orderLabel: string | null,
+): { readonly tone: 'accepted' | 'warning'; readonly word: string; readonly reason: string } {
+  const who = orderLabel === null ? '' : `${orderLabel}: `;
+  const progress = `${who}${loadedWords(response.progress.loaded, response.progress.total)}.`;
+  if (response.scan.status === 'unloaded') return { tone: 'accepted', word: `${response.scan.packageCode} unloaded`, reason: progress };
+  if (response.alreadyLoaded) return { tone: 'warning', word: `${response.scan.packageCode} already loaded`, reason: progress };
+  return { tone: 'accepted', word: `${response.scan.packageCode} loaded`, reason: progress };
 }
 
 /** Per-order dispatch of an order on an open load (A19). */

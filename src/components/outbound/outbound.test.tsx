@@ -219,7 +219,7 @@ describe('the Outbound page', () => {
     await settle();
 
     const tablist = view.container.querySelector('[role="tablist"][aria-label="Outbound lists"]')!;
-    expect([...tablist.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['Orders', 'Waves', 'Pack & Dispatch', 'Handovers', 'Documents']);
+    expect([...tablist.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['Orders', 'Waves', 'Pack & Dispatch', 'Handovers', 'Documents', 'Freight']);
     expect(tablist.querySelector('[aria-selected="true"]')?.getAttribute('data-tab')).toBe('orders');
     expect(panelHeadings(view)).toContain('Orders');
     expect(panelHeadings(view)).not.toContain('Waves');

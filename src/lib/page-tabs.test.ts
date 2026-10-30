@@ -99,6 +99,7 @@ describe('page-tabs — the pages', () => {
       ['pack', 'Pack & Dispatch'],
       ['handovers', 'Handovers'],
       ['documents', 'Documents'],
+      ['freight', 'Freight'],
     ]);
     expect(REPLENISHMENT_PAGE_TABS.tabs.map((t) => [t.id, t.label])).toEqual([
       ['breaches', 'Reorder breaches'],
