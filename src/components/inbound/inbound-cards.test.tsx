@@ -201,6 +201,23 @@ function stubRouter(): void {
     if (pathname === `${base}/partners`) {
       return json(200, { items: [{ id: 'v-1', code: 'V-1', name: 'Live Partner Name', roles: ['vendor'], status: 'active', links: [] }], nextCursor: null });
     }
+    // Story 2-9a — one GRN's document (the details drawer).
+    if (pathname === `${base}/receiving/goods-receipts/g-1/document`) {
+      return json(200, {
+        id: 'g-1', code: 'GRN-0001', receivedAt: '2026-10-18T05:00:00.000Z', recordedAt: '2026-10-18T05:00:00.000Z', printedAt: '2026-10-18T06:00:00.000Z',
+        parties: {
+          frozen: true,
+          warehouse: { code: 'W1', name: 'Main', legalName: null, gstin: null, address: null, operatorName: 'Priya Spices' },
+          client: { code: 'ACME', name: 'Acme Foods', legalName: null, gstin: null, address: null },
+          vendor: null,
+          supplierNote: 'Unannounced — Unannounced delivery',
+        },
+        document: { kind: 'blind', code: null, blindReasonCode: 'unannounced-delivery', blindReasonLabel: 'Unannounced delivery', label: 'Blind receipt (Unannounced delivery)' },
+        arrival: null,
+        lines: [],
+        totals: { lineCount: 0, byUom: [] },
+      });
+    }
     // Story 2-4a — one GRN's lines (the expandable row).
     if (pathname === `${base}/receiving/goods-receipts/g-1/lines`) {
       return json(200, {
@@ -912,5 +929,45 @@ describe('Goods receipts — damage photos (story 2-5a)', () => {
     });
     await settle();
     expect(view.container.querySelector('button[aria-label^="Add a photo"]')).toBeNull();
+  });
+});
+
+describe('Goods receipts — the GRN details drawer (story 2-9a)', () => {
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  const drawer = () => view!.container.querySelector('[data-testid="grn-detail-drawer"]');
+
+  test('grnDetailId (the server-parsed ?grn=) opens the drawer, read by id', async () => {
+    view = render(<InboundCards initialTab="grns" grnDetailId="g-1" />);
+    await settle();
+    expect(drawer()).not.toBeNull();
+    expect(drawer()!.textContent).toContain('Goods receipt GRN-0001');
+    expect(requests.some((r) => r.url.pathname.endsWith('/receiving/goods-receipts/g-1/document'))).toBe(true);
+  });
+
+  test('"Details of GRN-0001" opens it and writes ?grn=; Close removes the parameter; the Recorded column reads IST', async () => {
+    // An earlier suite may leave happy-dom at about:blank, where replaceState
+    // cannot write a path — set a real URL first (the dock-schedule precedent).
+    (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost/inbound?tab=grns');
+    view = render(<InboundCards initialTab="grns" />);
+    await settle();
+    expect(rows()[0]!.join(' ')).toContain('18 Oct 2026, 10:30');
+    const details = panel().querySelector('button[aria-label="Details of GRN-0001"]')!;
+    await act(async () => {
+      details.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+    expect(drawer()).not.toBeNull();
+    expect(new URL(window.location.href).searchParams.get('grn')).toBe('g-1');
+    expect(new URL(window.location.href).searchParams.get('tab')).toBe('grns');
+    const close = drawer()!.querySelector('button[aria-label="Close Goods receipt GRN-0001"]')!;
+    await act(async () => {
+      close.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+    expect(drawer()).toBeNull();
+    expect(new URL(window.location.href).searchParams.has('grn')).toBe(false);
   });
 });

@@ -138,6 +138,8 @@ import {
   receivingControllerGetQcHold,
   receivingControllerInspectQcHold,
   receivingControllerListGoodsReceiptLines,
+  receivingControllerGoodsReceiptDocument,
+  receivingControllerGoodsReceiptDocumentFile,
   receivingControllerListLpns,
   receivingControllerMintLpns,
   receivingControllerPrintLpnLabels,
@@ -289,6 +291,7 @@ import {
   portalControllerAsns,
   portalControllerGoodsReceipts,
   portalControllerGoodsReceipt,
+  portalControllerGoodsReceiptFile,
   portalControllerInvoice,
   portalControllerInvoiceNote,
   portalControllerInvoiceNotes,
@@ -505,6 +508,7 @@ import type {
   InvoiceResponse,
   GenerateBinsDto,
   GoodsReceiptLinesResponse,
+  GoodsReceiptDocumentDto,
   ReceiptPhotosResponse,
   ReceiptPhotoResponse,
   GoodsReceiptListResponse,
@@ -6163,6 +6167,13 @@ export async function fetchApiPortalGoodsReceipt(
   return data;
 }
 
+/** Story 2-9a — one of this client's receipts as its GRN document file (PDF or CSV). Another client's is a 404. */
+export async function fetchApiPortalGoodsReceiptFile(tenantId: string, grnId: string, format: 'pdf' | 'csv'): Promise<Blob> {
+  const { data, error } = await portalControllerGoodsReceiptFile({ path: { tenantId, grnId }, query: { format }, parseAs: 'blob' });
+  if (error || !data) throw portalError(error);
+  return data as Blob;
+}
+
 /**
  * Story 4-7a — this client's returns with their disposition totals, newest
  * first; optionally only those still awaiting a decision or only decided ones.
@@ -6587,6 +6598,36 @@ export async function fetchApiListGoodsReceiptLines(
     throw unwrapError(error, 400);
   }
   return data;
+}
+
+/** Story 2-9a — one goods receipt as its GRN document (the details drawer) — any member. */
+export async function fetchApiGoodsReceiptDocument(
+  tenantId: string,
+  grnId: string,
+  options?: { signal?: AbortSignal },
+): Promise<GoodsReceiptDocumentDto> {
+  const { data, error, response } = await receivingControllerGoodsReceiptDocument({ path: { tenantId, grnId }, signal: options?.signal });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data;
+}
+
+/**
+ * Story 2-9a — the GRN document as a file (the A4 PDF, or its lines as CSV),
+ * fetched with the bearer header (a plain link cannot carry it). The caller
+ * names the download (`grnDocumentFilename` — CORS hides the server's name).
+ */
+export async function fetchApiGoodsReceiptDocumentFile(tenantId: string, grnId: string, format: 'pdf' | 'csv'): Promise<Blob> {
+  const { data, error, response } = await receivingControllerGoodsReceiptDocumentFile({
+    path: { tenantId, grnId },
+    query: { format },
+    parseAs: 'blob',
+  });
+  if (error || !data) {
+    throw unwrapError(error, response?.status ?? 400);
+  }
+  return data as Blob;
 }
 
 /** Story 2-10b — one goods receipt's LPNs (licence plates) in code order, every status — any member. */

@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiPortalAnnounceAsn } from '@/lib/api/client';
+import { fetchApiPortalAnnounceAsn, fetchApiPortalGoodsReceiptFile } from '@/lib/api/client';
 import type {
   PortalAsnDetailResponse,
   PortalAsnRowDto,
+  PortalGoodsReceiptDetailDto,
   PortalGoodsReceiptLineDto,
   PortalGoodsReceiptRowDto,
   PortalPurchaseOrderRowDto,
@@ -13,6 +14,24 @@ import type {
 } from '@/lib/api/generated';
 import { istDateTimeLabel } from '@/lib/audit-exports';
 import { damageReasonLabel, shortReasonLabel } from '@/lib/grn-lines';
+import { downloadBlob } from '@/lib/csv';
+import {
+  GRN_DOCUMENTS_OMITTED_NOTE,
+  GRN_NOT_FROZEN_NOTE,
+  GRN_UNAVAILABLE,
+  grnDocumentFilename,
+  grnDocumentKindLabel,
+  grnExpiryLabel,
+  grnPartyLines,
+  grnPortalExcessLabel,
+  grnPortalQcLabel,
+  grnSealLabel,
+  grnSerialsLabel,
+  grnTotalsLabels,
+  isMalformedGrnParam,
+  parseGrnParam,
+  writeGrnParam,
+} from '@/lib/grn-document';
 import { PORTAL_REMOVED_PHOTO, createUrlRefresher, photoCountLabel, type UrlRefresher } from '@/lib/receipt-photos';
 import { MAX_ASN_CODE_LENGTH, type AsnDraftLine, type LineOption } from '@/lib/asns';
 import { readSession, subscribeSession } from '@/lib/auth';
@@ -22,10 +41,12 @@ import {
   parsePortalAsnCreate,
   PO_STATUS_LABEL,
   PORTAL_NO_SKUS_MESSAGE,
+  PORTAL_SESSION_EXPIRED,
   PORTAL_SKUS_TOO_MANY_MESSAGE,
   portalAsnReason,
   portalDate,
   portalQuantity,
+  portalReadReason,
   portalSkuOption,
   portalWarehouseOptions,
   receivedOfLabel,
@@ -66,8 +87,27 @@ import { WarehousesFailure } from '@/components/shared/warehouses-failure';
  * cancel (decision 2): a mistaken notice is cancelled by the warehouse.
  */
 export function PortalInbound() {
+  // Story 2-9a (A18) — `?grn=<id>` (the receipt email's link) opens THAT
+  // receipt's detail, read by id — independent of the paginated list, so a
+  // receipt on any page opens. Read from the live URL after mount (the page
+  // is static; no server parse).
+  const [deepLink, setDeepLink] = useState<{ raw: string } | null>(null);
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get('grn');
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the live URL is read once, after hydration
+    if (raw !== null) setDeepLink({ raw });
+  }, []);
   return (
     <div className="flex flex-col gap-4">
+      {deepLink !== null && (
+        <ReceiptDeepLink
+          raw={deepLink.raw}
+          onClose={() => {
+            setDeepLink(null);
+            writeGrnParam(null);
+          }}
+        />
+      )}
       <AsnsSection />
       <PurchaseOrdersSection />
       <ReceiptsSection />
@@ -477,7 +517,11 @@ function portalLineCondition(line: PortalGoodsReceiptLineDto): string {
 }
 
 function ReceiptLines({ grnId }: { grnId: string }) {
-  const grn = usePortalGoodsReceipt(grnId);
+  return <ReceiptLinesView grn={usePortalGoodsReceipt(grnId)} />;
+}
+
+/** One receipt's header and lines from a read the CALLER holds (the deep link reads once and passes it here). */
+function ReceiptLinesView({ grn }: { grn: ReturnType<typeof usePortalGoodsReceipt> }) {
   // A28 — one refresher per receipt; it reads the newest `refresh` at call time.
   const [refresher] = useState(() => createUrlRefresher(grn.refresh));
   useEffect(() => refresher.bind(grn.refresh), [refresher, grn.refresh]);
@@ -490,12 +534,14 @@ function ReceiptLines({ grnId }: { grnId: string }) {
   const open = index === -1 ? null : all[index]!;
   return (
     <>
+      <ReceiptHeader grn={grn.data} />
       <ul className="flex flex-col gap-3 py-1" data-testid="receipt-lines">
         {grn.data.lines.map((line) => (
           <li key={line.lineNo} className="flex flex-col gap-1.5">
             <div>
               {skuLabel(line)} <span className="data text-(--muted-foreground)">· {portalLineCondition(line)}</span>
             </div>
+            <ReceiptLineFacts line={line} />
             {line.photos.length > 0 && (
               <ul className="flex flex-wrap gap-2" aria-label={`Damage photos of ${line.skuCode}`}>
                 {line.photos.map((photo, at) => (
@@ -537,6 +583,138 @@ function ReceiptLines({ grnId }: { grnId: string }) {
         </ModalFrame>
       )}
     </>
+  );
+}
+
+/**
+ * Story 2-9a — the receipt's GRN header in the portal: the parties (frozen at
+ * receipt, or the current ones with the note), the document, the arrival as
+ * recorded on the gate-in, the totals, and the two downloads (the SAME
+ * document the warehouse holds).
+ */
+function ReceiptHeader({ grn }: { grn: PortalGoodsReceiptDetailDto }) {
+  const tenantId = usePortalTenantId();
+  const [busy, setBusy] = useState<'pdf' | 'csv' | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
+  const download = async (format: 'pdf' | 'csv') => {
+    if (tenantId === null) {
+      setRefused(PORTAL_SESSION_EXPIRED);
+      return;
+    }
+    setBusy(format);
+    setRefused(null);
+    try {
+      downloadBlob(grnDocumentFilename(grn.code, format), await fetchApiPortalGoodsReceiptFile(tenantId, grn.id, format));
+    } catch (error) {
+      setRefused(portalReadReason(error, 'The GRN file'));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const { parties, arrival } = grn;
+  return (
+    <div className="flex flex-col gap-2 py-1" data-testid="receipt-header">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{grn.document.label}</span>
+        <button type="button" className={buttonClass} disabled={busy !== null} onClick={() => void download('pdf')}>
+          {busy === 'pdf' ? 'Preparing…' : 'Download GRN (PDF)'}
+        </button>
+        <button type="button" className={buttonClass} disabled={busy !== null} onClick={() => void download('csv')}>
+          {busy === 'csv' ? 'Preparing…' : 'Export lines (CSV)'}
+        </button>
+      </div>
+      {refused !== null && <FeedbackBanner tone="rejected" word="Download failed" reason={refused} />}
+      <div className="grid gap-2 text-xs md:grid-cols-3">
+        <div>
+          <div className="font-medium">Received at</div>
+          <div>{parties.warehouse.name}</div>
+          {grnPartyLines(parties.warehouse).slice(1).map((text, index) => (
+            <div key={index}>{text}</div>
+          ))}
+          <div>Operated by {parties.warehouse.operatorName}</div>
+        </div>
+        <div>
+          <div className="font-medium">Your company</div>
+          {(parties.client === null ? ['—'] : grnPartyLines(parties.client)).map((text, index) => (
+            <div key={index}>{text}</div>
+          ))}
+        </div>
+        <div>
+          <div className="font-medium">Supplier</div>
+          {(parties.vendor === null ? [parties.supplierNote ?? '—'] : grnPartyLines(parties.vendor)).map((text, index) => (
+            <div key={index}>{text}</div>
+          ))}
+        </div>
+      </div>
+      {!parties.frozen && <div className="text-xs text-(--muted-foreground)">{GRN_NOT_FROZEN_NOTE}</div>}
+      {arrival !== null && (
+        <div className="text-xs">
+          <span className="font-medium">Arrival</span> — as recorded on gate-in {arrival.gateInCode}
+          {arrival.vehicleNo !== null ? ` · vehicle ${arrival.vehicleNo}` : ''}
+          {arrival.containerNo !== null ? ` · container ${arrival.containerNo}` : ''}
+          {arrival.transporterName !== null ? ` · ${arrival.transporterName}` : ''}
+          {arrival.lrNumber !== null ? ` · LR/AWB ${arrival.lrNumber}` : ''}
+          {` · seal ${grnSealLabel(arrival.sealStatus)}`}
+          {arrival.sealNumber !== null ? ` ${arrival.sealNumber}` : ''} · gated in {istDateTimeLabel(arrival.gatedInAt)} IST
+          {arrival.documents.map((document, index) => (
+            <div key={index} className="data">
+              {grnDocumentKindLabel(document.kind)} {document.number} dated {document.date}
+              {document.ewayBillNo !== null ? ` · e-way bill ${document.ewayBillNo}` : ''}
+            </div>
+          ))}
+          {arrival.documentsOmitted && <div className="text-(--muted-foreground)">{GRN_DOCUMENTS_OMITTED_NOTE}</div>}
+        </div>
+      )}
+      <div className="data text-xs text-(--muted-foreground)">
+        {grnTotalsLabels(grn.totals.byUom, grn.lines).join(' — ')}
+      </div>
+    </div>
+  );
+}
+
+/** Story 2-9a — a line's batch, dates, over-receipt and QC outcome in the client's words. */
+function ReceiptLineFacts({ line }: { line: PortalGoodsReceiptLineDto }) {
+  const precision = line.uomPrecision;
+  const parts = [
+    line.uom,
+    line.batchCode === null ? null : `batch ${line.batchCode}`,
+    line.mfgDate === null ? null : `mfg ${line.mfgDate}`,
+    line.expiryDate === null ? null : `expiry ${grnExpiryLabel(line)}`,
+    grnPortalExcessLabel(line.excess, precision) || null,
+    grnPortalQcLabel(line.qc, precision) || null,
+    grnSerialsLabel(line),
+  ].filter((part): part is string => part !== null && part !== '');
+  return <div className="data text-xs text-(--muted-foreground)">{parts.join(' · ')}</div>;
+}
+
+/** Story 2-9a (A18) — `?grn=<id>`: one receipt's detail, read by id; unknown or malformed → inline "not available". */
+function ReceiptDeepLink({ raw, onClose }: { raw: string; onClose: () => void }) {
+  const grnId = parseGrnParam(raw);
+  // ONE read: the panel's title and its lines share it.
+  const grn = usePortalGoodsReceipt(grnId);
+  const unavailable = isMalformedGrnParam(raw) || (grn.state === 'failed' && grn.notFound);
+  return (
+    <Section
+      title={grn.state === 'ready' ? `Receipt ${grn.data.code}` : 'Receipt'}
+      action={
+        <button type="button" className={buttonClass} onClick={onClose}>
+          All receipts
+        </button>
+      }
+    >
+      <div data-testid="receipt-deep-link">
+        {unavailable ? (
+          <div className="flex flex-col items-start gap-1">
+            <FeedbackBanner tone="rejected" word={GRN_UNAVAILABLE} reason="It may have been removed, or the link is wrong." />
+            <button type="button" className={buttonClass} onClick={onClose}>
+              Go to your receipts
+            </button>
+          </div>
+        ) : grnId === null ? null : (
+          <ReceiptLinesView grn={grn} />
+        )}
+      </div>
+    </Section>
   );
 }
 

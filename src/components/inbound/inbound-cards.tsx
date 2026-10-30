@@ -43,6 +43,9 @@ import { poCreatedOutcome } from '@/lib/purchase-orders';
 import { grnGateInLabel } from '@/lib/gate-ins';
 import { grnDamagedSuffix, grnLineAppliedLabel, grnLineBatchDatesLabel, grnLineConditionLabel, grnLineRecallLabel, grnShortSuffix } from '@/lib/grn-lines';
 import { GrnLineSerials } from '@/components/inbound/grn-line-serials';
+import { GrnDetailDrawer } from '@/components/inbound/grn-detail-drawer';
+import { writeGrnParam } from '@/lib/grn-document';
+import { istDateTimeLabel } from '@/lib/audit-exports';
 import { StatusChip } from '@/components/shared/status-chip';
 import { useGoodsReceiptLines } from '@/lib/use-grn-lines';
 import { useGrnLpns } from '@/lib/use-grn-lpns';
@@ -115,7 +118,8 @@ export function InboundCards({
   initialTab = null,
   qcGrnId = null,
   dock = DEFAULT_DOCK_URL_STATE,
-}: { drill?: ParsedDrill; initialTab?: InboundTab | null; qcGrnId?: string | null; dock?: DockUrlState } = {}) {
+  grnDetailId = null,
+}: { drill?: ParsedDrill; initialTab?: InboundTab | null; qcGrnId?: string | null; dock?: DockUrlState; grnDetailId?: string | null } = {}) {
   const sessioned = useSyncExternalStore(
     subscribeSession,
     () => readSession() !== null,
@@ -131,7 +135,7 @@ export function InboundCards({
       </div>
     );
   }
-  return <InboundCardsSessioned drill={drill} initialTab={initialTab} qcGrnId={qcGrnId} dock={dock} />;
+  return <InboundCardsSessioned drill={drill} initialTab={initialTab} qcGrnId={qcGrnId} dock={dock} grnDetailId={grnDetailId} />;
 }
 
 function InboundCardsSessioned({
@@ -139,12 +143,21 @@ function InboundCardsSessioned({
   initialTab,
   qcGrnId,
   dock,
+  grnDetailId,
 }: {
   drill: ParsedDrill;
   initialTab: InboundTab | null;
   qcGrnId: string | null;
   dock: DockUrlState;
+  grnDetailId: string | null;
 }) {
+  // Story 2-9a — the GRN details drawer (`?grn=<id>`), on any tab: it reads
+  // the receipt by id, so a deep link to a receipt on any page opens.
+  const [detailGrnId, setDetailGrnId] = useState<string | null>(grnDetailId);
+  const openGrnDetail = (id: string | null) => {
+    setDetailGrnId(id);
+    writeGrnParam(id);
+  };
   const grnsDrill = drillFor(drill, 'grns');
   const putawayDrill = drillFor(drill, 'putaway');
   // inbound-tabs: one card at a time. A drill opens on its own list's tab;
@@ -218,7 +231,12 @@ function InboundCardsSessioned({
         )}
         {tab === 'grns' &&
           (grnsDrill === null ? (
-            <GoodsReceiptsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
+            <GoodsReceiptsCard
+              active={active}
+              warehouseId={warehouseId}
+              warehouseLabel={warehouse?.name ?? warehouse?.code ?? null}
+              onDetails={openGrnDetail}
+            />
           ) : (
             // The drill's warehouse (or every warehouse, when the drill names none).
             <GoodsReceiptsCard
@@ -227,6 +245,7 @@ function InboundCardsSessioned({
               warehouseLabel={grnsDrill.warehouseId === undefined ? 'All warehouses' : drillLabel(grnsDrill.warehouseId)}
               drill={grnsDrill}
               clearHref={inboundTabHref('grns')}
+              onDetails={openGrnDetail}
             />
           ))}
         {tab === 'putaway' &&
@@ -249,6 +268,7 @@ function InboundCardsSessioned({
           <VendorReturnsCard active={active} warehouseId={warehouseId} warehouseLabel={warehouse?.name ?? warehouse?.code ?? null} />
         )}
       </PageTabPanel>
+      {detailGrnId !== null && <GrnDetailDrawer key={detailGrnId} grnId={detailGrnId} onClose={() => openGrnDetail(null)} />}
     </div>
   );
 }
@@ -488,6 +508,7 @@ function GoodsReceiptsCard({
   warehouseLabel,
   drill = null,
   clearHref,
+  onDetails,
 }: {
   active: ActiveClientState;
   warehouseId: string | null;
@@ -496,6 +517,8 @@ function GoodsReceiptsCard({
   drill?: GrnsDrill | null;
   /** inbound-tabs — where the banner's Clear lands (this list's tab). */
   clearHref?: string;
+  /** Story 2-9a — opens the GRN details drawer (`?grn=`). */
+  onDetails?: (grnId: string) => void;
 }) {
   const grns = useGoodsReceipts(warehouseId, active.filter, drill);
   // Story 2-4a — the expanded row (one at a time), keyed to its warehouse
@@ -614,8 +637,28 @@ function GoodsReceiptsCard({
     {
       key: 'recordedAt',
       header: 'Recorded',
-      render: (grn) => <time dateTime={grn.recordedAt}>{new Date(grn.recordedAt).toLocaleString()}</time>,
+      // Story 2-9a (PENDING gate-in) — the IST clock, as the gate-in card reads.
+      render: (grn) => <time dateTime={grn.recordedAt}>{istDateTimeLabel(grn.recordedAt)}</time>,
     },
+    ...(onDetails === undefined
+      ? []
+      : [
+          {
+            // Story 2-9a — the GRN document: parties, arrival, lines, downloads.
+            key: 'details',
+            header: '',
+            render: (grn: GoodsReceiptEntryDto) => (
+              <button
+                type="button"
+                aria-label={`Details of ${grn.code}`}
+                onClick={() => onDetails(grn.id)}
+                className="text-xs text-(--primary) underline underline-offset-2"
+              >
+                Details
+              </button>
+            ),
+          } satisfies DataTableColumn<GoodsReceiptEntryDto>,
+        ]),
     {
       // Story 9-3a — the GRN's receipts and putaways, in its OWN warehouse
       // (never the active one).
