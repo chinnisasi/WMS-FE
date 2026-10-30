@@ -53,6 +53,27 @@ import {
   receiptHeading,
   receiptLineText,
   receivedOfAuthorized,
+  AWAITING_REVIEW_BADGE,
+  REVERSED_BADGE,
+  RETURN_ORIGIN_LABEL,
+  REVIEW_STATUS_LABEL,
+  MATCH_KIND_LABEL,
+  REJECT_REASON_LABEL,
+  REJECT_REASON_OPTIONS,
+  NOT_OUR_GOODS_HINT,
+  CLIENT_PROMPTED_WARNING,
+  blindAcceptedOutcome,
+  blindRejectedOutcome,
+  blindReviewReason,
+  blindReviewRefusalReloads,
+  isBlindReturn,
+  openRmaForSuggestion,
+  parcelReferenceText,
+  parseRejectDraft,
+  previewBlindLinks,
+  reviewBadge,
+  reviewSummaryText,
+  sameParcelText,
 } from './returns';
 import { UNREACHABLE_REASON } from './outbound-orders';
 
@@ -85,6 +106,10 @@ describe('words', () => {
       'other',
     ]);
     expect(RETURN_REASON_LABEL['wrong-item']).toBe('Wrong item');
+    // Story 4-7b — the label map knows `unannounced` (a blind line's reason), the create options never offer it.
+    expect(RETURN_REASON_LABEL.unannounced).toBe('Unannounced');
+    expect(RETURN_REASON_OPTIONS.map((o) => o.value)).not.toContain('unannounced');
+    expect(returnReasonText({ reasonCode: 'unannounced', reasonNote: null })).toBe('Unannounced');
   });
 
   test('cancel is offered on an open return only; create on a dispatched order only', () => {
@@ -98,6 +123,9 @@ describe('words', () => {
     expect(returnOrderLabel({ orderReference: 'SHOP-#1', orderId: 'o-1' })).toBe('SHOP-#1');
     // Story 4-1b — no reference: the order id's short form (its last 8 characters).
     expect(returnOrderLabel({ orderReference: null, orderId: '0198f7a2-1b3c-7d4e-8f90-0000000000b1' })).toBe('000000b1');
+    // Story 4-7b — an unannounced return linked to no order.
+    expect(returnOrderLabel({ orderReference: null, orderId: null })).toBe('Unannounced');
+    expect(returnOrderLabel({ orderReference: 'SHOP-#9', orderId: null })).toBe('SHOP-#9');
     const lines = [
       { skuId: 'a', authorizedQty: 2 },
       { skuId: 'b', authorizedQty: 1.25 },
@@ -401,6 +429,133 @@ describe('story 4-7a — the RMA-line badge (A7), from the receipts', () => {
     expect(lineDispositionText({ ...split, restocked: 0.5, onHold: 0, scrapped: 0, failedInspection: 0, open: 0 }, { uom: 'kg', uomPrecision: 3 })).toBe(
       '0.500 restocked',
     );
+  });
+});
+
+describe('story 4-7b — the badge of an unannounced return\'s line', () => {
+  test('pending reads "Awaiting review" (never "Dispositioned"), rejected reads "Reversed", accepted behaves as 4-7a', () => {
+    // Pending: open 0, nothing decided — 4-7a alone would say "Dispositioned".
+    const pending = receiptLine({ openQty: 0, pendingReviewQty: 2, reversedQty: 0 });
+    expect(lineDispositionState('rl-1', [{ lines: [pending] }])).toBe('pending-review');
+    expect(lineAwaitsDisposition('rl-1', [{ lines: [pending] }])).toBe(false);
+    const rejected = receiptLine({ openQty: 0, pendingReviewQty: 0, reversedQty: 2 });
+    expect(lineDispositionState('rl-1', [{ lines: [rejected] }])).toBe('reversed');
+    const accepted = receiptLine({ openQty: 2, pendingReviewQty: 0, reversedQty: 0 });
+    expect(lineDispositionState('rl-1', [{ lines: [accepted] }])).toBe('awaiting');
+    const acceptedDone = receiptLine({ openQty: 0, restockedQty: 2, pendingReviewQty: 0, reversedQty: 0 });
+    expect(lineDispositionState('rl-1', [{ lines: [acceptedDone] }])).toBe('dispositioned');
+    expect(lineDispositionSplit('rl-1', [{ lines: [pending] }])).toMatchObject({ pendingReview: 2, reversed: 0 });
+    // An authorized line carries neither figure: unchanged.
+    expect(lineDispositionSplit('rl-1', [{ lines: [receiptLine()] }])).toMatchObject({ pendingReview: 0, reversed: 0 });
+    expect(AWAITING_REVIEW_BADGE).toContain('Awaiting review');
+    expect(REVERSED_BADGE).toContain('Reversed');
+  });
+});
+
+describe('story 4-7b — the blind-return vocabulary and review', () => {
+  const blind = (over: Record<string, unknown> = {}) =>
+    ({
+      code: 'RMA-0042',
+      origin: 'blind',
+      reviewStatus: 'pending',
+      reviewReasonCode: null,
+      reviewNote: null,
+      parcelReference: 'AWB123',
+      ...over,
+    }) as never;
+
+  test('the label maps are Records over the generated unions', () => {
+    expect(RETURN_ORIGIN_LABEL).toEqual({ authorized: 'Authorized', blind: 'Unannounced' });
+    expect(REVIEW_STATUS_LABEL).toEqual({ pending: 'Awaiting review', accepted: 'Accepted', rejected: 'Reversed' });
+    expect(MATCH_KIND_LABEL).toEqual({ awb: 'matched by AWB', 'order-reference': 'matched by order reference' });
+    expect(Object.keys(REJECT_REASON_LABEL)).toEqual(['mis-scanned', 'not-our-goods', 'duplicate', 'other']);
+    expect(REJECT_REASON_OPTIONS.map((o) => o.value)).toEqual(['mis-scanned', 'not-our-goods', 'duplicate', 'other']);
+    expect(NOT_OUR_GOODS_HINT).toBe('Hand these back to the carrier or receive them for the right client');
+    expect(CLIENT_PROMPTED_WARNING).toBe("Client chosen by the operator — the barcode is also another client's");
+  });
+
+  test('the list badge and the detail sentence follow the review; an authorized return has neither', () => {
+    expect(isBlindReturn({ origin: undefined })).toBe(false);
+    expect(reviewBadge({ origin: 'authorized', reviewStatus: null })).toBeNull();
+    expect(reviewBadge({ origin: 'blind', reviewStatus: 'pending' })).toEqual({ word: 'Awaiting review', tone: 'warning' });
+    expect(reviewBadge({ origin: 'blind', reviewStatus: 'rejected' })).toEqual({ word: 'Reversed', tone: 'neutral' });
+    expect(reviewBadge({ origin: 'blind', reviewStatus: 'accepted' })).toEqual({ word: 'Accepted', tone: 'success' });
+    expect(reviewSummaryText({ origin: 'authorized', reviewStatus: null, reviewReasonCode: null, reviewNote: null, parcelReference: null })).toBeNull();
+    expect(reviewSummaryText(blind())).toContain('Awaiting review on the Unannounced tab');
+    expect(reviewSummaryText(blind({ reviewStatus: 'rejected', reviewReasonCode: 'other', reviewNote: 'wrong dock' }))).toContain('(Other — wrong dock)');
+    expect(parcelReferenceText({ parcelReference: null })).toBe('none scanned');
+    expect(sameParcelText({ sameParcelRmas: [] })).toBeNull();
+    expect(sameParcelText({ sameParcelRmas: [{ id: 'x', code: 'RMA-0040', reviewStatus: 'rejected' }] })).toBe('Also received as RMA-0040 (Reversed)');
+    expect(openRmaForSuggestion({ openRmasForSuggestedOrder: [{ id: 'r', code: 'RMA-0012', status: 'open' }] })).toMatchObject({ code: 'RMA-0012' });
+    expect(openRmaForSuggestion({})).toBeNull();
+  });
+
+  test('the reject draft: a reason, a note for "other", at most 200; a blank note is absent', () => {
+    expect(parseRejectDraft({ reasonCode: '', note: '' }).problem).toBe('Pick why this parcel is rejected.');
+    expect(parseRejectDraft({ reasonCode: 'other', note: '   ' }).problem).toBe('The reason “Other” needs a note saying why.');
+    expect(parseRejectDraft({ reasonCode: 'other', note: 'x'.repeat(201) }).problem).toBe('Keep the note to 200 characters.');
+    expect(parseRejectDraft({ reasonCode: 'mis-scanned', note: '  ' }).body).toEqual({ reasonCode: 'mis-scanned' });
+    expect(parseRejectDraft({ reasonCode: 'other', note: ' wrong dock ' }).body).toEqual({ reasonCode: 'other', note: 'wrong dock' });
+  });
+
+  test('the link preview mirrors A11: first fitting order line, capacity decremented, serials subset, kit parents skipped', () => {
+    const order = {
+      lines: [
+        rl({ orderLineId: 'kit', skuId: 'x', kitParent: true, returnableQty: 9 }),
+        rl({ orderLineId: 'o1', skuId: 'x', returnableQty: 2 }),
+        rl({ orderLineId: 'o2', skuId: 'x', returnableQty: 2 }),
+        rl({ orderLineId: 'o3', skuId: 's', serialTracked: true, returnableQty: 1, returnableSerials: [serial('SN-1')] }),
+      ],
+    };
+    const line = (id: string, skuId: string, qty: number, serials: string[] = []) => ({ id, skuId, receivedQty: qty, serials: serials.map(serial) });
+    // X 2 + X 1 over order lines X 2 + X 2: both link.
+    expect(previewBlindLinks([line('a', 'x', 2), line('b', 'x', 1)], order).map((p) => p.links)).toEqual([true, true]);
+    // X 3 fits no single line.
+    expect(previewBlindLinks([line('a', 'x', 3)], order).map((p) => p.links)).toEqual([false]);
+    // A serial not returnable on the line stays unlinked; a returnable one links; reused in the same parcel it does not.
+    expect(previewBlindLinks([line('a', 's', 1, ['SN-9'])], order)[0]!.links).toBe(false);
+    expect(previewBlindLinks([line('a', 's', 1, ['SN-1']), line('b', 's', 1, ['SN-1'])], order).map((p) => p.links)).toEqual([true, false]);
+    // Fractions compare in milli.
+    expect(previewBlindLinks([line('a', 'x', 1.5), line('b', 'x', 0.5)], { lines: [rl({ orderLineId: 'o', skuId: 'x', returnableQty: 2 })] }).map((p) => p.links)).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  test('the accept banner is built from the response: the order, or none, and the unlinked lines by SKU', () => {
+    const lines = [
+      { id: 'l1', skuId: 'sku-a', receivedQty: 2 },
+      { id: 'l2', skuId: 'sku-b', receivedQty: 1 },
+    ] as never;
+    const codes: Record<string, string> = { 'sku-a': 'SKU-A', 'sku-b': 'SKU-B' };
+    expect(blindAcceptedOutcome({ code: 'RMA-0042', orderId: 'o-1', orderReference: 'SHOP-1', lines, unlinkedLines: [] }).word).toBe(
+      'RMA-0042 accepted — linked to order SHOP-1',
+    );
+    const partial = blindAcceptedOutcome({ code: 'RMA-0042', orderId: 'o-1', orderReference: 'SHOP-1', lines, unlinkedLines: ['l2'] }, (id) => codes[id] ?? null);
+    expect(partial.reason).toContain('Not linked (no order line could take it): SKU-B × 1');
+    const none = blindAcceptedOutcome({ code: 'RMA-0042', orderId: null, orderReference: null, lines, unlinkedLines: ['l1', 'l2'] });
+    expect(none.word).toBe('RMA-0042 accepted with no order');
+    expect(blindRejectedOutcome({ code: 'RMA-0042', reviewReasonCode: 'not-our-goods' }).reason).toContain(NOT_OUR_GOODS_HINT);
+  });
+
+  test('the review refusals branch on the code; the moved-on ones reload', () => {
+    const p = (code: string, status = 409, ext: Record<string, unknown> = {}) =>
+      new ApiProblem(code, status, 'd', 't', ext);
+    expect(blindReviewReason(p('review-not-pending', 409, { reviewStatus: 'accepted' }))).toBe("This parcel's review is already accepted — the queue has refreshed.");
+    expect(blindReviewReason(p('reject-above-threshold', 409, { threshold: 10, totalQty: 12 }))).toContain('removes 12 units, above your write-off threshold of 10');
+    expect(blindReviewReason(p('order-client-mismatch'))).toContain("another client's");
+    expect(blindReviewReason(p('document-warehouse-mismatch'))).toContain("another warehouse's");
+    expect(blindReviewReason(p('order-not-dispatched', 409, { orderStatus: 'accepted' }))).toContain('not dispatched');
+    expect(blindReviewReason(p('disposition-scope-quarantined'))).toContain('reconcile quarantine');
+    expect(blindReviewReason(p('rma-not-blind', 409, { origin: 'authorized' }))).toContain('authorized');
+    expect(blindReviewReason(new Error('offline'))).toBe(UNREACHABLE_REASON);
+    expect(blindReviewRefusalReloads(p('review-not-pending'))).toBe(true);
+    expect(blindReviewRefusalReloads(p('rma-not-blind'))).toBe(true);
+    expect(blindReviewRefusalReloads(p('not-found', 404))).toBe(true);
+    expect(blindReviewRefusalReloads(p('reject-above-threshold'))).toBe(false);
+    // 4-7a dispose on a line not accepted.
+    expect(dispositionRefusalReloads(p('review-pending'))).toBe(true);
+    expect(dispositionReason(p('review-rejected'))).toContain('rejected at review');
   });
 });
 

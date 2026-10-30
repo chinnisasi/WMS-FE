@@ -88,6 +88,8 @@ export const LEDGER_EVENT_TYPES = [
   // Story 4-7a — a returned unit restocked (RETURNS → a storage bin) or scrapped (RETURNS → out).
   'return.restocked',
   'return.scrapped',
+  // Story 4-7b — an unannounced return rejected at review: RETURNS → out.
+  'return.reversed',
   // Story 2-8b — a return to vendor's dispatched units, out of DAMAGED.
   'rtv.dispatched',
 ] as const satisfies readonly LedgerEventType[];
@@ -113,6 +115,7 @@ export const LEDGER_TYPE_LABEL: Readonly<Record<LedgerEventType, string>> = {
   'qc.failed': 'QC failed',
   'return.restocked': 'Return restocked',
   'return.scrapped': 'Return scrapped',
+  'return.reversed': 'Return reversed',
   'rtv.dispatched': 'Returned to vendor',
 };
 

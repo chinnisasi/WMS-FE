@@ -22,7 +22,7 @@ import {
   selectAllSerials,
   type ReturnDraft,
   type ReturnDraftLine,
-  type ReturnReasonCode,
+  type AuthorizableReasonCode,
 } from '@/lib/returns';
 import { useReturnable } from '@/lib/use-returns';
 import { ulid } from '@/lib/ulid';
@@ -259,7 +259,7 @@ function ReturnLineRow({
         <select
           aria-label={`Reason for ${code}`}
           value={entry.reasonCode}
-          onChange={(event) => onEdit(line.orderLineId, { reasonCode: event.target.value as ReturnReasonCode | '' })}
+          onChange={(event) => onEdit(line.orderLineId, { reasonCode: event.target.value as AuthorizableReasonCode | '' })}
           className={`${selectClass} w-auto py-1`}
         >
           <option value="">Reason…</option>

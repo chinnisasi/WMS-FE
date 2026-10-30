@@ -3,6 +3,7 @@ import type {
   CountVarianceEntryResponseDto,
   MissingLicenceDto,
   RejectedGrnLineDto,
+  BlindEntryRefusedDto,
   RejectedOpResponse,
   ReturnEntryRefusedDto,
 } from '@/lib/api/generated';
@@ -367,6 +368,82 @@ export const RETURN_MASTER_DATA_GUIDANCE = 'Fix the location or warehouse master
 export const RETURN_RMA_CLOSED_GUIDANCE =
   'The return authorization is cancelled or already received — create a new one for these units, then receive them again.';
 
+// ── story 4-7b: an unannounced parcel's refused units (return.receive_blind) ──
+
+/**
+ * The catalog remedy (Discard only): the unit could not be identified or
+ * booked, so it is on the dock and booked nowhere until the catalog is fixed.
+ */
+export const BLIND_RECEIVE_REVIEW_GUIDANCE =
+  'Units are on the dock and booked nowhere — fix the catalog entry (batch, serial, SKU), then receive them again as an unannounced parcel';
+
+/** The re-scan remedy: the unit is known, the capture was wrong. */
+export const BLIND_RECAPTURE_GUIDANCE =
+  'Re-scan these units with the correct capture (serial, batch, weight or quantity), then receive them again as an unannounced parcel.';
+
+/** The other-client remedy: one parcel holds one client's goods. */
+export const BLIND_OTHER_CLIENT_GUIDANCE =
+  "These units are another client's — receive them as their own unannounced parcel for that client.";
+
+/** The serial-in-stock remedy: the serial is already booked somewhere — likely a duplicate parcel or a mis-scan. */
+export const BLIND_SERIAL_IN_STOCK_GUIDANCE =
+  'This serial is already in stock — check whether the parcel was received before (a duplicate) or the wrong serial was scanned, then receive it again if it is genuinely back.';
+
+/** Why an unannounced parcel's unit was not booked, in words — a `Record` over the generated union (12 reasons). */
+export const BLIND_REFUSAL_LABEL: Readonly<Record<BlindEntryRefusedDto['reason'], string>> = {
+  'not-in-catalog': 'not in the catalog',
+  'sku-not-of-client': "another client's SKU",
+  'kit-cannot-hold-stock': 'a kit — receive its components',
+  'qty-precision': 'quantity too precise',
+  'missing-capture': 'capture missing',
+  'unexpected-capture': 'capture not expected',
+  'weight-out-of-range': 'weight out of range',
+  'serial-unknown': 'serial not known for this SKU',
+  'serial-blocked': 'serial blocked',
+  'serial-in-stock': 'serial already in stock',
+  'serial-duplicate': 'serial scanned twice in the parcel',
+  'batch-unknown': 'batch not known for this SKU',
+};
+
+/** Per blind refusal reason, the remedy; anything else reads the catalog remedy. */
+const BLIND_GUIDANCE_BY_CODE: Readonly<Record<BlindEntryRefusedDto['reason'], string>> = {
+  'not-in-catalog': BLIND_RECEIVE_REVIEW_GUIDANCE,
+  'sku-not-of-client': BLIND_OTHER_CLIENT_GUIDANCE,
+  'kit-cannot-hold-stock': BLIND_RECEIVE_REVIEW_GUIDANCE,
+  'qty-precision': BLIND_RECAPTURE_GUIDANCE,
+  'missing-capture': BLIND_RECAPTURE_GUIDANCE,
+  'unexpected-capture': BLIND_RECAPTURE_GUIDANCE,
+  'weight-out-of-range': BLIND_RECAPTURE_GUIDANCE,
+  'serial-unknown': BLIND_RECEIVE_REVIEW_GUIDANCE,
+  'serial-blocked': BLIND_RECEIVE_REVIEW_GUIDANCE,
+  'serial-in-stock': BLIND_SERIAL_IN_STOCK_GUIDANCE,
+  'serial-duplicate': BLIND_RECAPTURE_GUIDANCE,
+  'batch-unknown': BLIND_RECEIVE_REVIEW_GUIDANCE,
+};
+
+/**
+ * The remedies a `return.receive_blind` row's reviewer reads (story 4-7b),
+ * one per distinct remedy, in the order the row's reasons first name them: a
+ * server-raised row (`blind-entries-refused`) reads its `refusals`, a
+ * device-uploaded whole-op row its `problemCode`. Empty for any other op
+ * type; an unknown code reads the catalog remedy (`GUIDANCE_BY_CODE`'s
+ * `blind-entries-refused`).
+ */
+export function blindReceiveGuidance(entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>): readonly string[] {
+  if (entry.opType !== 'return.receive_blind') return [];
+  const refusals = Array.isArray(entry.payload['refusals']) ? (entry.payload['refusals'] as Record<string, unknown>[]) : null;
+  const codes = refusals === null ? [entry.problemCode] : refusals.map((item) => String(item['reason'] ?? entry.problemCode));
+  const out: string[] = [];
+  for (const code of codes) {
+    const guidance =
+      (BLIND_GUIDANCE_BY_CODE as Readonly<Record<string, string>>)[code] ??
+      (code === 'not-found' || code === 'document-warehouse-mismatch' ? RETURN_MASTER_DATA_GUIDANCE : null) ??
+      GUIDANCE_BY_CODE['blind-entries-refused']!;
+    if (!out.includes(guidance)) out.push(guidance);
+  }
+  return out;
+}
+
 /** Why a returned unit was not booked, in words — a `Record` over the generated union. */
 export const RETURN_REFUSAL_LABEL: Readonly<Record<ReturnEntryRefusedDto['reason'], string>> = {
   'not-on-authorization': 'not on the return',
@@ -395,6 +472,8 @@ const GUIDANCE_BY_CODE: Readonly<Record<string, string>> = {
   'returns-bin-conflict': RETURN_MASTER_DATA_GUIDANCE,
   'document-warehouse-mismatch': RETURN_MASTER_DATA_GUIDANCE,
   'rma-not-receivable': RETURN_RMA_CLOSED_GUIDANCE,
+  // Story 4-7b — the server-raised row of an unannounced parcel's refused units.
+  'blind-entries-refused': BLIND_RECEIVE_REVIEW_GUIDANCE,
 };
 
 /**
@@ -547,6 +626,8 @@ export function rejectedOpGuidance(
   if (entry.opType === 'return.restock') return [returnRestockGuidance(binCode)];
   // Story 2-8b — a refused handheld RTV pick: Discard only; the pick moved nothing.
   if (entry.opType === 'rtv.pick') return [rtvPickGuidance(entry.problemCode)];
+  // Story 4-7b — an unannounced parcel's refused units: Discard only; they are booked nowhere.
+  if (entry.opType === 'return.receive_blind') return blindReceiveGuidance(entry);
   // Story 4-2b (A7) — a bench pack of an order cancelled while the parcel was at the bench: Discard only.
   if (isCancelledOrderPack(entry)) return [PACK_ORDER_CANCELLED_GUIDANCE];
   // Story 2-3a — a refused device unload: Discard only; the web re-records it.
@@ -804,6 +885,7 @@ export function rejectedOpSummary(
   if (entry.opType === 'receipt-photo.stage') return receiptPhotoSummary(entry);
   if (entry.opType === 'return.restock') return returnRestockSummary(entry, skuCode);
   if (entry.opType === 'rtv.pick') return rtvPickSummary(entry);
+  if (entry.opType === 'return.receive_blind') return blindReceiveSummary(entry, skuCode);
   if (entry.opType !== 'return.receive') return null;
   const payload = entry.payload;
   const rmaCode = typeof payload['rmaCode'] === 'string' ? payload['rmaCode'] : null;
@@ -829,6 +911,45 @@ export function rejectedOpSummary(
   });
   const units = entries.length;
   return { heading: `${rma} — ${units} entr${units === 1 ? 'y' : 'ies'} not booked`, lines };
+}
+
+function blindRefusalWords(reason: string): string {
+  return (BLIND_REFUSAL_LABEL as Readonly<Record<string, string>>)[reason] ?? reason;
+}
+
+/**
+ * A `return.receive_blind` row's summary (story 4-7b): the parcel (its
+ * reference, else "no reference") and each refused entry with its reason. A
+ * server-raised row (`blind-entries-refused`) pairs `entries[i]` with
+ * `refusals[i]`; a device-uploaded whole-op refusal carries the whole op, so
+ * every entry reads with the row's problem code.
+ */
+export function blindReceiveSummary(
+  entry: Pick<RejectedOpResponse, 'opType' | 'payload' | 'problemCode'>,
+  skuCode: (skuId: string) => string | null = () => null,
+): { heading: string; lines: readonly string[] } | null {
+  if (entry.opType !== 'return.receive_blind') return null;
+  const payload = entry.payload;
+  const reference = typeof payload['parcelReference'] === 'string' && payload['parcelReference'] !== '' ? payload['parcelReference'] : null;
+  const parcel = reference === null ? 'Unannounced parcel (no reference)' : `Unannounced parcel ${reference}`;
+  const entries = Array.isArray(payload['entries']) ? (payload['entries'] as Record<string, unknown>[]) : [];
+  const refusals = Array.isArray(payload['refusals']) ? (payload['refusals'] as Record<string, unknown>[]) : null;
+  const lines = entries.map((item, index) => {
+    const skuId = typeof item['skuId'] === 'string' ? item['skuId'] : '';
+    const sku = skuCode(skuId) ?? (skuId === '' ? 'unknown SKU' : `SKU …${shortIdTail(skuId)}`);
+    const qty = typeof item['qty'] === 'number' ? item['qty'] : '?';
+    const condition = conditionWords(item['condition']);
+    const parts = [`${sku} × ${qty}`];
+    if (condition !== null) parts.push(condition);
+    if (typeof item['batchCode'] === 'string') parts.push(`batch ${item['batchCode']}`);
+    if (typeof item['serialNumber'] === 'string') parts.push(`serial ${item['serialNumber']}`);
+    if (typeof item['weightGrams'] === 'number') parts.push(`${(item['weightGrams'] / 1000).toFixed(3)} kg`);
+    if (typeof item['note'] === 'string') parts.push(`“${item['note']}”`);
+    const reasonCode = refusals === null ? entry.problemCode : String(refusals[index]?.['reason'] ?? entry.problemCode);
+    return `${parts.join(' · ')} — ${blindRefusalWords(reasonCode)}`;
+  });
+  const units = entries.length;
+  return { heading: `${parcel} — ${units} entr${units === 1 ? 'y' : 'ies'} not booked`, lines };
 }
 
 // ── story 1-2b: Accept anyway (a grn.shelf-life-refused row) ─────────────────

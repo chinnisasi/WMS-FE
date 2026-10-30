@@ -176,7 +176,9 @@ export type CountsTab = (typeof COUNTS_PAGE_TABS)['defaultTab'];
 /**
  * `/returns` (story 4-7a) — the return authorizations (the bare route, as
  * before) and the received units still awaiting a disposition
- * (`?tab=awaiting`): restock, quarantine or scrap.
+ * (`?tab=awaiting`): restock, quarantine or scrap. Story 4-7b — the
+ * unannounced parcels awaiting review (`?tab=unannounced`, `returns.manage`
+ * only — the screen passes it in `visibleTabs` by role).
  */
 export const RETURNS_PAGE_TABS = definePageTabs({
   route: '/returns',
@@ -184,6 +186,7 @@ export const RETURNS_PAGE_TABS = definePageTabs({
   tabs: [
     { id: 'authorizations', label: 'Authorizations' },
     { id: 'awaiting', label: 'Awaiting disposition' },
+    { id: 'unannounced', label: 'Unannounced' },
   ],
 });
 export type ReturnsTab = (typeof RETURNS_PAGE_TABS)['defaultTab'];

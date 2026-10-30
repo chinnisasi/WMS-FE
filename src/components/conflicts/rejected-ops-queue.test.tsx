@@ -518,6 +518,44 @@ describe('story 13-2 — a return.receive row is Discard only', () => {
   });
 });
 
+describe('story 4-7b — a return.receive_blind row is Discard only', () => {
+  const BLIND_OP_ID = '01989f7a-1b3c-7d4e-8f90-777777777777';
+
+  test('the row names the parcel and each refused unit with its reason, the catalog guidance, and only Discard', async () => {
+    opRows = [
+      rejectedOp(
+        {
+          opType: 'return.receive_blind',
+          classification: 'rejected',
+          problemCode: 'blind-entries-refused',
+          problemDetail: null,
+          decisions: ['discard'],
+          payload: {
+            warehouseId: WAREHOUSE_ID,
+            clientId: 'c-1',
+            parcelReference: 'AWB123',
+            occurredAt: '2026-10-30T05:00:00Z',
+            entries: [{ skuId: 'sku-1', qty: 1, condition: 'opened', note: null, batchCode: 'B9', serialNumber: null, weightGrams: null }],
+            refusals: [{ entryIndex: 1, reason: 'batch-unknown' }],
+          },
+        },
+        BLIND_OP_ID,
+      ),
+    ];
+    view = await mount();
+    const card = article(view, 'AWB123');
+    const text = card.textContent ?? '';
+    expect(text).toContain('Unannounced parcel AWB123 — 1 entry not booked');
+    expect(text).toContain('× 1 · Opened · batch B9 — batch not known for this SKU');
+    expect(text).toContain('Units are on the dock and booked nowhere — fix the catalog entry (batch, serial, SKU), then receive them again as an unannounced parcel');
+    expect(text).not.toContain('Create a return authorization for these units');
+    const labels = [...card.querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels).toContain('Discard');
+    expect(labels).not.toContain('Apply (re-execute)');
+    expect(labels).not.toContain('Open a recount');
+  });
+});
+
 describe('story 1-2b — a grn.shelf-life-refused row: Accept anyway needs a note', () => {
   const SHELF_OP_ID = '01989f7a-1b3c-7d4e-8f90-aaaaaaaaaaaa';
   const shelfRow = () =>

@@ -753,7 +753,25 @@ export const PORTAL_RETURN_REASON_LABEL: Readonly<Record<PortalReturnLineDto['re
   'not-as-described': 'Not as described',
   'changed-mind': 'Changed mind',
   other: 'Other',
+  // Story 4-7b — a parcel that came back with no return authorization.
+  unannounced: 'Arrived without a return request',
 };
+
+/**
+ * Story 4-7b — how the return came in, in the client's words — a `Record`
+ * over the generated union. Only accepted unannounced returns reach the portal.
+ */
+export const PORTAL_RETURN_ORIGIN_LABEL: Readonly<Record<PortalReturnRowDto['origin'], string>> = {
+  authorized: 'Authorized',
+  blind: 'Unannounced',
+};
+
+/** Story 4-7b — the origin line of a return: "Unannounced · parcel AWB123", or null for an authorized return. */
+export function portalReturnOriginText(row: Pick<PortalReturnRowDto, 'origin' | 'parcelReference'>): string | null {
+  if (row.origin !== 'blind') return null;
+  const word = PORTAL_RETURN_ORIGIN_LABEL.blind;
+  return row.parcelReference === null || row.parcelReference === '' ? word : `${word} · parcel ${row.parcelReference}`;
+}
 
 /** What the warehouse decided, in the client's words — a `Record` over the generated union. */
 export const PORTAL_DISPOSITION_OUTCOME_LABEL: Readonly<Record<PortalReturnDispositionDto['outcome'], string>> = {

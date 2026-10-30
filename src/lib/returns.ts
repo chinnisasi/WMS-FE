@@ -11,12 +11,15 @@ import { ApiProblem } from '@/lib/api/client';
 import type {
   AwaitingDispositionDto,
   BinResponse,
+  BlindAcceptResultDto,
+  RejectBlindReturnDto,
   CreateReturnAuthorizationDto,
   DisposeReturnDto,
   ReturnableLineDto,
   ReturnAuthorizationDto,
   ReturnAuthorizationLineInputDto,
   ReturnDispositionResultDto,
+  ReturnableOrderDto,
   ReturnReceiptLineViewDto,
   ReturnReceiptViewDto,
   ReturnSerialDto,
@@ -43,6 +46,12 @@ export function notifyReturnsChanged(): void {
 
 export type ReturnStatus = ReturnAuthorizationDto['status'];
 export type ReturnReasonCode = ReturnAuthorizationDto['lines'][number]['reasonCode'];
+/**
+ * Story 4-7b — the reasons a return can be AUTHORIZED with (the create
+ * body's narrower enum): every reason but `unannounced`, which only a blind
+ * receipt writes.
+ */
+export type AuthorizableReasonCode = CreateReturnAuthorizationDto['lines'][number]['reasonCode'];
 
 /** The backend's bounds, mirrored (`return-authorization.command.ts`). */
 export const MAX_RETURN_LINES = 200;
@@ -79,13 +88,25 @@ export const AWAITING_DISPOSITION_BADGE = '↩ Awaiting disposition';
 /** Story 4-7a — the badge once every received unit of the line is decided (restocked, scrapped or out of a settled hold). */
 export const DISPOSITIONED_BADGE = '✓ Dispositioned';
 
-/** The badge state of one RMA line: nothing received, something still undecided, or everything decided. */
-export type LineDispositionState = 'none' | 'awaiting' | 'dispositioned';
+/** Story 4-7b — the badge of an unannounced return's line before its review is decided (amber, word-first). */
+export const AWAITING_REVIEW_BADGE = '◷ Awaiting review';
+
+/** Story 4-7b — the badge of an unannounced return's line once the review rejected it: the booking was reversed. */
+export const REVERSED_BADGE = '⟲ Reversed';
+
+/**
+ * The badge state of one RMA line: nothing received, something still
+ * undecided, or everything decided. Story 4-7b — an unannounced return's line
+ * is `pending-review` until its review is decided (its `openQty` is 0, which
+ * would otherwise read "Dispositioned"), and `reversed` once rejected.
+ */
+export type LineDispositionState = 'none' | 'pending-review' | 'reversed' | 'awaiting' | 'dispositioned';
 
 type ReceiptLineSplit = Pick<
   ReturnReceiptLineViewDto,
   'rmaLineId' | 'qty' | 'openQty' | 'restockedQty' | 'scrappedQty' | 'onHoldQty' | 'failedInspectionQty'
->;
+> &
+  Partial<Pick<ReturnReceiptLineViewDto, 'pendingReviewQty' | 'reversedQty'>>;
 
 /** One RMA line's received units across its receipts, split by what became of them (base units). */
 export interface LineDispositionSplit {
@@ -95,6 +116,10 @@ export interface LineDispositionSplit {
   readonly onHold: number;
   readonly failedInspection: number;
   readonly scrapped: number;
+  /** Story 4-7b — units of an unannounced return still awaiting its review (0 on an authorized return). */
+  readonly pendingReview: number;
+  /** Story 4-7b — units of an unannounced return reversed at review (0 on an authorized return). */
+  readonly reversed: number;
 }
 
 /** A figure an older payload did not carry reads as undecided — never as a silent 0 (A7: a stale badge must not claim "Dispositioned"). */
@@ -115,7 +140,7 @@ export function lineDispositionSplit(
   const lines = receipts.flatMap((receipt) => receipt.lines).filter((line) => line.rmaLineId === rmaLineId);
   if (lines.length === 0) return null;
   let undecided = false;
-  const sum = { received: 0, open: 0, restocked: 0, onHold: 0, failedInspection: 0, scrapped: 0 };
+  const sum = { received: 0, open: 0, restocked: 0, onHold: 0, failedInspection: 0, scrapped: 0, pendingReview: 0, reversed: 0 };
   for (const line of lines) {
     const open = figure(line.openQty);
     const onHold = figure(line.onHoldQty);
@@ -126,6 +151,9 @@ export function lineDispositionSplit(
     sum.restocked += figure(line.restockedQty) ?? 0;
     sum.scrapped += figure(line.scrappedQty) ?? 0;
     sum.failedInspection += figure(line.failedInspectionQty) ?? 0;
+    // Story 4-7b — absent on an authorized return's line (reads 0).
+    sum.pendingReview += figure(line.pendingReviewQty) ?? 0;
+    sum.reversed += figure(line.reversedQty) ?? 0;
   }
   return { ...sum, undecided };
 }
@@ -142,6 +170,10 @@ export function lineDispositionState(
 ): LineDispositionState {
   const split = lineDispositionSplit(rmaLineId, receipts);
   if (split === null) return 'none';
+  // Story 4-7b — the review comes first: a pending line has nothing open yet
+  // (openQty 0) and must never read "Dispositioned"; a rejected one was reversed.
+  if (split.pendingReview > 0) return 'pending-review';
+  if (split.reversed > 0 && split.reversed >= split.received) return 'reversed';
   return split.undecided ? 'awaiting' : 'dispositioned';
 }
 
@@ -210,11 +242,28 @@ export const RETURN_REASON_LABEL: Readonly<Record<ReturnReasonCode, string>> = {
   'not-as-described': 'Not as described',
   'changed-mind': 'Changed mind',
   other: 'Other (say why)',
+  // Story 4-7b — a blind receipt's line (never offered on the create form).
+  unannounced: 'Unannounced',
 };
 
-export const RETURN_REASON_OPTIONS: readonly { value: ReturnReasonCode; label: string }[] = (
-  Object.keys(RETURN_REASON_LABEL) as ReturnReasonCode[]
-).map((value) => ({ value, label: RETURN_REASON_LABEL[value] }));
+/**
+ * Story 4-7b — the create form's reasons: an explicit ALLOWLIST of the six
+ * authorizable codes, never `Object.keys` of the label map (which now carries
+ * `unannounced`, a code the create body refuses).
+ */
+const AUTHORIZABLE_REASON_CODES: readonly AuthorizableReasonCode[] = [
+  'damaged',
+  'defective',
+  'wrong-item',
+  'not-as-described',
+  'changed-mind',
+  'other',
+];
+
+export const RETURN_REASON_OPTIONS: readonly { value: AuthorizableReasonCode; label: string }[] = AUTHORIZABLE_REASON_CODES.map((value) => ({
+  value,
+  label: RETURN_REASON_LABEL[value],
+}));
 
 /**
  * Only an open authorization can be cancelled (else 409 `rma-transition-invalid`).
@@ -285,7 +334,7 @@ export interface ReturnDraftLine {
   readonly qty: string;
   /** The checked serial numbers (serial lines) — the quantity is their count. */
   readonly serials: readonly string[];
-  readonly reasonCode: ReturnReasonCode | '';
+  readonly reasonCode: AuthorizableReasonCode | '';
   readonly reasonNote: string;
 }
 
@@ -418,9 +467,12 @@ export function parseCancelReason(reason: string): { reason: string | null; prob
  * The order column: the RMA's stored order reference (story 4-1b: the
  * client's order number, else the channel's reference), else the order id's
  * short form — the label rule's fallback, as the Outbound list shows it.
+ * Story 4-7b — an unannounced return linked to no order (pending, rejected,
+ * or accepted with "No order") reads "Unannounced".
  */
 export function returnOrderLabel(rma: Pick<ReturnAuthorizationDto, 'orderReference' | 'orderId'>): string {
-  return rma.orderReference ?? shortOrderId(rma.orderId);
+  if (rma.orderReference !== null) return rma.orderReference;
+  return rma.orderId === null ? 'Unannounced' : shortOrderId(rma.orderId);
 }
 
 /**
@@ -789,7 +841,10 @@ export function dispositionRefusalReloads(error: unknown): boolean {
     (error.code === 'exceeds-awaiting' ||
       error.code === 'not-found' ||
       error.code === 'document-warehouse-mismatch' ||
-      error.code === 'disposition-not-supported')
+      error.code === 'disposition-not-supported' ||
+      // Story 4-7b — an unannounced return's line not (or no longer) open to a decision.
+      error.code === 'review-pending' ||
+      error.code === 'review-rejected')
   );
 }
 
@@ -817,6 +872,11 @@ export function dispositionReason(error: unknown, uom: string | null = null): st
       }
       case 'disposition-not-supported':
         return "A serial unit or a returned case can't be quarantined — restock or scrap it.";
+      // Story 4-7b — an unannounced return is decided only once its review accepts it.
+      case 'review-pending':
+        return 'This unannounced return is still awaiting review — accept it on the Unannounced tab first. The queue has refreshed.';
+      case 'review-rejected':
+        return 'This unannounced return was rejected at review — its units were reversed and there is nothing to decide. The queue has refreshed.';
       case 'batch-expired':
         return "This batch has expired, so it can't go back on a shelf — quarantine or scrap it.";
       case 'batch-blocked':
@@ -856,6 +916,278 @@ export function dispositionReason(error: unknown, uom: string | null = null): st
         return 'Your session expired — sign in again.';
       case 'validation-failed':
         return error.detail ?? 'Check the decision and try again.';
+      default:
+        return error.detail ?? `Not recorded (${error.code}).`;
+    }
+  }
+  return UNREACHABLE_REASON;
+}
+
+// ── story 4-7b: blind (unannounced) returns and their review ─────────────────
+
+export type ReturnOrigin = NonNullable<ReturnAuthorizationDto['origin']>;
+export type ReviewStatus = NonNullable<ReturnAuthorizationDto['reviewStatus']>;
+export type MatchKind = NonNullable<ReturnAuthorizationDto['matchKind']>;
+export type RejectReasonCode = RejectBlindReturnDto['reasonCode'];
+
+/** How the return came in — a `Record` over the generated union, so a new origin fails the compile until named. */
+export const RETURN_ORIGIN_LABEL: Readonly<Record<ReturnOrigin, string>> = {
+  authorized: 'Authorized',
+  blind: 'Unannounced',
+};
+
+/** An unannounced return's review, in words — a `Record` over the generated union. */
+export const REVIEW_STATUS_LABEL: Readonly<Record<ReviewStatus, string>> = {
+  pending: 'Awaiting review',
+  accepted: 'Accepted',
+  rejected: 'Reversed',
+};
+
+/** How the parcel reference matched the suggested order — a `Record` over the generated union. */
+export const MATCH_KIND_LABEL: Readonly<Record<MatchKind, string>> = {
+  awb: 'matched by AWB',
+  'order-reference': 'matched by order reference',
+};
+
+/** Why an unannounced return is rejected — a `Record` over the generated union. */
+export const REJECT_REASON_LABEL: Readonly<Record<RejectReasonCode, string>> = {
+  'mis-scanned': 'Mis-scanned',
+  'not-our-goods': "Not this client's goods",
+  duplicate: 'Duplicate parcel',
+  other: 'Other (say why)',
+};
+
+/** The reject dialog's reasons, in display order (an allowlist — never "everything but"). */
+export const REJECT_REASON_OPTIONS: readonly { value: RejectReasonCode; label: string }[] = (
+  ['mis-scanned', 'not-our-goods', 'duplicate', 'other'] as const satisfies readonly RejectReasonCode[]
+).map((value) => ({ value, label: REJECT_REASON_LABEL[value] }));
+
+/** The backend's bound on a reject note (`blind-return.command.ts`, 1–200 once trimmed). */
+export const MAX_REJECT_NOTE_LENGTH = 200;
+
+/** A11 — the card's warning about "No order": its units count against no order's returnable quantity. */
+export const NO_ORDER_WARNING =
+  "“No order” links nothing: these units then count against no order's returnable quantity, so the same units can also be authorized on a return of their order.";
+
+/** A18 — the reject dialog's hint for goods that are not this client's: they stay on the dock. */
+export const NOT_OUR_GOODS_HINT = 'Hand these back to the carrier or receive them for the right client';
+
+/** A24 — the card's warning on a parcel whose client the operator chose at a barcode several clients share. */
+export const CLIENT_PROMPTED_WARNING = "Client chosen by the operator — the barcode is also another client's";
+
+/** A24 — the Accept dialog's required confirmation on such a parcel. */
+export function clientPromptedConfirmLabel(clientLabel: string | null): string {
+  return `I checked these goods are ${clientLabel ?? 'this client'}'s`;
+}
+
+/** True for an unannounced (blind) return — an older payload with no `origin` is an authorized one. */
+export function isBlindReturn(rma: Pick<ReturnAuthorizationDto, 'origin'>): boolean {
+  return rma.origin === 'blind';
+}
+
+/**
+ * The list's review chip of an unannounced return (A25): "Awaiting review"
+ * (amber), "Accepted" (green) or "Reversed" (neutral); null for an authorized
+ * return or a review state the payload does not carry.
+ */
+export function reviewBadge(
+  rma: Pick<ReturnAuthorizationDto, 'origin' | 'reviewStatus'>,
+): { word: string; tone: 'warning' | 'success' | 'neutral' } | null {
+  if (!isBlindReturn(rma) || rma.reviewStatus === null || rma.reviewStatus === undefined) return null;
+  const tone = rma.reviewStatus === 'pending' ? 'warning' : rma.reviewStatus === 'accepted' ? 'success' : 'neutral';
+  return { word: REVIEW_STATUS_LABEL[rma.reviewStatus], tone };
+}
+
+/** "AWB123", or "none scanned" — the parcel reference the operator scanned. */
+export function parcelReferenceText(rma: Pick<ReturnAuthorizationDto, 'parcelReference'>): string {
+  return rma.parcelReference === null || rma.parcelReference === undefined || rma.parcelReference === '' ? 'none scanned' : rma.parcelReference;
+}
+
+/**
+ * The review block of an expanded unannounced return: one sentence of where
+ * its review stands. Null on an authorized return.
+ */
+export function reviewSummaryText(
+  rma: Pick<ReturnAuthorizationDto, 'origin' | 'reviewStatus' | 'reviewReasonCode' | 'reviewNote' | 'parcelReference'>,
+): string | null {
+  if (!isBlindReturn(rma)) return null;
+  const parcel = `Unannounced parcel — reference ${parcelReferenceText(rma)}.`;
+  switch (rma.reviewStatus) {
+    case 'pending':
+      return `${parcel} Awaiting review on the Unannounced tab — its units cannot be decided until it is accepted.`;
+    case 'accepted':
+      return `${parcel} Accepted at review — its units await a disposition like any return.`;
+    case 'rejected': {
+      const reason = rma.reviewReasonCode === null || rma.reviewReasonCode === undefined ? null : REJECT_REASON_LABEL[rma.reviewReasonCode];
+      const why = reason === null ? '' : ` (${rma.reviewReasonCode === 'other' ? 'Other' : reason}${rma.reviewNote ? ` — ${rma.reviewNote}` : ''})`;
+      return `${parcel} Rejected at review${why} — its booking was reversed out of the Returns bin.`;
+    }
+    default:
+      return parcel;
+  }
+}
+
+/** "Also received as RMA-0040 (Awaiting review), RMA-0041 (Reversed)" — A20; null when no other parcel shares the reference. */
+export function sameParcelText(rma: Pick<ReturnAuthorizationDto, 'sameParcelRmas'>): string | null {
+  const others = rma.sameParcelRmas ?? [];
+  if (others.length === 0) return null;
+  return `Also received as ${others.map((other) => `${other.code} (${REVIEW_STATUS_LABEL[other.reviewStatus]})`).join(', ')}`;
+}
+
+/** The suggested order's open return, or null — the card's flag (A19). */
+export function openRmaForSuggestion(rma: Pick<ReturnAuthorizationDto, 'openRmasForSuggestedOrder'>): { id: string; code: string } | null {
+  const open = rma.openRmasForSuggestedOrder ?? [];
+  return open[0] ?? null;
+}
+
+/** The flag's sentence: the suggested order already has an open return to receive this parcel against. */
+export function openRmaFlagText(code: string): string {
+  return `${code} is open for the suggested order — this parcel may be that return. Receive it against ${code} on the handheld and reject this one as a duplicate.`;
+}
+
+/** The note the "Reject as received against RMA-X" shortcut prefills. */
+export function receivedAgainstNote(code: string): string {
+  return `Received against ${code}`;
+}
+
+/** One reject as the dialog holds it. */
+export interface RejectDraft {
+  readonly reasonCode: RejectReasonCode | '';
+  readonly note: string;
+}
+
+/**
+ * The reject body, or the first problem (nothing is sent while one stands):
+ * a reason, a note for "Other", at most 200 characters once trimmed; a blank
+ * note stays ABSENT.
+ */
+export function parseRejectDraft(draft: RejectDraft): { body: RejectBlindReturnDto | null; problem: string | null } {
+  if (draft.reasonCode === '') return { body: null, problem: 'Pick why this parcel is rejected.' };
+  const note = draft.note.trim();
+  if (draft.reasonCode === 'other' && note === '') return { body: null, problem: 'The reason “Other” needs a note saying why.' };
+  if ([...note].length > MAX_REJECT_NOTE_LENGTH) return { body: null, problem: `Keep the note to ${MAX_REJECT_NOTE_LENGTH} characters.` };
+  return { body: { reasonCode: draft.reasonCode, ...(note === '' ? {} : { note }) }, problem: null };
+}
+
+/** One RMA line's fate under an accept with a given order (the preview). */
+export interface LinkPreviewLine {
+  readonly rmaLineId: string;
+  readonly skuId: string;
+  readonly qty: number;
+  readonly links: boolean;
+}
+
+/**
+ * Which lines an accept with this order will link — the server's A11 plan
+ * (`planBlindLinks`) mirrored over the existing `GET returns/returnable`
+ * read: lines in order, each to the first non-kit-parent order line of its
+ * SKU whose remaining returnable quantity (decremented as lines link) covers
+ * it and, for serials, whose returnable serials hold every one not already
+ * taken. A preview only: the server re-plans under the order lock and the
+ * response's `unlinkedLines` is the ruling.
+ */
+export function previewBlindLinks(
+  lines: readonly Pick<ReturnAuthorizationDto['lines'][number], 'id' | 'skuId' | 'receivedQty' | 'serials'>[],
+  order: Pick<ReturnableOrderDto, 'lines'>,
+): readonly LinkPreviewLine[] {
+  const milli = (value: number) => Math.round(value * 1000);
+  const remaining = new Map(order.lines.map((line) => [line.orderLineId, milli(line.returnableQty)]));
+  const serialsOf = new Map(order.lines.map((line) => [line.orderLineId, new Set(line.returnableSerials.map((serial) => serial.serialNumber))]));
+  const taken = new Set<string>();
+  return lines.map((line) => {
+    const need = milli(line.receivedQty);
+    const serials = line.serials.map((serial) => serial.serialNumber);
+    const fit = order.lines.find(
+      (orderLine) =>
+        orderLine.skuId === line.skuId &&
+        !orderLine.kitParent &&
+        remaining.get(orderLine.orderLineId)! >= need &&
+        serials.every((number) => serialsOf.get(orderLine.orderLineId)!.has(number) && !taken.has(number)),
+    );
+    if (fit === undefined) return { rmaLineId: line.id, skuId: line.skuId, qty: line.receivedQty, links: false };
+    remaining.set(fit.orderLineId, remaining.get(fit.orderLineId)! - need);
+    for (const number of serials) taken.add(number);
+    return { rmaLineId: line.id, skuId: line.skuId, qty: line.receivedQty, links: true };
+  });
+}
+
+/** The accept's banner, built from the RESPONSE: the order it linked (or none) and the lines left unlinked. */
+export function blindAcceptedOutcome(
+  result: Pick<BlindAcceptResultDto, 'code' | 'orderId' | 'orderReference' | 'lines' | 'unlinkedLines'>,
+  skuCode: (skuId: string) => string | null = () => null,
+): { word: string; reason: string } {
+  const word =
+    result.orderId === null
+      ? `${result.code} accepted with no order`
+      : `${result.code} accepted — linked to order ${result.orderReference ?? shortOrderId(result.orderId)}`;
+  const unlinked = result.lines.filter((line) => result.unlinkedLines.includes(line.id));
+  if (result.orderId === null) {
+    return { word, reason: 'Its units now await a disposition. No line counts against an order.' };
+  }
+  if (unlinked.length === 0) {
+    return { word, reason: 'Every line linked to the order — its units now await a disposition.' };
+  }
+  const named = unlinked.map((line) => `${skuCode(line.skuId) ?? `SKU …${line.skuId.slice(-8)}`} × ${line.receivedQty}`);
+  return {
+    word,
+    reason: `Not linked (no order line could take ${unlinked.length === 1 ? 'it' : 'them'}): ${named.join(', ')}. Its units now await a disposition.`,
+  };
+}
+
+/** The reject's banner, built from the RESPONSE. */
+export function blindRejectedOutcome(rma: Pick<ReturnAuthorizationDto, 'code' | 'reviewReasonCode'>): { word: string; reason: string } {
+  const hint = rma.reviewReasonCode === 'not-our-goods' ? ` ${NOT_OUR_GOODS_HINT}.` : '';
+  return { word: `${rma.code} rejected`, reason: `Its booking was reversed out of the Returns bin.${hint}` };
+}
+
+/** The review refusals after which the queue re-reads and the dialog closes: the parcel itself moved on. */
+export function blindReviewRefusalReloads(error: unknown): boolean {
+  return (
+    error instanceof ApiProblem &&
+    (error.code === 'review-not-pending' || error.code === 'rma-not-blind' || (error.code === 'not-found' && error.status === 404))
+  );
+}
+
+/** The accept / reject refusals in words — branching on the problem `code`, never on prose. */
+export function blindReviewReason(error: unknown): string {
+  if (error instanceof ApiProblem) {
+    switch (error.code) {
+      case 'review-not-pending': {
+        const state = error.extensions.reviewStatus;
+        const word = typeof state === 'string' && Object.hasOwn(REVIEW_STATUS_LABEL, state) ? REVIEW_STATUS_LABEL[state as ReviewStatus].toLowerCase() : 'decided';
+        return `This parcel's review is already ${word} — the queue has refreshed.`;
+      }
+      case 'rma-not-blind':
+        return 'This return was authorized, not received unannounced — there is nothing to review. The queue has refreshed.';
+      case 'order-client-mismatch':
+        return "That order is another client's — link an order of the parcel's own client, or choose “No order”.";
+      case 'document-warehouse-mismatch':
+        return "That order is another warehouse's — link an order of this warehouse, or choose “No order”.";
+      case 'order-not-dispatched':
+        return 'That order is not dispatched — only a dispatched order can take a return.';
+      case 'reject-above-threshold': {
+        const threshold = error.extensions.threshold;
+        const total = error.extensions.totalQty;
+        return typeof threshold === 'number' && typeof total === 'number'
+          ? `Rejecting removes ${total} units, above your write-off threshold of ${threshold} — accept it and scrap the units in steps, or raise the threshold in the adjustment policy.`
+          : 'Above your write-off threshold — accept it and scrap the units in steps, or raise the threshold in the adjustment policy.';
+      }
+      case 'disposition-scope-quarantined':
+        return 'The Returns bin is under a reconcile quarantine — nothing can be reversed out of it until that is resolved.';
+      case 'not-found':
+        return 'The return or the order no longer exists — the queue has refreshed.';
+      case 'role-denied':
+        return "Your role can't review unannounced returns.";
+      case 'permission-denied':
+        return 'Your session belongs to another tenant — sign in again.';
+      case 'idempotency-key-reuse':
+        return 'This review was already sent with different details — change something and send it again.';
+      case 'conflict':
+        return 'The same review is still being processed — try again to read the result.';
+      case 'unauthenticated':
+        return 'Your session expired — sign in again.';
+      case 'validation-failed':
+        return error.detail ?? 'Check the review and try again.';
       default:
         return error.detail ?? `Not recorded (${error.code}).`;
     }

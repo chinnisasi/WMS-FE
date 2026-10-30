@@ -17,6 +17,12 @@ import {
   RETURN_MASTER_DATA_GUIDANCE,
   returnReceiveGuidance,
   RETURN_REFUSAL_LABEL,
+  BLIND_REFUSAL_LABEL,
+  BLIND_RECEIVE_REVIEW_GUIDANCE,
+  BLIND_RECAPTURE_GUIDANCE,
+  BLIND_OTHER_CLIENT_GUIDANCE,
+  BLIND_SERIAL_IN_STOCK_GUIDANCE,
+  blindReceiveGuidance,
   adjustmentDecisionReason,
   adjustmentListReason,
   isOwnerOnlyVariance,
@@ -427,6 +433,94 @@ describe('story 13-2 — per-type decisions and the return.receive summary', () 
   test('decision-not-available reads generically (the per-row guidance lives on return.receive cards)', () => {
     const error = problem('decision-not-available', 409);
     expect(rejectedOpsResolveReason(error)).toBe('That decision is not available for this op — refresh the queue.');
+  });
+});
+
+describe('story 4-7b — an unannounced parcel\'s refused units (return.receive_blind)', () => {
+  const row = (problemCode: string, reasons?: string[]) => ({
+    opType: 'return.receive_blind' as const,
+    problemCode,
+    payload: reasons === undefined ? {} : { refusals: reasons.map((reason, entryIndex) => ({ entryIndex, reason })) },
+  });
+
+  test('the refusal words cover the twelve reasons, and the catalog guidance is pinned', () => {
+    expect(Object.keys(BLIND_REFUSAL_LABEL).sort()).toEqual([
+      'batch-unknown',
+      'kit-cannot-hold-stock',
+      'missing-capture',
+      'not-in-catalog',
+      'qty-precision',
+      'serial-blocked',
+      'serial-duplicate',
+      'serial-in-stock',
+      'serial-unknown',
+      'sku-not-of-client',
+      'unexpected-capture',
+      'weight-out-of-range',
+    ]);
+    expect(BLIND_REFUSAL_LABEL['sku-not-of-client']).toBe("another client's SKU");
+    expect(BLIND_RECEIVE_REVIEW_GUIDANCE).toBe(
+      'Units are on the dock and booked nowhere — fix the catalog entry (batch, serial, SKU), then receive them again as an unannounced parcel',
+    );
+  });
+
+  test('guidance is per reason, de-duplicated, reads the problem code on a whole-op row, and only on return.receive_blind rows', () => {
+    expect(blindReceiveGuidance(row('blind-entries-refused', ['batch-unknown', 'serial-unknown', 'not-in-catalog']))).toEqual([BLIND_RECEIVE_REVIEW_GUIDANCE]);
+    expect(blindReceiveGuidance(row('blind-entries-refused', ['missing-capture', 'sku-not-of-client', 'serial-in-stock', 'serial-duplicate']))).toEqual([
+      BLIND_RECAPTURE_GUIDANCE,
+      BLIND_OTHER_CLIENT_GUIDANCE,
+      BLIND_SERIAL_IN_STOCK_GUIDANCE,
+    ]);
+    expect(blindReceiveGuidance(row('blind-entries-refused'))).toEqual([BLIND_RECEIVE_REVIEW_GUIDANCE]);
+    expect(blindReceiveGuidance(row('not-found'))).toEqual([RETURN_MASTER_DATA_GUIDANCE]);
+    expect(blindReceiveGuidance(row('validation-failed'))).toEqual([BLIND_RECEIVE_REVIEW_GUIDANCE]);
+    expect(blindReceiveGuidance({ opType: 'return.receive', problemCode: 'blind-entries-refused', payload: {} })).toEqual([]);
+    // The dispatcher routes the blind type to its own guidance, never the 13-2 authorization remedy.
+    expect(rejectedOpGuidance(row('blind-entries-refused', ['serial-blocked']))).toEqual([BLIND_RECEIVE_REVIEW_GUIDANCE]);
+    expect(rejectedOpGuidance(row('blind-entries-refused', ['serial-blocked']))).not.toContain(RETURN_RECEIVE_REVIEW_GUIDANCE);
+    // The 13-2 return.receive guidance learns the server-raised code too (one GUIDANCE_BY_CODE).
+    expect(returnReceiveGuidance({ opType: 'return.receive', problemCode: 'blind-entries-refused', payload: {} })).toEqual([BLIND_RECEIVE_REVIEW_GUIDANCE]);
+  });
+
+  test('a server-raised row names the parcel and pairs each entry with its refusal; a device whole-op row reads its problem code', () => {
+    const codes: Record<string, string> = { 'sku-a': 'SKU-A' };
+    const server = rejectedOpSummary(
+      {
+        opType: 'return.receive_blind',
+        problemCode: 'blind-entries-refused',
+        payload: {
+          warehouseId: 'w',
+          clientId: 'c',
+          parcelReference: 'AWB123',
+          occurredAt: '2026-10-30T05:00:00.000Z',
+          entries: [
+            { skuId: 'sku-a', qty: 1, condition: 'opened', note: null, batchCode: 'B9', serialNumber: null, weightGrams: null },
+            { skuId: '01989f7a-0000-7000-8000-00000000c0de', qty: 1, condition: 'resaleable', note: null, batchCode: null, serialNumber: 'SN-7', weightGrams: null },
+          ],
+          refusals: [
+            { entryIndex: 0, reason: 'batch-unknown' },
+            { entryIndex: 2, reason: 'serial-blocked' },
+          ],
+        },
+      },
+      (id) => codes[id] ?? null,
+    );
+    expect(server).toEqual({
+      heading: 'Unannounced parcel AWB123 — 2 entries not booked',
+      lines: [
+        'SKU-A × 1 · Opened · batch B9 — batch not known for this SKU',
+        'SKU …0000c0de × 1 · Resaleable · serial SN-7 — serial blocked',
+      ],
+    });
+    const device = rejectedOpSummary({
+      opType: 'return.receive_blind',
+      problemCode: 'validation-failed',
+      payload: { parcelReference: null, entries: [{ skuId: 'sku-a', qty: 2, condition: 'damaged' }] },
+    });
+    expect(device).toEqual({
+      heading: 'Unannounced parcel (no reference) — 1 entry not booked',
+      lines: ['SKU …sku-a × 2 · Damaged — validation-failed'],
+    });
   });
 });
 
