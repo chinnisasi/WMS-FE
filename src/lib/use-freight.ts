@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-import { fetchApiFreightCandidates, fetchApiFreightLoad, fetchApiListFreightLoads, type FreightCandidatesStatus } from '@/lib/api/client';
-import type { FreightCandidateDto, FreightLoadListRowDto, FreightLoadViewDto } from '@/lib/api/generated';
+import { fetchApiFreightCandidates, fetchApiFreightLoad, fetchApiListFreightLoads, fetchApiOrderShipping, type FreightCandidatesStatus } from '@/lib/api/client';
+import type { FreightCandidateDto, FreightLoadListRowDto, FreightLoadViewDto, OrderFreightBlockDto } from '@/lib/api/generated';
 import { CLIENT_PENDING, type ClientFilter } from '@/lib/active-client';
 import { readSession, subscribeSession } from '@/lib/auth';
 import { MAX_FREIGHT_CANDIDATES, freightReason, type FreightLoadsListView } from '@/lib/freight';
 import { OUTBOUND_CHANGED_EVENT } from '@/lib/outbound';
 import type { ResourceState, Reloadable } from '@/lib/resource-state';
 import { useClientEpoch } from '@/lib/use-client-epoch';
+import { MAX_CONCURRENT_CARTON_READS, settleLimited } from '@/lib/use-outbound-pack-dispatch';
 
 /**
  * Story 4-9a — the freight reads (A20, A21), in the canonical hook shape
@@ -219,4 +220,39 @@ export function useFreightCandidates(warehouseId: string | null, filters: Freigh
   }, []);
   const stale = tenantId === null || warehouseId === null || filters === null || result === null || result.key !== key;
   return { ...(stale ? ({ state: 'loading' } as const) : result.state), reload };
+}
+
+const NO_TRUCKS: ReadonlyMap<string, OrderFreightBlockDto> = new Map();
+
+/**
+ * The Pack & Dispatch rows on an open truck (A30): the order's shipping read
+ * (its `freight` block) per open row, at most 4 in flight — the pipeline's
+ * list row carries no freight fact as built. Only a `planned` consignment is
+ * kept; a failed read leaves its row as before (the expanded panel says why).
+ * Refetched on every outbound change, keeping the last map until it lands.
+ */
+export function useOrdersOnTrucks(tenantId: string, orderIds: readonly string[]): ReadonlyMap<string, OrderFreightBlockDto> {
+  const [revision] = useOutboundRevision();
+  const [result, setResult] = useState<{ key: string; data: ReadonlyMap<string, OrderFreightBlockDto> } | null>(null);
+  const key = `${tenantId}|${orderIds.join(',')}`;
+  useEffect(() => {
+    if (orderIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const settled = await settleLimited(orderIds, MAX_CONCURRENT_CARTON_READS, (orderId) => fetchApiOrderShipping(tenantId, orderId));
+      if (cancelled) return;
+      const data = new Map<string, OrderFreightBlockDto>();
+      settled.forEach((entry, index) => {
+        if (entry.status === 'fulfilled' && entry.value.freight != null && entry.value.freight.status === 'planned') data.set(orderIds[index]!, entry.value.freight);
+      });
+      setResult({ key, data });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // `orderIds` enters through `key` — the array's identity churns every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, revision]);
+  if (orderIds.length === 0 || result === null || result.key !== key) return NO_TRUCKS;
+  return result.data;
 }

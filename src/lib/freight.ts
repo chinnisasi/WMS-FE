@@ -33,6 +33,7 @@ import {
   type VehicleType,
 } from '@/lib/freight-primitives';
 import { CONTAINER_NO_RE, PHONE_RE, VEHICLE_NO_RE, VEHICLE_RULE, istToday, normalizeContainerNo, normalizePhone, normalizeVehicleNo } from '@/lib/gate-ins';
+import { DISPATCH_VIA_FREIGHT_REASON } from '@/lib/outbound-pack-dispatch';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 import type { StatusTone } from '@/lib/status-tone';
 
@@ -149,7 +150,7 @@ export const FREIGHT_ORDER_REFUSAL_WORD: Readonly<Record<FreightOrderRefusalCode
   'eway-bill-expired': 'E-way bill expired — record the extended bill first',
 };
 
-export { COMPLIANCE_EXCEPTION_WORD };
+export { COMPLIANCE_EXCEPTION_WORD, DISPATCH_VIA_FREIGHT_REASON };
 
 // ── figures ────────────────────────────────────────────────────────────────
 
@@ -971,8 +972,6 @@ export function scanOutcome(
   return { tone: 'accepted', word: `${response.scan.packageCode} loaded`, reason: progress };
 }
 
-/** Per-order dispatch of an order on an open load (A19). */
-export const DISPATCH_VIA_FREIGHT_REASON = 'This order is on a truck — it leaves with the freight load, or remove it from the load first.';
 
 /** The PDFs' file names. */
 export function loadingSheetFilename(load: Pick<FreightLoadViewDto, 'code' | 'status'>): string {

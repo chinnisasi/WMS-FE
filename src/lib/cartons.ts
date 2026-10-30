@@ -37,6 +37,14 @@ export const MAX_LABELS_PER_PRINT = 1_000;
 export const MAX_PACKAGE_LABELS = 9_999;
 /** A shipment's weight bound (0042 `shipments_weight_grams_range`, A33). */
 export const MAX_SHIPMENT_WEIGHT_GRAMS = 1_000_000;
+/** Story 4-9a (A4) — a pallet's weight bound in grams, and its "said to contain" count. */
+export const MAX_PALLET_WEIGHT_GRAMS = 3_000_000;
+export const MAX_PALLET_INNER_COUNT = 9_999;
+/** Story 4-9a (A47) — the pack's gross bound (`order_packs_gross_weight_range`). */
+export const MAX_PACK_GROSS_GRAMS = 200_000_000;
+
+/** Story 4-9a — a package is a carton or a pallet. */
+export type PackageKind = 'carton' | 'pallet';
 
 const MILLI = 1_000;
 
@@ -79,6 +87,10 @@ export interface CartonDraft {
   readonly lengthCm: string;
   readonly widthCm: string;
   readonly heightCm: string;
+  /** Story 4-9a (A19) — absent is a carton. */
+  readonly type?: PackageKind;
+  /** Story 4-9a — a pallet's "cartons on this pallet" ('' = not stated). */
+  readonly innerCount?: string;
 }
 
 export interface CartonGrid {
@@ -121,6 +133,8 @@ export interface LiveCarton {
   readonly weightGrams: number | null;
   readonly dimensionsMm: { readonly lengthMm: number; readonly widthMm: number; readonly heightMm: number } | null;
   readonly lines: readonly { readonly skuId: string; readonly qty: number; readonly handlingUnitIds?: readonly string[] | null }[];
+  readonly type?: PackageKind;
+  readonly innerCount?: number | null;
 }
 
 function gramsToKgText(grams: number | null): string {
@@ -150,6 +164,7 @@ export function gridFromLivePack(skus: readonly CartonSku[], cartons: readonly L
       lengthCm: mmToCmText(carton.dimensionsMm?.lengthMm),
       widthCm: mmToCmText(carton.dimensionsMm?.widthMm),
       heightCm: mmToCmText(carton.dimensionsMm?.heightMm),
+      ...(carton.type === 'pallet' ? { type: 'pallet' as const, innerCount: carton.innerCount == null ? '' : String(carton.innerCount) } : {}),
     };
   });
   return { skus, cartons: drafts.length > 0 ? drafts : [EMPTY_CARTON], caseCarton };
@@ -190,6 +205,26 @@ export function setCartonQty(grid: CartonGrid, index: number, skuId: string, raw
 }
 
 export type CartonMeasure = 'weightKg' | 'lengthCm' | 'widthCm' | 'heightCm';
+
+/** Story 4-9a — a container's package type; a carton drops its inner count. */
+export function setPackageType(grid: CartonGrid, index: number, type: PackageKind): CartonGrid {
+  return {
+    ...grid,
+    cartons: grid.cartons.map((c, i) => {
+      if (i !== index) return c;
+      if (type === 'pallet') return { ...c, type: 'pallet', innerCount: c.innerCount ?? '' };
+      const { type: _type, innerCount: _inner, ...rest } = c;
+      void _type;
+      void _inner;
+      return rest;
+    }),
+  };
+}
+
+/** Story 4-9a — a pallet's "cartons on this pallet". */
+export function setInnerCount(grid: CartonGrid, index: number, raw: string): CartonGrid {
+  return { ...grid, cartons: grid.cartons.map((c, i) => (i === index ? { ...c, innerCount: raw } : c)) };
+}
 
 export function setCartonMeasure(grid: CartonGrid, index: number, field: CartonMeasure, raw: string): CartonGrid {
   return replaceCarton(grid, index, (c) => ({ ...c, [field]: raw }));
@@ -265,20 +300,24 @@ export interface CartonBody {
   scanned: CartonScanLine[];
   weightGrams?: number;
   dimensionsMm?: CartonDimensions;
+  /** Story 4-9a — sent only on a pallet (a carton's body hashes as 4-5a's). */
+  type?: 'pallet';
+  innerCount?: number;
 }
 
 export type ParsedCartonGrid =
   | { readonly cartons: CartonBody[]; readonly problem: null }
   | { readonly cartons: null; readonly problem: string };
 
-/** kg (up to 3 decimals) → whole grams, 1–1,000,000; '' → absent. */
-export function parseCartonWeightKg(raw: string): { grams: number | undefined; problem: string | null } {
+/** kg (up to 3 decimals) → whole grams, 1–1,000,000 (a pallet 3,000,000); '' → absent. */
+export function parseCartonWeightKg(raw: string, kind: PackageKind = 'carton'): { grams: number | undefined; problem: string | null } {
+  const max = kind === 'pallet' ? MAX_PALLET_WEIGHT_GRAMS : MAX_CARTON_WEIGHT_GRAMS;
   const trimmed = raw.trim();
   if (trimmed === '') return { grams: undefined, problem: null };
   if (!/^\d+(?:\.\d{1,3})?$/.test(trimmed)) return { grams: undefined, problem: 'Weight is kilograms, to at most 3 decimals (grams).' };
   const grams = Math.round(Number(trimmed) * 1000);
   if (grams < 1) return { grams: undefined, problem: 'Weight is at least 1 gram.' };
-  if (grams > MAX_CARTON_WEIGHT_GRAMS) return { grams: undefined, problem: `Weight is at most ${formatCount(MAX_CARTON_WEIGHT_GRAMS / 1000)} kg.` };
+  if (grams > max) return { grams: undefined, problem: `Weight is at most ${formatCount(max / 1000)} kg${kind === 'pallet' ? ' for a pallet' : ''}.` };
   return { grams, problem: null };
 }
 
@@ -324,6 +363,7 @@ export function parseCartonGrid(grid: CartonGrid, mode: 'pack' | 'recarton'): Pa
   if (mode === 'pack' && !canSplitAtPack(grid.skus)) return fail(CATCH_WEIGHT_PACK_NOTE);
   const cartons: CartonBody[] = [];
   let lineCount = 0;
+  let gross = 0;
   const totals = new Map<string, number>();
   for (const [index, carton] of grid.cartons.entries()) {
     const n = index + 1;
@@ -359,17 +399,30 @@ export function parseCartonGrid(grid: CartonGrid, mode: 'pack' | 'recarton'): Pa
     if (scanned.length === 0) return fail(`Carton ${n} is empty — remove it.`);
     if (scanned.length > MAX_LINES_PER_CARTON) return fail(`Carton ${n} holds more than ${MAX_LINES_PER_CARTON} SKUs.`);
     lineCount += scanned.length;
-    const weight = parseCartonWeightKg(carton.weightKg);
-    if (weight.problem !== null) return fail(`Carton ${n}: ${weight.problem}`);
+    const pallet = carton.type === 'pallet';
+    const noun = pallet ? `Pallet ${n}` : `Carton ${n}`;
+    const weight = parseCartonWeightKg(carton.weightKg, pallet ? 'pallet' : 'carton');
+    if (weight.problem !== null) return fail(`${noun}: ${weight.problem}`);
     const dims = parseCartonDimensionsCm(carton.lengthCm, carton.widthCm, carton.heightCm);
-    if (dims.problem !== null) return fail(`Carton ${n}: ${dims.problem}`);
+    if (dims.problem !== null) return fail(`${noun}: ${dims.problem}`);
+    let innerCount: number | undefined;
+    const innerText = (carton.innerCount ?? '').trim();
+    if (pallet && innerText !== '') {
+      if (!/^\d+$/.test(innerText) || Number(innerText) < 1 || Number(innerText) > MAX_PALLET_INNER_COUNT) {
+        return fail(`${noun}: the cartons on it are a whole number from 1 to ${formatCount(MAX_PALLET_INNER_COUNT)}.`);
+      }
+      innerCount = Number(innerText);
+    }
+    gross += weight.grams ?? 0;
     cartons.push({
       scanned,
       ...(weight.grams === undefined ? {} : { weightGrams: weight.grams }),
       ...(dims.dimensionsMm === undefined ? {} : { dimensionsMm: dims.dimensionsMm }),
+      ...(pallet ? { type: 'pallet' as const, ...(innerCount === undefined ? {} : { innerCount }) } : {}),
     });
   }
   if (lineCount > MAX_CARTON_LINES) return fail(`A pack holds at most ${formatCount(MAX_CARTON_LINES)} carton lines.`);
+  if (gross > MAX_PACK_GROSS_GRAMS) return fail(`The packages weigh more than ${formatCount(MAX_PACK_GROSS_GRAMS / 1000)} kg together — check the weights.`);
   for (const sku of grid.skus) {
     const cartoned = totals.get(sku.skuId) ?? 0;
     if (cartoned !== toMilli(sku.packedQty)) {
@@ -407,7 +460,8 @@ export function buildPackBody(
   if (grid === null) return { body: { ...oneCarton, scanned: [...oneCarton.scanned] }, problem: null };
   const parsed = parseCartonGrid(grid, 'pack');
   if (parsed.problem !== null) return { body: null, problem: parsed.problem };
-  if (parsed.cartons.length === 1) {
+  // Story 4-9a — one pallet is still a package list (the top-level body has no type).
+  if (parsed.cartons.length === 1 && parsed.cartons[0]!.type !== 'pallet') {
     // A grid left with one carton (split, then the others removed) is today's
     // payload: that carton's weight and dimensions travel as the top-level
     // ones — the bench's own measurements fieldset is hidden while splitting.

@@ -19,6 +19,9 @@ import {
   rowTotals,
   setCartonMeasure,
   setCartonQty,
+  setInnerCount,
+  setPackageType,
+  type PackageKind,
   type CartonGrid,
   type CartonMeasure,
   type CartonSku,
@@ -123,6 +126,50 @@ export function CartonGridEditor({
                 </tr>
               );
             })}
+            {/* Story 4-9a (A30) — each package is a carton or a pallet; a pallet may say how many cartons it holds. */}
+            <tr className="border-t border-(--border)">
+              <th scope="row" className="px-2 py-1 text-left font-normal text-(--muted-foreground)">
+                Package
+              </th>
+              {grid.cartons.map((carton, index) => (
+                <td key={index} className="px-2 py-1">
+                  <select
+                    className={`${inputClass} w-24 py-1`}
+                    aria-label={`Package ${index + 1} type`}
+                    value={carton.type ?? 'carton'}
+                    disabled={disabled}
+                    onChange={(e) => onChange(setPackageType(grid, index, e.target.value as PackageKind))}
+                  >
+                    <option value="carton">Carton</option>
+                    <option value="pallet">Pallet</option>
+                  </select>
+                </td>
+              ))}
+              <td />
+            </tr>
+            {grid.cartons.some((c) => c.type === 'pallet') && (
+              <tr className="border-t border-(--border)">
+                <th scope="row" className="px-2 py-1 text-left font-normal text-(--muted-foreground)">
+                  Cartons on this pallet
+                </th>
+                {grid.cartons.map((carton, index) => (
+                  <td key={index} className="px-2 py-1">
+                    {carton.type === 'pallet' && (
+                      <input
+                        className={`${inputClass} w-20 py-1`}
+                        inputMode="numeric"
+                        aria-label={`Cartons on pallet ${index + 1}`}
+                        placeholder="—"
+                        value={carton.innerCount ?? ''}
+                        disabled={disabled}
+                        onChange={(e) => onChange(setInnerCount(grid, index, e.target.value))}
+                      />
+                    )}
+                  </td>
+                ))}
+                <td />
+              </tr>
+            )}
             {measures.map(({ field, word }) => (
               <tr key={field} className="border-t border-(--border)">
                 <th scope="row" className="px-2 py-1 text-left font-normal text-(--muted-foreground)">

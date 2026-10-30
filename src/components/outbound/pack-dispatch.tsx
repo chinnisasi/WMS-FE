@@ -77,7 +77,9 @@ import {
   type CartonGrid,
 } from '@/lib/cartons';
 import { dispatchesByHandover, handoverOutcome, shippingCell } from '@/lib/shipping';
-import { useOrderShipments } from '@/lib/use-shipping';
+import { useOrderShipments, useOrderShipping } from '@/lib/use-shipping';
+import { useOrdersOnTrucks } from '@/lib/use-freight';
+import { onTruckCell } from '@/lib/freight';
 import { useActiveClient, type ActiveClientState } from '@/lib/use-active-client';
 import { roleHasCapability } from '@/lib/users';
 import { ulid } from '@/lib/ulid';
@@ -215,6 +217,8 @@ function PackDispatchTable({
   // Story 4-5a (A26) — the packed row's "3 cartons · 12.4 kg".
   const packedOrderIds = pipeline.filter((order) => order.status === 'ready_to_dispatch').map((order) => order.id);
   const cartonSummaries = usePackedCartonSummaries(tenantId, packedOrderIds);
+  // Story 4-9a (A30) — the rows on an open truck: "On truck LD-0007 (stop 3)".
+  const onTrucks = useOrdersOnTrucks(tenantId, openOrderIds);
   // Story 4-4a (A20) — the handover builder, opened from a row's "Hand over".
   const [handover, setHandover] = useState<{ clientId: string | null; orderId: string; more: readonly string[] } | null>(null);
   // FE14 — Hand over on another row while the builder is open: joins the open draft for the same client, else says why not.
@@ -298,6 +302,14 @@ function PackDispatchTable({
               <button type="button" className={rowButtonClass} onClick={shipments.reload}>
                 Retry
               </button>
+            </span>
+          );
+        }
+        const truck = onTrucks.get(order.id);
+        if (truck !== undefined) {
+          return (
+            <span data-testid="shipping-cell-truck">
+              <StatusChip tone="info">{onTruckCell(truck)}</StatusChip>
             </span>
           );
         }
@@ -480,6 +492,9 @@ function PackDispatchPanel({
   const shipmentRead = useOrderShipment(orderId);
   const viaHandover =
     shipmentRead.state === 'ready' && shipmentRead.data !== null && dispatchesByHandover(shipmentRead.data.shipment);
+  // Story 4-9a (A30) — an order on an open truck leaves with the load: Dispatch and Hand over give way to "Open load".
+  const shippingRead = useOrderShipping(orderId);
+  const truck = shippingRead.state === 'ready' && shippingRead.data?.freight != null && shippingRead.data.freight.status === 'planned' ? shippingRead.data.freight : null;
   // The SKU map only decorates: it names each line's SKU code and unit, and a
   // line falls back to its raw `skuId` and the unit-agnostic quantity copy
   // when its SKU cannot be resolved — the pack flow is never blocked on it.
@@ -647,8 +662,16 @@ function PackDispatchPanel({
               {shipmentRead.state === 'failed' && (
                 <ReadFailure word="Shipment unavailable" reason={shipmentRead.reason} onRetry={shipmentRead.reload} />
               )}
-              {shipmentRead.state === 'ready' && !viaHandover && <LabelSection tenantId={tenantId} orderId={orderId} canLabel={canLabel} />}
-              {shipmentRead.state !== 'ready' ? null : viaHandover ? (
+              {truck !== null && (
+                <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="on-truck-row">
+                  <span>{onTruckCell(truck)} — it leaves with the truck.</span>
+                  <Link href={`/outbound?tab=freight&open=${truck.loadId}`} className={primaryClass} data-testid="open-load">
+                    Open load
+                  </Link>
+                </div>
+              )}
+              {truck === null && shipmentRead.state === 'ready' && !viaHandover && <LabelSection tenantId={tenantId} orderId={orderId} canLabel={canLabel} />}
+              {shipmentRead.state !== 'ready' || truck !== null ? null : viaHandover ? (
                 // The 4.6c Dispatch button gives way to Hand over (A20).
                 onHandOver !== undefined ? (
                   <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="hand-over-row">

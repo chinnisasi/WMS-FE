@@ -503,6 +503,9 @@ export function packReason(error: unknown): string {
   return UNREACHABLE_REASON;
 }
 
+/** Story 4-9a (A19) — the per-order dispatch of an order on an open truck, refused in words. */
+export const DISPATCH_VIA_FREIGHT_REASON = 'This order is on a truck — it leaves with the freight load, or remove it from the load first.';
+
 /** Story 4-4a — the per-order dispatch of a client-arranged order, refused in words (the one copy). */
 export const DISPATCH_VIA_HANDOVER_REASON =
   'The client arranged this courier — hand the parcel over to the courier (Hand over); the handover dispatches it.';
@@ -518,6 +521,8 @@ export function dispatchReason(error: unknown): string {
     if (error.code === 'order-holds-recalled-batch') return recalledBatchSentence(error);
     // Story 4-4a (A13) — the client arranged the courier: only a handover dispatches it.
     if (error.code === 'dispatch-via-handover') return DISPATCH_VIA_HANDOVER_REASON;
+    // Story 4-9a (A19) — the order is on an open truck: it leaves with the load.
+    if (error.code === 'dispatch-via-freight') return error.detail ?? DISPATCH_VIA_FREIGHT_REASON;
     // Story 4-6a (A13) — the brand's documents gate, worded by code from its extensions.
     const gate = gateRefusalSentence(error);
     if (gate !== null) return gate;
