@@ -151,6 +151,12 @@ import {
   receivingControllerPlaceQcHold,
   receivingControllerReleaseQcHold,
   receivingControllerReleaseReceiptHolds,
+  clientReturnsControllerCancel,
+  clientReturnsControllerCreate,
+  clientReturnsControllerDispatch,
+  clientReturnsControllerGet,
+  clientReturnsControllerList,
+  clientReturnsControllerReturnable,
   vendorReturnsControllerCancel,
   vendorReturnsControllerCreate,
   vendorReturnsControllerDispatch,
@@ -305,6 +311,8 @@ import {
   recallsControllerReport,
   recallsControllerShipments,
   portalControllerPortalReturns,
+  portalControllerPortalClientReturns,
+  portalControllerPortalClientReturn,
   portalControllerPurchaseOrder,
   portalControllerPurchaseOrders,
   portalControllerSkus,
@@ -624,6 +632,13 @@ import type {
   UnloadGateInDto,
   CreateVendorReturnDto,
   DispatchVendorReturnDto,
+  ClientReturnDto,
+  ClientReturnListResponse,
+  CreateClientReturnDto,
+  DispatchClientReturnDto,
+  ReturnableToClientResponse,
+  PortalClientReturnPageResponse,
+  PortalClientReturnDetailResponse,
   ReturnableDamagedResponse,
   VendorReturnDto,
   VendorReturnListResponse,
@@ -6120,6 +6135,24 @@ export async function fetchApiPortalReturn(
   return data;
 }
 
+/** Story 4-7c — this client's shipments back to it (returns to client), newest first. */
+export async function fetchApiPortalClientReturns(tenantId: string, options?: PortalPageOptions): Promise<PortalClientReturnPageResponse> {
+  const { data, error } = await portalControllerPortalClientReturns({ path: { tenantId }, query: portalPageQuery(options), signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
+/** Story 4-7c — one shipment back to this client. Another client's is a 404. */
+export async function fetchApiPortalClientReturn(
+  tenantId: string,
+  clientReturnId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PortalClientReturnDetailResponse> {
+  const { data, error } = await portalControllerPortalClientReturn({ path: { tenantId, clientReturnId }, signal: options?.signal });
+  if (error || !data) throw portalError(error);
+  return data;
+}
+
 export async function fetchApiPortalPurchaseOrder(
   tenantId: string,
   poId: string,
@@ -6764,6 +6797,116 @@ export async function fetchApiReturnableDamaged(
   const { data, error } = await vendorReturnsControllerReturnable({
     path: { tenantId, warehouseId },
     query: { clientId, ...(options?.skuId === undefined ? {} : { skuId: options.skuId }) },
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+// ── story 4-7c: returns to client ───────────────────────────────────────────
+
+/** Story 4-7c — the RTC statuses (the list's `status` filter). */
+export type ClientReturnStatusFilter = ClientReturnDto['status'];
+
+/**
+ * Story 4-7c — creates a return to client (`returns.manage`): a draft drawing
+ * on one client's awaiting receipt lines (RETURNS) and its DAMAGED arms, the
+ * brand and its chosen address frozen. The key is per draft.
+ */
+export async function fetchApiCreateClientReturn(
+  tenantId: string,
+  body: CreateClientReturnDto,
+  idempotencyKey: string,
+): Promise<ClientReturnDto> {
+  const { data, error } = await clientReturnsControllerCreate({
+    path: { tenantId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 4-7c — the tenant's returns to client, newest first; filters ride the query only when set. */
+export async function fetchApiListClientReturns(
+  tenantId: string,
+  options?: {
+    warehouseId?: string;
+    clientId?: string;
+    status?: ClientReturnStatusFilter;
+    cursor?: string;
+    limit?: number;
+    signal?: AbortSignal;
+  },
+): Promise<ClientReturnListResponse> {
+  const { data, error } = await clientReturnsControllerList({
+    path: { tenantId },
+    query: definedQuery({
+      warehouseId: options?.warehouseId,
+      clientId: options?.clientId,
+      status: options?.status,
+      cursor: options?.cursor,
+      limit: options?.limit,
+    }),
+    signal: options?.signal,
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 4-7c — one return to client: the frozen brand and address, lines, pick, dispatch and cancellation. */
+export async function fetchApiGetClientReturn(
+  tenantId: string,
+  clientReturnId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ClientReturnDto> {
+  const { data, error } = await clientReturnsControllerGet({ path: { tenantId, clientReturnId }, signal: options?.signal });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 4-7c — dispatches a picked return to client (`dispatch.execute`); the units leave RETURNS and DAMAGED (`rtc.dispatched`). */
+export async function fetchApiDispatchClientReturn(
+  tenantId: string,
+  clientReturnId: string,
+  body: DispatchClientReturnDto,
+  idempotencyKey: string,
+): Promise<ClientReturnDto> {
+  const { data, error } = await clientReturnsControllerDispatch({
+    path: { tenantId, clientReturnId },
+    body,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 4-7c — cancels a draft or picked return to client (`returns.manage`), with a reason. */
+export async function fetchApiCancelClientReturn(
+  tenantId: string,
+  clientReturnId: string,
+  reason: string,
+  idempotencyKey: string,
+): Promise<ClientReturnDto> {
+  const { data, error } = await clientReturnsControllerCancel({
+    path: { tenantId, clientReturnId },
+    body: { reason },
+    headers: { 'Idempotency-Key': idempotencyKey },
+  });
+  if (error || !data) throw unwrapError(error, 400);
+  return data;
+}
+
+/** Story 4-7c — what one client can send home from a warehouse: its awaiting receipt lines and its DAMAGED arms (after RTV and RTC claims). */
+export async function fetchApiReturnableToClient(
+  tenantId: string,
+  warehouseId: string,
+  clientId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ReturnableToClientResponse> {
+  const { data, error } = await clientReturnsControllerReturnable({
+    path: { tenantId, warehouseId },
+    query: { clientId },
     signal: options?.signal,
   });
   if (error || !data) throw unwrapError(error, 400);

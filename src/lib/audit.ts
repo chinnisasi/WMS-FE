@@ -88,6 +88,8 @@ export const AUDIT_TARGET_LABEL: Readonly<Record<AuditTargetType, string>> = {
   return_receipt: 'Return receipt',
   // Story 2-8b — a return to vendor (created, picked, dispatched, cancelled).
   vendor_return: 'Return to vendor',
+  // Story 4-7c — a return to client (created, picked, dispatched, cancelled).
+  client_return: 'Return to client',
   // Story 4-7a — a return line's disposition (restock, quarantine or scrap).
   return_disposition: 'Return disposition',
   sku: 'SKU',

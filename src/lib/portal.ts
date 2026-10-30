@@ -17,6 +17,8 @@ import type {
   PortalOrderRowDto,
   PortalAsnRowDto,
   PortalPurchaseOrderRowDto,
+  PortalClientReturnLineDto,
+  PortalClientReturnRowDto,
   PortalReturnDispositionDto,
   PortalReturnLineDto,
   PortalReturnRowDto,
@@ -814,7 +816,9 @@ export function portalReturnOrder(row: Pick<PortalReturnRowDto, 'orderReference'
 type DispositionTotals = Pick<
   PortalReturnRowDto,
   'receivedTotal' | 'restockedTotal' | 'onHoldTotal' | 'failedInspectionTotal' | 'scrappedTotal' | 'openTotal'
->;
+> &
+  // Story 4-7c — units on their way back to the client, and shipped back (absent → 0).
+  Partial<Pick<PortalReturnRowDto, 'returningToClientTotal' | 'returnedToClientTotal'>>;
 
 /**
  * What became of the received units, only the non-zero parts, in the order of
@@ -829,6 +833,10 @@ export function portalDispositionSummary(totals: DispositionTotals): string {
   if (totals.onHoldTotal > 0) parts.push(`${portalQuantity(totals.onHoldTotal)} held for inspection`);
   if (totals.failedInspectionTotal > 0) parts.push(`${portalQuantity(totals.failedInspectionTotal)} failed inspection`);
   if (totals.scrappedTotal > 0) parts.push(`${portalQuantity(totals.scrappedTotal)} scrapped`);
+  const returning = totals.returningToClientTotal ?? 0;
+  const returned = totals.returnedToClientTotal ?? 0;
+  if (returning > 0) parts.push(`${portalQuantity(returning)} being returned to you`);
+  if (returned > 0) parts.push(`${portalQuantity(returned)} shipped back to you`);
   if (totals.openTotal > 0) parts.push(`${portalQuantity(totals.openTotal)} awaiting a decision`);
   return parts.length === 0 ? 'Received' : parts.join(' · ');
 }
@@ -839,14 +847,71 @@ export function portalDispositionSummary(totals: DispositionTotals): string {
  * unit is (green), null when nothing is back yet (the status says so).
  */
 export function portalReturnDecisionState(
-  totals: Pick<DispositionTotals, 'receivedTotal' | 'openTotal' | 'onHoldTotal'>,
+  totals: Pick<DispositionTotals, 'receivedTotal' | 'openTotal' | 'onHoldTotal' | 'returningToClientTotal'>,
 ): { tone: 'warning' | 'success'; word: string } | null {
   if (totals.receivedTotal === 0) return null;
-  return totals.openTotal > 0 || totals.onHoldTotal > 0 ? { tone: 'warning', word: '↩ Awaiting a decision' } : { tone: 'success', word: '✓ All decided' };
+  if (totals.openTotal > 0 || totals.onHoldTotal > 0) return { tone: 'warning', word: '↩ Awaiting a decision' };
+  // Story 4-7c (A5) — units on a return shipment still being prepared are not settled yet.
+  if ((totals.returningToClientTotal ?? 0) > 0) return { tone: 'warning', word: '⇢ Being returned to you' };
+  return { tone: 'success', word: '✓ All decided' };
 }
 
 /** One decision in words: "Scrapped 2 · Damaged" / "Restocked 3". */
 export function portalDispositionText(entry: Pick<PortalReturnDispositionDto, 'outcome' | 'qty' | 'reasonCode'>): string {
   const head = `${PORTAL_DISPOSITION_OUTCOME_LABEL[entry.outcome]} ${portalQuantity(entry.qty)}`;
   return entry.reasonCode === null ? head : `${head} · ${PORTAL_DISPOSITION_REASON_LABEL[entry.reasonCode] ?? entry.reasonCode}`;
+}
+
+// ── story 4-7c: shipments back to the client (returns to client) ─────────────
+
+export type PortalClientReturnStatus = PortalClientReturnRowDto['status'];
+
+/**
+ * A14 — a return to client in the client's words: draft and picked read
+ * "Being prepared" (the client never sees the floor's states), dispatched
+ * "Shipped". A `Record` over the generated union.
+ */
+export const PORTAL_CLIENT_RETURN_STATUS_LABEL: Readonly<Record<PortalClientReturnStatus, string>> = {
+  draft: 'Being prepared',
+  picked: 'Being prepared',
+  dispatched: 'Shipped',
+  cancelled: 'Cancelled',
+};
+
+/** The status chip's tone: being prepared (amber), shipped (green), cancelled (neutral). */
+export function portalClientReturnTone(status: string): 'warning' | 'success' | 'neutral' {
+  if (status === 'dispatched') return 'success';
+  if (status === 'draft' || status === 'picked') return 'warning';
+  return 'neutral';
+}
+
+export function portalClientReturnStatusLabel(status: string): string {
+  return Object.hasOwn(PORTAL_CLIENT_RETURN_STATUS_LABEL, status) ? PORTAL_CLIENT_RETURN_STATUS_LABEL[status as PortalClientReturnStatus] : status;
+}
+
+/** Where a line came from, in the client's words. */
+export const PORTAL_CLIENT_RETURN_SOURCE_LABEL: Readonly<Record<PortalClientReturnLineDto['source'], string>> = {
+  returns: 'A customer return',
+  damaged: 'Damaged stock',
+};
+
+/** The grade a returned unit came back in (a customer return's line), in words. */
+export const PORTAL_CLIENT_RETURN_CONDITION_LABEL: Readonly<Record<NonNullable<PortalClientReturnLineDto['condition']>, string>> = {
+  resaleable: 'Resaleable',
+  opened: 'Opened',
+  damaged: 'Damaged',
+  'missing-parts': 'Missing parts',
+};
+
+/** Who carries it: the transporter, else the typed carrier, else "—". */
+export function portalClientReturnCarrier(row: Pick<PortalClientReturnRowDto, 'transporterName' | 'carrierName'>): string {
+  return row.transporterName ?? row.carrierName ?? '—';
+}
+
+/** The quantity cell: "3 of 4 shipped" once dispatched short, the shipped figure when whole, else the total. */
+export function portalClientReturnQuantity(row: Pick<PortalClientReturnRowDto, 'totalQuantity' | 'shippedQuantity'>): string {
+  if (row.shippedQuantity === null) return portalQuantity(row.totalQuantity);
+  return row.shippedQuantity === row.totalQuantity
+    ? portalQuantity(row.shippedQuantity)
+    : `${portalQuantity(row.shippedQuantity)} of ${portalQuantity(row.totalQuantity)} shipped`;
 }

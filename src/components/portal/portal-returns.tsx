@@ -22,6 +22,7 @@ import {
 import { usePortalReturn, usePortalReturns } from '@/lib/use-portal';
 
 import { DataTable, expandedRowId, type DataTableColumn } from '@/components/data-table/data-table';
+import { PortalClientReturns } from '@/components/portal/portal-client-returns';
 import { ReadFailure, rowButtonClass, Section, selectClass } from '@/components/shared/surface';
 
 const FILTERS: readonly PortalReturnFilter[] = ['all', 'awaiting', 'dispositioned'];
@@ -97,49 +98,53 @@ export function PortalReturns() {
     { key: 'created', header: 'Raised', render: (row) => portalDate(row.createdAt) },
   ];
   return (
-    <Section title="Returns">
-      <div className="max-w-3xl text-(--muted-foreground)">
-        Your customers&apos; returns, newest first — and what the warehouse decided for each unit once it was back: restocked to
-        sell again, held for inspection, or scrapped.
-      </div>
-      <label className="flex w-fit flex-col gap-1">
-        <span className="text-xs text-(--muted-foreground)">Show</span>
-        <select
-          aria-label="Show"
-          className={`${selectClass} w-auto py-1`}
-          value={filter}
-          onChange={(e) => {
-            setFilter(e.target.value as PortalReturnFilter);
-            setOpenId(null);
-          }}
-        >
-          {FILTERS.map((option) => (
-            <option key={option} value={option}>
-              {PORTAL_RETURN_FILTER_LABEL[option]}
-            </option>
-          ))}
-        </select>
-      </label>
-      {returns.state === 'loading' && <div className="text-(--muted-foreground)">Loading your returns…</div>}
-      {returns.state === 'failed' && <ReadFailure word="Returns not loaded" reason={returns.reason} onRetry={returns.reload} />}
-      {returns.state === 'ready' && (
-        <DataTable<PortalReturnRowDto>
-          key={filter}
-          columns={columns}
-          rows={returns.data.items}
-          nextCursor={returns.data.nextCursor}
-          onCursor={returns.onCursor}
-          emptyMessage={
-            filter === 'all'
-              ? 'No returns for your company yet.'
-              : filter === 'awaiting'
-                ? 'Nothing is awaiting a decision — every returned unit has been decided.'
-                : 'No fully decided returns yet.'
-          }
-          renderExpanded={(row) => (row.id === openId ? <ReturnDetail rmaId={row.id} /> : null)}
-        />
-      )}
-    </Section>
+    <div className="flex flex-col gap-4">
+      <Section title="Returns">
+        <div className="max-w-3xl text-(--muted-foreground)">
+          Your customers&apos; returns, newest first — and what the warehouse decided for each unit once it was back: restocked to
+          sell again, held for inspection, or scrapped.
+        </div>
+        <label className="flex w-fit flex-col gap-1">
+          <span className="text-xs text-(--muted-foreground)">Show</span>
+          <select
+            aria-label="Show"
+            className={`${selectClass} w-auto py-1`}
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value as PortalReturnFilter);
+              setOpenId(null);
+            }}
+          >
+            {FILTERS.map((option) => (
+              <option key={option} value={option}>
+                {PORTAL_RETURN_FILTER_LABEL[option]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {returns.state === 'loading' && <div className="text-(--muted-foreground)">Loading your returns…</div>}
+        {returns.state === 'failed' && <ReadFailure word="Returns not loaded" reason={returns.reason} onRetry={returns.reload} />}
+        {returns.state === 'ready' && (
+          <DataTable<PortalReturnRowDto>
+            key={filter}
+            columns={columns}
+            rows={returns.data.items}
+            nextCursor={returns.data.nextCursor}
+            onCursor={returns.onCursor}
+            emptyMessage={
+              filter === 'all'
+                ? 'No returns for your company yet.'
+                : filter === 'awaiting'
+                  ? 'Nothing is awaiting a decision — every returned unit has been decided.'
+                  : 'No fully decided returns yet.'
+            }
+            renderExpanded={(row) => (row.id === openId ? <ReturnDetail rmaId={row.id} /> : null)}
+          />
+        )}
+      </Section>
+      {/* Story 4-7c — the client's shipments back to it (returns to client), read only. */}
+      <PortalClientReturns />
+    </div>
   );
 }
 
@@ -166,6 +171,9 @@ function ReturnDetail({ rmaId }: { rmaId: string }) {
                   failedInspectionTotal: line.failedInspectionQty,
                   scrappedTotal: line.scrappedQty,
                   openTotal: line.openQty,
+                  // Story 4-7c — units on their way back to the client, and shipped back.
+                  returningToClientTotal: line.returningToClientQty,
+                  returnedToClientTotal: line.returnedToClientQty,
                 })}
               </div>
             )}

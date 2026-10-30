@@ -564,6 +564,25 @@ export function pendSourceText(entry: { readonly sourceDeviceId?: string | null 
 }
 
 /**
+ * Story 4-7c (D3) — the write-off's second stage: open returns to client
+ * (with any returns to vendor) claim the units (409 `damaged-claimed-by-rtc`,
+ * `clientReturnCodes` and `vendorReturnCodes`, `claimedQty` = both claims).
+ */
+export function damagedClaimedByRtcReason(error: ApiProblem): string {
+  const codesOf = (key: string): string[] => {
+    const raw = error.extensions[key];
+    return Array.isArray(raw) ? raw.filter((code): code is string => typeof code === 'string') : [];
+  };
+  const codes = [...codesOf('clientReturnCodes'), ...codesOf('vendorReturnCodes')];
+  const claimed = typeof error.extensions['claimedQty'] === 'number' ? (error.extensions['claimedQty'] as number) : null;
+  const onHand = typeof error.extensions['onHandQty'] === 'number' ? (error.extensions['onHandQty'] as number) : null;
+  const by = codes.length === 0 ? 'an open return to client' : codes.join(', ');
+  const figures =
+    claimed === null || onHand === null ? '' : ` (${formatCount(claimed)} of the ${formatCount(onHand)} on hand)`;
+  return `These damaged units are claimed by ${by}${figures} — cancel the return to client (or vendor) first, or write off fewer units.`;
+}
+
+/**
  * Story 2-8b (A2) — a DAMAGED write-off refused because open returns to
  * vendor claim the units (409 `damaged-claimed-by-rtv`): the RTV codes and
  * the figures from the problem's extensions.
@@ -604,6 +623,8 @@ export function adjustReason(error: unknown, context: { readonly batchCode?: str
       return 'A kit holds no stock — adjust its component SKUs.';
     case 'damaged-claimed-by-rtv':
       return damagedClaimedByRtvReason(error);
+    case 'damaged-claimed-by-rtc':
+      return damagedClaimedByRtcReason(error);
     case 'duplicate-serial':
       return 'A serial is already in stock — an Add takes only serials that are not on hand.';
     case 'serial-elsewhere':

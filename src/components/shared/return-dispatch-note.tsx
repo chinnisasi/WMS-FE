@@ -1,3 +1,5 @@
+import { Fragment } from 'react';
+
 import type { DispatchNoteModel, NoteParty } from '@/lib/consignment-capture';
 
 /**
@@ -107,18 +109,34 @@ function NoteCopy({ model, copy }: { readonly model: DispatchNoteModel; readonly
             </tr>
           </thead>
           <tbody>
-            {model.lines.map((line) => (
-              <tr key={line.key} className="border-b border-(--border)" data-testid="note-line">
-                <td className="data py-1 pr-2">{line.lineNo}</td>
-                <td className="py-1 pr-2 font-mono">{line.skuCode}</td>
-                <td className="py-1 pr-2">{line.skuName}</td>
-                <td className="py-1 pr-2 font-mono">{line.hsn}</td>
-                <td className="py-1 pr-2 font-mono">{line.batch}</td>
-                <td className="py-1 pr-2">{line.reason}</td>
-                <td className="data py-1 pr-2 text-right">{line.quantity}</td>
-                <td className="py-1 pr-2">{line.uom}</td>
-                {!model.dispatched && <td className="py-1">&nbsp;</td>}
-              </tr>
+            {model.lines.map((line, index) => (
+              <Fragment key={line.key}>
+                {line.group !== undefined && line.group !== model.lines[index - 1]?.group && (
+                  <tr className="border-b border-(--border)" data-testid="note-group">
+                    <td colSpan={model.dispatched ? 8 : 9} className="pt-2 pb-1 font-semibold">
+                      {line.group}
+                    </td>
+                  </tr>
+                )}
+                <tr className="border-b border-(--border)" data-testid="note-line">
+                  <td className="data py-1 pr-2">{line.lineNo}</td>
+                  <td className="py-1 pr-2 font-mono">{line.skuCode}</td>
+                  <td className="py-1 pr-2">
+                    {line.skuName}
+                    {line.detail !== undefined && (
+                      <span className="block text-[11px] text-(--muted-foreground)" data-testid="note-line-detail">
+                        {line.detail}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1 pr-2 font-mono">{line.hsn}</td>
+                  <td className="py-1 pr-2 font-mono">{line.batch}</td>
+                  <td className="py-1 pr-2">{line.reason}</td>
+                  <td className="data py-1 pr-2 text-right">{line.quantity}</td>
+                  <td className="py-1 pr-2">{line.uom}</td>
+                  {!model.dispatched && <td className="py-1">&nbsp;</td>}
+                </tr>
+              </Fragment>
             ))}
           </tbody>
         </table>

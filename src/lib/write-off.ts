@@ -1,6 +1,6 @@
 import type { BatchListItemDto, SkuResponse, StockAdjustmentDto } from '@/lib/api/generated';
 import { ApiProblem } from '@/lib/api/client';
-import { ADJUST_NOTE_MAX, ADJUSTMENT_PENDINGS_HREF as PENDINGS_HREF, damagedClaimedByRtvReason, parseAdjustQuantity } from '@/lib/adjust';
+import { ADJUST_NOTE_MAX, ADJUSTMENT_PENDINGS_HREF as PENDINGS_HREF, damagedClaimedByRtcReason, damagedClaimedByRtvReason, parseAdjustQuantity } from '@/lib/adjust';
 import { formatQuantity } from '@/lib/format-quantity';
 import { UNREACHABLE_REASON } from '@/lib/outbound-orders';
 
@@ -107,6 +107,8 @@ export function writeOffReason(error: unknown): string {
       return 'The bin is retired — nothing was changed.';
     case 'damaged-claimed-by-rtv':
       return damagedClaimedByRtvReason(error);
+    case 'damaged-claimed-by-rtc':
+      return damagedClaimedByRtcReason(error);
     case 'insufficient-on-hand':
       return 'DAMAGED holds fewer units than that now — refresh the stock and try a smaller write-off.';
     case 'role-denied':

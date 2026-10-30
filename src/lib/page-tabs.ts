@@ -187,6 +187,8 @@ export const RETURNS_PAGE_TABS = definePageTabs({
     { id: 'authorizations', label: 'Authorizations' },
     { id: 'awaiting', label: 'Awaiting disposition' },
     { id: 'unannounced', label: 'Unannounced' },
+    // Story 4-7c — returns to client (RTCs): the list, the detail, dispatch and print.
+    { id: 'to-client', label: 'To client' },
   ],
 });
 export type ReturnsTab = (typeof RETURNS_PAGE_TABS)['defaultTab'];
