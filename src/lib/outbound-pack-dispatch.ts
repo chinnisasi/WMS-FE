@@ -507,10 +507,16 @@ export function packReason(error: unknown): string {
  * is a race with a pack this client cannot see, and "already dispatched"
  * likewise. The 422 `idempotency-key-reuse` is the fixed house copy.
  */
+/** Story 4-4a — the per-order dispatch of a client-arranged order, refused in words. */
+export const DISPATCH_VIA_HANDOVER_REASON =
+  'The client arranged this courier — hand the parcel over to the courier (Hand over); the handover dispatches it.';
+
 export function dispatchReason(error: unknown): string {
   if (error instanceof ApiProblem) {
     // Story 3-7a — its picks drew a lot on an OPEN LIVE recall: named, with the two ways out.
     if (error.code === 'order-holds-recalled-batch') return recalledBatchSentence(error);
+    // Story 4-4a (A13) — the client arranged the courier: only a handover dispatches it.
+    if (error.code === 'dispatch-via-handover') return DISPATCH_VIA_HANDOVER_REASON;
     if (error.status === 409) return verbatim(error);
     switch (error.code) {
       case 'not-found':
