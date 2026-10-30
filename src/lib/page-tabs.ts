@@ -99,6 +99,8 @@ export const OUTBOUND_PAGE_TABS = definePageTabs({
     { id: 'pack', label: 'Pack & Dispatch' },
     // Story 4-4a (A20) — the courier handovers and their signed sheets.
     { id: 'handovers', label: 'Handovers' },
+    // Story 4-6a (A24) — the orders waiting for the brand's documents, and the parcels that left without them.
+    { id: 'documents', label: 'Documents' },
   ],
   drillTabs: { orders: 'orders' },
 });

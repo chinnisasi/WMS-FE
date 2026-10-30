@@ -21,7 +21,7 @@ export type ClientEmailStatus = ClientEmailLogItemDto['status'];
 export type ClientEmailKind = ClientEmailLogItemDto['kind'];
 
 /** The events in the backend's vocabulary order — a body sends them in this order. */
-export const CLIENT_EMAIL_EVENTS = ['receipt.recorded', 'order.dispatched', 'shipment.documents'] as const satisfies readonly ClientEmailEvent[];
+export const CLIENT_EMAIL_EVENTS = ['receipt.recorded', 'order.dispatched', 'shipment.documents', 'consignment.documents-needed'] as const satisfies readonly ClientEmailEvent[];
 
 /** The most emails of one kind a client is sent per IST day (A5) — the D2C guard until the daily digest. */
 export const CLIENT_EMAIL_DAILY_CAP = 500;
@@ -32,6 +32,8 @@ export const CLIENT_EMAIL_EVENT_LABEL: Readonly<Record<ClientEmailEvent, string>
   'order.dispatched': 'Dispatched (each order)',
   // Story 4-4a (A4) — the third box.
   'shipment.documents': 'Shipping documents (signed handover sheet, invoice, e-way bill, POD)',
+  // Story 4-6a (A20) — the fourth box.
+  'consignment.documents-needed': 'Documents needed (a packed order is waiting for your invoice or e-way bill)',
 };
 
 /** The hint beside each checkbox. The dispatch one promises no digest (B14). */
@@ -39,6 +41,7 @@ export const CLIENT_EMAIL_EVENT_HINT: Readonly<Record<ClientEmailEvent, string>>
   'receipt.recorded': 'One email per goods receipt, with its lines and quantities.',
   'order.dispatched': `Each order is one email per contact. A daily limit of ${CLIENT_EMAIL_DAILY_CAP} applies.`,
   'shipment.documents': `Each document the warehouse attaches is one email with the file, and each signed-sheet page its own. A daily limit of ${CLIENT_EMAIL_DAILY_CAP} applies.`,
+  'consignment.documents-needed': `One email when an order is packed and still needs the brand's invoice or e-way bill before it can leave. A daily limit of ${CLIENT_EMAIL_DAILY_CAP} applies.`,
 };
 
 /** The fieldset's lead line. */
@@ -51,6 +54,7 @@ const EVENT_SHORT: Readonly<Record<ClientEmailEvent, string>> = {
   'receipt.recorded': 'receipts',
   'order.dispatched': 'dispatches',
   'shipment.documents': 'shipping documents',
+  'consignment.documents-needed': 'documents needed',
 };
 
 /** The contact row's line, `Emails: receipts, dispatches` — null when it opted into none. */

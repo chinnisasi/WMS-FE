@@ -44,7 +44,8 @@ const fieldsetClass = 'grid min-w-0 gap-3 rounded-md border border-(--border) p-
  * with no debit note (an RTC records none — D8), and an RTC fieldset in its
  * `extra` slot: the consignee GSTIN (the brand registration receiving the
  * goods; the frozen client GSTIN by default) and the declared value
- * ("declared by the consignor", never judged). The document type follows the
+ * ("declared by the consignor"; required, and judged against the e-way
+ * threshold since 4-6a). The document type follows the
  * A2 advice — a challan between the same registration, a stock-transfer
  * invoice between two states — until the viewer picks one; the advice is
  * shown, never enforced. A suspended client is warned, never blocked (A8).
@@ -212,7 +213,11 @@ export function ClientReturnDispatchDialog({
                 />
               )}
             </Field>
-            <Field label="Declared value (₹, optional)" hint={`The consignor's value of the goods — printed "${RTC_DECLARED_BY_CONSIGNOR}", never checked.`} error={extraErrorOf('declaredValue')}>
+            <Field
+              label="Declared value (₹)"
+              hint={`The consignor's value of the goods, including tax — printed "${RTC_DECLARED_BY_CONSIGNOR}" and judged against the e-way threshold (above it an e-way bill is required).`}
+              error={extraErrorOf('declaredValue')}
+            >
               {(control) => (
                 <input
                   {...control}

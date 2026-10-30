@@ -7,6 +7,7 @@ import { render, type Rendered } from '../../lib/test/render';
 import { HandoverBuilder } from './handover-builder';
 import { HandoversCard } from './handovers-card';
 import { OutboundPackDispatch } from './pack-dispatch';
+import { ConsignmentsCard } from './consignments-card';
 
 /**
  * Story 4-4a — the staff surfaces of client-arranged shipping, driven through
@@ -33,8 +34,15 @@ function session(role: StoredSession['user']['role']): StoredSession {
   };
 }
 
+/** Story 4-6a — the list rows' optional `consignmentState` (absent: an older API). */
+let consignmentStates: Record<string, string> = {};
+/** Story 4-6a — the Documents worklist answer, and per-order consignment reads (absent → 404). */
+let worklist: unknown = { view: 'needed', needed: [], exceptions: [], truncated: false };
+let consignmentReads: Record<string, unknown> = {};
+
 function orderRow(id: string, status: string): Record<string, unknown> {
   return {
+    ...(consignmentStates[id] === undefined ? {} : { consignmentState: consignmentStates[id] }),
     id,
     tenantId: TENANT_ID,
     warehouseId: WAREHOUSE_ID,
@@ -189,6 +197,11 @@ function stubRouter(): void {
       const orderId = pathname.split('/').at(-2)!;
       return json(200, shippingReads[orderId] ?? shippingRead(orderId, { shipment: null, label: null }));
     }
+    if (pathname.endsWith('/outbound/consignments')) return json(200, worklist);
+    if (/\/outbound\/orders\/[^/]+\/consignment$/.test(pathname)) {
+      const orderId = pathname.split('/').at(-2)!;
+      return consignmentReads[orderId] === undefined ? json(404, { code: 'not-found', status: 404, title: 'None' }) : json(200, consignmentReads[orderId]);
+    }
     if (/\/outbound\/orders\/[^/]+\/(rates|restock-plan)$/.test(pathname)) return json(404, { code: 'not-found', status: 404, title: 'None' });
     if (/\/outbound\/orders\/[^/]+$/.test(pathname)) {
       const id = pathname.split('/').pop()!;
@@ -216,6 +229,9 @@ beforeEach(() => {
   shipments = {};
   shippingReads = {};
   candidates = [];
+  consignmentStates = {};
+  consignmentReads = {};
+  worklist = { view: 'needed', needed: [], exceptions: [], truncated: false };
   handoverRows = [];
   postReplies = {};
   handoverDetail = null;
@@ -440,6 +456,33 @@ describe('the handover builder (A20, A49)', () => {
     // An unchanged retry replays under the same key.
     await submit(root.querySelector('form')!);
     expect(requests.filter((r) => r.method === 'POST')[1]!.key).toBe(posted[0]!.key);
+  });
+
+  test('story 4-6a (A24) — a candidate whose documents are missing is marked, its tick disabled, and a scan never ticks it', async () => {
+    writeSession(session('operator'));
+    candidates = candidateRows().map((c, i) =>
+      i === 0
+        ? { ...c, consignment: { state: 'missing', blocking: true, ewayBillNumber: null, ewayValidUntil: null } }
+        : { ...c, consignment: { state: 'ready', blocking: false, ewayBillNumber: '123456789012', ewayValidUntil: '2099-01-01' } },
+    );
+    view = render(
+      <HandoverBuilder tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} initialClientId={CLIENT_A} initialOrderId={ORDER_A} onClose={() => {}} onCreated={() => {}} />,
+    );
+    await settle();
+    const root = byTestId(view.container, 'handover-builder')!;
+    const rowA = root.querySelector(`[data-order-id="${ORDER_A}"]`)!;
+    expect(byTestId(rowA as HTMLElement, 'handover-row-documents')!.textContent).toBe('⚠ Invoice not recorded — record it first');
+    const tick = rowA.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(tick.disabled).toBe(true);
+    // Opened from its row, it is still never ticked.
+    expect(tick.checked).toBe(false);
+    expect(byTestId(root, 'handover-confirm')?.textContent).toBe('Hand over 0 parcels');
+    await scan(root, '123456789012');
+    expect(byTestId(root, 'handover-scan-note')?.textContent).toBe('SO-1 — Invoice not recorded — record it first. It cannot leave yet.');
+    expect(tick.checked).toBe(false);
+    const rowB = root.querySelector(`[data-order-id="${ORDER_B}"]`)!;
+    expect(byTestId(rowB as HTMLElement, 'handover-row-documents')).toBeNull();
+    expect(rowB.querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(false);
   });
 
   test('a successful handover hands its response up', async () => {
@@ -719,8 +762,46 @@ describe('story 4-4a review — FV4 the handover sheet', () => {
     expect(sheet.textContent).not.toContain('9876543210');
     const rows = sheet.querySelectorAll('[data-testid="sheet-parcel"]');
     expect(rows).toHaveLength(2);
-    expect(rows[0]!.querySelectorAll('td')[3]!.textContent).toBe('2');
+    // The Parcels column follows the two story 4-6a document columns.
+    expect(rows[0]!.querySelectorAll('td')[5]!.textContent).toBe('2');
     expect(byTestId(root, 'sheet-upload')).not.toBeNull();
+  });
+
+  test('story 4-6a (A19, A39) — the stamped document and e-way bill print; "Not recorded" only for a flagged parcel with none; a late record is noted for staff', async () => {
+    writeSession(session('operator'));
+    const base = detail(0);
+    handoverDetail = {
+      ...base,
+      parcels: [
+        { ...base.parcels[0]!, taxDocument: { type: 'invoice', number: 'INV/26-27/0042', date: '2026-10-30' }, ewayBillNumber: '123456789012', ewayValidUntil: '2026-11-01', complianceException: null, lateRecord: null },
+        {
+          ...base.parcels[1]!,
+          taxDocument: null,
+          ewayBillNumber: null,
+          ewayValidUntil: null,
+          complianceException: 'consignment-documents-missing',
+          lateRecord: { seq: 2, brandDocument: { type: 'invoice', number: 'INV-9', date: '2026-10-31' }, ewayBillNumber: null, recordedAt: '2026-10-31T08:40:00.000Z' },
+        },
+      ],
+    };
+    handoverRows = [{ id: 'ho-1', code: 'HO-0001', clientId: CLIENT_A, clientCode: 'BRAND-A', courierName: 'Delhivery', shipmentCount: 2, packageCount: 3, handedOverAt: '2026-10-30T10:35:00.000Z', sheetPageCount: 0, source: 'web' }];
+    view = render(<HandoversCard tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    await expand('HO-0001');
+    const root = byTestId(view.container, 'handover-detail')!;
+    const docs = [...root.querySelectorAll('[data-testid="sheet-parcel-document"]')].map((td) => td.textContent);
+    const eways = [...root.querySelectorAll('[data-testid="sheet-parcel-eway"]')].map((td) => td.textContent);
+    expect(docs).toEqual(['INV INV/26-27/0042', 'Not recorded']);
+    expect(eways).toEqual(['1234 5678 9012 (to 1 Nov 2026)', 'Not recorded']);
+    const notes = [...root.querySelectorAll('[data-testid="sheet-parcel-exception"]')].map((n) => n.textContent);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('Left without the brand’s invoice — cleared by a late record (v2,');
+  });
+
+  test('story 4-6a — an older API without the keys prints a dash, never "Not recorded"', async () => {
+    const root = await openSheet('operator', 0);
+    expect([...root.querySelectorAll('[data-testid="sheet-parcel-document"]')].map((td) => td.textContent)).toEqual(['—', '—']);
+    expect(root.querySelector('[data-testid="sheet-parcel-exception"]')).toBeNull();
   });
 
   test('story 4-5a (AC5, A34, A37, A44) — each order’s cartons, the legacy line and the amber flags', async () => {
@@ -808,3 +889,68 @@ describe('story 4-5a — the Shipping panel once packed (A26, A40)', () => {
   });
 });
 
+
+describe('story 4-6a — the Docs cell and the Documents tab (A16, A24)', () => {
+  test('the Docs cell: the gate’s word on an open row; a dash from an older API', async () => {
+    writeSession(session('operator'));
+    consignmentStates = { [ORDER_A]: 'missing' };
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    const cells = [...view.container.querySelectorAll('[data-testid="docs-cell"]')].map((c) => c.textContent);
+    expect(cells).toEqual(['Invoice needed']);
+  });
+
+  const neededRow = {
+    orderId: ORDER_A,
+    orderLabel: 'SO-1',
+    clientId: CLIENT_A,
+    clientCode: 'BRAND-A',
+    orderType: 'b2c',
+    stage: 'packed',
+    state: 'missing',
+    requiredBecause: 'value',
+    valueFloorPaise: 6_200_000,
+    eway: null,
+    declaredBelowRatedValue: false,
+    createdAt: '2026-10-30T10:00:00.000Z',
+    packedAt: '2026-10-30T11:00:00.000Z',
+  };
+
+  test('Needed: the word first, why, and Record opens the order’s Tax documents with its form', async () => {
+    writeSession(session('operator'));
+    worklist = { view: 'needed', needed: [neededRow], exceptions: [], truncated: false };
+    consignmentReads = {
+      [ORDER_A]: {
+        gate: { state: 'missing', blocking: true, requiredBecause: 'value', valueFloorPaise: 6_200_000, nationalThresholdPaise: 5_000_000, expiresToday: false },
+        live: null, history: [], dispatchedRecordId: null, duplicates: [], consignorStateMismatch: false, ewayUsedByOtherClient: null, scans: [], complianceException: null,
+      },
+    };
+    view = render(<ConsignmentsCard tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    const read = requests.find((r) => r.pathname.endsWith('/outbound/consignments'))!;
+    expect(read.search).toBe('');
+    expect(byTestId(view.container, 'worklist-needed')!.textContent).toBe('Invoice needed');
+    expect(byTestId(view.container, 'worklist-why')!.textContent).toBe('Value ₹62,000 by the order’s own figures — above ₹50,000');
+    await act(async () => byTestId<HTMLButtonElement>(view!.container, 'worklist-record')!.click());
+    await settle();
+    expect(byTestId(view.container, 'consignment-panel')).not.toBeNull();
+    expect(byTestId(view.container, 'consignment-form')).not.toBeNull();
+  });
+
+  test('Left without documents: the exceptions view is read and each flag worded; an all-clear list says so', async () => {
+    writeSession(session('operator'));
+    view = render(<ConsignmentsCard tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    expect(view.container.textContent).toContain('No open order is waiting for the brand’s documents.');
+    worklist = {
+      view: 'exceptions',
+      needed: [],
+      exceptions: [{ orderId: ORDER_A, orderLabel: 'SO-1', clientId: CLIENT_A, clientCode: 'BRAND-A', shipmentId: 'sh-1', handoverId: 'ho-1', handoverCode: 'HO-0001', handedOverAt: '2026-10-30T10:35:00.000Z', code: 'consignment-documents-missing', state: 'missing' }],
+      truncated: false,
+    };
+    await act(async () => byTestId<HTMLButtonElement>(view!.container, 'documents-view-exceptions')!.click());
+    await settle();
+    expect(requests.filter((r) => r.pathname.endsWith('/outbound/consignments')).at(-1)!.search).toBe('?view=exceptions');
+    expect(byTestId(view.container, 'worklist-exception')!.textContent).toBe('Left without the brand’s invoice');
+  });
+});

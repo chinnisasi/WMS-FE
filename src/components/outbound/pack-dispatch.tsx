@@ -102,6 +102,8 @@ import { orderStatusTone } from '@/lib/status-tone';
 import { CancelOrderDialog, PutBackSection, type CancelTarget } from '@/components/outbound/cancel-order-dialog';
 import { HandoverBuilder } from '@/components/outbound/handover-builder';
 import { ShippingPanel } from '@/components/outbound/shipping-panel';
+import { ConsignmentPanel } from '@/components/outbound/consignment-panel';
+import { gateChip } from '@/lib/consignment';
 import { CartonGridEditor } from '@/components/outbound/carton-editor';
 import { PackCartonsPanel } from '@/components/outbound/print-pack-documents';
 
@@ -305,6 +307,22 @@ function PackDispatchTable({
         ) : (
           <span data-testid="shipping-cell">
             <StatusChip tone={cell.tone}>{cell.word}</StatusChip>
+          </span>
+        );
+      },
+    },
+    {
+      // Story 4-6a (A24) — the brand's documents: the word first, the tone second.
+      key: 'docs',
+      header: 'Docs',
+      render: (order) => {
+        if (order.status !== 'accepted' && order.status !== 'ready_to_dispatch') return null;
+        const chip = gateChip(order.consignmentState);
+        return chip === null ? (
+          <span className="text-xs text-(--muted-foreground)">—</span>
+        ) : (
+          <span data-testid="docs-cell">
+            <StatusChip tone={chip.tone}>{chip.word}</StatusChip>
           </span>
         );
       },
@@ -581,6 +599,11 @@ function PackDispatchPanel({
           canDispatch={canDispatch}
           canRemove={canCancel}
         />
+      )}
+
+      {/* Story 4-6a (A24) — the brand's tax document and e-way bill, beside Shipping. */}
+      {(status === 'accepted' || status === 'ready_to_dispatch' || status === 'dispatched') && (
+        <ConsignmentPanel orderId={orderId} orderLabel={orderLabel(order)} status={status} createdAt={order.createdAt} />
       )}
 
       {/* Story 4-5a (A26) — the packed order's cartons, the Print group and Re-pack into cartons. */}

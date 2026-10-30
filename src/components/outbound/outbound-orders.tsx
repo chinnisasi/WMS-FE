@@ -88,6 +88,8 @@ import { DrillBanner } from '@/components/shared/drill-banner';
 import { ReturnCreateForm } from '@/components/returns/return-create-form';
 import { CancelOrderDialog, PutBackSection, type CancelTarget } from '@/components/outbound/cancel-order-dialog';
 import { CustomerShelfLifeSection } from '@/components/outbound/customer-shelf-life';
+import { ConsignmentPanel } from '@/components/outbound/consignment-panel';
+import { gateBlocks, gateChip } from '@/lib/consignment';
 import { FeedbackBanner } from '@/components/feedback/banner';
 import type { OutboundSurfaceProps } from '@/components/outbound/outbound';
 import {
@@ -811,9 +813,20 @@ function OrdersTable({
     {
       key: 'status',
       header: 'Status',
-      render: (order) => (
-        <StatusChip tone={orderStatusTone(order.status)}>{orderStatusLabel(order.status)}</StatusChip>
-      ),
+      render: (order) => {
+        // Story 4-6a (A16) — a blocking documents gate is chipped beside the status (word first).
+        const docs = gateBlocks(order.consignmentState) ? gateChip(order.consignmentState) : null;
+        return (
+          <span className="flex flex-wrap items-center gap-1">
+            <StatusChip tone={orderStatusTone(order.status)}>{orderStatusLabel(order.status)}</StatusChip>
+            {docs !== null && (
+              <StatusChip tone={docs.tone} data-testid="order-docs-chip">
+                {docs.word}
+              </StatusChip>
+            )}
+          </span>
+        );
+      },
     },
     ...(showClients(clients)
       ? [
@@ -1214,6 +1227,8 @@ function OrderDetailBody({
       {order.status === 'cancelled' && <PutBackSection orderId={orderId} />}
       {/* Story 4-3b — the consignee's and the client's shelf-life rule, while the order can still be waved. */}
       {order.status === 'accepted' && <CustomerShelfLifeSection orderId={orderId} />}
+      {/* Story 4-6a (A24) — the brand's tax document and e-way bill. */}
+      <ConsignmentPanel orderId={orderId} orderLabel={orderLabel(order)} status={order.status} createdAt={order.createdAt} />
       {canManageReturns && canCreateReturn(order.status) && skuClientDeparted(order, detailClients) && (
         <div className="text-xs text-(--muted-foreground)" data-testid="return-client-departed">
           {RETURNS_CLIENT_DEPARTED}

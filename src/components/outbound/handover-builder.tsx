@@ -9,6 +9,7 @@ import {
   awbTail,
   bindHandoverKey,
   candidateBlocker,
+  consignmentBlocker,
   cartonTally,
   defaultPackageCountText,
   emptyHandoverDraft,
@@ -94,13 +95,26 @@ export function HandoverBuilder({
   const pruned = pruneStaleCartonCodes(ownDraft, items);
   const staleNote = staleCartonsDroppedNote(pruned.dropped);
   // FE14 — a requested order joins the draft ticked (derived at render, never a reset effect — guide §1.5).
-  const draft: HandoverDraft = {
+  const joined: HandoverDraft = {
     ...pruned.draft,
     rows: {
       ...Object.fromEntries(requestedOrderIds.filter((id) => !(id in pruned.draft.rows)).map((id) => [id, { ...EMPTY_ROW, selected: true }])),
       ...pruned.draft.rows,
     },
   };
+  // Story 4-6a (A24) — a candidate the documents gate blocks is never ticked
+  // (derived at render, so "Hand over" on a blocked row, or a refresh that
+  // finds its record withdrawn, unticks it without a reset effect).
+  const blockedIds = new Set(items.filter((c) => consignmentBlocker(c) !== null).map((c) => c.orderId));
+  const draft: HandoverDraft =
+    blockedIds.size === 0
+      ? joined
+      : {
+          ...joined,
+          rows: Object.fromEntries(
+            Object.entries(joined.rows).map(([id, row]) => [id, blockedIds.has(id) && row.selected ? { ...row, selected: false } : row]),
+          ),
+        };
   const truncated = candidates.state === 'ready' && candidates.data.truncated;
   const [scan, setScan] = useState('');
   const [scanNote, setScanNote] = useState<{ tone: 'accepted' | 'warning' | 'rejected'; text: string } | null>(null);
@@ -175,6 +189,8 @@ export function HandoverBuilder({
         setAmbiguous(carton.orderIds);
         setPendingCarton(carton.code);
         setScanNote({ tone: 'warning', text: 'This carton matches two parcels — tick the right one below.' });
+      } else if (blockedIds.has(carton.orderId)) {
+        setScanNote({ tone: 'rejected', text: `${labelOf(carton.orderId)} — ${consignmentBlocker(items.find((c) => c.orderId === carton.orderId)!)}. It cannot leave yet.` });
       } else {
         const candidate = items.find((c) => c.orderId === carton.orderId);
         tickScannedCarton(carton.orderId, carton.code, carton.needsAwb, candidate);
@@ -195,6 +211,10 @@ export function HandoverBuilder({
     } else if (result.kind === 'ambiguous') {
       setAmbiguous(result.orderIds);
       setScanNote({ tone: 'warning', text: 'This code matches two parcels — tick the right one below.' });
+    } else if (blockedIds.has(result.orderId)) {
+      // Story 4-6a (A24) — a scan never ticks a parcel whose documents are missing.
+      setAwaitingAwbFor(null);
+      setScanNote({ tone: 'rejected', text: `${labelOf(result.orderId)} — ${consignmentBlocker(items.find((c) => c.orderId === result.orderId)!)}. It cannot leave yet.` });
     } else if (result.kind === 'awb-for') {
       editRow(result.orderId, { selected: true, awb: result.awb });
       setAwaitingAwbFor(null);
@@ -397,7 +417,7 @@ export function HandoverBuilder({
                 </div>
               )}
               {scanNote !== null && (
-                <div role="status" className={scanNote.tone === 'accepted' ? 'text-(--accent)' : 'text-(--warning)'} data-testid="handover-scan-note">
+                <div role="status" className={scanNote.tone === 'accepted' ? 'text-(--accent)' : scanNote.tone === 'rejected' ? 'text-(--destructive)' : 'text-(--warning)'} data-testid="handover-scan-note">
                   {scanNote.text}
                 </div>
               )}
@@ -406,6 +426,7 @@ export function HandoverBuilder({
               {items.map((candidate) => {
                 const row = rowOf(draft, candidate.orderId);
                 const blocker = candidateBlocker(candidate, row);
+                const documentsBlocker = consignmentBlocker(candidate);
                 const refusal = refused.get(candidate.orderId);
                 const isForeign = foreign.includes(candidate.orderId);
                 const tally = cartonTally(row, candidate);
@@ -423,8 +444,9 @@ export function HandoverBuilder({
                       <input
                         type="checkbox"
                         checked={row.selected}
+                        disabled={documentsBlocker !== null}
                         onChange={(e) => onTick(candidate, e.target.checked)}
-                        aria-label={`Hand over ${candidate.orderLabel}`}
+                        aria-label={documentsBlocker === null ? `Hand over ${candidate.orderLabel}` : `Hand over ${candidate.orderLabel} — ${documentsBlocker}`}
                       />
                       <span className="font-mono">{candidate.orderLabel}</span>
                       <span className="text-(--muted-foreground)">
@@ -461,7 +483,12 @@ export function HandoverBuilder({
                         No packed weight to default. Over 1,000 kg — record the freight weight on the LR (4-9a); otherwise type it.
                       </div>
                     )}
-                    {row.selected && blocker !== null && refusal === undefined && (
+                    {documentsBlocker !== null && refusal === undefined && (
+                      <div className="text-(--warning)" data-testid="handover-row-documents">
+                        ⚠ {documentsBlocker}
+                      </div>
+                    )}
+                    {row.selected && blocker !== null && documentsBlocker === null && refusal === undefined && (
                       <div className="text-(--warning)" data-testid="handover-row-blocker">
                         ⚠ {blocker}
                       </div>

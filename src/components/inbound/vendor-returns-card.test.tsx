@@ -455,7 +455,7 @@ describe('Returns to vendor — dispatch and cancel', () => {
     await expand('RTV-0002');
     await press(button(detail('RTV-0002')!, 'Dispatch'));
     const dialog = () => detail('RTV-0002')!.querySelector<HTMLElement>('[role="dialog"][aria-label="Dispatch RTV-0002"]')!;
-    expect(dialog().querySelector('[data-testid="eway-threshold-hint"]')!.textContent).toContain('cannot judge the ₹50,000 threshold');
+    expect(dialog().querySelector('[data-testid="eway-threshold-hint"]')!.textContent).toContain('the WMS judges the declared value');
     const field = (label: string) => {
       const forId = [...dialog().querySelectorAll('label')].find((l) => l.textContent === label)!.getAttribute('for')!;
       return dialog().querySelector<HTMLInputElement>(`#${CSS.escape(forId)}`)!;
@@ -473,6 +473,11 @@ describe('Returns to vendor — dispatch and cancel', () => {
     setSelect(dialog().querySelector<HTMLSelectElement>(`#${CSS.escape([...dialog().querySelectorAll('label')].find((l) => l.textContent === 'Transporter')!.getAttribute('for')!)}`)!, TRANSPORTER);
     setValue(field('AWB / LR number'), ' AWB1234 ');
     setValue(field('Packages'), '1');
+    // Story 4-6a (A25) — the declared value is required on the web: nothing is sent without it.
+    await submit(dialog().querySelector('form'));
+    expect(writes('/dispatch')).toHaveLength(0);
+    expect(field('Declared value (₹)').getAttribute('aria-invalid')).toBe('true');
+    setValue(field('Declared value (₹)'), '42000');
     await submit(dialog().querySelector('form'));
     const sent = writes('/dispatch');
     expect(sent).toHaveLength(1);
@@ -484,6 +489,7 @@ describe('Returns to vendor — dispatch and cancel', () => {
       transporterId: TRANSPORTER,
       trackingRef: 'AWB1234',
       packageCount: 1,
+      declaredValuePaise: 4_200_000,
     });
     expect(card().textContent).toContain('RTV-0001 dispatched');
   });

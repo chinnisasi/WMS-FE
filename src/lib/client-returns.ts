@@ -24,6 +24,7 @@ import type {
 } from '@/lib/api/generated';
 import {
   BRAND_DOCUMENT_LABEL,
+  ewayDispatchRefusal,
   parseConsignmentDraft,
   stateCodeLabel,
   type BrandDocumentType,
@@ -191,6 +192,9 @@ export function rtcReason(error: unknown, action: RtcAction = 'create'): string 
   const x = error.extensions;
   const status = str(x['rtcStatus']);
   const now = status === null ? '' : ` (it is ${clientReturnStatusLabel(status).toLowerCase()} now)`;
+  // Story 4-6a (A22) — the declared value judged against the e-way threshold.
+  const eway = ewayDispatchRefusal(error);
+  if (eway !== null) return eway;
   switch (error.code) {
     // ── create ──
     case 'exceeds-awaiting': {
@@ -660,15 +664,16 @@ export function parseRtcDispatch(
   if (!parsed.ok) return { ok: false, field: parsed.field, problem: parsed.problem };
   const consignee = parseGstinField(extra.consigneeGstin, 'The consignee GSTIN');
   if (consignee.problem !== null) return { ok: false, extra: 'consigneeGstin', problem: consignee.problem };
-  let declaredValuePaise: number | undefined;
-  if (extra.declaredValue.trim() !== '') {
-    const rupees = parseRupees(extra.declaredValue);
-    if ('problem' in rupees) return { ok: false, extra: 'declaredValue', problem: rupees.problem };
-    if (rupees.paise > RTC_LIMITS.declaredValuePaiseMax) {
-      return { ok: false, extra: 'declaredValue', problem: `The declared value is at most ${formatRupees(RTC_LIMITS.declaredValuePaiseMax)}.` };
-    }
-    declaredValuePaise = rupees.paise;
+  // Story 4-6a (A25) — required on the web: the e-way threshold is judged from it.
+  if (extra.declaredValue.trim() === '') {
+    return { ok: false, extra: 'declaredValue', problem: "Enter the value on the brand's document (including tax) — the e-way threshold is judged from it." };
   }
+  const rupees = parseRupees(extra.declaredValue);
+  if ('problem' in rupees) return { ok: false, extra: 'declaredValue', problem: rupees.problem };
+  if (rupees.paise > RTC_LIMITS.declaredValuePaiseMax) {
+    return { ok: false, extra: 'declaredValue', problem: `The declared value is at most ${formatRupees(RTC_LIMITS.declaredValuePaiseMax)}.` };
+  }
+  const declaredValuePaise = rupees.paise;
   const { debitNoteNumber: _dropped, ...capture } = parsed.body;
   void _dropped;
   return {
@@ -676,7 +681,7 @@ export function parseRtcDispatch(
     body: {
       ...capture,
       ...(consignee.gstin === undefined ? {} : { consigneeGstin: consignee.gstin }),
-      ...(declaredValuePaise === undefined ? {} : { declaredValuePaise }),
+      declaredValuePaise,
     },
   };
 }

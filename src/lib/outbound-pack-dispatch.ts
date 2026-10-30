@@ -16,6 +16,7 @@ import { UNREACHABLE_REASON, verbatim, type OrderStatus, type Outcome } from '@/
 import { istDateTimeLabel } from '@/lib/audit-exports';
 import { formatInrPaise } from '@/lib/order-fields';
 import { nextFollowOnLabel } from '@/lib/orders';
+import { gateRefusalSentence } from '@/lib/consignment';
 
 /**
  * Pure copy and derivation for the Outbound pack & dispatch surface
@@ -517,6 +518,9 @@ export function dispatchReason(error: unknown): string {
     if (error.code === 'order-holds-recalled-batch') return recalledBatchSentence(error);
     // Story 4-4a (A13) — the client arranged the courier: only a handover dispatches it.
     if (error.code === 'dispatch-via-handover') return DISPATCH_VIA_HANDOVER_REASON;
+    // Story 4-6a (A13) — the brand's documents gate, worded by code from its extensions.
+    const gate = gateRefusalSentence(error);
+    if (gate !== null) return gate;
     if (error.status === 409) return verbatim(error);
     switch (error.code) {
       case 'not-found':

@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { ApiProblem } from './api/client';
 import {
   CLIENT_EMAIL_EVENT_HINT,
+  CLIENT_EMAIL_EVENTS,
   CLIENT_EMAIL_EVENT_LABEL,
   CLIENT_EMAIL_POLL_WINDOW_MS,
   clientEmailBanners,
@@ -129,6 +130,13 @@ describe('client emails — the log (story 5-2b)', () => {
   test('story 4-4a — the shipping documents event and kind have words', () => {
     expect(contactEmailsLabel(['shipment.documents', 'receipt.recorded'])).toBe('Emails: receipts, shipping documents');
     expect(clientEmailKindWord('shipment-document')).toBe('Shipping document');
+  });
+
+  test('story 4-6a (A20) — the fourth box: documents needed, last in vocabulary order', () => {
+    expect(CLIENT_EMAIL_EVENTS.at(-1)).toBe('consignment.documents-needed');
+    expect(CLIENT_EMAIL_EVENT_LABEL['consignment.documents-needed']).toBe('Documents needed (a packed order is waiting for your invoice or e-way bill)');
+    expect(contactEmailsLabel(['consignment.documents-needed', 'order.dispatched'])).toBe('Emails: dispatches, documents needed');
+    expect(contactEmailEventsBody(['consignment.documents-needed', 'receipt.recorded'], false)).toEqual({ emailEvents: ['receipt.recorded', 'consignment.documents-needed'] });
   });
 
   test('polling: only while a row is queued, for at most 60 s from the first queued read', () => {

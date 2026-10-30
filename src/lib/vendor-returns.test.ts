@@ -319,8 +319,8 @@ describe('the dispatch is bound to the return', () => {
     const rtv = pickedReturn();
     const now = Date.parse('2026-10-28T04:30:00.000Z');
     const base = { ...emptyConsignmentDraft(rtv.client.gstin, now), documentNumber: 'CH-1', vehicleNumber: 'KA01AB1234', packageCount: '1' };
-    expect(parseRtvDispatch({ ...base, documentDate: '2026-09-20' }, rtv, now).ok).toBe(true);
-    expect(parseRtvDispatch({ ...base, documentDate: '2026-09-19' }, rtv, now)).toMatchObject({ ok: false, field: 'documentDate' });
+    expect(parseRtvDispatch({ ...base, documentDate: '2026-09-20' }, rtv, now, '75000').ok).toBe(true);
+    expect(parseRtvDispatch({ ...base, documentDate: '2026-09-19' }, rtv, now, '75000')).toMatchObject({ ok: false, field: 'documentDate' });
   });
 });
 
