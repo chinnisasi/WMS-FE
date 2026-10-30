@@ -2134,6 +2134,51 @@ describe('story 4-4a — the portal order Shipping section (A21)', () => {
     expect(kinds).toEqual(['invoice', 'challan', 'eway-bill', 'other']);
   });
 
+  test('story 4-9a: a truck order — the LR and a Delivered chip on the row, the Truck block once, the Delivered timeline step', async () => {
+    const freight = {
+      status: 'delivered',
+      consignmentRef: 'LD-0007/03',
+      transporterName: 'VRL Logistics',
+      vehicleNumber: 'KA01AB1234',
+      containerNumber: null,
+      seals: null,
+      driverName: 'Ravi',
+      lrNumber: '4410',
+      lrDate: '2026-10-30',
+      freightTerms: 'paid',
+      packageCount: 17,
+      palletCount: 15,
+      weightGrams: 9_840_000,
+      dispatchedAt: '2026-10-30T10:35:00.000Z',
+      deliveredAt: '2026-11-02T05:50:00.000Z',
+      receiverName: 'A. Kumar',
+      shortPackageCount: null,
+      damagedPackageCount: null,
+      deliveryNote: null,
+      noteAvailable: true,
+    };
+    const listFreight = { lrNumber: '4410', transporterName: 'VRL Logistics', deliveredAt: '2026-11-02T05:50:00.000Z', outcome: 'delivered' };
+    routes = {
+      '/portal/orders': [200, { items: [row('dispatched', { freight: listFreight })], nextCursor: null }],
+      [`/portal/orders/${ORDER_ID}`]: [200, { ...row('dispatched'), lines: [] }],
+      [`/portal/orders/${ORDER_ID}/shipping`]: [200, shipping({ status: 'delivered', canRecord: false, freight })],
+    };
+    view = render(<PortalOrders />);
+    await settle();
+    const cell = view.container.querySelector('[data-testid="portal-order-freight"]')!;
+    expect(cell.textContent).toBe('LR 4410Delivered');
+    click(buttonNamed(view.container, 'Lines'));
+    await settle();
+    const section = view.container.querySelector<HTMLElement>('[data-testid="portal-shipping"]')!;
+    const line = 'Delivered on 2 Nov 2026, 11:20 IST — received by A. Kumar';
+    expect(section.textContent!.split(line).length - 1).toBe(1);
+    expect(section.textContent!.split('15 pallets, 2 cartons — 9,840 kg').length - 1).toBe(1);
+    expect(section.querySelector('[data-testid="portal-freight-note"]')?.textContent).toBe('Download freight note (PDF)');
+    expect(view.container.textContent).toContain('Delivered');
+    const steps = [...view.container.querySelectorAll('ol li')].map((li) => li.textContent ?? '');
+    expect(steps.some((t) => t.includes('Delivered') && t.includes('2 Nov 2026, 11:20 IST'))).toBe(true);
+  });
+
   test('handed over: the courier, AWB and IST time; documents are explicit downloads; no label forms', async () => {
     routes = {
       '/portal/orders': [200, { items: [row('dispatched', { awb: '123456789012', courierName: 'Delhivery' })], nextCursor: null }],

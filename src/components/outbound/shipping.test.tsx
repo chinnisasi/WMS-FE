@@ -40,8 +40,12 @@ let consignmentStates: Record<string, string> = {};
 let worklist: unknown = { view: 'needed', needed: [], exceptions: [], truncated: false };
 let consignmentReads: Record<string, unknown> = {};
 
+/** Story 4-9a — the list row's planned truck (absent: none). */
+let rowFreight: Record<string, unknown> = {};
+
 function orderRow(id: string, status: string): Record<string, unknown> {
   return {
+    ...(rowFreight[id] === undefined ? {} : { freight: rowFreight[id] }),
     ...(consignmentStates[id] === undefined ? {} : { consignmentState: consignmentStates[id] }),
     id,
     tenantId: TENANT_ID,
@@ -230,6 +234,7 @@ beforeEach(() => {
   shippingReads = {};
   candidates = [];
   consignmentStates = {};
+  rowFreight = {};
   consignmentReads = {};
   worklist = { view: 'needed', needed: [], exceptions: [], truncated: false };
   handoverRows = [];
@@ -1006,5 +1011,107 @@ describe('story 4-6a — the Docs cell and the Documents tab (A16, A24)', () => 
     await settle();
     expect(requests.filter((r) => r.pathname.endsWith('/outbound/consignments')).at(-1)!.search).toBe('?view=exceptions');
     expect(byTestId(view.container, 'worklist-exception')!.textContent).toBe('Left without the brand’s invoice');
+  });
+});
+
+describe('story 4-9a — an order on a truck', () => {
+  const LOAD = '0198f7a2-1b3c-7d4e-8f90-00000000a001';
+  const block = (over: Record<string, unknown> = {}) => ({
+    consignmentId: 'c-1',
+    loadId: LOAD,
+    loadCode: 'LD-0007',
+    consignmentRef: 'LD-0007/03',
+    status: 'planned',
+    stopSeq: 3,
+    lrNumber: null,
+    lrDate: null,
+    freightTerms: 'to-pay',
+    transporterName: 'VRL',
+    vehicleNumber: null,
+    dispatchedAt: null,
+    packageCount: null,
+    loadedPackageCount: null,
+    loadException: null,
+    delivery: null,
+    ...over,
+  });
+
+  test('Pack & Dispatch: the truck chip from the row, Open load to the load, no Dispatch, Hand over or label forms', async () => {
+    writeSession(session('operator'));
+    rowFreight = { [ORDER_A]: { loadId: LOAD, loadCode: 'LD-0007', stopSeq: 3 } };
+    shippingReads = { [ORDER_A]: shippingRead(ORDER_A, { shipment: null, label: null, freight: block() }) };
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    expect(byTestId(view.container, 'shipping-cell-truck')?.textContent).toBe('On truck LD-0007 (stop 3)');
+    // No per-row shipping read is needed for the chip.
+    expect(requests.some((r) => r.pathname.endsWith(`/orders/${ORDER_B}/shipping`))).toBe(false);
+    await expand('SO-1');
+    expect(byTestId<HTMLAnchorElement>(view.container, 'open-load')?.getAttribute('href')).toBe(`/outbound?tab=freight&open=${LOAD}`);
+    expect(byTestId(view.container, 'open-hand-over')).toBeNull();
+    const labels = [...view.container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(labels).not.toContain('Dispatch this order');
+    expect(labels).not.toContain('Generate label');
+  });
+
+  test('the Shipping panel: the truck block (terms without an LR date), no label forms while planned; the delivery line once left', async () => {
+    writeSession(session('operator'));
+    rowFreight = { [ORDER_A]: { loadId: LOAD, loadCode: 'LD-0007', stopSeq: 3 } };
+    shippingReads = { [ORDER_A]: shippingRead(ORDER_A, { shipment: null, label: null, freight: block() }) };
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    await expand('SO-1');
+    const panel = byTestId(view.container, 'shipping-freight')!;
+    expect(panel.textContent).toContain('On truck LD-0007 (stop 3) — VRL');
+    expect(panel.textContent).toContain('Freight To pay');
+    expect(byTestId(view.container, 'shipping-none')).toBeNull();
+    expect([...view.container.querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Upload label');
+    view.unmount();
+    orderStatuses = { [ORDER_A]: 'dispatched' };
+    rowFreight = {};
+    shippingReads = {
+      [ORDER_A]: shippingRead(ORDER_A, {
+        shipment: null,
+        label: null,
+        freight: block({
+          status: 'dispatched',
+          lrNumber: '4410',
+          vehicleNumber: 'KA01AB1234',
+          dispatchedAt: '2026-10-30T10:35:00.000Z',
+          packageCount: 15,
+          loadedPackageCount: 15,
+          delivery: { outcome: 'delivered', deliveredAt: '2026-11-02T05:50:00.000Z', receiverName: 'A. Kumar', short: null, damaged: null, note: null, deliverySeq: 1 },
+        }),
+      }),
+    };
+    view = render(<OutboundPackDispatch tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    await expand('SO-1');
+    expect(byTestId(view.container, 'shipping-freight-delivery')?.textContent).toBe('Delivered 02 Nov 2026, 11:20 IST — received by A. Kumar');
+  });
+
+  test('the Documents exceptions: two truck rows (no shipment) are distinct and name the load and its IST departure', async () => {
+    writeSession(session('operator'));
+    const truckRow = (orderId: string, label: string, consignmentId: string) => ({
+      orderId,
+      orderLabel: label,
+      clientId: CLIENT_A,
+      clientCode: 'BRAND-A',
+      shipmentId: null,
+      handoverId: null,
+      handoverCode: null,
+      handedOverAt: null,
+      code: 'consignment-documents-missing',
+      state: 'missing',
+      freight: { consignmentId, loadId: LOAD, loadCode: 'LD-0007', dispatchedAt: '2026-10-30T10:35:00.000Z' },
+    });
+    worklist = { view: 'exceptions', needed: [], exceptions: [truckRow(ORDER_A, 'SO-1', 'c-1'), truckRow(ORDER_B, 'SO-2', 'c-2')], truncated: false };
+    view = render(<ConsignmentsCard tenantId={TENANT_ID} warehouseId={WAREHOUSE_ID} warehouseLabel="WH1 Main" role="operator" />);
+    await settle();
+    await act(async () => byTestId<HTMLButtonElement>(view!.container, 'documents-view-exceptions')!.click());
+    await settle();
+    expect(view.container.querySelectorAll('[data-testid="worklist-exception"]')).toHaveLength(2);
+    const text = view.container.textContent ?? '';
+    expect(text.split('LD-0007').length - 1).toBe(2);
+    expect(text).toContain('30 Oct 2026, 16:05');
   });
 });

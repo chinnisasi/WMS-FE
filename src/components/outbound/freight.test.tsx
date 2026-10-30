@@ -242,3 +242,100 @@ describe('the Freight tab (story 4-9a)', () => {
     expect(byTestId(drawer, 'record-delivery-SO-1')?.textContent).toBe('Amend delivery');
   });
 });
+
+describe('the Freight tab — review fixes (story 4-9a)', () => {
+  const left = () =>
+    load({
+      id: LOAD_ID,
+      status: 'dispatched',
+      dispatchedAt: '2026-10-01T04:00:00.000Z',
+      consignments: [consignment({ status: 'dispatched', dispatchedAt: '2026-10-01T04:00:00.000Z' })],
+    });
+
+  function setInput(element: HTMLInputElement, value: string): void {
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  test('Record delivery posts the body under a key; a failed POD retries the upload only', async () => {
+    detail = left();
+    postReplies = {
+      '/delivery': { status: 201, body: { consignment: { id: 'c-1', orderId: 'o-1', loadId: LOAD_ID, status: 'dispatched', consignmentRef: 'LD-0001/01', lr: { number: null, date: null, terms: null }, delivery: null } } },
+      '/documents': { status: 503, body: { code: 'file-storage-unavailable', status: 503, title: 'Down' } },
+    };
+    await mount('operator');
+    const drawer = await openLoad();
+    await click(byTestId(drawer, 'record-delivery-SO-1')!);
+    const dialog = byTestId<HTMLFormElement>(drawer, 'freight-delivery-dialog')!;
+    await click(dialog.querySelectorAll('input[type="radio"]')[0]!);
+    setInput(dialog.querySelector('input[type="datetime-local"]') as HTMLInputElement, '2026-10-02T11:20');
+    const file = dialog.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(file, 'files', { value: [new File(['%PDF-1.7 pod'], 'pod.pdf', { type: 'application/pdf' })] });
+    await act(async () => void file.dispatchEvent(new Event('change', { bubbles: true })));
+    await settle();
+    await submit(dialog);
+    const delivery = requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/delivery'));
+    expect(delivery).toHaveLength(1);
+    expect(delivery[0]!.key).toMatch(KEY_RE);
+    expect(delivery[0]!.body).toEqual({ outcome: 'delivered', deliveredAt: '2026-10-02T05:50:00.000Z' });
+    expect(requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/documents'))).toHaveLength(1);
+    expect(byTestId(drawer, 'confirm-delivery')?.textContent).toBe('Retry the POD upload');
+    await submit(byTestId<HTMLFormElement>(drawer, 'freight-delivery-dialog')!);
+    expect(requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/delivery'))).toHaveLength(1);
+    expect(requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/documents'))).toHaveLength(2);
+  });
+
+  test('Reorder stops posts the new stop order and shows the loading order', async () => {
+    postReplies = { '/stops': { status: 200, body: { load: detail } } };
+    await mount('operator');
+    const drawer = await openLoad();
+    await click([...drawer.querySelectorAll('button')].find((b) => b.textContent === 'Reorder stops')!);
+    await click(drawer.querySelector('button[aria-label="Move SO-3 up"]')!);
+    expect(byTestId(drawer, 'loading-order')?.textContent).toContain('last stop first: SO-1, SO-3');
+    await click([...drawer.querySelectorAll('button')].find((b) => b.textContent === 'Save stops')!);
+    const post = requests.find((r) => r.method === 'POST' && r.pathname.endsWith('/stops'))!;
+    expect(post.body).toEqual({ orderIds: ['o-3', 'o-1'] });
+    expect(post.key).toMatch(KEY_RE);
+  });
+
+  test('a members change re-reads the load, rebases the rows and keeps the vehicle fields', async () => {
+    postReplies = { '/dispatch': { status: 409, body: { type: 'about:blank', title: 'x', status: 409, code: 'freight-members-changed', detail: 'd', orderIds: [] } } };
+    await mount('operator');
+    const drawer = await openLoad();
+    await click(byTestId(drawer, 'dispatch-freight-load')!);
+    const dialog = byTestId<HTMLFormElement>(drawer, 'freight-dispatch-dialog')!;
+    const driver = [...dialog.querySelectorAll('label')].find((l) => l.textContent?.startsWith('Driver’s name'))!.querySelector('input') as HTMLInputElement;
+    setInput(driver, 'Suresh');
+    detail = load({ id: LOAD_ID, consignments: [...load().consignments, consignment({ id: 'c-9', orderId: 'o-9', orderLabel: 'SO-9', stopSeq: 3 })] });
+    await submit(dialog);
+    expect(byTestId(drawer, 'dispatch-row-SO-9')).not.toBeNull();
+    const after = [...byTestId(drawer, 'freight-dispatch-dialog')!.querySelectorAll('label')].find((l) => l.textContent?.startsWith('Driver’s name'))!.querySelector('input') as HTMLInputElement;
+    expect(after.value).toBe('Suresh');
+  });
+
+  test('wedge scans are queued, none dropped; an unreadable code is refused with no request', async () => {
+    postReplies = {
+      '/scans': { status: 201, body: { scan: { packageCode: 'X', orderId: 'o-1', status: 'loaded' }, alreadyLoaded: false, progress: { consignmentId: 'c-1', loaded: 15, total: 15 } } },
+    };
+    await mount('operator');
+    const drawer = await openLoad();
+    const field = byTestId<HTMLInputElement>(drawer, 'freight-scan')!;
+    await act(async () => {
+      for (const code of ['O8FE5145B99902272.1.1', 'O8FE5145B99902272.1.2']) {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, code);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      }
+    });
+    await settle();
+    const scans = requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/scans'));
+    expect(scans.map((r) => (r.body as { packageCode: string }).packageCode)).toEqual(['O8FE5145B99902272.1.1', 'O8FE5145B99902272.1.2']);
+    setValue(field, 'HELLO');
+    await submit(field.form!);
+    expect(requests.filter((r) => r.method === 'POST' && r.pathname.endsWith('/scans'))).toHaveLength(2);
+    expect(drawer.textContent).toContain('This is not a package label');
+  });
+});
